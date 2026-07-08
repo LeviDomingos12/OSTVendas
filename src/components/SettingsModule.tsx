@@ -34,9 +34,13 @@ import {
   Image,
   Layers,
   Bell,
-  ChevronDown
+  ChevronDown,
+  MapPin,
+  Phone,
+  Plus,
+  Edit
 } from "lucide-react";
-import { SystemSettings, UserRole, Employee } from "../types";
+import { SystemSettings, UserRole, Employee, Branch } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
 import { SYSTEM_THEMES } from "../lib/themes";
@@ -406,8 +410,127 @@ export default function SettingsModule({
   const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
 
   // NEW Backup and Recovery tab states
-  const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp">("geral");
+  const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp" | "filiais">("geral");
   const [localBackupsLog, setLocalBackupsLog] = useState<any[]>([]);
+
+  // Branch (Filial) Management States
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
+  const [branchNameInput, setBranchNameInput] = useState("");
+  const [branchCodeInput, setBranchCodeInput] = useState("");
+  const [branchAddressInput, setBranchAddressInput] = useState("");
+  const [branchContactInput, setBranchContactInput] = useState("");
+  const [branchCityInput, setBranchCityInput] = useState("");
+
+  const handleSaveBranch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit) {
+      if (onShowToast) onShowToast("Apenas administradores podem gerenciar filiais.", "error", "Permissão Negada");
+      return;
+    }
+
+    if (!branchNameInput.trim()) {
+      if (onShowToast) onShowToast("O nome da filial é obrigatório.", "error");
+      return;
+    }
+
+    const currentBranches = settings.branches || [];
+
+    if (editingBranchId) {
+      const updatedBranches = currentBranches.map(b => 
+        b.id === editingBranchId 
+          ? { 
+              ...b, 
+              name: branchNameInput.trim(),
+              code: branchCodeInput.trim() || undefined,
+              address: branchAddressInput.trim(),
+              contact: branchContactInput.trim(),
+              city: branchCityInput.trim() || undefined
+            } 
+          : b
+      );
+
+      onUpdateSettings({ branches: updatedBranches });
+      if (onShowToast) onShowToast("Filial atualizada com sucesso!", "success");
+      
+      if (onAddAuditLog) {
+        onAddAuditLog(
+          "CONFIGURAÇÃO",
+          "CONFIGURAÇÕES",
+          `Filial "${branchNameInput.trim()}" atualizada pelo administrador.`
+        );
+      }
+    } else {
+      const newId = `branch-${Date.now()}`;
+      const newBranch: Branch = {
+        id: newId,
+        name: branchNameInput.trim(),
+        code: branchCodeInput.trim() || `FIL-${currentBranches.length + 1}`,
+        address: branchAddressInput.trim(),
+        contact: branchContactInput.trim(),
+        city: branchCityInput.trim() || undefined
+      };
+
+      const updatedBranches = [...currentBranches, newBranch];
+      onUpdateSettings({ branches: updatedBranches });
+      if (onShowToast) onShowToast("Nova filial cadastrada com sucesso!", "success");
+
+      if (onAddAuditLog) {
+        onAddAuditLog(
+          "CONFIGURAÇÃO",
+          "CONFIGURAÇÕES",
+          `Nova filial "${branchNameInput.trim()}" cadastrada pelo administrador.`
+        );
+      }
+    }
+
+    // Reset inputs
+    setEditingBranchId(null);
+    setBranchNameInput("");
+    setBranchCodeInput("");
+    setBranchAddressInput("");
+    setBranchContactInput("");
+    setBranchCityInput("");
+  };
+
+  const handleEditBranchClick = (branch: Branch) => {
+    setEditingBranchId(branch.id);
+    setBranchNameInput(branch.name);
+    setBranchCodeInput(branch.code || "");
+    setBranchAddressInput(branch.address);
+    setBranchContactInput(branch.contact);
+    setBranchCityInput(branch.city || "");
+    
+    // Smooth scroll to top of form
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteBranch = (id: string, name: string) => {
+    if (!canEdit) {
+      if (onShowToast) onShowToast("Apenas administradores podem gerenciar filiais.", "error", "Permissão Negada");
+      return;
+    }
+
+    const currentBranches = settings.branches || [];
+    if (currentBranches.length <= 1) {
+      if (onShowToast) onShowToast("Não é possível remover todas as filiais. O sistema precisa de pelo menos uma filial ativa.", "error");
+      return;
+    }
+
+    const confirmDel = window.confirm(`Tem certeza de que deseja remover a filial "${name}"?`);
+    if (!confirmDel) return;
+
+    const updatedBranches = currentBranches.filter(b => b.id !== id);
+    onUpdateSettings({ branches: updatedBranches });
+    if (onShowToast) onShowToast("Filial removida com sucesso!", "success");
+
+    if (onAddAuditLog) {
+      onAddAuditLog(
+        "CONFIGURAÇÃO",
+        "CONFIGURAÇÕES",
+        `Filial "${name}" removida pelo administrador.`
+      );
+    }
+  };
 
   const loadLocalBackupsLog = () => {
     try {
@@ -2017,6 +2140,18 @@ export default function SettingsModule({
         >
           <MessageSquare className="w-4 h-4 text-emerald-500" />
           Alertas WhatsApp
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("filiais")}
+          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+            activeSubTab === "filiais"
+              ? "border-orange-500 text-orange-600 font-extrabold"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Building className="w-4 h-4 text-orange-500" />
+          Filiais Comerciais
         </button>
       </div>
 
@@ -5440,6 +5575,192 @@ export default function SettingsModule({
                 </div>
               </div>
 
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === "filiais" && (
+        <div className="space-y-6 animate-in fade-in duration-200 text-slate-800">
+          {/* Header Card */}
+          <div className="bg-orange-950 text-white p-6 rounded-2xl border border-orange-900 shadow-lg space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
+                <Building className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Gerenciamento de Filiais Comerciais</h3>
+                <p className="text-xs text-orange-200 mt-0.5">
+                  Adicione, edite e organize os pontos de venda e armazéns da empresa. Estas filiais estarão disponíveis para os operadores no login.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Form Section */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 h-fit">
+              <div className="border-b border-slate-100 pb-3 flex items-center gap-2">
+                <Plus className="w-4 h-4 text-orange-500" />
+                <h4 className="font-bold text-slate-850 text-sm">
+                  {editingBranchId ? "Editar Filial" : "Cadastrar Nova Filial"}
+                </h4>
+              </div>
+
+              <form onSubmit={handleSaveBranch} className="space-y-4 text-xs">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Nome da Filial</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Filial Matola, Loja X"
+                    value={branchNameInput}
+                    onChange={(e) => setBranchNameInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Código Único</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: MAT-03"
+                      value={branchCodeInput}
+                      onChange={(e) => setBranchCodeInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Cidade / Província</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Maputo, Matola"
+                      value={branchCityInput}
+                      onChange={(e) => setBranchCityInput(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Endereço Completo</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Rua, Número, Bairro"
+                    value={branchAddressInput}
+                    onChange={(e) => setBranchAddressInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Contacto / Telefone</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: +258 84 900 1300"
+                    value={branchContactInput}
+                    onChange={(e) => setBranchContactInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 px-4 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center shadow-md shadow-orange-600/15"
+                  >
+                    {editingBranchId ? "Guardar Alterações" : "Adicionar Filial"}
+                  </button>
+                  {editingBranchId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingBranchId(null);
+                        setBranchNameInput("");
+                        setBranchCodeInput("");
+                        setBranchAddressInput("");
+                        setBranchContactInput("");
+                        setBranchCityInput("");
+                      }}
+                      className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition cursor-pointer font-bold"
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
+
+            {/* List Section */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h4 className="font-bold text-slate-850 text-sm">Filiais Ativas no Sistema</h4>
+                  <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase">
+                    {(settings.branches || []).length} Registadas
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {(settings.branches || []).map((branch) => (
+                    <div
+                      key={branch.id}
+                      className="p-4 bg-slate-50 hover:bg-slate-100/75 border border-slate-200 rounded-xl transition duration-150 flex items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h5 className="font-bold text-sm text-slate-900">{branch.name}</h5>
+                          {branch.code && (
+                            <span className="text-[9px] font-mono font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded uppercase">
+                              {branch.code}
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-0.5 text-slate-500 text-xs">
+                          <p className="flex items-center gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            {branch.address} {branch.city ? `(${branch.city})` : ""}
+                          </p>
+                          <p className="flex items-center gap-1.5">
+                            <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            {branch.contact}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleEditBranchClick(branch)}
+                          className="p-2 text-slate-500 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition cursor-pointer"
+                          title="Editar Filial"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBranch(branch.id, branch.name)}
+                          className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                          title="Remover Filial"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {(settings.branches || []).length === 0 && (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      <Building className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                      Nenhuma filial registada. Adicione uma no formulário ao lado.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

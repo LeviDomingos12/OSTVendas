@@ -33,6 +33,7 @@ interface LoginModuleProps {
   employees: Employee[];
   companyName: string;
   logoUrl?: string;
+  branches?: any[];
   onLoginSuccess: (user: Employee, company: string) => void;
   onShowToast: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
 }
@@ -41,6 +42,7 @@ export default function LoginModule({
   employees,
   companyName,
   logoUrl,
+  branches: passedBranches,
   onLoginSuccess,
   onShowToast
 }: LoginModuleProps) {
@@ -72,6 +74,7 @@ export default function LoginModule({
     const saved = localStorage.getItem("erp_require_operator_pin");
     return saved !== "false"; // Defaults to true
   });
+  const [showOperatorPassword, setShowOperatorPassword] = useState(false);
 
   // Caps Lock State
   const [isCapsLockOn, setIsCapsLockOn] = useState(false);
@@ -88,12 +91,15 @@ export default function LoginModule({
   // Active Branch Selected for Session
   const [selectedBranch, setSelectedBranch] = useState<string>("OST Comércio Geral");
 
-  const branches = [
-    { id: "b1", name: "OST Comércio Geral", description: "Sede Principal - Maputo", code: "MAP-01" },
-    { id: "b2", name: "Mercado Central", description: "Filial de Retalho", code: "MC-02" },
-    { id: "b3", name: "Loja Matola", description: "Showroom & POS", code: "MAT-03" },
-    { id: "b4", name: "Armazém Principal", description: "Logística & Depósito", code: "ARM-04" }
+  const branches = passedBranches && passedBranches.length > 0 ? passedBranches : [
+    { id: "b1", name: companyName || "OST Comércio Geral", description: "Sede Principal de Operações", code: "SEDE" }
   ];
+
+  useEffect(() => {
+    if (branches && branches.length > 0 && (signupBranch === "OST Comércio Geral" || !signupBranch)) {
+      setSignupBranch(branches[0].name);
+    }
+  }, [branches, signupBranch]);
 
   const roles = [
     { value: "Caixa", label: "Caixa (Operador POS)" },
@@ -298,40 +304,61 @@ export default function LoginModule({
     setSuccessMessage(null);
     try {
       setLoadingState("AUTHENTICATING");
-      setLoadingProgress(20);
+      setLoadingProgress(15);
       
-      const result = await googleSignInAndSync("OST Comércio Geral");
+      const result = await googleSignInAndSync("OST Comércio Geral", employees);
       if (result && result.employee) {
-        triggerLoadingPipeline(result.employee, result.branch);
+        // Run accelerated pipeline then trigger direct success redirect
+        setAuthenticatedUser(result.employee);
+        setSelectedBranch(result.branch);
+        
+        setTimeout(() => {
+          setLoadingState("CONNECTING");
+          setLoadingProgress(55);
+        }, 500);
+
+        setTimeout(() => {
+          setLoadingState("LOADING_PERMISSIONS");
+          setLoadingProgress(90);
+        }, 1000);
+
+        setTimeout(() => {
+          setLoadingProgress(100);
+          onShowToast(`Autenticado com sucesso via Google!`, "success");
+          onLoginSuccess(result.employee, result.branch);
+        }, 1500);
       } else {
         setLoadingState("IDLE");
       }
     } catch (err: any) {
       setLoadingState("IDLE");
+      setLoadingProgress(0);
       setErrorMessage(`❌ Erro Google Sign-In: ${err.message}`);
-      onShowToast("Não foi possível autenticar com o Google.", "error");
+      onShowToast(err.message || "Não foi possível autenticar com o Google.", "error");
     }
   };
 
-  // PIN Login fallback simulation
+  // PIN Login fallback simulation (Now treated as Password)
   const handlePinLoginSimulated = (pinVal: string) => {
     setErrorMessage(null);
-    if (pinVal.length < 4) return;
+    if (!pinVal.trim()) {
+      setErrorMessage("Por favor, introduza a sua senha.");
+      return;
+    }
 
     const match = employees.find(emp => emp.id === selectedEmployeeId);
     if (match) {
-      // Atribuímos PINs específicos para cada operador para demonstrar segurança individual
       const correctPin = match.pin || (
-        match.id === "e1" ? "1234" :
-        match.id === "e2" ? "2222" :
-        match.id === "e3" ? "3333" :
-        match.id === "e4" ? "4444" : "1234"
+        match.id === "e1" ? "123456" :
+        match.id === "e2" ? "222222" :
+        match.id === "e3" ? "333333" :
+        match.id === "e4" ? "444444" : "123456"
       );
 
-      if (pinVal === correctPin || pinVal === "2026") {
+      if (pinVal.trim() === correctPin.trim() || pinVal.trim() === "202612") {
         triggerLoadingPipeline(match, "OST Comércio Geral");
       } else {
-        setErrorMessage(`❌ PIN de segurança incorreto para ${match.name}. (Dica: Atribuído "${correctPin}")`);
+        setErrorMessage(`❌ Senha incorreta para ${match.name}.`);
         setPin("");
       }
     }
@@ -608,7 +635,7 @@ export default function LoginModule({
                     view === "PIN" ? "bg-[#FF6B00] text-white" : "hover:text-slate-200"
                   }`}
                 >
-                  Login por PIN
+                  Acesso de Operador
                 </button>
                 <button
                   type="button"
@@ -793,33 +820,18 @@ export default function LoginModule({
                   </div>
                 </div>
 
-                {/* Branch / Empresa Selection */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Empresa / Filial</label>
-                    <select
-                      value={signupBranch}
-                      onChange={(e) => setSignupBranch(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                    >
-                      {branches.map(b => (
-                        <option key={b.id} value={b.name}>{b.name}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Função / Perfil</label>
-                    <select
-                      value={signupRole}
-                      onChange={(e) => setSignupRole(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                    >
-                      {roles.map(r => (
-                        <option key={r.value} value={r.value}>{r.label}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Função / Perfil Selection */}
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Função / Perfil</label>
+                  <select
+                    value={signupRole}
+                    onChange={(e) => setSignupRole(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
+                  >
+                    {roles.map(r => (
+                      <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Password Fields */}
@@ -964,9 +976,9 @@ export default function LoginModule({
                   </select>
                 </div>
 
-                {/* Camada opcional de verificação de 'Pin do Operador' */}
+                {/* Camada opcional de verificação de 'Senha do Operador' */}
                 <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 text-xs">
-                  <span className="text-slate-300 font-bold">Verificação Estrita de PIN</span>
+                  <span className="text-slate-300 font-bold">Verificação Obrigatória de Senha</span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input 
                       type="checkbox" 
@@ -990,7 +1002,7 @@ export default function LoginModule({
                       <div>
                         <p className="font-bold">Acesso Rápido Ativo</p>
                         <p className="text-[10px] text-slate-400 mt-0.5">
-                          O PIN individual está desativado para conveniência. Pode iniciar sessão diretamente apenas selecionando o operador acima.
+                          A verificação de senha está desativada para conveniência. Pode iniciar sessão diretamente apenas selecionando o operador acima.
                         </p>
                       </div>
                     </div>
@@ -1011,85 +1023,54 @@ export default function LoginModule({
                   </div>
                 ) : (
                   <div className="space-y-4 animate-in fade-in duration-300">
-                    <div className="space-y-1.5 text-center">
-                      <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider text-left">Código PIN (4 Dígitos)</label>
-                      <div className="flex justify-center gap-3 py-2">
-                        {[0, 1, 2, 3].map((idx) => (
-                          <div
-                            key={idx}
-                            className={`w-11 h-11 rounded-lg border-2 flex items-center justify-center font-bold text-lg font-mono transition-all ${
-                              pin.length > idx 
-                                ? "bg-slate-900 border-orange-500 text-white animate-bounce" 
-                                : "border-slate-800 bg-slate-950 text-slate-650"
-                            }`}
-                          >
-                            {pin.length > idx ? "●" : ""}
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Virtual keyboard simulation */}
-                      <div className="grid grid-cols-3 gap-2 max-w-[240px] mx-auto pt-2">
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                          <button
-                            key={num}
-                            type="button"
-                            onClick={() => {
-                              if (pin.length < 4) {
-                                const newVal = pin + num;
-                                setPin(newVal);
-                                if (newVal.length === 4) handlePinLoginSimulated(newVal);
-                              }
-                            }}
-                            className="p-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs font-mono transition cursor-pointer"
-                          >
-                            {num}
-                          </button>
-                        ))}
-                        <button
-                          type="button"
-                          onClick={() => setPin("")}
-                          className="p-2.5 bg-slate-950 hover:bg-slate-900 text-red-400 font-bold text-[10px] rounded-lg transition cursor-pointer"
-                        >
-                          Limpar
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (pin.length < 4) {
-                              const newVal = pin + "0";
-                              setPin(newVal);
-                              if (newVal.length === 4) handlePinLoginSimulated(newVal);
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Senha do Operador</label>
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                          <Lock className="w-4 h-4" />
+                        </span>
+                        <input
+                          type={showOperatorPassword ? "text" : "password"}
+                          required
+                          value={pin}
+                          onChange={(e) => setPin(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handlePinLoginSimulated(pin);
                             }
                           }}
-                          className="p-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg font-bold text-xs font-mono transition cursor-pointer"
-                        >
-                          0
-                        </button>
+                          className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-10 text-xs text-white outline-none transition placeholder-slate-500 font-medium font-mono"
+                          placeholder="Digite a senha de operador"
+                        />
                         <button
                           type="button"
-                          onClick={() => {
-                            if (pin.length > 0) {
-                              setPin(pin.slice(0, -1));
-                            }
-                          }}
-                          className="p-2.5 bg-slate-950 hover:bg-slate-900 text-slate-400 font-bold text-[10px] rounded-lg transition cursor-pointer"
+                          onClick={() => setShowOperatorPassword(!showOperatorPassword)}
+                          className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
                         >
-                          Apagar
+                          {showOperatorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
                     </div>
 
+                    <button
+                      type="button"
+                      onClick={() => handlePinLoginSimulated(pin)}
+                      className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-[#FF6B00] hover:to-orange-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/20 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-white shrink-0" />
+                      <span>Entrar como {employees.find(emp => emp.id === selectedEmployeeId)?.name || "Operador"}</span>
+                    </button>
+
                     <div className="text-[10px] text-slate-500 border border-slate-800/60 p-2.5 rounded-lg text-center leading-relaxed">
-                      💡 <span className="font-bold text-slate-400">PIN do Operador:</span> {(() => {
+                      💡 <span className="font-bold text-slate-400">Senha do Operador:</span> {(() => {
                         const emp = employees.find(e => e.id === selectedEmployeeId);
                         const correctPin = emp?.pin || (
-                          selectedEmployeeId === "e1" ? "1234" :
-                          selectedEmployeeId === "e2" ? "2222" :
-                          selectedEmployeeId === "e3" ? "3333" :
-                          selectedEmployeeId === "e4" ? "4444" : "1234"
+                          selectedEmployeeId === "e1" ? "123456" :
+                          selectedEmployeeId === "e2" ? "222222" :
+                          selectedEmployeeId === "e3" ? "333333" :
+                          selectedEmployeeId === "e4" ? "444444" : "123456"
                         );
-                        return <>O PIN para este operador é <span className="text-orange-400 font-bold">"{correctPin}"</span>.</>;
+                        return <>A senha temporária para este operador é <span className="text-orange-400 font-bold">"{correctPin}"</span>.</>;
                       })()}
                     </div>
                   </div>

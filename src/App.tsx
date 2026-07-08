@@ -52,7 +52,7 @@ import {
   isCircuitBroken
 } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc } from "firebase/firestore";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 
 import { 
@@ -71,7 +71,8 @@ import {
   Cloud,
   Clock,
   Menu,
-  Lock
+  Lock,
+  ShieldAlert
 } from "lucide-react";
 
 interface Toast {
@@ -542,6 +543,18 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
+          // Fetch employee list to map Google account to actual employee
+          let currentEmployees: Employee[] = [];
+          try {
+            const dbResponse = await fetch("/api/db/load");
+            const dbJson = await dbResponse.json();
+            if (dbJson.success && dbJson.data && dbJson.data.employees) {
+              currentEmployees = dbJson.data.employees;
+            }
+          } catch (e) {
+            console.warn("Could not load employees for auth mapping:", e);
+          }
+
           // Fetch user profile from Firestore "usuarios" with robust caching & local fallback
           let profileData: any = null;
           try {
@@ -564,28 +577,117 @@ export default function App() {
                 console.error("Erro ao analisar cache local do perfil:", parseErr);
               }
             }
+          }
+
+          // Match logged in user email to an existing employee
+          const employeeEmailMatch = currentEmployees.find(emp => emp.email?.toLowerCase() === user.email?.toLowerCase());
+
+          if (!profileData && employeeEmailMatch) {
+            // Create user profile document in Firestore from matched employee
+            profileData = {
+              uid: user.uid,
+              nomeCompleto: employeeEmailMatch.name,
+              email: employeeEmailMatch.email || user.email || "",
+              empresa: "OST Comércio Geral",
+              perfil: employeeEmailMatch.role,
+              cargo: employeeEmailMatch.role,
+              estado: employeeEmailMatch.status === "ACTIVE" ? "Ativo" : "Inativo",
+              fotoPerfil: user.photoURL || "",
+              telefone: employeeEmailMatch.contact || "",
+              ultimoLogin: new Date().toISOString(),
+              dataCriacao: employeeEmailMatch.admissionDate ? new Date(employeeEmailMatch.admissionDate).toISOString() : new Date().toISOString(),
+              username: employeeEmailMatch.username || "",
+              pin: employeeEmailMatch.pin || "",
+              pinCreatedAt: employeeEmailMatch.pinCreatedAt || "",
+              pinChanged: employeeEmailMatch.pinChanged !== undefined ? employeeEmailMatch.pinChanged : true
+            };
             
-            // If still no profile, generate a generic but functional fallback user based on email or UID
-            if (!profileData) {
-              profileData = {
-                uid: user.uid,
-                nomeCompleto: user.displayName || user.email?.split("@")[0] || "Operador",
-                email: user.email || "operador@ostvendas.com",
-                empresa: "OST Comércio Geral",
-                perfil: "Administrador", // Default to high privilege fallback to keep system operational
-                cargo: "Administrador",
-                estado: "Ativo",
-                fotoPerfil: "",
-                telefone: "",
-                ultimoLogin: new Date().toISOString(),
-                dataCriacao: new Date().toISOString()
-              };
+            // Also write to Firestore to persist this mapping if online
+            try {
+              const userDocRef = doc(db, "usuarios", user.uid);
+              await setDoc(userDocRef, profileData);
+            } catch (err) {
+              console.warn("Could not save mapped Google profile to Firestore:", err);
             }
+          }
+
+          if (!profileData) {
+            // Generate a generic profile for the Google user if not found
+            profileData = {
+              uid: user.uid,
+              nomeCompleto: user.displayName || user.email?.split("@")[0] || "Operador",
+              email: user.email || "operador@ostvendas.com",
+              empresa: "OST Comércio Geral",
+              perfil: "Administrador Completo", // Default to high privilege fallback
+              cargo: "Administrador",
+              estado: "Ativo",
+              fotoPerfil: user.photoURL || "",
+              telefone: "",
+              ultimoLogin: new Date().toISOString(),
+              dataCriacao: new Date().toISOString()
+            };
           }
 
           if (profileData) {
             const mappedEmployee = mapUsuarioToEmployee(profileData as any);
             
+            if (mappedEmployee.status === "BLOCKED") {
+              showToast("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.", "error");
+              await auth.signOut();
+              setIsAuthenticated(false);
+              setActiveUser(null);
+              return;
+            }
+
+            if (mappedEmployee.status === "INACTIVE" || mappedEmployee.status === "SUSPENDED") {
+              showToast("Esta conta está inativa ou suspensa. Contacte o Administrador.", "error");
+              await auth.signOut();
+              setIsAuthenticated(false);
+              setActiveUser(null);
+              return;
+            }
+
+            // Check if PIN has expired (3 days rule)
+            const now = new Date();
+            const createdAtStr = mappedEmployee.pinCreatedAt || mappedEmployee.admissionDate || now.toISOString();
+            const createdAt = new Date(createdAtStr);
+            const diffTime = now.getTime() - createdAt.getTime();
+            const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+            const isPinTemporary = mappedEmployee.pinChanged === false || mappedEmployee.pinChanged === undefined;
+
+            if (isPinTemporary && diffDays > 3) {
+              const updatedEmployees = currentEmployees.map(emp => {
+                if (emp.id === mappedEmployee.id) {
+                  return { ...emp, status: "BLOCKED" as const };
+                }
+                return emp;
+              });
+              handleUpdateEmployees(updatedEmployees);
+              
+              handleAddAuditLog(
+                "Bloqueio de Conta Automático",
+                "SEGURANÇA",
+                `Conta do colaborador ${mappedEmployee.name} foi bloqueada por ultrapassar o prazo de 3 dias sem alterar o PIN temporário.`
+              );
+
+              showToast("A sua conta foi BLOQUEADA por expiração do prazo de 3 dias para alterar o PIN temporário.", "error");
+              await auth.signOut();
+              setIsAuthenticated(false);
+              setActiveUser(null);
+              return;
+            }
+
+            // Force PIN change if temporary but within the 3 days window
+            if (isPinTemporary) {
+              setForcePinTargetEmployee(mappedEmployee);
+              setNewPin("");
+              setConfirmNewPin("");
+              setForcePinError("");
+              setForcePinChangeOpen(true);
+              return;
+            }
+
             setActiveUser(mappedEmployee);
             setIsAuthenticated(true);
             setSettings(prev => ({
@@ -604,13 +706,24 @@ export default function App() {
           setActiveUser(null);
         }
       } else {
+        const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+        if (storedSimulated) {
+          try {
+            const parsed = JSON.parse(storedSimulated);
+            setActiveUser(parsed);
+            setIsAuthenticated(true);
+            return;
+          } catch (e) {
+            console.error("Failed to restore simulated session:", e);
+          }
+        }
         setIsAuthenticated(false);
         setActiveUser(null);
       }
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [employees]);
 
   // Real-time products subscription and initial sync
   useEffect(() => {
@@ -732,7 +845,7 @@ export default function App() {
     }
 
     if (targetEmp.status === "BLOCKED") {
-      setPinError("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.");
+      setPinError("A sua conta está BLOQUEADA por tempo expirado da senha de acesso ou suspensão de segurança.");
       return;
     }
 
@@ -743,11 +856,11 @@ export default function App() {
 
     const requiredPin = targetEmp.pin || "123456";
     if (enteredPin.trim() !== requiredPin.trim()) {
-      setPinError("Código PIN incorreto. Por favor, tente novamente.");
+      setPinError("Senha incorreta. Por favor, tente novamente.");
       return;
     }
 
-    // Check expiration policy (3 days)
+    // Check expiration policy (2 months / 60 days)
     const now = new Date();
     const createdAtStr = targetEmp.pinCreatedAt || targetEmp.admissionDate || now.toISOString();
     const createdAt = new Date(createdAtStr);
@@ -756,31 +869,24 @@ export default function App() {
 
     const isPinTemporary = targetEmp.pinChanged === false || targetEmp.pinChanged === undefined;
 
-    if (isPinTemporary && diffDays > 3) {
-      const updatedEmployees = employees.map(emp => {
-        if (emp.id === targetEmp.id) {
-          return { ...emp, status: "BLOCKED" as const };
-        }
-        return emp;
-      });
-      handleUpdateEmployees(updatedEmployees);
-      
-      handleAddAuditLog(
-        "Bloqueio de Conta Automático",
-        "SEGURANÇA",
-        `Conta do colaborador ${targetEmp.name} foi bloqueada por ultrapassar o prazo de 3 dias sem alterar o PIN temporário.`
-      );
-
-      setPinError("A sua conta foi BLOQUEADA por expiração do prazo de 3 dias para alterar o PIN temporário.");
-      return;
-    }
-
+    // If password is temporary (first login) OR has expired (older than 60 days)
     if (isPinTemporary) {
-      // Intercept login and open the Force PIN Change dialog
+      // Intercept login and open the Force password Change dialog
       setForcePinTargetEmployee(targetEmp);
       setNewPin("");
       setConfirmNewPin("");
-      setForcePinError("");
+      setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
+      setForcePinChangeOpen(true);
+      setPinVerificationOpen(false);
+      return;
+    }
+
+    if (diffDays > 60) {
+      // Password expired
+      setForcePinTargetEmployee(targetEmp);
+      setNewPin("");
+      setConfirmNewPin("");
+      setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
       setForcePinChangeOpen(true);
       setPinVerificationOpen(false);
       return;
@@ -841,18 +947,18 @@ export default function App() {
   const handleForcePinChangeSubmit = () => {
     if (!forcePinTargetEmployee) return;
 
-    if (newPin.length !== 6) {
-      setForcePinError("O novo PIN deve ter exatamente 6 dígitos.");
+    if (newPin.length < 6) {
+      setForcePinError("A nova senha deve ter pelo menos 6 caracteres.");
       return;
     }
 
     if (newPin === forcePinTargetEmployee.pin) {
-      setForcePinError("O novo PIN não pode ser idêntico ao PIN temporário anterior.");
+      setForcePinError("A nova senha não pode ser idêntica à senha anterior.");
       return;
     }
 
     if (newPin !== confirmNewPin) {
-      setForcePinError("Os PINs de confirmação não coincidem.");
+      setForcePinError("As senhas de confirmação não coincidem.");
       return;
     }
 
@@ -878,6 +984,7 @@ export default function App() {
       pinCreatedAt: new Date().toISOString()
     };
     setActiveUser(fitEmp);
+    setIsAuthenticated(true);
 
     let ipStr = "IP Desconhecido";
     fetch("https://api.ipify.org?format=json")
@@ -890,16 +997,17 @@ export default function App() {
       .catch(e => console.warn("Could not fetch IP", e))
       .finally(() => {
         handleAddAuditLog(
-          "Alteração de PIN Obrigatório",
+          "Alteração de Senha Obrigatória",
           "SEGURANÇA",
-          `Colaborador ${fitEmp.name} alterou com sucesso o seu PIN temporário para um PIN definitivo de 6 dígitos. Sessão iniciada. IP: ${ipStr}`
+          `Colaborador ${fitEmp.name} alterou com sucesso a sua senha de acesso. Sessão iniciada. IP: ${ipStr}`
         );
       });
 
+    const rawRole = (fitEmp.role || "").toUpperCase();
     const simplifiedRole: UserRole = 
-      fitEmp.role.toUpperCase().includes("GESTOR") || fitEmp.role.toUpperCase().includes("ADMINISTRADOR")
+      rawRole.includes("GESTOR") || rawRole.includes("ADMINISTRADOR")
         ? "ADMIN"
-        : fitEmp.role.toUpperCase().includes("SUPERVISOR")
+        : rawRole.includes("SUPERVISOR")
           ? "SUPERVISOR"
           : "CASHIER";
 
@@ -922,7 +1030,7 @@ export default function App() {
       setActiveTab("POS");
     }
 
-    showToast(`PIN definitivo de 6 dígitos registado com sucesso! Bem-vindo, ${fitEmp.name}.`, "success");
+    showToast(`Nova senha de acesso registada com sucesso! Bem-vindo, ${fitEmp.name}.`, "success");
     setForcePinChangeOpen(false);
     setForcePinTargetEmployee(null);
   };
@@ -1576,6 +1684,46 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
   }, [activeUser]);
 
   const handleLoginSuccess = (user: Employee, branchName: string) => {
+    // 1. Check blocked status
+    if (user.status === "BLOCKED") {
+      showToast("A sua conta está BLOQUEADA por tempo expirado da senha de acesso ou suspensão de segurança.", "error");
+      return;
+    }
+
+    if (user.status === "INACTIVE" || user.status === "SUSPENDED") {
+      showToast("Esta conta está inativa ou suspensa. Contacte o Administrador.", "error");
+      return;
+    }
+
+    // 2. Check Password expiration policy (2 months / 60 days)
+    const now = new Date();
+    const createdAtStr = user.pinCreatedAt || user.admissionDate || now.toISOString();
+    const createdAt = new Date(createdAtStr);
+    const diffTime = now.getTime() - createdAt.getTime();
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+    const isPinTemporary = user.pinChanged === false || user.pinChanged === undefined;
+
+    // 3. Force Password change if temporary (first login)
+    if (isPinTemporary) {
+      setForcePinTargetEmployee(user);
+      setNewPin("");
+      setConfirmNewPin("");
+      setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
+      setForcePinChangeOpen(true);
+      return;
+    }
+
+    if (diffDays > 60) {
+      setForcePinTargetEmployee(user);
+      setNewPin("");
+      setConfirmNewPin("");
+      setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
+      setForcePinChangeOpen(true);
+      return;
+    }
+
+    localStorage.setItem("erp_simulated_logged_in_user", JSON.stringify(user));
     setActiveUser(user);
     setIsAuthenticated(true);
     setSettings(prev => ({
@@ -1601,12 +1749,14 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           `Operador ${activeUser.name} encerrou a sessão.`
         );
       }
+      localStorage.removeItem("erp_simulated_logged_in_user");
       await auth.signOut();
       setActiveUser(null);
       setIsAuthenticated(false);
       showToast("Sessão terminada com sucesso.", "info");
     } catch (err: any) {
       console.error("Erro ao efetuar logout do Firebase:", err);
+      localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
       showToast("Sessão terminada com sucesso.", "info");
@@ -1619,6 +1769,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         employees={employees}
         companyName={settings.companyName}
         logoUrl={settings.logoUrl}
+        branches={settings.branches || []}
         onLoginSuccess={handleLoginSuccess}
         onShowToast={showToast}
       />
@@ -2125,11 +2276,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                             </span>
                             {(pinTargetEmployee.pinChanged === false || pinTargetEmployee.pinChanged === undefined) ? (
                               <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 animate-pulse">
-                                PIN Temporário
+                                Senha Temporária
                               </span>
                             ) : (
                               <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
-                                PIN Pessoal Definido
+                                Senha Definida
                               </span>
                             )}
                           </div>
@@ -2166,18 +2317,17 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   </div>
                 )}
 
-                {/* PIN Input Field */}
+                {/* Password Input Field */}
                 <div className="w-full space-y-1.5 mb-4">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
-                    Digite o seu PIN de Acesso (6 Dígitos)
+                    Digite a sua Senha de Acesso
                   </label>
                   <input
                     type="password"
-                    maxLength={6}
+                    maxLength={32}
                     value={enteredPin}
                     onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, "");
-                      setEnteredPin(val);
+                      setEnteredPin(e.target.value);
                       if (pinError) setPinError("");
                     }}
                     onKeyDown={(e) => {
@@ -2185,11 +2335,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                         handleVerifyAndSwitchProfile();
                       }
                     }}
-                    placeholder="••••••"
-                    className={`w-full text-center text-xl font-mono tracking-[1.5em] py-3 rounded-xl border focus:outline-none focus:ring-2 transition-all ${
+                    placeholder="Sua senha secreta"
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all text-xs font-medium ${
                       theme === "night"
                         ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:border-orange-500 focus:ring-orange-500/20"
-                        : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 focus:ring-orange-500/20 shadow-inner"
+                        : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 focus:ring-orange-500/20 shadow-sm"
                     }`}
                   />
                   {pinError && (
@@ -2197,71 +2347,6 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                       ⚠️ {pinError}
                     </p>
                   )}
-                </div>
-
-                {/* Highly Crafted POS PIN Pad for simple mouse/touchscreen interactions */}
-                <div className="grid grid-cols-3 gap-2 w-full max-w-[280px] mb-4">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                    <button
-                      key={num}
-                      type="button"
-                      onClick={() => {
-                        if (enteredPin.length < 6) {
-                          setEnteredPin(prev => prev + num);
-                          if (pinError) setPinError("");
-                        }
-                      }}
-                      className={`py-3 text-base font-extrabold rounded-xl transition cursor-pointer border ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-850 hover:bg-zinc-800 active:bg-zinc-750 text-slate-200"
-                          : "bg-slate-50 border-slate-200 hover:bg-slate-100 active:bg-slate-200 text-slate-700 shadow-sm"
-                      }`}
-                    >
-                      {num}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setEnteredPin("")}
-                    className={`py-3 text-[10px] font-bold rounded-xl transition cursor-pointer border ${
-                      theme === "night"
-                        ? "bg-zinc-900 border-zinc-850 text-rose-400 hover:bg-rose-500/10"
-                        : "bg-slate-50 border-slate-200 text-rose-600 hover:bg-rose-50"
-                    }`}
-                  >
-                    LIMPAR
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (enteredPin.length < 6) {
-                        setEnteredPin(prev => prev + "0");
-                        if (pinError) setPinError("");
-                      }
-                    }}
-                    className={`py-3 text-base font-extrabold rounded-xl transition cursor-pointer border ${
-                      theme === "night"
-                        ? "bg-zinc-900 border-zinc-850 hover:bg-zinc-800 active:bg-zinc-750 text-slate-200"
-                        : "bg-slate-50 border-slate-200 hover:bg-slate-100 active:bg-slate-200 text-slate-700 shadow-sm"
-                    }`}
-                  >
-                    0
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (enteredPin.length > 0) {
-                        setEnteredPin(prev => prev.slice(0, -1));
-                      }
-                    }}
-                    className={`py-3 text-xs font-bold rounded-xl transition cursor-pointer border ${
-                      theme === "night"
-                        ? "bg-zinc-900 border-zinc-850 text-slate-400 hover:bg-zinc-800"
-                        : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                    }`}
-                  >
-                    ⌫
-                  </button>
                 </div>
               </div>
 
@@ -2318,7 +2403,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   </div>
                   <div>
                     <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Atualização de Segurança Obrigatória</h3>
-                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir PIN Definitivo de 6 dígitos</p>
+                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir Senha Definitiva de Acesso</p>
                   </div>
                 </div>
               </div>
@@ -2328,23 +2413,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl space-y-1 text-xs">
                   <p className="font-bold text-amber-800">Olá {forcePinTargetEmployee.name},</p>
                   <p className="text-amber-700 leading-relaxed text-[11px]">
-                    De acordo com a política de segurança, o PIN inicial é temporário e **deve ser alterado dentro de um prazo limite de 3 dias**. Escolha o seu PIN pessoal de 6 dígitos para ativar permanentemente a sua conta.
+                    De acordo com a política de segurança, a sua senha inicial é temporária ou expirou. **Todas as senhas de acesso possuem validade máxima de 2 meses (60 dias)**. Defina uma senha de acesso forte de pelo menos 6 caracteres.
                   </p>
                 </div>
 
                 <div className="space-y-3.5">
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Novo PIN Pessoal (6 dígitos)</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Nova Senha de Acesso</label>
                     <input
                       type="password"
-                      maxLength={6}
-                      placeholder="Ex: 654321"
+                      maxLength={32}
+                      placeholder="Mínimo 6 caracteres"
                       value={newPin}
                       onChange={(e) => {
-                        setNewPin(e.target.value.replace(/\D/g, ""));
+                        setNewPin(e.target.value);
                         if (forcePinError) setForcePinError("");
                       }}
-                      className={`w-full text-center text-lg font-mono tracking-[1.5em] py-2 rounded-xl border focus:outline-none focus:ring-2 ${
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
                         theme === "night"
                           ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
                           : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
@@ -2353,17 +2438,17 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Novo PIN</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Nova Senha</label>
                     <input
                       type="password"
-                      maxLength={6}
-                      placeholder="Repita o novo PIN"
+                      maxLength={32}
+                      placeholder="Repita a nova senha de acesso"
                       value={confirmNewPin}
                       onChange={(e) => {
-                        setConfirmNewPin(e.target.value.replace(/\D/g, ""));
+                        setConfirmNewPin(e.target.value);
                         if (forcePinError) setForcePinError("");
                       }}
-                      className={`w-full text-center text-lg font-mono tracking-[1.5em] py-2 rounded-xl border focus:outline-none focus:ring-2 ${
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
                         theme === "night"
                           ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
                           : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
@@ -2395,9 +2480,9 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 <button
                   type="button"
                   onClick={handleForcePinChangeSubmit}
-                  disabled={newPin.length !== 6 || confirmNewPin.length !== 6}
+                  disabled={newPin.length < 6 || confirmNewPin.length < 6}
                   className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
-                    newPin.length === 6 && confirmNewPin.length === 6
+                    newPin.length >= 6 && confirmNewPin.length >= 6
                       ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
                       : "bg-slate-200 text-slate-400 cursor-not-allowed"
                   }`}

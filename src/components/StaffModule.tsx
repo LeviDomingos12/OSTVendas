@@ -553,6 +553,56 @@ export default function StaffModule({
     }, 1500);
   };
 
+  // Disparar automaticamente e-mail de boas-vindas com credenciais para o colaborador recém-criado
+  const dispatchWelcomeEmail = async (
+    recipientEmail: string,
+    employeeName: string,
+    username: string,
+    tempPin: string
+  ) => {
+    setEmailSendingStatus("SENDING");
+    try {
+      const response = await fetch("/api/email/dispatch-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: recipientEmail,
+          employeeName: employeeName,
+          username: username,
+          tempPin: tempPin
+        })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Falha do servidor de e-mail.");
+      }
+
+      setEmailSendingStatus("SUCCESS");
+      onAddAuditLog(
+        "Notificação de Credenciais",
+        "NOTIFICAÇÃO",
+        `Credenciais de acesso enviadas com sucesso para o Gmail de ${employeeName} (${recipientEmail}). Conteúdo: Username: '${username}', Senha Inicial Temporária: '${tempPin}' (Com validade de 2 meses).`
+      );
+      setTimeout(() => {
+        setEmailSendingStatus("IDLE");
+      }, 4000);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Erro ao enviar credenciais por e-mail:", error);
+      setEmailSendingStatus("ERROR");
+      onAddAuditLog(
+        "Falha de Envio de Credenciais",
+        "Erros do Sistema",
+        `Falha ao enviar credenciais para ${recipientEmail}: ${error.message}`
+      );
+      setTimeout(() => {
+        setEmailSendingStatus("IDLE");
+      }, 4000);
+      return { success: false, error: error.message };
+    }
+  };
+
   // Add/Contract new employee
   const handleSubmitEmployee = (e: React.FormEvent) => {
     e.preventDefault();
@@ -562,7 +612,16 @@ export default function StaffModule({
     }
     
     const finalUsername = username.trim() || generateSuggestedUsername(name);
-    const formattedPin = pin.trim() || Math.floor(100000 + Math.random() * 900000).toString(); // Generates random 6-digit code as backup
+    // Generates a random 8-character alphanumeric password as default temporary password
+    const generateTempPass = () => {
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+      let result = "";
+      for (let i = 0; i < 8; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    };
+    const formattedPin = pin.trim() || generateTempPass();
     setLocalError("");
 
     const payload: Employee = {
@@ -582,22 +641,11 @@ export default function StaffModule({
 
     onAddEmployee(payload);
     
-    let auditDetails = `Novo funcionário '${payload.name}' registado com username '${finalUsername}', PIN '${formattedPin}' e salário de ${payload.salary.toLocaleString()} ${currency}.`;
+    let auditDetails = `Novo funcionário '${payload.name}' registado com username '${finalUsername}', Senha Temporária '${formattedPin}' e salário de ${payload.salary.toLocaleString()} ${currency}.`;
 
     if (sendEmailCredentials && email.trim()) {
-      setEmailSendingStatus("SENDING");
-      auditDetails += ` Envio de credenciais agendado para o e-mail: ${email.trim()}.`;
-      setTimeout(() => {
-        setEmailSendingStatus("SUCCESS");
-        onAddAuditLog(
-          "Notificação de Credenciais",
-          "NOTIFICAÇÃO",
-          `Credenciais de acesso enviadas com sucesso para o Gmail de ${payload.name} (${email.trim()}). Conteúdo: Username: '${finalUsername}', PIN Inicial de 6 dígitos: '${formattedPin}' (Prazo regulamentar de alteração: 3 dias).`
-        );
-        setTimeout(() => {
-          setEmailSendingStatus("IDLE");
-        }, 4000);
-      }, 1500);
+      auditDetails += ` Envio de credenciais solicitado para o e-mail: ${email.trim()}.`;
+      dispatchWelcomeEmail(email.trim(), name.trim(), finalUsername, formattedPin);
     }
 
     onAddAuditLog(
@@ -2034,15 +2082,15 @@ export default function StaffModule({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block text-left">PIN (6 Dígitos) *</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block text-left">Senha Temporária *</label>
                     <input
                       type="text"
                       required
-                      maxLength={6}
-                      placeholder="Ex: 123456"
+                      maxLength={32}
+                      placeholder="Mínimo 6 caracteres"
                       value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-xs text-slate-850 text-center tracking-widest"
+                      onChange={(e) => setPin(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-xs text-slate-850"
                     />
                   </div>
                 </div>
@@ -2196,15 +2244,15 @@ export default function StaffModule({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block text-left">PIN (6 Dígitos)</label>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block text-left">Senha de Acesso</label>
                     <input
                       type="text"
                       required
-                      maxLength={6}
-                      placeholder="Ex: 123456"
+                      maxLength={32}
+                      placeholder="Mínimo 6 caracteres"
                       value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-center tracking-widest text-slate-800"
+                      onChange={(e) => setPin(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-slate-800"
                     />
                   </div>
                 </div>
@@ -2231,7 +2279,7 @@ export default function StaffModule({
                   <option value="ACTIVE">🟢 Ativo (Acesso autorizado)</option>
                   <option value="SUSPENDED">🟡 Suspenso (Acesso temporariamente retido)</option>
                   <option value="INACTIVE">🔴 Desativado (Acesso rescindido)</option>
-                  <option value="BLOCKED">🔒 Bloqueado (PIN Temporário Expirado)</option>
+                  <option value="BLOCKED">🔒 Bloqueado (Senha Expirada ou Segurança)</option>
                 </select>
               </div>
 
@@ -2411,8 +2459,8 @@ export default function StaffModule({
                         <span className="font-mono text-slate-700 block font-bold mt-0.5">{selectedEmp.admissionDate || "2024-01-10"}</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[9.5px]">PIN DO OPERADOR</span>
-                        <span className="font-mono text-orange-600 block font-extrabold mt-0.5">{selectedEmp.pin || "Não definido (Padrão 1234)"}</span>
+                        <span className="text-slate-400 block text-[9.5px]">SENHA DE ACESSO</span>
+                        <span className="font-mono text-orange-600 block font-extrabold mt-0.5">{selectedEmp.pin || "Não definido"}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block text-[9.5px]">E-MAIL (GMAIL)</span>

@@ -443,6 +443,48 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
+  // POST: Send employee credentials email
+  app.post("/api/email/dispatch-credentials", async (req, res) => {
+    try {
+      const { recipient, employeeName, username, tempPin } = req.body;
+      if (!recipient || !employeeName || !username || !tempPin) {
+        return res.status(400).json({ error: "Parâmetros recipient, employeeName, username e tempPin são obrigatórios." });
+      }
+
+      const body = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #f8fafc;">
+          <h2 style="color: #ff6b00; border-bottom: 2px solid #ff6b00; padding-bottom: 10px; margin-top: 0;">Suas Credenciais de Acesso - OST Vendas ERP</h2>
+          <p>Olá <strong>${employeeName}</strong>,</p>
+          <p>Sua conta de operador no sistema <strong>OST Vendas ERP</strong> foi criada com sucesso pelo Administrador!</p>
+          
+          <div style="background-color: #ffffff; padding: 15px; border-radius: 8px; border: 1px solid #cbd5e1; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>Nome de Utilizador (Username):</strong> <span style="font-family: monospace; font-size: 14px; background-color: #f1f5f9; padding: 4px 8px; border-radius: 4px; font-weight: bold; color: #1e293b;">${username}</span></p>
+            <p style="margin: 0;"><strong>Senha Temporária de Acesso:</strong> <span style="font-family: monospace; font-size: 16px; font-weight: bold; color: #ff6b00; background-color: #f1f5f9; padding: 4px 8px; border-radius: 4px;">${tempPin}</span></p>
+          </div>
+
+          <p style="color: #e11d48; font-weight: bold; margin-bottom: 5px;">⚠️ Segurança: Alteração Obrigatória no Primeiro Login</p>
+          <p style="margin-top: 0; line-height: 1.5;">Ao fazer o seu primeiro login com esta senha temporária, o sistema exigirá que você **crie uma nova senha definitiva**. Lembramos que as senhas têm uma validade máxima de <strong>2 meses (60 dias)</strong>, devendo ser atualizadas periodicamente para garantir a segurança da plataforma.</p>
+          
+          <p style="margin-top: 30px; font-size: 11px; color: #64748b; border-top: 1px solid #cbd5e1; padding-top: 10px; margin-bottom: 0;">
+            Este é um e-mail automático gerado pelo sistema OST Vendas ERP. Não responda a este e-mail.
+          </p>
+        </div>
+      `;
+
+      const result = await trySendEmail({
+        to: recipient,
+        subject: `Suas Credenciais de Acesso - OST Vendas ERP`,
+        body,
+        fallbackMessage: `Credenciais enviadas com sucesso para o e-mail ${recipient}!`
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[API EMAIL CREDENTIALS ERROR]", error);
+      res.status(500).json({ error: error.message || "Falha ao enviar e-mail de credenciais." });
+    }
+  });
+
   // POST: Testing Custom SMTP connection and dispatch immediately
   app.post("/api/email/test-smtp", async (req, res) => {
     try {

@@ -26,10 +26,10 @@ export const initialCustomers: Customer[] = [
 ];
 
 export const initialEmployees: Employee[] = [
-  { id: "e1", name: "Levi Domingos", role: "Administrador Completo", contact: "841234567", salary: 85000, admissionDate: "2024-01-10", status: "ACTIVE", pin: "1234", email: "levidomingos12@gmail.com" },
-  { id: "e2", name: "Inácio Macamo", role: "Supervisor de Vendas", contact: "859923881", salary: 45000, admissionDate: "2025-03-15", status: "ACTIVE", pin: "2222", email: "inacio.macamo@gmail.com" },
-  { id: "e3", name: "Marta Ubisse", role: "Operadora de Caixa / Vendas", contact: "823301923", salary: 22000, admissionDate: "2025-09-01", status: "ACTIVE", pin: "3333", email: "marta.ubisse@gmail.com" },
-  { id: "e4", name: "Délio Chiponde", role: "Operador de Caixa", contact: "867712399", salary: 22000, admissionDate: "2026-01-15", status: "ACTIVE", pin: "4444", email: "delio.chiponde@gmail.com" }
+  { id: "e1", name: "Levi Domingos", role: "Administrador Completo", contact: "841234567", salary: 85000, admissionDate: "2024-01-10", status: "ACTIVE", pin: "123456", email: "levidomingos12@gmail.com", username: "ldomingos", pinCreatedAt: "2024-01-10T00:00:00.000Z", pinChanged: true },
+  { id: "e2", name: "Inácio Macamo", role: "Supervisor de Vendas", contact: "859923881", salary: 45000, admissionDate: "2025-03-15", status: "ACTIVE", pin: "222222", email: "inacio.macamo@gmail.com", username: "imacamo", pinCreatedAt: "2025-03-15T00:00:00.000Z", pinChanged: true },
+  { id: "e3", name: "Marta Ubisse", role: "Operadora de Caixa / Vendas", contact: "823301923", salary: 22000, admissionDate: "2025-09-01", status: "ACTIVE", pin: "333333", email: "marta.ubisse@gmail.com", username: "mubisse", pinCreatedAt: "2025-09-01T00:00:00.000Z", pinChanged: true },
+  { id: "e4", name: "Délio Chiponde", role: "Operador de Caixa", contact: "867712399", salary: 22000, admissionDate: "2026-01-15", status: "ACTIVE", pin: "444444", email: "delio.chiponde@gmail.com", username: "dchiponde", pinCreatedAt: "2026-01-15T00:00:00.000Z", pinChanged: true }
 ];
 
 export const initialCashFlow: CashFlowEntry[] = [
@@ -143,11 +143,7 @@ export const defaultSettings: SystemSettings = {
   fiscalCertificationNumber: "OST/CERT/00249/2026",
   aiAutoMonitoring: true,
   aiHealthSensitivity: 80,
-  branches: [
-    { id: "central", name: "Filial Central (Maputo)", address: "Av. Marginal, Kiosk Nº 14, Maputo", contact: "+258 84 900 1200" },
-    { id: "matola", name: "Filial Matola", address: "Av. União, Matchiki-Tchiki, Matola", contact: "+258 84 900 1300" },
-    { id: "beira", name: "Filial Beira", address: "Bairro Central, Beira", contact: "+258 84 900 1400" }
-  ],
+  branches: [],
   stockTransfers: [
     { id: "st1", originBranchId: "central", destinationBranchId: "matola", productId: "p3", productName: "Farinha de Milho Top Score (10kg)", quantity: 5, timestamp: "2026-06-20T10:30:00", status: "COMPLETED", responsibleUser: "Inácio Macamo" }
   ],

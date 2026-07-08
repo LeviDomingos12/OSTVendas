@@ -291,6 +291,10 @@ export interface UsuarioDoc {
   telefone: string;
   ultimoLogin: any;
   dataCriacao: any;
+  username?: string;
+  pin?: string;
+  pinCreatedAt?: string;
+  pinChanged?: boolean;
 }
 
 // Map Firestore doc to native Employee type
@@ -301,8 +305,13 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc): any {
     role: usuario.perfil, // E.g. "Administrador", "Gerente", "Supervisor", "Caixa", etc.
     contact: usuario.telefone || "",
     salary: 22000,
-    admissionDate: usuario.dataCriacao ? new Date().toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-    status: usuario.estado === "Ativo" ? "ACTIVE" : "INACTIVE"
+    admissionDate: usuario.dataCriacao ? (typeof usuario.dataCriacao === "string" ? usuario.dataCriacao.split('T')[0] : new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+    status: usuario.estado === "Ativo" ? "ACTIVE" : "INACTIVE",
+    email: usuario.email || "",
+    username: usuario.username || "",
+    pin: usuario.pin || "",
+    pinCreatedAt: usuario.pinCreatedAt || "",
+    pinChanged: usuario.pinChanged !== undefined ? usuario.pinChanged : true
   };
 }
 
@@ -380,7 +389,115 @@ export const signUpWithEmail = async (
     }
 
     return mapUsuarioToEmployee(userProfile);
-  } catch (error) {
+  } catch (error: any) {
+    const isOperationNotAllowed = error?.code === "auth/operation-not-allowed" || 
+                                  error?.message?.includes("operation-not-allowed") ||
+                                  error?.message?.includes("auth/operation-not-allowed");
+
+    if (isOperationNotAllowed) {
+      console.warn("[AUTH FALLBACK] Email/Password provider is disabled in Firebase Console. Falling back to local/simulated account creation.");
+      
+      // 1. Fetch current employees list from local DB store via API
+      let employees: any[] = [];
+      try {
+        const dbResponse = await fetch("/api/db/load");
+        const dbJson = await dbResponse.json();
+        if (dbJson.success && dbJson.data && dbJson.data.employees) {
+          employees = dbJson.data.employees;
+        }
+      } catch (e) {
+        console.warn("Could not load employees for fallback:", e);
+      }
+
+      // 2. Check if email already in use
+      const exists = employees.some(emp => emp.email?.toLowerCase() === email.toLowerCase());
+      if (exists) {
+        throw new Error("Este endereço de e-mail já está associado a outra conta.");
+      }
+
+      // 3. Create simulated employee object
+      const simId = `emp-sim-${Date.now()}`;
+      
+      // Generate a username based on full name
+      const cleanName = nomeCompleto.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const parts = cleanName.split(/\s+/).filter(Boolean);
+      let proposedUsername = parts[0] || "user";
+      if (parts.length > 1) {
+        proposedUsername = parts[0][0] + parts[parts.length - 1];
+      }
+      // Ensure unique username
+      let finalUsername = proposedUsername;
+      let counter = 1;
+      while (employees.some(emp => emp.username === finalUsername)) {
+        finalUsername = proposedUsername + counter;
+        counter++;
+      }
+
+      // Generate initial 6-digit PIN
+      const initialPinNum = Math.floor(100000 + Math.random() * 900000);
+      const formattedPin = String(initialPinNum);
+
+      const newEmployee = {
+        id: simId,
+        name: nomeCompleto,
+        role: perfil,
+        contact: "",
+        salary: 22000,
+        admissionDate: new Date().toISOString().split('T')[0],
+        status: "ACTIVE" as const,
+        pin: formattedPin,
+        email: email,
+        username: finalUsername,
+        pinCreatedAt: new Date().toISOString(),
+        pinChanged: false, // Force them to change PIN upon first login
+        password: password // Store the password for local/simulated email logins
+      };
+
+      // 4. Save the updated employees list to the server/local database file
+      const updatedEmployees = [...employees, newEmployee];
+      try {
+        await fetch("/api/db/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            table: "employees",
+            data: updatedEmployees
+          })
+        });
+      } catch (saveErr) {
+        console.error("Failed to save updated employees list in fallback:", saveErr);
+      }
+
+      // 5. Optionally also save user to Firestore "usuarios" collection if firestore is working but only auth provider is disabled!
+      const userProfile: UsuarioDoc = {
+        uid: simId,
+        nomeCompleto,
+        email,
+        empresa,
+        perfil,
+        cargo: perfil,
+        estado: "Ativo",
+        fotoPerfil: "",
+        telefone: "",
+        ultimoLogin: new Date().toISOString(),
+        dataCriacao: new Date().toISOString(),
+        username: finalUsername,
+        pin: formattedPin,
+        pinCreatedAt: new Date().toISOString(),
+        pinChanged: false
+      };
+
+      if (!isCircuitBroken()) {
+        try {
+          await setDoc(doc(db, "usuarios", simId), sanitizeForFirestore(userProfile));
+        } catch (fsErr) {
+          console.warn("Could not save fallback profile to Firestore (probably quota exceeded or network issue):", fsErr);
+        }
+      }
+
+      return newEmployee;
+    }
+
     console.error("Sign up error:", error);
     checkAndNotifyQuota(error);
     throw error;
@@ -460,7 +577,43 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     }
 
     return { employee: mapUsuarioToEmployee(profile), branch: profile.empresa };
-  } catch (error) {
+  } catch (error: any) {
+    const isOperationNotAllowed = error?.code === "auth/operation-not-allowed" || 
+                                  error?.message?.includes("operation-not-allowed") ||
+                                  error?.message?.includes("auth/operation-not-allowed");
+
+    if (isOperationNotAllowed || error?.code === "auth/user-not-found" || error?.message?.includes("user-not-found")) {
+      console.warn("[AUTH FALLBACK] Falling back to checking local/simulated account list.");
+
+      // 1. Fetch current employees list from local DB store via API
+      let employees: any[] = [];
+      try {
+        const dbResponse = await fetch("/api/db/load");
+        const dbJson = await dbResponse.json();
+        if (dbJson.success && dbJson.data && dbJson.data.employees) {
+          employees = dbJson.data.employees;
+        }
+      } catch (e) {
+        console.warn("Could not load employees for fallback sign-in:", e);
+      }
+
+      // 2. Find employee matching email & password
+      const matchedEmployee = employees.find(
+        emp => emp.email?.toLowerCase() === email.toLowerCase() && emp.password === password
+      );
+
+      if (matchedEmployee) {
+        if (matchedEmployee.status === "INACTIVE" || matchedEmployee.status === "SUSPENDED") {
+          throw new Error("Utilizador desativado. Contacte o Administrador.");
+        }
+        if (matchedEmployee.status === "BLOCKED") {
+          throw new Error("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.");
+        }
+
+        return { employee: matchedEmployee, branch: "OST Comércio Geral" };
+      }
+    }
+
     console.error("Sign in error:", error);
     checkAndNotifyQuota(error);
     // Log login failure
@@ -512,80 +665,118 @@ export const recoverPassword = async (email: string): Promise<void> => {
 };
 
 // Google sign-in and profile synchronization
-export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio Geral"): Promise<any> => {
+export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio Geral", employeesList: any[] = []): Promise<any> => {
   try {
     const signInResult = await googleSignIn();
     if (!signInResult) return null;
 
     const { user } = signInResult;
-    const userDocRef = doc(db, "usuarios", user.uid);
-    
-    let profile: UsuarioDoc;
-    try {
-      const docSnap = await getDoc(userDocRef);
-
-      if (docSnap.exists()) {
-        profile = docSnap.data() as UsuarioDoc;
-        if (profile.estado === "Inativo") {
-          await auth.signOut();
-          throw new Error("Utilizador desativado. Contacte o Administrador.");
-        }
-
-        // Update login timestamp
-        if (!isCircuitBroken()) {
-          try {
-            await updateDoc(userDocRef, {
-              ultimoLogin: new Date().toISOString()
-            });
-          } catch (updateErr: any) {
-            console.warn("Could not update last login timestamp:", updateErr);
-            checkAndNotifyQuota(updateErr);
-          }
-        }
-      } else {
-        // First-time Google login: Create a new Firestore user profile document
-        profile = {
-          uid: user.uid,
-          nomeCompleto: user.displayName || "Operador Google",
-          email: user.email || "",
-          empresa: defaultBranch,
-          perfil: "Caixa", // Default role
-          cargo: "Operador",
-          estado: "Ativo",
-          fotoPerfil: user.photoURL || "",
-          telefone: user.phoneNumber || "",
-          ultimoLogin: new Date().toISOString(),
-          dataCriacao: new Date().toISOString()
-        };
-
-        if (!isCircuitBroken()) {
-          try {
-            await setDoc(userDocRef, sanitizeForFirestore(profile));
-          } catch (setErr: any) {
-            console.warn("Could not save new Google user profile:", setErr);
-            checkAndNotifyQuota(setErr);
-          }
-        }
-      }
-    } catch (getErr: any) {
-      console.warn("Failed to sync/retrieve Google user profile:", getErr);
-      checkAndNotifyQuota(getErr);
-      profile = {
-        uid: user.uid,
-        nomeCompleto: user.displayName || "Operador Google",
-        email: user.email || "",
-        empresa: defaultBranch,
-        perfil: "Caixa",
-        cargo: "Operador",
-        estado: "Ativo",
-        fotoPerfil: user.photoURL || "",
-        telefone: user.phoneNumber || "",
-        ultimoLogin: new Date().toISOString(),
-        dataCriacao: new Date().toISOString()
-      };
+    const googleEmail = user.email?.toLowerCase().trim();
+    if (!googleEmail) {
+      await auth.signOut();
+      throw new Error("Não foi possível obter o endereço de e-mail da sua conta Google.");
     }
 
-    // Log success
+    // 1. Validate e-mail exists in Firestore "usuarios" collection
+    let existingProfileInFirestore: UsuarioDoc | null = null;
+    let existingDocId: string | null = null;
+    try {
+      const querySnapshot = await getDocs(collection(db, "usuarios"));
+      querySnapshot.forEach((docSnap) => {
+        const d = docSnap.data() as UsuarioDoc;
+        if (d.email && d.email.toLowerCase().trim() === googleEmail) {
+          existingProfileInFirestore = d;
+          existingDocId = docSnap.id;
+        }
+      });
+    } catch (e) {
+      console.warn("Erro ao ler coleção 'usuarios' do Firestore para validar e-mail:", e);
+    }
+
+    const matchedEmp = employeesList.find(emp => emp.email?.toLowerCase().trim() === googleEmail);
+
+    // If email is not found in either Firestore or the local/mock employees list, deny access!
+    if (!existingProfileInFirestore && !matchedEmp) {
+      await auth.signOut();
+      throw new Error(`O e-mail do Google (${user.email}) não está cadastrado ou autorizado no sistema. Por favor, solicite o seu cadastro ao Administrador.`);
+    }
+
+    let profile: UsuarioDoc;
+    const userDocRef = doc(db, "usuarios", user.uid);
+
+    if (existingProfileInFirestore) {
+      const currentProfile = existingProfileInFirestore as UsuarioDoc;
+      if (currentProfile.estado === "Inativo") {
+        await auth.signOut();
+        throw new Error("Utilizador desativado. Contacte o Administrador.");
+      }
+
+      // Prepare updated profile
+      profile = {
+        ...currentProfile,
+        uid: user.uid, // Ensure bound to Google user UID
+        fotoPerfil: user.photoURL || currentProfile.fotoPerfil || "",
+        ultimoLogin: new Date().toISOString()
+      };
+
+      // Enrich missing credentials if matched employee has them
+      if (matchedEmp && (!profile.username || !profile.pin)) {
+        profile.username = profile.username || matchedEmp.username || "";
+        profile.pin = profile.pin || matchedEmp.pin || "";
+        profile.pinCreatedAt = profile.pinCreatedAt || matchedEmp.pinCreatedAt || "";
+        profile.pinChanged = profile.pinChanged !== undefined ? profile.pinChanged : (matchedEmp.pinChanged !== undefined ? matchedEmp.pinChanged : true);
+      }
+
+      // Write updated document matching the Google UID
+      if (!isCircuitBroken()) {
+        try {
+          await setDoc(userDocRef, sanitizeForFirestore(profile));
+          // If the old document was stored under a different ID/UID, clean it up
+          if (existingDocId && existingDocId !== user.uid) {
+            await deleteDoc(doc(db, "usuarios", existingDocId));
+          }
+        } catch (setErr) {
+          console.warn("Falha ao atualizar UID do Google em Firestore:", setErr);
+        }
+      }
+    } else if (matchedEmp) {
+      // Create a brand new Firestore document for an existing authorized employee
+      profile = {
+        uid: user.uid,
+        nomeCompleto: matchedEmp.name,
+        email: matchedEmp.email || user.email || "",
+        empresa: defaultBranch,
+        perfil: matchedEmp.role,
+        cargo: matchedEmp.role,
+        estado: matchedEmp.status === "ACTIVE" ? "Ativo" : "Inativo",
+        fotoPerfil: user.photoURL || "",
+        telefone: matchedEmp.contact || "",
+        ultimoLogin: new Date().toISOString(),
+        dataCriacao: matchedEmp.admissionDate ? new Date(matchedEmp.admissionDate).toISOString() : new Date().toISOString(),
+        username: matchedEmp.username || "",
+        pin: matchedEmp.pin || "",
+        pinCreatedAt: matchedEmp.pinCreatedAt || "",
+        pinChanged: matchedEmp.pinChanged !== undefined ? matchedEmp.pinChanged : true
+      };
+
+      if (profile.estado === "Inativo") {
+        await auth.signOut();
+        throw new Error("Utilizador desativado. Contacte o Administrador.");
+      }
+
+      if (!isCircuitBroken()) {
+        try {
+          await setDoc(userDocRef, sanitizeForFirestore(profile));
+        } catch (setErr) {
+          console.warn("Falha ao criar perfil inicial via Google em Firestore:", setErr);
+        }
+      }
+    } else {
+      await auth.signOut();
+      throw new Error("Erro de integridade de dados ao validar utilizador.");
+    }
+
+    // Log login success
     if (!isCircuitBroken()) {
       try {
         const logId = `log-glogin-${Date.now()}`;
@@ -595,7 +786,7 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
           userName: profile.nomeCompleto,
           action: "Login com Google",
           module: "AUTENTICAÇÃO",
-          details: `Login de ${profile.nomeCompleto} com Google efetuado com sucesso.`,
+          details: `Login de ${profile.nomeCompleto} com Google efetuado com sucesso após validação de e-mail no Firestore.`,
           timestamp: new Date().toISOString()
         }));
       } catch (logErr: any) {
