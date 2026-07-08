@@ -1,0 +1,263 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;650;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;650;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Base resets & scrollbars */
+body {
+  font-family: var(--font-sans);
+  background-color: #f8fafc;
+  color: #1e293b;
+  scrollbar-color: #cbd5e1 #f1f5f9;
+  scrollbar-width: thin;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+body.dark {
+  background-color: #09090b !important; /* zinc-950 */
+  color: #e4e4e7 !important; /* zinc-200 */
+  scrollbar-color: #3f3f46 #09090b;
+}
+
+h1, h2, h3, h4, th {
+  font-family: "Space Grotesk", var(--font-sans);
+}
+
+/* Beautiful and highly visible modern scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(241, 245, 249, 0.4);
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-track {
+  background: rgba(9, 9, 11, 0.4);
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 2.5px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border: 2.5px solid transparent;
+  background-clip: padding-box;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+  border: 1.5px solid transparent;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+  border: 1.5px solid transparent;
+}
+
+/* Scrollbar thin classes helper */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border: 1px solid transparent;
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border: 1px solid transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Global Component Styling Overrides mapped to Elegant Dark theme */
+
+/* Main canvas background mappings */
+.dark .bg-slate-50, .dark .bg-slate-100/30, .dark .bg-slate-50/50, .dark .bg-slate-100\/30, .dark .bg-slate-50\/50, .dark [class*="bg-slate-50"] {
+  background-color: #09090b !important;
+}
+
+/* Card overrides */
+.dark .bg-white, .dark [class*="bg-white"] {
+  background-color: #18181b !important; /* zinc-900 */
+}
+
+/* Border overrides */
+.dark .border-slate-200, .dark .border-slate-100, .dark .border-slate-300/40, .dark .border-slate-200/50, .dark .border-slate-100/60 {
+  border-color: #27272a !important; /* zinc-800 */
+}
+
+/* Side navigation background overrides to zinc-900 */
+.dark aside {
+  background-color: #18181b !important;
+  border-color: #27272a !important;
+}
+
+/* Headers */
+.dark header {
+  background-color: rgba(9, 9, 11, 0.75) !important;
+  backdrop-filter: blur(12px);
+  border-color: #27272a !important;
+}
+
+/* Input, Selector and Form fields */
+.dark input, .dark select, .dark textarea {
+  background-color: #09090b !important;
+  border-color: #27272a !important;
+  color: #f4f4f5 !important;
+}
+.dark input::placeholder, .dark textarea::placeholder {
+  color: #71717a !important;
+}
+.dark input:focus, .dark select:focus, .dark textarea:focus {
+  border-color: #f59e0b !important; /* amber-500 */
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+}
+
+/* Table overrides */
+.dark th {
+  background-color: #09090b !important;
+  color: #a1a1aa !important;
+  border-color: #27272a !important;
+}
+
+.dark td {
+  border-color: #181c24 !important;
+  color: #e4e4e7 !important;
+}
+
+.dark tr:hover td {
+  background-color: rgba(39, 39, 42, 0.3) !important;
+}
+
+/* Zebra strips */
+.dark .even\:bg-slate-50\/50:nth-child(even), .dark .even\:bg-slate-50:nth-child(even), .dark .odd\:bg-slate-50\/50:nth-child(odd) {
+  background-color: rgba(24, 24, 27, 0.4) !important;
+}
+
+/* Typography Overrides */
+.dark .text-slate-800, .dark .text-slate-900, .dark .text-slate-750, .dark .text-slate-850, .dark .text-slate-700 {
+  color: #f4f4f5 !important; /* zinc-100 */
+}
+
+.dark .text-slate-600, .dark .text-slate-650 {
+  color: #d4d4d8 !important; /* zinc-300 */
+}
+
+.dark .text-slate-500, .dark .text-slate-400 {
+  color: #a1a1aa !important; /* zinc-400 */
+}
+
+/* Accent mappings: orange-500 and orange-600 tags transition gracefully to amber-500 */
+.dark .bg-orange-500, .dark .hover\:bg-orange-600:hover, .dark .bg-orange-600 {
+  background-color: #f59e0b !important; /* amber-500 */
+  color: #09090b !important;
+  font-weight: 700 !important;
+}
+.dark .bg-orange-500:hover {
+  background-color: #d97706 !important; /* amber-600 */
+}
+
+.dark .text-orange-500, .dark .text-orange-600 {
+  color: #fbbf24 !important; /* amber-450 */
+}
+
+.dark .bg-orange-50, .dark .bg-orange-100 {
+  background-color: rgba(245, 158, 11, 0.1) !important;
+  color: #fbbf24 !important;
+}
+
+/* Alert Boxes & highlights */
+.dark .bg-red-50, .dark .bg-red-50\/50 {
+  background-color: rgba(239, 68, 68, 0.08) !important;
+}
+.dark .bg-emerald-50, .dark .bg-emerald-50\/50 {
+  background-color: rgba(16, 185, 129, 0.08) !important;
+}
+.dark .bg-blue-50, .dark .bg-blue-50\/50 {
+  background-color: rgba(59, 130, 246, 0.08) !important;
+}
+
+/* Modals, popups & dropdowns */
+.dark .modal-content, .dark .shadow-2xl, .dark .shadow-xl {
+  background-color: #18181b !important;
+  border: 1px solid #27272a !important;
+}
+
+/* Cart highlights, POS details layout */
+.dark .divide-y > * + * {
+  border-color: #27272a !important;
+}
+
+/* Charts Tooltips customized for dark mode */
+.dark .recharts-default-tooltip {
+  background-color: #18181b !important;
+  border: 1px solid #27272a !important;
+}
+.dark .recharts-tooltip-label {
+  color: #f4f4f5 !important;
+}
+
+/* Vibrant, Modern & Colorful Theme Customizations (Orange & White focus) */
+.modern-gradient {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+}
+
+.modern-shadow {
+  box-shadow: 0 10px 35px -10px rgba(249, 115, 22, 0.12) !important;
+}
+
+.modern-card {
+  background-color: #ffffff;
+  border: 1px solid #f1f5f9;
+  border-radius: 1.5rem; /* rounded-3xl */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 20px -6px rgba(249, 115, 22, 0.04);
+}
+
+.modern-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 40px -12px rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.18);
+}
+
+.dark .modern-card {
+  background-color: #18181b !important;
+  border-color: #27272a !important;
+}
+
+.dark .modern-card:hover {
+  box-shadow: 0 20px 45px -15px rgba(245, 158, 11, 0.1) !important;
+  border-color: rgba(245, 158, 11, 0.25) !important;
+}
+
+.vibrant-badge {
+  background: linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(245, 158, 11, 0.04) 100%);
+  border: 1px solid rgba(249, 115, 22, 0.15);
+  color: #ea580c;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Pulse animation helper */
+@keyframes softPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
+.animate-soft-pulse {
+  animation: softPulse 3s infinite ease-in-out;
+}
+
+

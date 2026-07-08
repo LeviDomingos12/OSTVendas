@@ -1,0 +1,3683 @@
+[
+  {
+    "id": "a1",
+    "timestamp": "2026-06-22T07:45:00",
+    "user": "Inácio Macamo",
+    "userRole": "SUPERVISOR",
+    "action": "Abertura de Caixa",
+    "module": "CAIXA",
+    "details": "Abertura efetuada com 5,000 MT de saldo inicial."
+  },
+  {
+    "id": "a2",
+    "timestamp": "2026-06-22T09:12:00",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "Ajuste de Stock",
+    "module": "STOCK",
+    "details": "Arroz Nacional de Chicualacuala (25kg) aumentado em +20 unidades."
+  },
+  {
+    "id": "a3",
+    "timestamp": "2026-06-22T11:45:00",
+    "user": "Marta Ubisse",
+    "userRole": "CASHIER",
+    "action": "Desconto Autorizado por Supervisor",
+    "module": "VENDAS",
+    "details": "Venda #1032 teve desconto de 15% autorizado por Inácio Macamo."
+  },
+  {
+    "id": "a4",
+    "timestamp": "2026-06-22T15:30:00",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "Atualização de Configurações",
+    "module": "CONFIGURAÇÕES",
+    "details": "Alterado o endereço SMTP do servidor de correio comercial para Gmail SSL."
+  },
+  {
+    "id": "log-1783364760950",
+    "timestamp": "2026-07-06T19:06:00.950Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=15903&CVER=22&X-HTTP-Session-Id=gsessionid&zx=9grf12xof7bb&t=1. Erro: signal is aborted without reason"
+  },
+  {
+    "id": "log-1783364760950",
+    "timestamp": "2026-07-06T19:06:00.950Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=15903&CVER=22&X-HTTP-Session-Id=gsessionid&zx=9grf12xof7bb&t=1. Erro: signal is aborted without reason"
+  },
+  {
+    "id": "log-1783364762080",
+    "timestamp": "2026-07-06T19:06:02.080Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Backup Local Automático (Diária)",
+    "module": "SISTEMA",
+    "details": "Cópia de segurança gravada localmente com sucesso (Diária)."
+  },
+  {
+    "id": "log-1783364765184",
+    "timestamp": "2026-07-06T19:06:05.184Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Logout Efetuado",
+    "module": "SEGURANÇA",
+    "details": "Operador levi domingos encerrou a sessão."
+  },
+  {
+    "id": "log-1783364928488",
+    "timestamp": "2026-07-06T19:08:48.488Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783364928489",
+    "timestamp": "2026-07-06T19:08:48.489Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783365153248",
+    "timestamp": "2026-07-06T19:12:33.248Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783365153248",
+    "timestamp": "2026-07-06T19:12:33.248Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783365590149",
+    "timestamp": "2026-07-06T19:19:50.149Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783365957553",
+    "timestamp": "2026-07-06T19:25:57.553Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366169021",
+    "timestamp": "2026-07-06T19:29:29.021Z",
+    "user": "Levi Domingos",
+    "userRole": "ADMIN",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366320040",
+    "timestamp": "2026-07-06T19:32:00.040Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Alternância de Operador",
+    "module": "SISTEMA",
+    "details": "Sessão iniciada como Inácio Macamo (Perfil: Supervisor de Vendas). IP: 197.235.96.48"
+  },
+  {
+    "id": "log-1783366372026",
+    "timestamp": "2026-07-06T19:32:52.026Z",
+    "user": "Inácio Macamo",
+    "userRole": "SUPERVISOR",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366372027",
+    "timestamp": "2026-07-06T19:32:52.027Z",
+    "user": "Inácio Macamo",
+    "userRole": "SUPERVISOR",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366601321",
+    "timestamp": "2026-07-06T19:36:41.321Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366601322",
+    "timestamp": "2026-07-06T19:36:41.322Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366826248",
+    "timestamp": "2026-07-06T19:40:26.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783366826249",
+    "timestamp": "2026-07-06T19:40:26.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783367154721",
+    "timestamp": "2026-07-06T19:45:54.721Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783367154723",
+    "timestamp": "2026-07-06T19:45:54.723Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "PROMESSA_REJEITADA",
+    "module": "Erros do Sistema",
+    "details": "Rejeição de promessa: WebSocket closed without opened. | Stack: Error: WebSocket closed without opened. |     at WebSocket.<anonymous> (https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app/@vite/client:454:22)"
+  },
+  {
+    "id": "log-1783367311774",
+    "timestamp": "2026-07-06T19:48:31.774Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=SYCUx3_V_J-u0XQpz5U9f_5px9fUwRBav6RUsIsNfbUCMcABn0GByQ&VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=rpc&SID=h3_bROha4eH9q3abVCa7PA&AID=162&CI=0&TYPE=xmlhttp&zx=h5sn41bszrog&t=1. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311776",
+    "timestamp": "2026-07-06T19:48:31.776Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=SYCUx3_V_J-u0XQpz5U9f_5px9fUwRBav6RUsIsNfbUCMcABn0GByQ&VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=rpc&SID=h3_bROha4eH9q3abVCa7PA&AID=162&CI=0&TYPE=xmlhttp&zx=h5sn41bszrog&t=1. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311860",
+    "timestamp": "2026-07-06T19:48:31.860Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311860",
+    "timestamp": "2026-07-06T19:48:31.860Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311860",
+    "timestamp": "2026-07-06T19:48:31.860Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367311965",
+    "timestamp": "2026-07-06T19:48:31.965Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311965",
+    "timestamp": "2026-07-06T19:48:31.965Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311966",
+    "timestamp": "2026-07-06T19:48:31.966Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367311966",
+    "timestamp": "2026-07-06T19:48:31.966Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311966",
+    "timestamp": "2026-07-06T19:48:31.966Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311966",
+    "timestamp": "2026-07-06T19:48:31.966Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367311967",
+    "timestamp": "2026-07-06T19:48:31.967Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311967",
+    "timestamp": "2026-07-06T19:48:31.967Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311967",
+    "timestamp": "2026-07-06T19:48:31.967Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367311967",
+    "timestamp": "2026-07-06T19:48:31.967Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=SYCUx3_V_J-u0XQpz5U9f_5px9fUwRBav6RUsIsNfbUCMcABn0GByQ&VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=rpc&SID=h3_bROha4eH9q3abVCa7PA&AID=162&CI=0&TYPE=xmlhttp&zx=k8ibe0ruxxa9&t=2. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367311967",
+    "timestamp": "2026-07-06T19:48:31.967Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar https://firestore.googleapis.com/google.firestore.v1.Firestore/Listen/channel?gsessionid=SYCUx3_V_J-u0XQpz5U9f_5px9fUwRBav6RUsIsNfbUCMcABn0GByQ&VER=8&database=projects%2Fgen-lang-client-0285564041%2Fdatabases%2Fostvendas-clean-db&RID=rpc&SID=h3_bROha4eH9q3abVCa7PA&AID=162&CI=0&TYPE=xmlhttp&zx=k8ibe0ruxxa9&t=2. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312029",
+    "timestamp": "2026-07-06T19:48:32.029Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312030",
+    "timestamp": "2026-07-06T19:48:32.030Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312031",
+    "timestamp": "2026-07-06T19:48:32.031Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312031",
+    "timestamp": "2026-07-06T19:48:32.031Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312031",
+    "timestamp": "2026-07-06T19:48:32.031Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312115",
+    "timestamp": "2026-07-06T19:48:32.115Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312116",
+    "timestamp": "2026-07-06T19:48:32.116Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312116",
+    "timestamp": "2026-07-06T19:48:32.116Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312116",
+    "timestamp": "2026-07-06T19:48:32.116Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312116",
+    "timestamp": "2026-07-06T19:48:32.116Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312116",
+    "timestamp": "2026-07-06T19:48:32.116Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312117",
+    "timestamp": "2026-07-06T19:48:32.117Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312118",
+    "timestamp": "2026-07-06T19:48:32.118Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312119",
+    "timestamp": "2026-07-06T19:48:32.119Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312120",
+    "timestamp": "2026-07-06T19:48:32.120Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312121",
+    "timestamp": "2026-07-06T19:48:32.121Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312122",
+    "timestamp": "2026-07-06T19:48:32.122Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312123",
+    "timestamp": "2026-07-06T19:48:32.123Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312124",
+    "timestamp": "2026-07-06T19:48:32.124Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312231",
+    "timestamp": "2026-07-06T19:48:32.231Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312231",
+    "timestamp": "2026-07-06T19:48:32.231Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312231",
+    "timestamp": "2026-07-06T19:48:32.231Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312232",
+    "timestamp": "2026-07-06T19:48:32.232Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312233",
+    "timestamp": "2026-07-06T19:48:32.233Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312234",
+    "timestamp": "2026-07-06T19:48:32.234Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312235",
+    "timestamp": "2026-07-06T19:48:32.235Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312236",
+    "timestamp": "2026-07-06T19:48:32.236Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312237",
+    "timestamp": "2026-07-06T19:48:32.237Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312238",
+    "timestamp": "2026-07-06T19:48:32.238Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312239",
+    "timestamp": "2026-07-06T19:48:32.239Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312240",
+    "timestamp": "2026-07-06T19:48:32.240Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312240",
+    "timestamp": "2026-07-06T19:48:32.240Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312240",
+    "timestamp": "2026-07-06T19:48:32.240Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312240",
+    "timestamp": "2026-07-06T19:48:32.240Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312240",
+    "timestamp": "2026-07-06T19:48:32.240Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312241",
+    "timestamp": "2026-07-06T19:48:32.241Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312242",
+    "timestamp": "2026-07-06T19:48:32.242Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312243",
+    "timestamp": "2026-07-06T19:48:32.243Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312244",
+    "timestamp": "2026-07-06T19:48:32.244Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312245",
+    "timestamp": "2026-07-06T19:48:32.245Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312246",
+    "timestamp": "2026-07-06T19:48:32.246Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312247",
+    "timestamp": "2026-07-06T19:48:32.247Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312248",
+    "timestamp": "2026-07-06T19:48:32.248Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312249",
+    "timestamp": "2026-07-06T19:48:32.249Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312250",
+    "timestamp": "2026-07-06T19:48:32.250Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312250",
+    "timestamp": "2026-07-06T19:48:32.250Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312250",
+    "timestamp": "2026-07-06T19:48:32.250Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312250",
+    "timestamp": "2026-07-06T19:48:32.250Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312250",
+    "timestamp": "2026-07-06T19:48:32.250Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312514",
+    "timestamp": "2026-07-06T19:48:32.514Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312515",
+    "timestamp": "2026-07-06T19:48:32.515Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312515",
+    "timestamp": "2026-07-06T19:48:32.515Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312516",
+    "timestamp": "2026-07-06T19:48:32.516Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312517",
+    "timestamp": "2026-07-06T19:48:32.517Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312518",
+    "timestamp": "2026-07-06T19:48:32.518Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312519",
+    "timestamp": "2026-07-06T19:48:32.519Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312519",
+    "timestamp": "2026-07-06T19:48:32.519Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312519",
+    "timestamp": "2026-07-06T19:48:32.519Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312519",
+    "timestamp": "2026-07-06T19:48:32.519Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312520",
+    "timestamp": "2026-07-06T19:48:32.520Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312521",
+    "timestamp": "2026-07-06T19:48:32.521Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312521",
+    "timestamp": "2026-07-06T19:48:32.521Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312521",
+    "timestamp": "2026-07-06T19:48:32.521Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312522",
+    "timestamp": "2026-07-06T19:48:32.522Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312523",
+    "timestamp": "2026-07-06T19:48:32.523Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312523",
+    "timestamp": "2026-07-06T19:48:32.523Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312523",
+    "timestamp": "2026-07-06T19:48:32.523Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312523",
+    "timestamp": "2026-07-06T19:48:32.523Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312524",
+    "timestamp": "2026-07-06T19:48:32.524Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312525",
+    "timestamp": "2026-07-06T19:48:32.525Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312526",
+    "timestamp": "2026-07-06T19:48:32.526Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312527",
+    "timestamp": "2026-07-06T19:48:32.527Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312528",
+    "timestamp": "2026-07-06T19:48:32.528Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312529",
+    "timestamp": "2026-07-06T19:48:32.529Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312530",
+    "timestamp": "2026-07-06T19:48:32.530Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312531",
+    "timestamp": "2026-07-06T19:48:32.531Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312531",
+    "timestamp": "2026-07-06T19:48:32.531Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312531",
+    "timestamp": "2026-07-06T19:48:32.531Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312532",
+    "timestamp": "2026-07-06T19:48:32.532Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312533",
+    "timestamp": "2026-07-06T19:48:32.533Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312533",
+    "timestamp": "2026-07-06T19:48:32.533Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312533",
+    "timestamp": "2026-07-06T19:48:32.533Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312534",
+    "timestamp": "2026-07-06T19:48:32.534Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312535",
+    "timestamp": "2026-07-06T19:48:32.535Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312535",
+    "timestamp": "2026-07-06T19:48:32.535Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312535",
+    "timestamp": "2026-07-06T19:48:32.535Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312536",
+    "timestamp": "2026-07-06T19:48:32.536Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312537",
+    "timestamp": "2026-07-06T19:48:32.537Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312537",
+    "timestamp": "2026-07-06T19:48:32.537Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312537",
+    "timestamp": "2026-07-06T19:48:32.537Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312538",
+    "timestamp": "2026-07-06T19:48:32.538Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312538",
+    "timestamp": "2026-07-06T19:48:32.538Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312538",
+    "timestamp": "2026-07-06T19:48:32.538Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312539",
+    "timestamp": "2026-07-06T19:48:32.539Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312540",
+    "timestamp": "2026-07-06T19:48:32.540Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312540",
+    "timestamp": "2026-07-06T19:48:32.540Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312540",
+    "timestamp": "2026-07-06T19:48:32.540Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312541",
+    "timestamp": "2026-07-06T19:48:32.541Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312542",
+    "timestamp": "2026-07-06T19:48:32.542Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312542",
+    "timestamp": "2026-07-06T19:48:32.542Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312542",
+    "timestamp": "2026-07-06T19:48:32.542Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312543",
+    "timestamp": "2026-07-06T19:48:32.543Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312544",
+    "timestamp": "2026-07-06T19:48:32.544Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312544",
+    "timestamp": "2026-07-06T19:48:32.544Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312544",
+    "timestamp": "2026-07-06T19:48:32.544Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  },
+  {
+    "id": "log-1783367312545",
+    "timestamp": "2026-07-06T19:48:32.545Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312545",
+    "timestamp": "2026-07-06T19:48:32.545Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "FALHA_REDE",
+    "module": "Erros do Sistema",
+    "details": "Falha de conexão com a rede ao acessar /api/db/save. Erro: Failed to fetch"
+  },
+  {
+    "id": "log-1783367312545",
+    "timestamp": "2026-07-06T19:48:32.545Z",
+    "user": "levi domingos",
+    "userRole": "CASHIER",
+    "action": "Falha de Sincronização",
+    "module": "Erros do Sistema",
+    "details": "Erro de conexão ao sincronizar tabela 'auditlogs': Failed to fetch. Guardado na fila de reenvio offline."
+  }
+]

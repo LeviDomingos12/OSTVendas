@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net catch-all deny rule
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Global hardened helper definitions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    // ---------------- PRODUCTS ----------------
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() 
+        && isValidId(productId)
+        && request.resource.data.keys().hasAll(['id', 'name', 'code', 'costPrice', 'salePrice', 'stock'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200
+        && request.resource.data.code is string && request.resource.data.code.size() <= 100
+        && request.resource.data.costPrice is number
+        && request.resource.data.salePrice is number
+        && request.resource.data.stock is number;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- CUSTOMERS ----------------
+    match /customers/{customerId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(customerId)
+        && request.resource.data.keys().hasAll(['id', 'name', 'phone'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200
+        && request.resource.data.phone is string && request.resource.data.phone.size() <= 64;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- EMPLOYEES ----------------
+    match /employees/{employeeId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(employeeId)
+        && request.resource.data.keys().hasAll(['id', 'name', 'role'])
+        && request.resource.data.name is string && request.resource.data.name.size() <= 200
+        && request.resource.data.role is string && request.resource.data.role.size() <= 150;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- CASHFLOW ----------------
+    match /cashflow/{cashflowId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(cashflowId)
+        && request.resource.data.keys().hasAll(['id', 'timestamp', 'type', 'amount', 'reason', 'responsibleUser'])
+        && request.resource.data.type is string
+        && request.resource.data.amount is number
+        && request.resource.data.reason is string && request.resource.data.reason.size() <= 500;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- AUDITLOGS ----------------
+    match /auditlogs/{auditlogId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(auditlogId)
+        && request.resource.data.keys().hasAll(['id', 'timestamp', 'user', 'action', 'module'])
+        && request.resource.data.user is string
+        && request.resource.data.action is string
+        && request.resource.data.module is string;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- TRANSACTIONS ----------------
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+        && isValidId(transactionId)
+        && request.resource.data.keys().hasAll(['id', 'invoiceNumber', 'timestamp', 'subtotal', 'grandTotal', 'paymentMethod', 'cashierName'])
+        && request.resource.data.invoiceNumber is string
+        && request.resource.data.subtotal is number
+        && request.resource.data.grandTotal is number
+        && request.resource.data.paymentMethod is string;
+      allow delete: if isSignedIn();
+    }
+    
+    // ---------------- SETTINGS ----------------
+    match /settings/{configDoc} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && configDoc == 'config';
+    }
+  }
+}

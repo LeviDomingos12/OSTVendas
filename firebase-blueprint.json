@@ -1,0 +1,197 @@
+{
+  "entities": {
+    "usuario": {
+      "title": "Usuario",
+      "description": "User profile and authorization details synchronized with Firebase Auth",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Unique Firebase Authentication User UID"
+        },
+        "nomeCompleto": {
+          "type": "string",
+          "description": "Display name of the user"
+        },
+        "email": {
+          "type": "string",
+          "description": "The registered email address"
+        },
+        "empresa": {
+          "type": "string",
+          "description": "The active branch or company associated"
+        },
+        "perfil": {
+          "type": "string",
+          "enum": ["Administrador", "Gerente", "Supervisor", "Caixa", "Estoquista", "Vendedor", "Financeiro"],
+          "description": "Assigned access role in ERP"
+        },
+        "cargo": {
+          "type": "string",
+          "description": "Job title or position description"
+        },
+        "estado": {
+          "type": "string",
+          "enum": ["Ativo", "Inativo"],
+          "description": "Account status (blocking inactive users)"
+        },
+        "fotoPerfil": {
+          "type": "string",
+          "description": "URL to profile photo"
+        },
+        "telefone": {
+          "type": "string",
+          "description": "User contact telephone number"
+        },
+        "ultimoLogin": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last login event"
+        },
+        "dataCriacao": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp of user account registration"
+        }
+      },
+      "required": ["uid", "nomeCompleto", "email", "empresa", "perfil", "estado", "dataCriacao"]
+    },
+    "empresa": {
+      "title": "Empresa",
+      "description": "Branch or firm definition in multi-branch scope",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Branch unique code identifier"
+        },
+        "nome": {
+          "type": "string",
+          "description": "Branch name"
+        },
+        "nuit": {
+          "type": "string",
+          "description": "Mozambican Tax Identification Number (NUIT)"
+        },
+        "endereco": {
+          "type": "string",
+          "description": "Physical address"
+        }
+      },
+      "required": ["id", "nome"]
+    },
+    "log": {
+      "title": "Log",
+      "description": "Comprehensive security and operations audit log entries",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique log entry ID"
+        },
+        "userId": {
+          "type": "string",
+          "description": "UID of the actor"
+        },
+        "userName": {
+          "type": "string",
+          "description": "Name of the actor"
+        },
+        "action": {
+          "type": "string",
+          "description": "Operation action name"
+        },
+        "module": {
+          "type": "string",
+          "description": "System module involved"
+        },
+        "details": {
+          "type": "string",
+          "description": "Extended contextual details of the action"
+        },
+        "device": {
+          "type": "string",
+          "description": "Detected device user agent details"
+        },
+        "ip": {
+          "type": "string",
+          "description": "Client IP address when available"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Action logged timestamp"
+        }
+      },
+      "required": ["id", "action", "module", "timestamp"]
+    },
+    "produto": {
+      "title": "Produto",
+      "description": "Product inventory item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "category": { "type": "string" },
+        "costPrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "vatRate": { "type": "number" },
+        "supplier": { "type": "string" },
+        "emoji": { "type": "string" },
+        "brand": { "type": "string" },
+        "barcode": { "type": "string" },
+        "isFavorite": { "type": "boolean" },
+        "weightBased": { "type": "boolean" },
+        "promotion": { "type": "string" },
+        "image": { "type": "string" }
+      },
+      "required": ["id", "name", "code", "category", "costPrice", "salePrice", "stock"]
+    },
+    "transacao": {
+      "title": "Transacao",
+      "description": "Sales receipt or checkout transaction document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNumber": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "subtotal": { "type": "number" },
+        "vatTotal": { "type": "number" },
+        "discountTotal": { "type": "number" },
+        "grandTotal": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "cashierName": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "nuit": { "type": "string" },
+        "paymentDetails": { "type": "string" }
+      },
+      "required": ["id", "invoiceNumber", "subtotal", "vatTotal", "discountTotal", "grandTotal", "paymentMethod", "cashierName"]
+    }
+  },
+  "firestore": {
+    "usuarios/{uid}": {
+      "schema": "usuario",
+      "description": "User account documents synchronized to Firebase Auth"
+    },
+    "empresas/{empresaId}": {
+      "schema": "empresa",
+      "description": "Multi-company and branch configurations"
+    },
+    "logs/{logId}": {
+      "schema": "log",
+      "description": "Consolidated security and operation audit logs"
+    },
+    "produtos/{produtoId}": {
+      "schema": "produto",
+      "description": "Active sales inventory items"
+    },
+    "transacoes/{transacaoId}": {
+      "schema": "transacao",
+      "description": "Sales invoices and receipts records"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ostvendas-clean-db",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ai-studio-ostvendas-e2d52f5d-b57f-430e-9d24-e415e95b0744",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ai-studio-e2d52f5d-b57f-430e-9d24-e415e95b0744",
+      "rules": "firestore.rules"
+    }
+  ]
+}
