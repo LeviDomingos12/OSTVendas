@@ -703,6 +703,36 @@ export default function CashRegisterModule({
   return (
     <div className="space-y-6">
       
+      {/* Indicador de Saldo Consolidado no Topo */}
+      <div className="bg-gradient-to-r from-orange-500/10 via-orange-500/5 to-transparent border border-orange-500/20 rounded-2xl p-4 md:p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Coins className="w-5 h-5 text-orange-500" />
+            <span className="text-xs font-black uppercase tracking-wider text-orange-600 dark:text-orange-400">
+              Saldo Atual Consolidado
+            </span>
+          </div>
+          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">
+            {currentRole === "ADMIN" ? (
+              <span>Fluxo Total Consolidado do Sistema <strong className="text-orange-600 dark:text-orange-400">(Acesso de Admin)</strong></span>
+            ) : (
+              <span>Movimentos Filtrados do Usuário: <strong className="text-orange-600 dark:text-orange-400">{activeUsername}</strong></span>
+            )}
+          </h3>
+          <p className="text-[11px] text-slate-400">
+            Calculado com base no saldo de abertura (5.000,00 {currency}) + entradas (vendas em dinheiro, reforços) - saídas e quebras no período filtrado.
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 block mb-1">
+            Saldo Disponível em Caixa
+          </span>
+          <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tight">
+            {cashCalculation.theoreticalTotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-lg font-bold text-orange-500">{currency}</span>
+          </span>
+        </div>
+      </div>
+
       {/* Header with quick status state indicator */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3.5 border-b border-slate-100 pb-4 dark:border-zinc-850">
         <div>

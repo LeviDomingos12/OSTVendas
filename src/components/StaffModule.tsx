@@ -21,6 +21,7 @@ import {
   Trash2,
   Edit3,
   Lock,
+  KeyRound,
   ChevronRight,
   ChevronDown,
   X,
@@ -37,6 +38,8 @@ import {
   FileSpreadsheet
 } from "lucide-react";
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
+import { sendEmail } from "../lib/gmail";
+import { getRecoveryRequests, resolveRecoveryRequest } from "../lib/firebase";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -176,6 +179,11 @@ export default function StaffModule({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<"RESUMO" | "PERMISSOES" | "ATENCION" | "FERIAS" | "SALARIO" | "HISTORICO">("RESUMO");
 
+  // Recovery Requests tracking
+  const [recoveryRequests, setRecoveryRequests] = useState<any[]>([]);
+  const [isLoadingRecovery, setIsLoadingRecovery] = useState(false);
+  const [pendingRecoveryId, setPendingRecoveryId] = useState<string | null>(null);
+
   // Form states for employee addition & modification
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
@@ -190,20 +198,56 @@ export default function StaffModule({
   const [sendEmailCredentials, setSendEmailCredentials] = useState(true);
   const [emailSendingStatus, setEmailSendingStatus] = useState<"IDLE" | "SENDING" | "SUCCESS" | "ERROR">("IDLE");
 
-  const generateSuggestedUsername = (fullName: string): string => {
-    const parts = fullName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return "";
-    if (parts.length === 1) return parts[0];
-    const firstInitial = parts[0][0];
-    const lastApelido = parts[parts.length - 1];
-    return `${firstInitial}${lastApelido}`;
+  const generateSuggestedUsername = (fullName: string, phoneContact: string = ""): string => {
+    const nameParts = fullName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, " ").split(/\s+/).filter(Boolean);
+    let letters = "";
+    if (nameParts.length === 0) {
+      letters = "user";
+    } else if (nameParts.length === 1) {
+      const namePart = nameParts[0];
+      letters = namePart.padEnd(4, "x").slice(0, 4);
+    } else {
+      const firstName = nameParts[0];
+      const lastName = nameParts[nameParts.length - 1];
+      
+      let firstPart = firstName.slice(0, 2);
+      let lastPart = lastName.slice(0, 2);
+      
+      if (firstPart.length < 2) {
+        lastPart = lastName.slice(0, 4 - firstPart.length);
+      }
+      if (lastPart.length < 2) {
+        firstPart = firstName.slice(0, 4 - lastPart.length);
+      }
+      
+      let combined = firstPart + lastPart;
+      if (combined.length < 4) {
+        for (let i = 1; i < nameParts.length - 1 && combined.length < 4; i++) {
+          combined += nameParts[i].slice(0, 4 - combined.length);
+        }
+      }
+      if (combined.length < 4) {
+        combined = combined.padEnd(4, "x");
+      }
+      letters = combined.slice(0, 4);
+    }
+
+    const digits = phoneContact.replace(/\D/g, "");
+    let numbers = "";
+    if (digits.length < 3) {
+      numbers = digits.padEnd(3, "0").slice(0, 3);
+    } else {
+      numbers = digits.slice(-3);
+    }
+
+    return `${letters}${numbers}`;
   };
 
   React.useEffect(() => {
     if (isFormOpen && !selectedEmp) {
-      setUsername(generateSuggestedUsername(name));
+      setUsername(generateSuggestedUsername(name, contact));
     }
-  }, [name, isFormOpen, selectedEmp]);
+  }, [name, contact, isFormOpen, selectedEmp]);
 
   const openAddForm = () => {
     setName("");
@@ -216,6 +260,24 @@ export default function StaffModule({
     setEmail("");
     setIsFormOpen(true);
   };
+
+  const loadRecoveryRequests = async () => {
+    setIsLoadingRecovery(true);
+    try {
+      const data = await getRecoveryRequests();
+      setRecoveryRequests(data);
+    } catch (err) {
+      console.error("Failed to fetch recovery requests:", err);
+    } finally {
+      setIsLoadingRecovery(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadRecoveryRequests();
+    const interval = setInterval(loadRecoveryRequests, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Quick state details for Permissions modal
   const [empPermissions, setEmpPermissions] = useState<string[]>(["POS", "STOCK"]);
@@ -611,7 +673,7 @@ export default function StaffModule({
       return;
     }
     
-    const finalUsername = username.trim() || generateSuggestedUsername(name);
+    const finalUsername = username.trim() || generateSuggestedUsername(name, contact);
     // Generates a random 8-character alphanumeric password as default temporary password
     const generateTempPass = () => {
       const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -669,7 +731,7 @@ export default function StaffModule({
     e.preventDefault();
     if (!selectedEmp || !name.trim() || !contact.trim()) return;
 
-    const finalUsername = username.trim() || generateSuggestedUsername(name);
+    const finalUsername = username.trim() || generateSuggestedUsername(name, contact);
     const isPinUpdated = pin.trim() !== "" && pin.trim() !== selectedEmp.pin;
 
     const updated = employees.map(emp => {
@@ -682,6 +744,7 @@ export default function StaffModule({
           salary,
           status: employeeStatus,
           pin: pin.trim() || emp.pin || "123456",
+          password: pin.trim() || emp.password || emp.pin || "123456",
           email: email.trim() || emp.email,
           username: finalUsername,
           pinCreatedAt: isPinUpdated ? new Date().toISOString() : (emp.pinCreatedAt || new Date().toISOString()),
@@ -692,6 +755,37 @@ export default function StaffModule({
     });
 
     onUpdateEmployees(updated);
+
+    if (isPinUpdated) {
+      const userEmail = email.trim() || selectedEmp.email;
+      if (userEmail) {
+        sendEmail({
+          to: userEmail,
+          subject: "Alteração de Senha / PIN de Acesso - OST Vendas",
+          body: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+              <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+                <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança</p>
+              </div>
+              <h2 style="color: #1e293b; font-size: 18px;">Olá, ${name}!</h2>
+              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que a sua palavra-passe (PIN) de acesso ao terminal foi alterada com sucesso pela Administração.</p>
+              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+                <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN de Acesso:</span>
+                <strong style="color: #ff6b00; font-size: 22px; letter-spacing: 2px; font-family: monospace;">${pin.trim()}</strong>
+              </div>
+              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, guarde este PIN em local seguro e não o partilhe com terceiros.</p>
+              <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração ou se julga tratar-se de um erro, contacte imediatamente o Administrador.</p>
+            </div>
+          `,
+          isHtml: true
+        }).then(() => {
+          console.log("Email de alteração de PIN enviado para:", userEmail);
+        }).catch((err) => {
+          console.error("Erro ao enviar email de alteração de PIN:", err);
+        });
+      }
+    }
     
     onAddAuditLog(
       "Editar Funcionário",
@@ -699,11 +793,92 @@ export default function StaffModule({
       `Perfil do funcionário '${name}' atualizado (Username: '${finalUsername}'). Estado: ${employeeStatus}, Cargo: ${role}, PIN atualizado/confirmado, Salário: ${salary.toLocaleString()} ${currency}.`
     );
 
+    if (pendingRecoveryId) {
+      resolveRecoveryRequest(pendingRecoveryId).then(() => {
+        loadRecoveryRequests();
+      }).catch(err => {
+        console.error("Error resolving recovery request:", err);
+      });
+      setPendingRecoveryId(null);
+    }
+
     setIsEditModalOpen(false);
     setSelectedEmp(null);
     setPin("");
     setEmail("");
     setUsername("");
+  };
+
+  // Reset credentials directly for an employee
+  const handleResetCredentialsDirectly = (emp: Employee) => {
+    if (currentRole !== "ADMIN" && currentRole !== "SUPERVISOR") {
+      alert("Apenas administradores ou supervisores podem resetar a senha de colaboradores.");
+      return;
+    }
+
+    const confirmReset = window.confirm(
+      `Tem a certeza de que deseja redefinir e resetar a senha e PIN de acesso de "${emp.name}"? Um novo PIN temporário de 6 dígitos será gerado automaticamente.`
+    );
+
+    if (!confirmReset) return;
+
+    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+
+    const updated = employees.map(e => {
+      if (e.id === emp.id) {
+        return {
+          ...e,
+          pin: generatedPin,
+          password: generatedPin,
+          pinCreatedAt: new Date().toISOString(),
+          pinChanged: false
+        };
+      }
+      return e;
+    });
+
+    onUpdateEmployees(updated);
+
+    onAddAuditLog(
+      "Reset de Credenciais",
+      "FUNCIONÁRIOS",
+      `Administrador resetou as credenciais (Senha e PIN) do colaborador '${emp.name}'. Nova credencial temporária gerada.`
+    );
+
+    const userEmail = emp.email?.trim();
+    if (userEmail) {
+      sendEmail({
+        to: userEmail,
+        subject: "Redefinição de Palavra-passe / PIN - OST Vendas",
+        body: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+            <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+              <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+              <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança</p>
+            </div>
+            <h2 style="color: #1e293b; font-size: 18px;">Olá, ${emp.name}!</h2>
+            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que a sua palavra-passe e PIN de acesso do sistema foram redefinidos pela Administração.</p>
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+              <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Nova Credencial Temporária:</span>
+              <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
+            </div>
+            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize esta credencial temporária para aceder ao sistema e redefinir a sua senha para uma segura no seu primeiro acesso.</p>
+            <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, por favor contacte imediatamente o Administrador.</p>
+          </div>
+        `,
+        isHtml: true
+      }).then(() => {
+        console.log("Email de redefinição de credenciais enviado para:", userEmail);
+      }).catch(err => {
+        console.error("Erro ao enviar email de redefinição:", err);
+      });
+    }
+
+    alert(
+      `A senha/PIN de "${emp.name}" foi redefinida com sucesso!\n\n` +
+      `Nova Credencial Temporária: ${generatedPin}\n\n` +
+      `Se o colaborador tiver um e-mail cadastrado, ele receberá uma cópia destas instruções.`
+    );
   };
 
   // Save changes to permissions
@@ -912,6 +1087,34 @@ export default function StaffModule({
     setIsEditModalOpen(true);
   };
 
+  const handleResetPasswordFromRequest = (req: any) => {
+    const emp = employees.find(e => 
+      e.id === req.employeeId || 
+      (req.email && e.email?.toLowerCase() === req.email.toLowerCase()) ||
+      e.name.toLowerCase() === req.employeeName.toLowerCase()
+    );
+
+    if (!emp) {
+      alert(`Colaborador "${req.employeeName}" não foi encontrado no Quadro de Funcionários.`);
+      return;
+    }
+
+    setSelectedEmp(emp);
+    setName(emp.name);
+    setRole(emp.role);
+    setContact(emp.contact);
+    setSalary(emp.salary);
+    setEmployeeStatus(emp.status as any || "ACTIVE");
+    
+    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+    setPin(generatedPin);
+    
+    setEmail(emp.email || "");
+    setUsername(emp.username || "");
+    setPendingRecoveryId(req.id);
+    setIsEditModalOpen(true);
+  };
+
   const openPermissionsModal = (emp: Employee, event: React.MouseEvent) => {
     event.stopPropagation();
     setSelectedEmp(emp);
@@ -1074,6 +1277,67 @@ export default function StaffModule({
       {/* TAB 1: EMPLOYEES QUADRO */}
       {activeTab === "STAFF" && (
         <div className="space-y-6">
+
+          {/* NOTIFICAÇÕES DE RECUPERAÇÃO DE SENHA */}
+          {recoveryRequests.filter(req => req.status === "PENDENTE").length > 0 && (
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4.5 space-y-3.5 shadow-sm animate-in fade-in slide-in-from-top-4 duration-300">
+              <div className="flex items-center justify-between border-b border-amber-100 pb-2">
+                <p className="font-extrabold text-slate-800 text-xs flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                  </span>
+                  Solicitações de Recuperação de Senha / PIN Pendentes ({recoveryRequests.filter(req => req.status === "PENDENTE").length})
+                </p>
+                <span className="text-[10px] bg-amber-100 text-amber-800 py-0.5 px-2 rounded-full font-bold uppercase tracking-wide">Ação Necessária</span>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {recoveryRequests.filter(req => req.status === "PENDENTE").map((req) => (
+                  <div key={req.id} className="bg-white p-3 rounded-xl border border-amber-200/60 shadow-sm flex flex-col justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-start gap-2">
+                        <strong className="text-slate-900 font-bold text-xs">{req.employeeName}</strong>
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-md uppercase ${
+                          req.type === "PIN" ? "bg-orange-50 text-orange-600 border border-orange-100" : "bg-blue-50 text-blue-600 border border-blue-100"
+                        }`}>
+                          {req.type === "PIN" ? "PIN do Terminal" : "Senha de Login"}
+                        </span>
+                      </div>
+                      {req.email && <p className="text-[10px] text-slate-500 font-medium font-mono">{req.email}</p>}
+                      <p className="text-[9px] text-slate-400 font-medium">Solicitado em: {new Date(req.timestamp).toLocaleString("pt-PT")}</p>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-slate-100">
+                      <button
+                        onClick={() => handleResetPasswordFromRequest(req)}
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-[10px] font-bold py-1.5 px-3.5 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition shadow-sm"
+                      >
+                        <Lock className="w-3.5 h-3.5 shrink-0" />
+                        Resetar Senha / PIN
+                      </button>
+                      
+                      <button
+                        onClick={async () => {
+                          if (confirm("Deseja marcar esta solicitação como resolvida sem alterar as credenciais?")) {
+                            try {
+                              await resolveRecoveryRequest(req.id);
+                              loadRecoveryRequests();
+                            } catch (err) {
+                              console.error("Erro ao resolver solicitação:", err);
+                            }
+                          }
+                        }}
+                        className="bg-slate-100 hover:bg-slate-200 text-slate-600 hover:text-slate-800 text-[10px] font-bold py-1.5 px-3 rounded-lg cursor-pointer transition"
+                      >
+                        Descartar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           {/* STATS BENTO GRIDS (ITEM 4) */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1307,6 +1571,15 @@ export default function StaffModule({
                       >
                         <Lock className="w-3.5 h-3.5" />
                       </button>
+                      {(currentRole === "ADMIN" || currentRole === "SUPERVISOR") && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleResetCredentialsDirectly(emp); }}
+                          className="p-1.5 rounded-lg hover:bg-amber-50 text-slate-500 hover:text-amber-600 transition transform hover:scale-115 cursor-pointer"
+                          title="Resetar Senha / PIN"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                       <button 
                         onClick={(e) => { e.stopPropagation(); openEmployeeDrawer(emp); }}
                         className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-orange-500 transition transform hover:scale-115 cursor-pointer"
@@ -1396,6 +1669,15 @@ export default function StaffModule({
                           title="Remover Colaborador"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {(currentRole === "ADMIN" || currentRole === "SUPERVISOR") && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleResetCredentialsDirectly(emp); }}
+                          className="p-1 rounded hover:bg-amber-50 text-slate-400 hover:text-amber-600 transition cursor-pointer font-bold"
+                          title="Resetar Senha / PIN"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
                         </button>
                       )}
                       <button 
@@ -1492,6 +1774,15 @@ export default function StaffModule({
                                 title="Remover Colaborador"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            {(currentRole === "ADMIN" || currentRole === "SUPERVISOR") && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleResetCredentialsDirectly(emp); }}
+                                className="p-1 hover:bg-slate-100 rounded text-slate-500 hover:text-amber-600 transition cursor-pointer"
+                                title="Resetar Senha / PIN"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
                               </button>
                             )}
                             <button 

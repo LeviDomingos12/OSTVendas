@@ -9,9 +9,37 @@ interface SendEmailParams {
 }
 
 export const sendEmail = async ({ to, subject, body, isHtml = true, attachments }: SendEmailParams) => {
+  try {
+    // 1. Try sending via server-side SMTP first (which uses settings/env configs)
+    const serverResponse = await fetch("/api/email/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        to,
+        subject,
+        body,
+      }),
+    });
+
+    if (serverResponse.ok) {
+      const data = await serverResponse.json();
+      return data;
+    } else {
+      console.warn("[SMTP FAILED] Falling back to client-side Gmail API if token is available.");
+    }
+  } catch (error) {
+    console.error("[SMTP ERROR] Failed to send via SMTP, trying Google API fallback:", error);
+  }
+
+  // 2. Fallback to client-side Google Gmail API if access token is available
   const accessToken = await getAccessToken();
   if (!accessToken) {
-    throw new Error("No access token available. Please sign in with Google first.");
+    throw new Error(
+      "Nenhuma configuração de SMTP ativa no servidor e não há nenhuma conta Google autenticada " +
+      "para envio via API do Gmail. Por favor, configure as credenciais SMTP nas Definições ou faça login com Google."
+    );
   }
 
   let emailContent = "";

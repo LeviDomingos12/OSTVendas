@@ -114,6 +114,7 @@ export interface Employee {
   username?: string;
   pinCreatedAt?: string;
   pinChanged?: boolean;
+  password?: string;
 }
 
 export interface SystemSettings {

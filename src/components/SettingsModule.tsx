@@ -143,6 +143,7 @@ export default function SettingsModule({
   const [isSmtpVerified, setIsSmtpVerified] = useState(settings.isSmtpVerified || false);
   const [testRecipient, setTestRecipient] = useState(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [isImportingEnv, setIsImportingEnv] = useState(false);
 
   // Expiry and Batches states
   const [inventoryStrategy, setInventoryStrategy] = useState<"FIFO" | "LIFO" | "NORMAL">(settings.inventoryStrategy || "FIFO");
@@ -1265,6 +1266,34 @@ export default function SettingsModule({
       });
     } finally {
       setIsTestingSmtp(false);
+    }
+  };
+
+  const handleImportFromEnv = async () => {
+    setIsImportingEnv(true);
+    try {
+      const response = await fetch("/api/email/smtp-env");
+      if (response.ok) {
+        const data = await response.json();
+        setSmtpHost(data.smtpHost || "");
+        setSmtpPort(data.smtpPort || 587);
+        setSmtpUser(data.smtpUser || "");
+        setSmtpPassword(data.smtpPassword || "");
+        setSmtpSecure(data.smtpSecure || false);
+        setIsSmtpVerified(false);
+        if (onShowToast) {
+          onShowToast("Configurações SMTP importadas do arquivo .env com sucesso! Clique em 'Salvar Servidor' para gravar.", "success", "Importação Conclúida");
+        }
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Não foi possível contactar o servidor para obter dados do .env.");
+      }
+    } catch (err: any) {
+      if (onShowToast) {
+        onShowToast(err.message || "Falha ao obter credenciais do .env.", "error", "Falha na Importação");
+      }
+    } finally {
+      setIsImportingEnv(false);
     }
   };
 
@@ -3624,6 +3653,17 @@ export default function SettingsModule({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={isImportingEnv || !canEdit}
+              onClick={handleImportFromEnv}
+              className="bg-orange-50 hover:bg-orange-100 text-orange-600 disabled:opacity-50 text-[10px] py-1 px-3 rounded-full font-bold transition flex items-center gap-1 cursor-pointer border border-orange-200"
+              title="Preencher os campos abaixo utilizando as definições de SMTP configuradas no ficheiro .env do servidor"
+            >
+              <Download className={`w-3 h-3 ${isImportingEnv ? "animate-spin" : ""}`} />
+              {isImportingEnv ? "A importar..." : "Preencher do .env"}
+            </button>
+
             {isSmtpVerified ? (
               <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px] flex items-center gap-1">
                 <CheckCircle className="w-3.5 h-3.5" />

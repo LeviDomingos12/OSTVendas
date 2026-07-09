@@ -295,10 +295,53 @@ export interface UsuarioDoc {
   pin?: string;
   pinCreatedAt?: string;
   pinChanged?: boolean;
+  password?: string;
+}
+
+// Custom Helper to get partitioned collection path for dynamic data isolation (Multi-tenant structure)
+export function getPartitionPath(collectionName: string, adminEmailOverride?: string): string {
+  let adminEmail: string | null = adminEmailOverride || null;
+
+  if (!adminEmail) {
+    // 1. Check current authenticated Google/Firebase Auth user
+    const firebaseUser = auth.currentUser;
+    if (firebaseUser) {
+      const cached = localStorage.getItem(`cached_profile_${firebaseUser.uid}`);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          adminEmail = parsed.adminEmail || parsed.email;
+        } catch (e) {}
+      }
+      if (!adminEmail) {
+        adminEmail = firebaseUser.email;
+      }
+    }
+  }
+
+  if (!adminEmail) {
+    // 2. Fallback to active logged-in user in ERP local/simulated session
+    const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+    if (storedSimulated) {
+      try {
+        const parsed = JSON.parse(storedSimulated);
+        adminEmail = parsed.adminEmail || parsed.email;
+      } catch (e) {}
+    }
+  }
+
+  // Clean the email to form a valid, sanitized Firestore path segment
+  const cleanEmail = (adminEmail || "default_tenant")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^a-z0-9@._-]/g, "");
+
+  return `admins/${cleanEmail}/${collectionName}`;
 }
 
 // Map Firestore doc to native Employee type
-export function mapUsuarioToEmployee(usuario: UsuarioDoc): any {
+export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string }): any {
   return {
     id: usuario.uid,
     name: usuario.nomeCompleto,
@@ -311,7 +354,9 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc): any {
     username: usuario.username || "",
     pin: usuario.pin || "",
     pinCreatedAt: usuario.pinCreatedAt || "",
-    pinChanged: usuario.pinChanged !== undefined ? usuario.pinChanged : true
+    pinChanged: usuario.pinChanged !== undefined ? usuario.pinChanged : true,
+    password: usuario.password || "",
+    adminEmail: usuario.adminEmail || usuario.email || "" // Map the partition key
   };
 }
 
@@ -345,7 +390,7 @@ export const signUpWithEmail = async (
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    const userProfile: UsuarioDoc = {
+    const userProfile: UsuarioDoc & { adminEmail?: string } = {
       uid: user.uid,
       nomeCompleto,
       email,
@@ -356,7 +401,8 @@ export const signUpWithEmail = async (
       fotoPerfil: "",
       telefone: "",
       ultimoLogin: new Date().toISOString(), // Use local ISO string to avoid serverTimestamp quota write errors if possible
-      dataCriacao: new Date().toISOString()
+      dataCriacao: new Date().toISOString(),
+      adminEmail: email // Set tenant's adminEmail to their own email
     };
 
     // Save profile to Firestore usuarios collection
@@ -373,7 +419,8 @@ export const signUpWithEmail = async (
     if (!isCircuitBroken()) {
       try {
         const logId = `log-register-${Date.now()}`;
-        await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
+        const logsCollPath = getPartitionPath("logs", email);
+        await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,
           userId: user.uid,
           userName: nomeCompleto,
@@ -701,11 +748,11 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
       throw new Error(`O e-mail do Google (${user.email}) não está cadastrado ou autorizado no sistema. Por favor, solicite o seu cadastro ao Administrador.`);
     }
 
-    let profile: UsuarioDoc;
+    let profile: UsuarioDoc & { adminEmail?: string };
     const userDocRef = doc(db, "usuarios", user.uid);
 
     if (existingProfileInFirestore) {
-      const currentProfile = existingProfileInFirestore as UsuarioDoc;
+      const currentProfile = existingProfileInFirestore as UsuarioDoc & { adminEmail?: string };
       if (currentProfile.estado === "Inativo") {
         await auth.signOut();
         throw new Error("Utilizador desativado. Contacte o Administrador.");
@@ -726,6 +773,11 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
         profile.pinCreatedAt = profile.pinCreatedAt || matchedEmp.pinCreatedAt || "";
         profile.pinChanged = profile.pinChanged !== undefined ? profile.pinChanged : (matchedEmp.pinChanged !== undefined ? matchedEmp.pinChanged : true);
       }
+
+      // Resolve adminEmail
+      const roleLower = (profile.perfil || "").toLowerCase();
+      const isAdmin = roleLower.includes("admin") || roleLower.includes("gestor") || roleLower.includes("owner");
+      profile.adminEmail = isAdmin ? profile.email : (profile.adminEmail || matchedEmp?.adminEmail || profile.email);
 
       // Write updated document matching the Google UID
       if (!isCircuitBroken()) {
@@ -759,6 +811,11 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
         pinChanged: matchedEmp.pinChanged !== undefined ? matchedEmp.pinChanged : true
       };
 
+      // Resolve adminEmail
+      const roleLower = (profile.perfil || "").toLowerCase();
+      const isAdmin = roleLower.includes("admin") || roleLower.includes("gestor") || roleLower.includes("owner");
+      profile.adminEmail = isAdmin ? profile.email : (matchedEmp.adminEmail || profile.email);
+
       if (profile.estado === "Inativo") {
         await auth.signOut();
         throw new Error("Utilizador desativado. Contacte o Administrador.");
@@ -776,11 +833,15 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
       throw new Error("Erro de integridade de dados ao validar utilizador.");
     }
 
+    // Cache updated profile to localStorage so getPartitionPath has immediate offline/online access to it
+    localStorage.setItem(`cached_profile_${user.uid}`, JSON.stringify(profile));
+
     // Log login success
     if (!isCircuitBroken()) {
       try {
         const logId = `log-glogin-${Date.now()}`;
-        await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
+        const logsCollPath = getPartitionPath("logs", profile.adminEmail);
+        await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,
           userId: user.uid,
           userName: profile.nomeCompleto,
@@ -807,9 +868,9 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
 
 // Fetch all products from Firestore
 export const getProdutosFromFirestore = async (): Promise<any[]> => {
-  const path = "produtos";
+  const collPath = getPartitionPath("produtos");
   try {
-    const querySnapshot = await getDocs(collection(db, path));
+    const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -817,19 +878,20 @@ export const getProdutosFromFirestore = async (): Promise<any[]> => {
     });
     return list;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.GET, collPath);
     return [];
   }
 };
 
 // Add product to Firestore
 export const addProdutoToFirestore = async (product: any): Promise<void> => {
-  const path = `produtos/${product.id}`;
+  const collPath = getPartitionPath("produtos");
+  const path = `${collPath}/${product.id}`;
   if (isCircuitBroken()) {
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await setDoc(doc(db, "produtos", product.id), sanitizeForFirestore(product));
+    await setDoc(doc(db, collPath, product.id), sanitizeForFirestore(product));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -837,12 +899,13 @@ export const addProdutoToFirestore = async (product: any): Promise<void> => {
 
 // Update product in Firestore
 export const updateProdutoInFirestore = async (productId: string, updatedFields: any): Promise<void> => {
-  const path = `produtos/${productId}`;
+  const collPath = getPartitionPath("produtos");
+  const path = `${collPath}/${productId}`;
   if (isCircuitBroken()) {
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await updateDoc(doc(db, "produtos", productId), sanitizeForFirestore(updatedFields));
+    await updateDoc(doc(db, collPath, productId), sanitizeForFirestore(updatedFields));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -850,12 +913,13 @@ export const updateProdutoInFirestore = async (productId: string, updatedFields:
 
 // Delete product from Firestore
 export const deleteProdutoFromFirestore = async (productId: string): Promise<void> => {
-  const path = `produtos/${productId}`;
+  const collPath = getPartitionPath("produtos");
+  const path = `${collPath}/${productId}`;
   if (isCircuitBroken()) {
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await deleteDoc(doc(db, "produtos", productId));
+    await deleteDoc(doc(db, collPath, productId));
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -865,9 +929,9 @@ export const deleteProdutoFromFirestore = async (productId: string): Promise<voi
 
 // Fetch all transactions from Firestore
 export const getTransacoesFromFirestore = async (): Promise<any[]> => {
-  const path = "transacoes";
+  const collPath = getPartitionPath("transacoes");
   try {
-    const querySnapshot = await getDocs(collection(db, path));
+    const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -875,19 +939,20 @@ export const getTransacoesFromFirestore = async (): Promise<any[]> => {
     });
     return list;
   } catch (error) {
-    handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.GET, collPath);
     return [];
   }
 };
 
 // Add transaction to Firestore
 export const addTransacaoToFirestore = async (transaction: any): Promise<void> => {
-  const path = `transacoes/${transaction.id}`;
+  const collPath = getPartitionPath("transacoes");
+  const path = `${collPath}/${transaction.id}`;
   if (isCircuitBroken()) {
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await setDoc(doc(db, "transacoes", transaction.id), sanitizeForFirestore(transaction));
+    await setDoc(doc(db, collPath, transaction.id), sanitizeForFirestore(transaction));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -899,9 +964,9 @@ export const subscribeToProdutos = (
   onUpdate: (products: any[]) => void,
   onError: (error: any) => void
 ) => {
-  const path = "produtos";
+  const collPath = getPartitionPath("produtos");
   return onSnapshot(
-    collection(db, path),
+    collection(db, collPath),
     (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
@@ -911,7 +976,7 @@ export const subscribeToProdutos = (
     },
     (error) => {
       try {
-        handleFirestoreError(error, OperationType.GET, path);
+        handleFirestoreError(error, OperationType.GET, collPath);
       } catch (e: any) {
         onError(e);
       }
@@ -1152,9 +1217,9 @@ export const addAuditLogToCloudSQL = async (log: any): Promise<boolean> => {
  * Fetches security, login, and error logs from Firestore "logs" collection.
  */
 export const getLogsFromFirestore = async (): Promise<any[]> => {
-  const path = "logs";
+  const collPath = getPartitionPath("logs");
   try {
-    const querySnapshot = await getDocs(collection(db, path));
+    const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -1170,6 +1235,71 @@ export const getLogsFromFirestore = async (): Promise<any[]> => {
   } catch (error) {
     console.error("Failed to fetch logs from Firestore:", error);
     return [];
+  }
+};
+
+/**
+ * Creates a password/PIN recovery request in Firestore.
+ */
+export const createRecoveryRequest = async (request: { 
+  email?: string; 
+  employeeId?: string; 
+  employeeName: string; 
+  type: "SENHA" | "PIN";
+}): Promise<void> => {
+  try {
+    const requestId = `recov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    await setDoc(doc(db, "solicitacoes_recuperacao", requestId), sanitizeForFirestore({
+      id: requestId,
+      email: request.email || "",
+      employeeId: request.employeeId || "",
+      employeeName: request.employeeName,
+      type: request.type,
+      status: "PENDENTE",
+      timestamp: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.error("Failed to create recovery request:", error);
+    throw error;
+  }
+};
+
+/**
+ * Fetches all recovery requests from Firestore.
+ */
+export const getRecoveryRequests = async (): Promise<any[]> => {
+  try {
+    const querySnapshot = await getDocs(collection(db, "solicitacoes_recuperacao"));
+    const list: any[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      list.push({ ...data, id: docSnap.id });
+    });
+    // Sort by timestamp descending
+    list.sort((a, b) => {
+      const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return timeB - timeA;
+    });
+    return list;
+  } catch (error) {
+    console.error("Failed to fetch recovery requests from Firestore:", error);
+    return [];
+  }
+};
+
+/**
+ * Marks a recovery request as resolved.
+ */
+export const resolveRecoveryRequest = async (requestId: string): Promise<void> => {
+  try {
+    await updateDoc(doc(db, "solicitacoes_recuperacao", requestId), {
+      status: "RESOLVIDO",
+      resolvedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Failed to resolve recovery request:", error);
+    throw error;
   }
 };
 

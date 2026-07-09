@@ -15,7 +15,7 @@ import {
   LogOut,
   X
 } from "lucide-react";
-import { UserRole, UserProfile } from "../types";
+import { UserRole, UserProfile, Employee } from "../types";
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -28,6 +28,7 @@ interface SidebarProps {
   theme?: string;
   isOpen?: boolean;
   onClose?: () => void;
+  activeUser?: Employee | null;
 }
 
 export default function Sidebar({
@@ -40,7 +41,8 @@ export default function Sidebar({
   onLogout,
   theme,
   isOpen,
-  onClose
+  onClose,
+  activeUser
 }: SidebarProps) {
   
   const profiles: UserProfile[] = [
@@ -141,51 +143,21 @@ export default function Sidebar({
           <div className={`text-2xl w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
             isNight ? "bg-zinc-950 border-zinc-850" : "bg-white border-orange-200/40 shadow-sm"
           }`}>
-            {currentProfile.avatar}
+            {activeUser ? (
+              (activeUser.role || "").toUpperCase().includes("ADMIN") || (activeUser.role || "").toUpperCase().includes("GESTOR") ? "👨‍💼" : (activeUser.role || "").toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"
+            ) : currentProfile.avatar}
           </div>
           <div className="min-w-0">
             <h4 className={`text-xs font-black truncate leading-none ${
               isNight ? "text-slate-200" : "text-slate-800"
-            }`}>{currentProfile.name}</h4>
+            }`}>{activeUser ? activeUser.name : currentProfile.name}</h4>
             <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full mt-1.5 inline-block border transition-colors ${
               isNight 
                 ? "bg-zinc-950 text-slate-400 border-zinc-850" 
                 : "bg-orange-100 text-orange-700 border-orange-200/30"
             }`}>
-              {getRoleLabel(currentRole)}
+              {activeUser ? activeUser.role : getRoleLabel(currentRole)}
             </span>
-          </div>
-        </div>
-        
-        <div className={`mt-3 pt-2.5 border-t ${isNight ? "border-zinc-800" : "border-orange-100/30"}`}>
-          <label className={`text-[9px] uppercase tracking-wider font-extrabold block mb-1.5 ${
-            isNight ? "text-slate-500" : "text-orange-600/80"
-          }`}>
-            Alterar Perfil Comercial
-          </label>
-          <div className="relative">
-            <select 
-              value={currentRole}
-              onChange={(e) => {
-                const targetRole = e.target.value as UserRole;
-                onChangeRole(targetRole);
-                
-                // If current module gets restricted, reset module to POS
-                const selectedMenu = menuItems.find(m => m.id === activeModule);
-                if (selectedMenu && !selectedMenu.roles.includes(targetRole)) {
-                  onChangeModule("pos");
-                }
-              }}
-              className={`w-full text-xs rounded-xl py-1.5 px-2.5 outline-none font-bold cursor-pointer transition-colors ${
-                isNight 
-                  ? "bg-zinc-950 border-zinc-850 text-slate-300 focus:border-amber-500" 
-                  : "bg-white border-orange-200/50 text-slate-700 focus:border-orange-500 shadow-sm"
-              }`}
-            >
-              <option value="ADMIN">Administrador</option>
-              <option value="SUPERVISOR">Supervisor</option>
-              <option value="CASHIER">Vendedor / Caixa</option>
-            </select>
           </div>
         </div>
       </div>

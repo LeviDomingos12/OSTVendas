@@ -732,6 +732,250 @@ export default function ReportsModule({
     }, 1500);
   };
 
+  const handleExportSalesSummaryPDF = async () => {
+    setIsExporting(true);
+    setExportMessage("");
+    if (onShowToast) {
+      onShowToast("Preparando Sumário de Vendas Profissional...", "info", "Aguarde");
+    }
+
+    setTimeout(async () => {
+      try {
+        const { jsPDF } = await import("jspdf");
+        const { default: autoTable } = await import("jspdf-autotable");
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: "a4"
+        });
+
+        const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
+        const rgbArray = activeTheme.rgb.split(",").map(Number);
+
+        // A4: 210 x 297 mm
+        // 1. Top elegant color band
+        doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.rect(0, 0, 210, 10, "F");
+
+        // 2. Company Logo
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 14, 30, 30);
+        }
+
+        // 3. Corporate Info Header
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42); // slate-900
+        doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139); // slate-500
+        doc.text(`NUIT: ${settings.companyNuit || "400293112"} | Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 29);
+        doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"} | E-mail: ${settings.smtpUser || "suporte@ost.co.mz"}`, 14, 34);
+
+        // Header Divider Line
+        doc.setDrawColor(226, 232, 240); // slate-200
+        doc.setLineWidth(0.4);
+        doc.line(14, 39, 196, 39);
+
+        // 4. Document Title
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("SUMÁRIO EXECUTIVO DE VENDAS E DESEMPENHO", 14, 48);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Período de Apuração: ${new Date(startDate).toLocaleDateString("pt-MZ")} até ${new Date(endDate).toLocaleDateString("pt-MZ")}`, 14, 54);
+        doc.text(`Emitido em: ${new Date().toLocaleString("pt-MZ")} | Moeda Oficial: Meticais (MT)`, 14, 59);
+
+        // 5. Beautiful Metric Cards Row
+        // Card 1: Faturamento Bruto
+        doc.setFillColor(248, 250, 252); // slate-50
+        doc.rect(14, 65, 57, 20, "F");
+        doc.setDrawColor(226, 232, 240);
+        doc.rect(14, 65, 57, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("FATURAÇÃO BRUTA", 18, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.text(formatMZ(financialTotals.salesTotal), 18, 79);
+
+        // Card 2: Imposto IVA
+        doc.setFillColor(248, 250, 252);
+        doc.rect(76, 65, 57, 20, "F");
+        doc.rect(76, 65, 57, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("IVA RECOLHIDO (16%)", 80, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(formatMZ(financialTotals.vatTotal), 80, 79);
+
+        // Card 3: Volume & Ticket Médio
+        doc.setFillColor(248, 250, 252);
+        doc.rect(138, 65, 58, 20, "F");
+        doc.rect(138, 65, 58, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("TICKET MÉDIO", 142, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        const avgTicket = filteredTransactions.length ? Math.round(financialTotals.salesTotal / filteredTransactions.length) : 0;
+        doc.text(formatMZ(avgTicket), 142, 79);
+
+        // 6. Section: Payment Methods Distribution
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("DISTRIBUIÇÃO DE RECEITAS POR MÉTODO", 14, 94);
+
+        const paymentBreakdown: Record<string, { count: number; total: number }> = {};
+        filteredTransactions.forEach(t => {
+          const method = t.paymentMethod || "OUTRO";
+          if (!paymentBreakdown[method]) {
+            paymentBreakdown[method] = { count: 0, total: 0 };
+          }
+          paymentBreakdown[method].count += 1;
+          paymentBreakdown[method].total += t.grandTotal;
+        });
+
+        const totalTransactions = filteredTransactions.length || 1;
+        const totalRevenue = financialTotals.salesTotal || 1;
+
+        const paymentRows = Object.entries(paymentBreakdown).map(([method, data]) => [
+          method,
+          `${data.count} transações`,
+          `${((data.count / totalTransactions) * 100).toFixed(1)}%`,
+          formatMZ(data.total),
+          `${((data.total / totalRevenue) * 100).toFixed(1)}%`
+        ]);
+
+        autoTable(doc, {
+          startY: 98,
+          head: [["Método de Pagamento", "Volume de Vendas", "% Transações", "Faturamento Acumulado", "% Receita"]],
+          body: paymentRows.length > 0 ? paymentRows : [["Nenhum método registrado", "0", "0%", "0,00 MT", "0%"]],
+          theme: "striped",
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            3: { halign: "right", fontStyle: "bold" },
+            4: { halign: "right" }
+          }
+        });
+
+        let nextY = (doc as any).lastAutoTable.finalY + 10;
+
+        // 7. Section: Top Products Sold
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("PRODUTOS MAIS VENDIDOS NO PERÍODO", 14, nextY);
+
+        const productSales: Record<string, { qty: number; total: number }> = {};
+        filteredTransactions.forEach(t => {
+          if (t.items && Array.isArray(t.items)) {
+            t.items.forEach(item => {
+              const prodName = item.productName || "Produto Sem Nome";
+              if (!productSales[prodName]) {
+                productSales[prodName] = { qty: 0, total: 0 };
+              }
+              productSales[prodName].qty += item.quantity || 0;
+              productSales[prodName].total += item.subtotal || 0;
+            });
+          }
+        });
+
+        const topProducts = Object.entries(productSales)
+          .map(([name, data]) => ({ name, qty: data.qty, total: data.total }))
+          .sort((a, b) => b.total - a.total)
+          .slice(0, 5);
+
+        const productRows = topProducts.map((p, idx) => [
+          `0${idx + 1}`,
+          p.name,
+          `${p.qty} unidades`,
+          formatMZ(p.total)
+        ]);
+
+        autoTable(doc, {
+          startY: nextY + 4,
+          head: [["Posição", "Produto / Serviço", "Qtd Vendida", "Faturamento Gerado"]],
+          body: productRows.length > 0 ? productRows : [["-", "Nenhum produto registrado no período", "0", "0,00 MT"]],
+          theme: "striped",
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            0: { halign: "center", fontStyle: "bold", textColor: [100, 116, 139] },
+            3: { halign: "right", fontStyle: "bold" }
+          }
+        });
+
+        nextY = (doc as any).lastAutoTable.finalY + 10;
+
+        // 8. Signatures Section (draw at page bottom or next page if no space)
+        const drawDocSignatures = (targetDoc: typeof doc, startY: number) => {
+          targetDoc.setDrawColor(203, 213, 225);
+          targetDoc.line(20, startY + 12, 90, startY + 12);
+          targetDoc.line(120, startY + 12, 190, startY + 12);
+
+          targetDoc.setFont("helvetica", "bold");
+          targetDoc.setFontSize(8);
+          targetDoc.setTextColor(71, 85, 105);
+          targetDoc.text("Responsável de Vendas / Caixa", 28, startY + 16);
+          targetDoc.text("Administração / Direção Geral", 130, startY + 16);
+
+          targetDoc.setFont("helvetica", "normal");
+          targetDoc.setFontSize(7.5);
+          targetDoc.setTextColor(148, 163, 184);
+          targetDoc.text("Este sumário consolidado serve como documento gerencial de auditoria e desempenho de vendas.", 14, startY + 24);
+        };
+
+        if (nextY + 30 > 280) {
+          doc.addPage();
+          doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+          doc.rect(0, 0, 210, 10, "F");
+          drawDocSignatures(doc, 20);
+        } else {
+          drawDocSignatures(doc, nextY);
+        }
+
+        // Save PDF file
+        doc.save(`Sumario_Vendas_Profissional_${startDate}_a_${endDate}.pdf`);
+
+        setExportMessage(`Sumário Profissional de Vendas (A4 PDF) gerado com sucesso!`);
+        onAddAuditLog(
+          "Exportar Sumário de Vendas PDF",
+          "RELATÓRIOS",
+          `Gestor exportou sumário profissional de faturamento de ${startDate} até ${endDate}.`
+        );
+
+        if (onShowToast) {
+          onShowToast("Sumário de Vendas Profissional gerado com sucesso!", "success", "PDF Exportado");
+        }
+      } catch (err: any) {
+        console.error("Erro ao gerar PDF de sumário de vendas:", err);
+        setExportMessage(`Erro ao compilar PDF de vendas: ${err.message || err}`);
+        if (onShowToast) {
+          onShowToast("Falha ao gerar sumário de vendas PDF.", "error", "Erro de Exportação");
+        }
+      } finally {
+        setIsExporting(false);
+      }
+    }, 1200);
+  };
+
   const handleExportIvaPdf = async () => {
     setIsExporting(true);
     setExportMessage("");
@@ -1115,6 +1359,18 @@ export default function ReportsModule({
             >
               <Download className="w-4 h-4 shrink-0" />
               {isExporting ? "Gerando Ficheiro e compilando bases de dados..." : `Gerar e Descarregar Relatório em ${exportFormat}`}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportSalesSummaryPDF}
+              disabled={isExporting}
+              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
+                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
+              }`}
+            >
+              <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
+              Exportar Sumário de Vendas do Período (PDF)
             </button>
 
             <button

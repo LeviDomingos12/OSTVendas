@@ -21,13 +21,15 @@ import {
   ArrowLeft,
   Chrome
 } from "lucide-react";
-import { Employee } from "../types";
+import { Employee, SystemSettings } from "../types";
 import { 
   signUpWithEmail, 
   signInWithEmail, 
   recoverPassword, 
-  googleSignInAndSync 
+  googleSignInAndSync,
+  createRecoveryRequest
 } from "../lib/firebase";
+import { sendEmail } from "../lib/gmail";
 
 interface LoginModuleProps {
   employees: Employee[];
@@ -36,6 +38,8 @@ interface LoginModuleProps {
   branches?: any[];
   onLoginSuccess: (user: Employee, company: string) => void;
   onShowToast: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
+  onAddAuditLog?: (action: string, module: string, details: string) => void;
+  settings?: SystemSettings;
 }
 
 export default function LoginModule({
@@ -44,7 +48,9 @@ export default function LoginModule({
   logoUrl,
   branches: passedBranches,
   onLoginSuccess,
-  onShowToast
+  onShowToast,
+  onAddAuditLog,
+  settings
 }: LoginModuleProps) {
   // Views: "LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE"
   const [view, setView] = useState<"LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE">("LOGIN");
@@ -282,19 +288,108 @@ export default function LoginModule({
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!recoveryEmail.trim()) {
+    const emailVal = recoveryEmail.trim();
+    if (!emailVal) {
       setErrorMessage("Por favor, introduza o e-mail cadastrado.");
       return;
     }
 
     try {
-      await recoverPassword(recoveryEmail.trim());
-      setSuccessMessage("Link de recuperação enviado! Verifique a sua caixa de entrada.");
-      onShowToast("E-mail de recuperação enviado com sucesso.", "success");
+      // Find matching employee to report name to admin
+      const matchedEmp = employees.find(emp => emp.email?.toLowerCase() === emailVal.toLowerCase());
+      const empName = matchedEmp ? matchedEmp.name : "Utilizador Externo";
+      const empId = matchedEmp ? matchedEmp.id : "";
+
+      // 1. Send the standard Firebase password reset email
+      await recoverPassword(emailVal);
+
+      // 2. Notify the Admin in the Firestore DB
+      await createRecoveryRequest({
+        email: emailVal,
+        employeeId: empId,
+        employeeName: empName,
+        type: "SENHA"
+      });
+
+      // 3. Register Audit Log
+      if (onAddAuditLog) {
+        onAddAuditLog(
+          "Solicitação de Recuperação",
+          "SEGURANÇA",
+          `Colaborador '${empName}' (${emailVal}) solicitou recuperação de senha. Pedido registrado no sistema.`
+        );
+      }
+
+      // 4. Send automated notification of recovery request via SMTP to employee
+      try {
+        await sendEmail({
+          to: emailVal,
+          subject: "Solicitação de Recuperação de Senha - OST Vendas",
+          body: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+              <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+                <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Recuperação de Conta</p>
+              </div>
+              <h2 style="color: #1e293b; font-size: 18px;">Olá, ${empName}!</h2>
+              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Recebemos uma solicitação de redefinição de senha para a sua conta vinculada a este endereço de e-mail no sistema <strong>OST Vendas</strong>.</p>
+              <p style="color: #475569; font-size: 14px; line-height: 1.5;">O Administrador do sistema foi notificado do seu pedido para redefinir as credenciais. Por favor, verifique a sua caixa de correio eletrónico pelas instruções adicionais de redefinição de senha ou consulte o seu Gestor de Equipa.</p>
+              <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se você não efetuou este pedido, por favor ignore esta mensagem de segurança.</p>
+            </div>
+          `,
+          isHtml: true
+        });
+      } catch (mailErr) {
+        console.warn("Erro ao despachar cópia por SMTP para utilizador:", mailErr);
+      }
+
+      // 5. Notify administrators via email
+      const adminEmails = [
+        ...new Set([
+          ...(settings?.reportRecipientEmail ? [settings.reportRecipientEmail] : []),
+          ...employees.filter(emp => emp.role === "ADMIN" && emp.email).map(emp => emp.email!)
+        ])
+      ];
+
+      for (const adminEmail of adminEmails) {
+        try {
+          await sendEmail({
+            to: adminEmail,
+            subject: `ALERTA DE SEGURANÇA: Pedido de Recuperação de Senha - ${empName}`,
+            body: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 15px; margin-bottom: 20px;">
+                  <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                  <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Alerta de Segurança - Recuperação de Senha</p>
+                </div>
+                <h2 style="color: #1e293b; font-size: 18px;">Olá, Administrador!</h2>
+                <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que o colaborador <strong>${empName}</strong> (${emailVal}) solicitou uma redefinição de palavra-passe.</p>
+                <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                  <p style="margin: 0; font-size: 14px; color: #991b1b;"><strong>Detalhes da Solicitação:</strong></p>
+                  <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: #7f1d1d;">
+                    <li><strong>Colaborador:</strong> ${empName}</li>
+                    <li><strong>E-mail:</strong> ${emailVal}</li>
+                    <li><strong>Tipo:</strong> Senha de Acesso</li>
+                    <li><strong>Data/Hora:</strong> ${new Date().toLocaleString()}</li>
+                  </ul>
+                </div>
+                <p style="color: #475569; font-size: 14px; line-height: 1.5;">Pode redefinir as credenciais diretamente no painel de gestão de equipa em <strong>Funcionários &gt; Solicitações Pendentes</strong> clicando no botão de Reset.</p>
+                <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Este é um e-mail automático gerado pelo sistema de vendas OST Vendas.</p>
+              </div>
+            `,
+            isHtml: true
+          });
+        } catch (adminMailErr) {
+          console.warn("Erro ao enviar email para administrador:", adminEmail, adminMailErr);
+        }
+      }
+
+      setSuccessMessage("Link de recuperação enviado! O administrador também foi notificado sobre o seu pedido.");
+      onShowToast("Pedido de recuperação e e-mail enviados com sucesso.", "success");
       setRecoveryEmail("");
     } catch (err: any) {
       setErrorMessage(`❌ Erro na recuperação: ${err.message}`);
-      onShowToast("Erro ao solicitar link.", "error");
+      onShowToast("Erro ao solicitar recuperação.", "error");
     }
   };
 
@@ -599,7 +694,7 @@ export default function LoginModule({
               {view === "LOGIN" && (
                 <>
                   <h2 className="text-3xl font-black text-white tracking-tight leading-none">Sistema de Gestão</h2>
-                  <p className="text-xs text-slate-400">Entre com e-mail e senha ou use uma opção de acesso rápido.</p>
+                  <p className="text-xs text-slate-400">Entre com seu e-mail e senha cadastrados para acessar.</p>
                 </>
               )}
               {view === "SIGNUP" && (
@@ -615,39 +710,6 @@ export default function LoginModule({
                 </>
               )}
             </div>
-
-            {/* Quick Login Method Tabs (Only shown in standard/PIN/QR view) */}
-            {(view === "LOGIN" || view === "PIN" || view === "QRCODE") && (
-              <div className="grid grid-cols-3 bg-slate-900 p-1 rounded-xl border border-slate-800 text-center text-xs font-bold text-slate-400">
-                <button
-                  type="button"
-                  onClick={() => { setView("LOGIN"); setErrorMessage(null); }}
-                  className={`py-2 rounded-lg cursor-pointer transition ${
-                    view === "LOGIN" ? "bg-[#FF6B00] text-white" : "hover:text-slate-200"
-                  }`}
-                >
-                  Geral
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setView("PIN"); setErrorMessage(null); }}
-                  className={`py-2 rounded-lg cursor-pointer transition ${
-                    view === "PIN" ? "bg-[#FF6B00] text-white" : "hover:text-slate-200"
-                  }`}
-                >
-                  Acesso de Operador
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setView("QRCODE"); setErrorMessage(null); }}
-                  className={`py-2 rounded-lg cursor-pointer transition ${
-                    view === "QRCODE" ? "bg-[#FF6B00] text-white" : "hover:text-slate-200"
-                  }`}
-                >
-                  QR Code
-                </button>
-              </div>
-            )}
 
             {/* Feedback Notifications */}
             {errorMessage && (
@@ -1050,6 +1112,61 @@ export default function LoginModule({
                           {showOperatorPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
                       </div>
+                    </div>
+
+                    <div className="flex justify-end pr-1 -mt-1.5">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const currentEmp = employees.find(emp => emp.id === selectedEmployeeId);
+                          if (!currentEmp) {
+                            onShowToast("Por favor, selecione um operador válido.", "warning");
+                            return;
+                          }
+                          try {
+                            await createRecoveryRequest({
+                              email: currentEmp.email || "",
+                              employeeId: currentEmp.id,
+                              employeeName: currentEmp.name,
+                              type: "PIN"
+                            });
+
+                            // Send automated email notification to employee via SMTP
+                            const empEmail = currentEmp.email?.trim();
+                            if (empEmail) {
+                              try {
+                                await sendEmail({
+                                  to: empEmail,
+                                  subject: "Solicitação de Redefinição de PIN - OST Vendas",
+                                  body: `
+                                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                                      <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+                                        <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                                        <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Solicitação de PIN</p>
+                                      </div>
+                                      <h2 style="color: #1e293b; font-size: 18px;">Olá, ${currentEmp.name}!</h2>
+                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">Confirmamos que recebemos a sua solicitação para redefinir o seu PIN de acesso do terminal no sistema <strong>OST Vendas</strong>.</p>
+                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">O Administrador do sistema foi notificado do seu pedido para redefinir o PIN de acesso. Assim que o administrador aprovar o seu pedido, você receberá um e-mail automático com o seu novo PIN temporário.</p>
+                                      <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se você não efetuou este pedido, por favor ignore esta mensagem de segurança.</p>
+                                    </div>
+                                  `,
+                                  isHtml: true
+                                });
+                              } catch (mailErr) {
+                                console.warn("Erro ao despachar cópia por SMTP para utilizador:", mailErr);
+                              }
+                            }
+
+                            onShowToast(`Solicitação enviada ao administrador para ${currentEmp.name}!`, "success");
+                            setSuccessMessage(`Pedido de redefinição de PIN para ${currentEmp.name} enviado ao Administrador.`);
+                          } catch (err: any) {
+                            onShowToast("Erro ao solicitar recuperação de PIN.", "error");
+                          }
+                        }}
+                        className="text-[10.5px] text-orange-400 hover:text-orange-300 font-bold hover:underline cursor-pointer"
+                      >
+                        Esqueceu o PIN de operador? Solicitar redefinição ao Admin
+                      </button>
                     </div>
 
                     <button

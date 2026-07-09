@@ -298,7 +298,7 @@ export default function App() {
               await Promise.all(promises);
               success = true;
             } catch (fsErr) {
-              console.error("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
+              console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
             }
           } else if (tableName === "transactions") {
             try {
@@ -306,15 +306,19 @@ export default function App() {
               await Promise.all(promises);
               success = true;
             } catch (fsErr) {
-              console.error("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
+              console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
             }
           } else {
-            const response = await fetch("/api/db/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ table: tableName, data })
-            });
-            success = response.ok;
+            try {
+              const response = await fetch("/api/db/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ table: tableName, data })
+              });
+              success = response.ok;
+            } catch (fetchErr) {
+              console.warn(`[SYNC QUEUE] Erro de rede ao ressincronizar tabela ${tableName}:`, fetchErr);
+            }
           }
           
           if (success) {
@@ -327,7 +331,7 @@ export default function App() {
         
         localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
       } catch (err) {
-        console.error("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
+        console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
       }
     };
 
@@ -1683,6 +1687,33 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     return "ADMIN";
   }, [activeUser]);
 
+  // Filtra dados para que vendedores (CASHIER) e supervisores (SUPERVISOR) vejam apenas os seus registos, enquanto o ADMIN tem acesso total
+  const filteredTransactions = useMemo(() => {
+    if (!activeUser) return [];
+    if (simplifiedRole === "ADMIN") {
+      return transactions;
+    }
+    return transactions.filter(t => {
+      const cashierLower = (t.cashierName || "").toLowerCase().trim();
+      const activeNameLower = (activeUser.name || "").toLowerCase().trim();
+      const activeUsernameLower = (activeUser.username || "").toLowerCase().trim();
+      return cashierLower === activeNameLower || cashierLower === activeUsernameLower;
+    });
+  }, [transactions, activeUser, simplifiedRole]);
+
+  const filteredCashFlow = useMemo(() => {
+    if (!activeUser) return [];
+    if (simplifiedRole === "ADMIN") {
+      return cashFlow;
+    }
+    return cashFlow.filter(c => {
+      const respUserLower = (c.responsibleUser || "").toLowerCase().trim();
+      const activeNameLower = (activeUser.name || "").toLowerCase().trim();
+      const activeUsernameLower = (activeUser.username || "").toLowerCase().trim();
+      return respUserLower === activeNameLower || respUserLower === activeUsernameLower;
+    });
+  }, [cashFlow, activeUser, simplifiedRole]);
+
   const handleLoginSuccess = (user: Employee, branchName: string) => {
     // 1. Check blocked status
     if (user.status === "BLOCKED") {
@@ -1772,6 +1803,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         branches={settings.branches || []}
         onLoginSuccess={handleLoginSuccess}
         onShowToast={showToast}
+        onAddAuditLog={handleAddAuditLog}
+        settings={settings}
       />
     );
   }
@@ -1800,6 +1833,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           theme={theme}
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
+          activeUser={activeUser}
         />
       )}
 
@@ -1981,7 +2015,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 <POSModule
                   products={products}
                   customers={customers}
-                  transactions={transactions}
+                  transactions={filteredTransactions}
                   onCompleteSale={handleCompleteSaleAction}
                   activeUsername={activeUser.name}
                   settings={settings}
@@ -1996,10 +2030,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               {/* STATS ANALYTICS CONTROL PANEL */}
               {activeTab === "DASHBOARD" && (
                 <DashboardModule
-                  transactions={transactions}
+                  transactions={filteredTransactions}
                   products={products}
                   customers={customers}
-                  cashFlow={cashFlow}
+                  cashFlow={filteredCashFlow}
                   currency={currency}
                   onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
                   settings={settings}
@@ -2014,8 +2048,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               {/* DAILY BOOK BALANCE CASH OPERATIONS */}
               {activeTab === "CASH" && (
                 <CashRegisterModule
-                  cashFlow={cashFlow}
-                  transactions={transactions}
+                  cashFlow={filteredCashFlow}
+                  transactions={filteredTransactions}
                   onAddCashFlowEntry={handleAddCashFlowEntry}
                   activeUsername={activeUser.name}
                   currentRole={simplifiedRole}
@@ -2029,7 +2063,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               {activeTab === "STOCK" && (
                 <StockModule
                   products={products}
-                  transactions={transactions}
+                  transactions={filteredTransactions}
                   onAddProduct={handleAddProduct}
                   onUpdateProduct={handleUpdateProduct}
                   onDeleteProduct={handleDeleteProduct}
@@ -2083,7 +2117,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               {activeTab === "AI" && (
                 <AiForecastModule
                   products={products}
-                  transactions={transactions}
+                  transactions={filteredTransactions}
                   settings={settings}
                   theme={theme}
                   currency={currency}
@@ -2095,7 +2129,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
               {activeTab === "REPORTS" && (
                 <ReportsModule
-                  transactions={transactions}
+                  transactions={filteredTransactions}
                   settings={settings}
                   onUpdateSettings={handleUpdateSettings}
                   onAddAuditLog={handleAddAuditLog}

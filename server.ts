@@ -485,6 +485,43 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
+  // GET: Retrieve SMTP settings from .env
+  app.get("/api/email/smtp-env", (req, res) => {
+    try {
+      res.json({
+        smtpHost: process.env.SMTP_HOST || "",
+        smtpPort: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
+        smtpUser: process.env.SMTP_USER || "",
+        smtpPassword: process.env.SMTP_PASS || process.env.SMTP_PASSWORD || "",
+        smtpSecure: process.env.SMTP_SECURE === "true"
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST: Send general email via Custom SMTP or .env fallback
+  app.post("/api/email/send", async (req, res) => {
+    try {
+      const { to, subject, body } = req.body;
+      if (!to || !subject || !body) {
+        return res.status(400).json({ error: "Parâmetros to, subject e body são obrigatórios." });
+      }
+
+      const result = await trySendEmail({
+        to,
+        subject,
+        body,
+        fallbackMessage: `E-mail enviado via SMTP (simulado se não configurado) para ${to}!`
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[API GENERAL EMAIL SEND ERROR]", error);
+      res.status(500).json({ error: error.message || "Falha ao enviar e-mail via SMTP." });
+    }
+  });
+
   // POST: Testing Custom SMTP connection and dispatch immediately
   app.post("/api/email/test-smtp", async (req, res) => {
     try {
