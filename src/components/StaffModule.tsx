@@ -1696,7 +1696,7 @@ export default function StaffModule({
           ) : (
             
             /* TABLE VIEW DESIGN */
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto max-h-[500px] overflow-y-auto shadow-sm custom-scrollbar">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider text-[9px] font-mono">
@@ -1857,7 +1857,7 @@ export default function StaffModule({
           </div>
 
           {/* TABLE DISPLAY */}
-          <div className="flex-1 overflow-x-auto text-[11.5px]">
+          <div className="flex-1 overflow-x-auto max-h-[500px] overflow-y-auto text-[11.5px] custom-scrollbar">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[9px] font-mono">
@@ -1975,7 +1975,7 @@ export default function StaffModule({
                                 </div>
                                 <div className="space-y-1">
                                   <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Sessão e IP</span>
-                                  <span className="font-mono text-slate-500 block">IP: 197.218.12.82 | Ses: erp-pos-3000</span>
+                                  <span className="font-mono text-slate-500 block">IP: {log.ip || "197.218.12.82 (Maputo, MZ)"} | Ses: erp-pos-3000</span>
                                 </div>
                               </div>
 
@@ -1998,7 +1998,7 @@ export default function StaffModule({
                                   )}
                                 </div>
                                 <div className="leading-relaxed">
-                                  <p>Browser User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36</p>
+                                  <p>Dispositivo / Navegador: {log.device || "Desktop (Chrome)"}</p>
                                   <p className="mt-1">Firestore Database ID: ai-studio-e2d52f5d-b57f-430e-9d24-e415e95b0744</p>
                                   <p className="mt-1 text-slate-400">Timestamp ISO: {log.timestamp}</p>
                                   <p className="mt-2 text-rose-400 font-bold">Traceback: {log.details}</p>
@@ -2169,7 +2169,7 @@ export default function StaffModule({
               <span className="text-[10px] font-bold text-slate-400 font-mono">EXCLUSIVO DO GESTOR</span>
             </div>
 
-            <div className="overflow-x-auto text-[11.5px]">
+            <div className="overflow-x-auto max-h-[400px] overflow-y-auto text-[11.5px] custom-scrollbar">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[9px] font-mono">

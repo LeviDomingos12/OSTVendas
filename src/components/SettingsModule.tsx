@@ -58,6 +58,9 @@ interface SettingsModuleProps {
   onExportLocalDB?: () => void;
   onImportLocalDB?: (jsonData: any) => Promise<boolean> | boolean;
   onTriggerLocalBackup?: (type: "manual" | "automatic") => Promise<boolean> | boolean;
+  systemVersion?: string;
+  employees?: Employee[];
+  onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
 }
 
 export default function SettingsModule({
@@ -72,7 +75,10 @@ export default function SettingsModule({
   onChangeColorTheme,
   onExportLocalDB,
   onImportLocalDB,
-  onTriggerLocalBackup
+  onTriggerLocalBackup,
+  systemVersion,
+  employees = [],
+  onResetEmployeePin
 }: SettingsModuleProps) {
   const canEdit = currentRole === "ADMIN";
   
@@ -411,8 +417,10 @@ export default function SettingsModule({
   const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
 
   // NEW Backup and Recovery tab states
-  const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp" | "filiais">("geral");
+  const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp" | "filiais" | "seguranca" | "smtp">("geral");
   const [localBackupsLog, setLocalBackupsLog] = useState<any[]>([]);
+  const [confirmResetEmployeeId, setConfirmResetEmployeeId] = useState<string | null>(null);
+  const [isResettingPin, setIsResettingPin] = useState(false);
 
   // Branch (Filial) Management States
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
@@ -1163,7 +1171,7 @@ export default function SettingsModule({
   const handleGmailLogin = async () => {
     setIsLoggingIn(true);
     try {
-      const result = await googleSignIn();
+      const result = await googleSignIn(true);
       if (result) {
         setGmailUser(result.user);
         setNeedsAuth(false);
@@ -1926,7 +1934,7 @@ export default function SettingsModule({
       const backupData = {
         app_name: "OST Vendas",
         export_date: new Date().toISOString(),
-        version: "3.2.0-Prod-Mozambique",
+        version: systemVersion || "3.2.0-Prod-Mozambique",
         db_signature: "SQL-LITE-OST-90A1",
         active_settings: {
           companyName,
@@ -2136,6 +2144,18 @@ export default function SettingsModule({
         </button>
         <button
           type="button"
+          onClick={() => setActiveSubTab("smtp")}
+          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+            activeSubTab === "smtp"
+              ? "border-orange-500 text-orange-600 font-extrabold"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Mail className="w-4 h-4 text-orange-500" />
+          Servidor SMTP & E-mail
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveSubTab("backup")}
           className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
             activeSubTab === "backup"
@@ -2182,6 +2202,20 @@ export default function SettingsModule({
           <Building className="w-4 h-4 text-orange-500" />
           Filiais Comerciais
         </button>
+        {canEdit && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("seguranca")}
+            className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+              activeSubTab === "seguranca"
+                ? "border-rose-500 text-rose-600 font-extrabold font-black bg-rose-50/20"
+                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+            }`}
+          >
+            <Shield className="w-4 h-4 text-rose-600 animate-pulse" />
+            Segurança de Acesso
+          </button>
+        )}
       </div>
 
       {activeSubTab === "geral" && (
@@ -2614,131 +2648,6 @@ export default function SettingsModule({
                 Salvar Definições Fiscais
               </button>
 
-            </form>
-          </div>
-
-          {/* System Notifications Card */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-orange-600">
-              <AlertTriangle className="w-4.5 h-4.5" />
-              <h3 className="font-bold text-slate-850 text-sm">Notificações do Sistema</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Configure as definições de e-mail de destino para alertas e relatórios automáticos de auditoria. O administrador receberá logs de eventos operacionais críticos externamente para garantir monitoria contínua do ERP.
-            </p>
-
-            <form onSubmit={handleSaveAlertsConfig} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase block">E-mail de Destino para Alertas de Eventos Críticos</label>
-                <input
-                  type="email"
-                  disabled={!canEdit}
-                  value={alertsRecipientEmail}
-                  onChange={(e) => setAlertsRecipientEmail(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs"
-                  placeholder="admin-alerts@empresa.co.mz"
-                />
-                <span className="text-[10px] text-slate-400 block mt-1">
-                  Este endereço receberá notificações automáticas em caso de eventos de segurança, falhas de sistema e acessos não autorizados.
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
-                  <input
-                    type="checkbox"
-                    disabled={!canEdit}
-                    checked={emailStockAlertsEnabled}
-                    onChange={(e) => {
-                      if (e.target.checked && smtpEnabled && !isSmtpVerified) {
-                        if (onShowToast) {
-                          onShowToast(
-                            "O servidor SMTP precisa ser verificado com sucesso ('Testar Conexão') no painel dedicado antes de poder ativar os alertas automáticos.",
-                            "warning",
-                            "SMTP Não Verificado"
-                          );
-                        }
-                        return;
-                      }
-                      setEmailStockAlertsEnabled(e.target.checked);
-                    }}
-                    className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                  />
-                  <span>Alertas de Estoque Baixo por E-mail</span>
-                </label>
-                <p className="text-[10.5px] text-slate-400 leading-normal">
-                  Quando ativo, envia avisos automáticos via e-mail para o destinatário acima sempre que o estoque de algum item atingir um nível crítico. Requer SMTP ou Gmail API configurado.
-                </p>
-              </div>
-
-              {/* Custom Email Template Editor for Stock Alerts */}
-              {emailStockAlertsEnabled && (
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-1.5 text-orange-600 font-bold text-xs uppercase tracking-wider border-b pb-1.5 border-slate-200">
-                    <Mail className="w-4 h-4 text-orange-500" />
-                    <span>Modelo de E-mail de Alerta</span>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Assunto do E-mail</label>
-                    <input
-                      type="text"
-                      disabled={!canEdit}
-                      value={stockAlertEmailSubject}
-                      onChange={(e) => setStockAlertEmailSubject(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
-                      placeholder="Ex: [ALERTA] Estoque Crítico de Produtos"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Corpo do E-mail (Texto Simples)</label>
-                    <textarea
-                      rows={6}
-                      disabled={!canEdit}
-                      value={stockAlertEmailBody}
-                      onChange={(e) => setStockAlertEmailBody(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-850 disabled:opacity-75 outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 leading-relaxed resize-y"
-                      placeholder="Escreva a mensagem do e-mail..."
-                    />
-                  </div>
-
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-150 space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Tags Dinâmicas Disponíveis:</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-slate-600">
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[LISTA_PRODUTOS]</code>
-                        <span>Lista de produtos baixos</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[NOME_EMPRESA]</code>
-                        <span>Nome do estabelecimento</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[DATA]</code>
-                        <span>Data e hora do envio</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[EMAIL_DESTINO]</code>
-                        <span>E-mail destinatário</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {canEdit ? (
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15"
-                >
-                  Salvar Definições de Notificações
-                </button>
-              ) : (
-                <div className="text-[11px] text-slate-400 text-center py-2 bg-slate-50 border border-slate-100 rounded-xl">
-                  Apenas administradores podem alterar as definições de alertas críticos.
-                </div>
-              )}
             </form>
           </div>
 
@@ -3640,8 +3549,154 @@ export default function SettingsModule({
         </div>
 
       </div>
+        </div>
+      )}
 
-      {/* EXCLUSIVE PANEL: Dedicated SMTP Server Configuration */}
+      {activeSubTab === "smtp" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header Card */}
+          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
+                <Mail className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Servidor SMTP & Alertas de E-mail</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure as credenciais do seu próprio servidor de e-mail para enviar faturas, alertas de estoque crítico e relatórios financeiros automatizados.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* System Notifications Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center gap-2 text-orange-600">
+              <AlertTriangle className="w-4.5 h-4.5" />
+              <h3 className="font-bold text-slate-850 text-sm">Notificações do Sistema & Alertas por E-mail</h3>
+            </div>
+            <p className="text-[11px] text-slate-400 leading-normal">
+              Configure as definições de e-mail de destino para alertas e relatórios automáticos de auditoria. O administrador receberá logs de eventos operacionais críticos externamente para garantir monitoria contínua do ERP.
+            </p>
+
+            <form onSubmit={handleSaveAlertsConfig} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block">E-mail de Destino para Alertas de Eventos Críticos</label>
+                  <input
+                    type="email"
+                    disabled={!canEdit}
+                    value={alertsRecipientEmail}
+                    onChange={(e) => setAlertsRecipientEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                    placeholder="admin-alerts@empresa.co.mz"
+                  />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    Este endereço receberá notificações automáticas em caso de eventos de segurança, falhas de sistema e acessos não autorizados.
+                  </span>
+                </div>
+
+                <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
+                    <input
+                      type="checkbox"
+                      disabled={!canEdit}
+                      checked={emailStockAlertsEnabled}
+                      onChange={(e) => {
+                        if (e.target.checked && smtpEnabled && !isSmtpVerified) {
+                          if (onShowToast) {
+                            onShowToast(
+                              "O servidor SMTP precisa ser verificado com sucesso ('Testar Conexão') no painel dedicado antes de poder ativar os alertas automáticos.",
+                              "warning",
+                              "SMTP Não Verificado"
+                            );
+                          }
+                          return;
+                        }
+                        setEmailStockAlertsEnabled(e.target.checked);
+                      }}
+                      className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span>Alertas de Estoque Baixo por E-mail</span>
+                  </label>
+                  <p className="text-[10.5px] text-slate-400 leading-normal">
+                    Quando ativo, envia avisos automáticos via e-mail para o destinatário ao lado sempre que o estoque de algum item atingir um nível crítico. Requer SMTP configurado.
+                  </p>
+                </div>
+              </div>
+
+              {/* Custom Email Template Editor for Stock Alerts */}
+              {emailStockAlertsEnabled && (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4 animate-in fade-in duration-200">
+                  <div className="flex items-center gap-1.5 text-orange-600 font-bold text-xs uppercase tracking-wider border-b pb-1.5 border-slate-200">
+                    <Mail className="w-4 h-4 text-orange-500" />
+                    <span>Modelo de E-mail de Alerta</span>
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Assunto do E-mail</label>
+                    <input
+                      type="text"
+                      disabled={!canEdit}
+                      value={stockAlertEmailSubject}
+                      onChange={(e) => setStockAlertEmailSubject(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                      placeholder="Ex: [ALERTA] Estoque Crítico de Produtos"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Corpo do E-mail (Texto Simples)</label>
+                    <textarea
+                      rows={6}
+                      disabled={!canEdit}
+                      value={stockAlertEmailBody}
+                      onChange={(e) => setStockAlertEmailBody(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-850 disabled:opacity-75 outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 leading-relaxed resize-y"
+                      placeholder="Escreva a mensagem do e-mail..."
+                    />
+                  </div>
+
+                  <div className="bg-white p-2.5 rounded-lg border border-slate-150 space-y-1.5">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Tags Dinâmicas Disponíveis:</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-slate-600">
+                      <div className="flex items-center gap-1">
+                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[LISTA_PRODUTOS]</code>
+                        <span>Lista de produtos baixos</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[NOME_EMPRESA]</code>
+                        <span>Nome do estabelecimento</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[DATA]</code>
+                        <span>Data e hora do envio</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[EMAIL_DESTINO]</code>
+                        <span>E-mail destinatário</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {canEdit ? (
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15"
+                >
+                  Salvar Definições de Notificações
+                </button>
+              ) : (
+                <div className="text-[11px] text-slate-400 text-center py-2 bg-slate-50 border border-slate-100 rounded-xl">
+                  Apenas administradores podem alterar as definições de alertas críticos.
+                </div>
+              )}
+            </form>
+          </div>
+
+          {/* EXCLUSIVE PANEL: Dedicated SMTP Server Configuration */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
           <div className="flex items-center gap-2.5 text-orange-600">
@@ -4105,8 +4160,13 @@ export default function SettingsModule({
           </div>
         )}
       </div>
+        </div>
+      )}
 
-      {/* Google Drive Integration */}
+      {activeSubTab === "geral" && (
+        <div className="space-y-6 animate-in fade-in-50 duration-150">
+
+          {/* Google Drive Integration */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
           <div className="flex items-center gap-2.5 text-blue-600">
@@ -5745,7 +5805,7 @@ export default function SettingsModule({
                   </span>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
                   {(settings.branches || []).map((branch) => (
                     <div
                       key={branch.id}
@@ -5803,6 +5863,176 @@ export default function SettingsModule({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeSubTab === "seguranca" && (
+        <div className="space-y-6 animate-in fade-in duration-200 text-slate-800">
+          {/* Header Card */}
+          <div className="bg-rose-950 text-white p-6 rounded-2xl border border-rose-900 shadow-lg space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-rose-500 text-white p-2.5 rounded-xl shrink-0">
+                <Shield className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Segurança de Acesso & Controle de PINs</h3>
+                <p className="text-xs text-rose-200 mt-0.5">
+                  Gerencie a política de segurança, monitore a validade das credenciais e force a rotação de senhas para todos os colaboradores.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Central Security Panel */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h4 className="font-bold text-slate-850 text-sm">Controle de PIN dos Colaboradores</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Administradores podem resetar credenciais instantaneamente. PINs padrões têm validade temporária e expiram em 60 dias.
+                </p>
+              </div>
+              <span className="text-[10px] font-mono bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded font-black uppercase">
+                {employees.length} Utilizadores
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[450px] overflow-y-auto pr-1 custom-scrollbar">
+              {employees.map((emp) => {
+                const isTemp = emp.pinChanged === false || emp.pinChanged === undefined;
+                const now = new Date();
+                const createdAtStr = emp.pinCreatedAt || emp.admissionDate || now.toISOString();
+                const createdAt = new Date(createdAtStr);
+                const diffTime = now.getTime() - createdAt.getTime();
+                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                const remainingDays = Math.max(0, 60 - diffDays);
+
+                return (
+                  <div 
+                    key={emp.id}
+                    className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/60 hover:border-slate-300 transition-all flex flex-col justify-between gap-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-extrabold text-slate-900 text-sm">{emp.name}</span>
+                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 font-bold uppercase tracking-wider">
+                            {emp.role}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 font-bold">@{emp.username} • id: {emp.id}</p>
+                      </div>
+
+                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
+                        emp.status === "ACTIVE" 
+                          ? "bg-emerald-100 text-emerald-800" 
+                          : "bg-amber-100 text-amber-800"
+                      }`}>
+                        {emp.status}
+                      </span>
+                    </div>
+
+                    <div className="border-t border-slate-200/50 pt-2.5 flex items-center justify-between gap-2">
+                      <div className="space-y-1">
+                        <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Estado de Senha (PIN)</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-md border font-extrabold flex items-center gap-1 ${
+                            isTemp 
+                              ? "bg-rose-50 border-rose-200 text-rose-700" 
+                              : remainingDays <= 7 
+                                ? "bg-amber-50 border-amber-200 text-amber-700 animate-pulse" 
+                                : "bg-emerald-50 border-emerald-200 text-emerald-700"
+                          }`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                            {isTemp 
+                              ? "PIN Temporário (Altere Já)" 
+                              : remainingDays <= 7 
+                                ? `Expira em ${remainingDays} dias!` 
+                                : `Válido por ${remainingDays} dias`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setConfirmResetEmployeeId(emp.id)}
+                        className="py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold rounded-lg text-[11px] transition-all cursor-pointer shadow-sm hover:shadow-rose-500/20 flex items-center gap-1.5 border border-rose-600/10 font-sans"
+                      >
+                        <Lock className="w-3 h-3 shrink-0" />
+                        Resetar PIN
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* PIN Reset Confirmation Modal */}
+          {confirmResetEmployeeId && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full border border-slate-100 shadow-2xl p-6 space-y-4 animate-in zoom-in duration-150">
+                <div className="flex items-center gap-3 text-rose-600">
+                  <div className="bg-rose-50 p-3 rounded-xl">
+                    <Shield className="w-6 h-6 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-slate-900 text-base">Confirmar Reset de PIN</h3>
+                    <p className="text-xs text-slate-400">Operação de segurança administrativa</p>
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Tem certeza que deseja forçar o reset de PIN de acesso para o colaborador{" "}
+                  <strong className="text-slate-900 font-bold">
+                    {employees.find(e => e.id === confirmResetEmployeeId)?.name}
+                  </strong>
+                  ?
+                </p>
+
+                <div className="p-3.5 bg-rose-50/50 border border-rose-100 rounded-xl text-[11px] text-rose-800 leading-normal space-y-1">
+                  <p className="font-bold flex items-center gap-1">
+                    <span>⚠️ O que acontece a seguir?</span>
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 opacity-90 pl-1 font-medium">
+                    <li>O PIN será imediatamente restaurado para o padrão temporário <span className="font-black bg-white px-1.5 py-0.5 rounded border border-rose-200">123456</span>.</li>
+                    <li>No próximo login, o colaborador será obrigado por lei de rotação a criar uma nova senha pessoal forte de no mínimo 6 dígitos.</li>
+                    <li>Um registo de auditoria de segurança (Audit Log) será criado.</li>
+                  </ul>
+                </div>
+
+                <div className="flex gap-3 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmResetEmployeeId(null)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isResettingPin}
+                    onClick={async () => {
+                      setIsResettingPin(true);
+                      try {
+                        if (onResetEmployeePin) {
+                          await onResetEmployeePin(confirmResetEmployeeId);
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      } finally {
+                        setIsResettingPin(false);
+                        setConfirmResetEmployeeId(null);
+                      }
+                    }}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-md shadow-rose-600/10 flex items-center gap-1"
+                  >
+                    {isResettingPin ? "A processar..." : "Sim, Confirmar Reset"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

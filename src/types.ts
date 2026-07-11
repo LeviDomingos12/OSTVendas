@@ -99,6 +99,8 @@ export interface AuditLog {
   action: string;
   module: string;
   details: string;
+  ip?: string;
+  device?: string;
 }
 
 export interface Employee {
@@ -115,6 +117,7 @@ export interface Employee {
   pinCreatedAt?: string;
   pinChanged?: boolean;
   password?: string;
+  fotoPerfil?: string;
 }
 
 export interface SystemSettings {

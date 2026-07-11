@@ -677,7 +677,7 @@ export default function CustomersModule({
             </div>
 
             {/* Database List Table */}
-            <div className="flex-1 overflow-x-auto text-[11.5px]">
+            <div className="flex-1 overflow-x-auto max-h-[500px] overflow-y-auto text-[11.5px] custom-scrollbar">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wide text-[9.5px]">
@@ -901,7 +901,7 @@ export default function CustomersModule({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[350px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
@@ -981,7 +981,7 @@ export default function CustomersModule({
             </div>
           </div>
           
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[350px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 uppercase text-[10px] font-bold text-slate-500 tracking-wider">

@@ -1004,7 +1004,7 @@ export default function CashRegisterModule({
                 </div>
 
                 {/* Vertical Timeline Ledger */}
-                <div className="relative pl-6 border-l-2 border-slate-100 dark:border-zinc-800 space-y-5">
+                <div className="relative pl-6 border-l-2 border-slate-100 dark:border-zinc-800 space-y-5 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                   {filteredTimeline.length === 0 ? (
                     <div className="p-8 text-center text-xs text-slate-400 italic">
                       Nenhuma atividade encontrada para os filtros aplicados.
@@ -1315,7 +1315,7 @@ export default function CashRegisterModule({
             <span className="text-[10px] text-slate-400 font-mono">Turnos Anteriores</span>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto max-h-[450px] overflow-y-auto custom-scrollbar">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-100/50 border-b border-slate-250 dark:bg-zinc-950/60 dark:border-zinc-850">

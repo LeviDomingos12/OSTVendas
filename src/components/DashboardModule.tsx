@@ -50,7 +50,9 @@ import {
   PieChart, 
   Pie, 
   Cell, 
-  Legend 
+  Legend,
+  ComposedChart,
+  Line
 } from "recharts";
 import { Product, Customer, Transaction, CashFlowEntry, SystemSettings } from "../types";
 
@@ -60,6 +62,7 @@ interface DashboardModuleProps {
   transactions: Transaction[];
   cashFlow: CashFlowEntry[];
   currency: string;
+  activeUser?: any;
   onChangeModule?: (mod: string) => void;
   settings?: SystemSettings;
   onUpdateSettings?: (newSettings: Partial<SystemSettings>) => void;
@@ -75,6 +78,7 @@ export default function DashboardModule({
   transactions,
   cashFlow,
   currency,
+  activeUser,
   onChangeModule,
   settings,
   onUpdateSettings,
@@ -102,6 +106,14 @@ export default function DashboardModule({
 
   // 1. Interactive Scope States
   const [timeScope, setTimeScope] = useState<"TODAY" | "YESTERDAY" | "LAST_7" | "CUSTOM">("TODAY");
+  
+  // Target Goal State with LocalStorage persistence
+  const [targetGoal, setTargetGoal] = useState<number>(() => {
+    const saved = localStorage.getItem("erp_daily_revenue_goal");
+    return saved ? Number(saved) : 200000;
+  });
+  const [isEditingGoal, setIsEditingGoal] = useState(false);
+  const [tempGoalStr, setTempGoalStr] = useState(targetGoal.toString());
   
   // Initialize to the latest date that has sales if today is empty, to provide an amazing and live-loaded feel
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() => {
@@ -832,6 +844,39 @@ export default function DashboardModule({
     });
   }, [transactions, selectedDateStr]);
 
+  // Vendas vs Metas Recorrentes (Past 7 Days relative to selectedDateStr)
+  const chartSalesVsGoals = useMemo(() => {
+    const dailyMap: Record<string, { Vendas: number; Meta: number }> = {};
+    const isCaixa = activeUser?.role?.toUpperCase().includes("CAIXA") || activeUser?.role?.toUpperCase().includes("VENDEDOR");
+    // If cashier/caixa, their portion of the target is lower (e.g. 25% of general target or a standard cashier target)
+    const dailyMeta = isCaixa ? (targetGoal / 4) : targetGoal;
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(selectedDateStr);
+      d.setDate(d.getDate() - i);
+      const str = d.toISOString().split("T")[0];
+      dailyMap[str] = { Vendas: 0, Meta: dailyMeta };
+    }
+
+    transactions.forEach(tx => {
+      const txDate = dateSplit(tx.timestamp);
+      if (dailyMap[txDate] !== undefined) {
+        dailyMap[txDate].Vendas += tx.grandTotal;
+      }
+    });
+
+    return Object.entries(dailyMap).map(([date, values]) => {
+      const parts = date.split("-");
+      const shortDate = `${parts[2]}/${parts[1]}`; // DD/MM format
+      return {
+        data: shortDate,
+        Vendas: values.Vendas,
+        Meta: values.Meta,
+        dateStr: date
+      };
+    });
+  }, [transactions, selectedDateStr, targetGoal, activeUser]);
+
   // Receita diária para a semana corrente baseada em selectedDateStr
   const chartWeeklyRevenue = useMemo(() => {
     const current = new Date(selectedDateStr);
@@ -1186,14 +1231,6 @@ export default function DashboardModule({
     if (prevAvg === 0) return currentAvg > 0 ? 100 : 0;
     return ((currentAvg - prevAvg) / prevAvg) * 100;
   }, [transactions, selectedDateStr, timeScope, averageTicket]);
-
-  // Target Goal State with LocalStorage persistence
-  const [targetGoal, setTargetGoal] = useState<number>(() => {
-    const saved = localStorage.getItem("erp_daily_revenue_goal");
-    return saved ? Number(saved) : 200000;
-  });
-  const [isEditingGoal, setIsEditingGoal] = useState(false);
-  const [tempGoalStr, setTempGoalStr] = useState(targetGoal.toString());
 
   const targetProgress = useMemo(() => {
     const factor = timeScope === "LAST_7" ? 7 : 1;
@@ -2052,6 +2089,73 @@ export default function DashboardModule({
                 <Legend layout="horizontal" verticalAlign="bottom" align="center" />
               </PieChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Vendas vs Metas Dynamic Composed Chart */}
+        <div className="col-span-2 bg-white p-5 rounded-2xl border border-slate-200 outline-none overflow-hidden shadow-sm flex flex-col h-96">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Vendas vs. Metas</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Visão comparativa de desempenho comercial dos últimos 7 dias.</p>
+            </div>
+            <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold border ${
+              activeUser?.role?.toUpperCase().includes("ADMINISTRADOR") || activeUser?.role?.toUpperCase().includes("GESTOR")
+                ? "bg-emerald-50 text-emerald-700 border-emerald-150" 
+                : "bg-blue-50 text-blue-700 border-blue-150"
+            }`}>
+              {activeUser?.role?.toUpperCase().includes("ADMINISTRADOR") || activeUser?.role?.toUpperCase().includes("GESTOR")
+                ? "Visão: Geral (Administrador)" 
+                : `Visão: Própria (Caixa)`}
+            </span>
+          </div>
+          <div className="flex-1 min-h-0 text-[11px] font-mono">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartSalesVsGoals} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="data" stroke="#94a3b8" />
+                <YAxis stroke="#94a3b8" />
+                <Tooltip formatter={(value, name) => [`${value.toLocaleString()} ${currency}`, name === "Vendas" ? "Vendido" : "Meta"]} />
+                <Legend verticalAlign="top" height={36} iconType="circle" />
+                <Bar dataKey="Vendas" fill="#10b981" radius={[4, 4, 0, 0]} barSize={28} name="Vendas Realizadas" />
+                <Line type="monotone" dataKey="Meta" stroke="#ef4444" strokeWidth={3} strokeDasharray="5 5" dot={{ r: 4 }} name="Meta de Vendas" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Dynamic Goal Explainer / Metric Summary widget */}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 outline-none overflow-hidden shadow-sm flex flex-col justify-between h-96">
+          <div className="mb-2">
+            <h3 className="font-bold text-slate-800 text-sm">Análise de Metas</h3>
+            <p className="text-xs text-slate-400 mt-0.5">Indicadores chave de desempenho comercial.</p>
+          </div>
+          <div className="space-y-4 flex-1 mt-3">
+            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Meta Diária Atual</span>
+              <p className="text-lg font-black text-slate-800 mt-0.5">
+                {(activeUser?.role?.toUpperCase().includes("CAIXA") || activeUser?.role?.toUpperCase().includes("VENDEDOR"))
+                  ? (targetGoal / 4).toLocaleString()
+                  : targetGoal.toLocaleString()} {currency}
+              </p>
+              <span className="text-[9.5px] text-slate-500 block mt-1">
+                {(activeUser?.role?.toUpperCase().includes("CAIXA") || activeUser?.role?.toUpperCase().includes("VENDEDOR"))
+                  ? "Sua cota individual (25% da meta global da empresa)"
+                  : "Meta global de vendas da empresa"}
+              </span>
+            </div>
+            <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl">
+              <span className="text-[10px] text-emerald-600 font-bold uppercase block">Vendas Recorrentes</span>
+              <p className="text-lg font-black text-emerald-700 mt-0.5">
+                {chartSalesVsGoals.reduce((sum, item) => sum + item.Vendas, 0).toLocaleString()} {currency}
+              </p>
+              <span className="text-[9.5px] text-emerald-600/80 block mt-1">
+                Total acumulado nos últimos 7 dias de registos ativos.
+              </span>
+            </div>
+          </div>
+          <div className="text-[10px] text-slate-400 font-medium border-t border-slate-100 pt-3">
+            Atualizado automaticamente com base nas permissões de utilizador.
           </div>
         </div>
 

@@ -29,6 +29,7 @@ interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
   activeUser?: Employee | null;
+  onSwitchUser?: () => void;
 }
 
 export default function Sidebar({
@@ -42,7 +43,8 @@ export default function Sidebar({
   theme,
   isOpen,
   onClose,
-  activeUser
+  activeUser,
+  onSwitchUser
 }: SidebarProps) {
   
   const profiles: UserProfile[] = [
@@ -139,15 +141,23 @@ export default function Sidebar({
           ? "bg-zinc-900 text-slate-150 border-zinc-800" 
           : "bg-orange-50/50 text-slate-700 border-orange-100/50 shadow-sm"
       }`}>
-        <div className="flex items-center gap-3 mb-2">
-          <div className={`text-2xl w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${
+        <div className="flex items-center gap-3">
+          <div className={`text-2xl w-10 h-10 rounded-xl flex items-center justify-center border transition-all overflow-hidden ${
             isNight ? "bg-zinc-950 border-zinc-850" : "bg-white border-orange-200/40 shadow-sm"
           }`}>
             {activeUser ? (
-              (activeUser.role || "").toUpperCase().includes("ADMIN") || (activeUser.role || "").toUpperCase().includes("GESTOR") ? "👨‍💼" : (activeUser.role || "").toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"
+              activeUser.fotoPerfil ? (
+                activeUser.fotoPerfil.startsWith("data:") || activeUser.fotoPerfil.startsWith("http") || activeUser.fotoPerfil.startsWith("/") ? (
+                  <img src={activeUser.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
+                ) : (
+                  <span className="text-xl leading-none">{activeUser.fotoPerfil}</span>
+                )
+              ) : (
+                (activeUser.role || "").toUpperCase().includes("ADMIN") || (activeUser.role || "").toUpperCase().includes("GESTOR") ? "👨‍💼" : (activeUser.role || "").toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"
+              )
             ) : currentProfile.avatar}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h4 className={`text-xs font-black truncate leading-none ${
               isNight ? "text-slate-200" : "text-slate-800"
             }`}>{activeUser ? activeUser.name : currentProfile.name}</h4>
@@ -160,6 +170,22 @@ export default function Sidebar({
             </span>
           </div>
         </div>
+
+        {onSwitchUser && (
+          <button
+            id="sidebar-change-user-btn"
+            onClick={onSwitchUser}
+            className={`w-full mt-3.5 flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+              isNight
+                ? "bg-zinc-950 border-zinc-850 text-orange-400 hover:text-orange-350 hover:bg-zinc-900"
+                : "bg-white border-orange-150 text-orange-600 hover:bg-orange-500/5 hover:text-orange-700 shadow-[0_2px_8px_rgba(249,115,22,0.04)]"
+            }`}
+            title="Alterar Operador / Vincular Conta"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span>Alterar Usuário 🔄</span>
+          </button>
+        )}
       </div>
 
       {/* Navigation */}

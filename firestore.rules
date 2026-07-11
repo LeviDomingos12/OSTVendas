@@ -1,8 +1,54 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Check if the current authenticated user's email matches the adminEmail partition parameter
+    function isOwnerOfPartition(adminEmail) {
+      return isSignedIn() && request.auth.token.email.lower() == adminEmail.lower();
+    }
+
+    // Default deny catch-all
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Partitioned Collections under admins/{adminEmail}/{collectionName}
+    match /admins/{adminEmail}/{collectionName}/{docId} {
+      // Allow read, write if the authenticated user owns this partition email, admin_uid or matches token email
+      allow read, write: if isOwnerOfPartition(adminEmail) || 
+                            (isSignedIn() && (request.auth.uid == adminEmail || 
+                                              (request.auth.token.admin_uid != null && request.auth.token.admin_uid == adminEmail) ||
+                                              (request.auth.token.company_id != null && request.auth.token.company_id == adminEmail)));
+    }
+
+    // Partitioned Collections under companies/{companyId}/{collectionName}
+    match /companies/{companyId}/{collectionName}/{docId} {
+      // Allow read, write if user matches companyId, or token has company_id
+      allow read, write: if isSignedIn() && (request.auth.uid == companyId || 
+                                            (request.auth.token.company_id != null && request.auth.token.company_id == companyId) ||
+                                            (request.auth.token.admin_uid != null && request.auth.token.admin_uid == companyId));
+    }
+
+    // Global Usuarios Collection
+    match /usuarios/{uid} {
+      // Allow reading and writing the user's own profile document
+      allow get, write: if isSignedIn() && request.auth.uid == uid;
+      
+      // Allow authenticated users to search/list users (e.g. for registration, log-in fallback mappings)
+      allow list: if isSignedIn();
+
+      // Support fallback user cleanup where existingDocId (simId) is deleted
+      allow delete: if isSignedIn();
+    }
+    
+    // Quick root-level connection check
+    match /test/connection {
+      allow read: if true;
     }
   }
 }

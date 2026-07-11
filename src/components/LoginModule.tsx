@@ -27,7 +27,8 @@ import {
   signInWithEmail, 
   recoverPassword, 
   googleSignInAndSync,
-  createRecoveryRequest
+  createRecoveryRequest,
+  auth
 } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
 
@@ -67,7 +68,7 @@ export default function LoginModule({
   const [signupPassword, setSignupPassword] = useState("");
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
   const [signupBranch, setSignupBranch] = useState("OST Comércio Geral");
-  const [signupRole, setSignupRole] = useState("Caixa");
+  const [signupRole, setSignupRole] = useState("Administrador");
   const [showSignupPassword, setShowSignupPassword] = useState(false);
 
   // Recovery Form State
@@ -161,7 +162,7 @@ export default function LoginModule({
   // Trigger loading pipeline sequence before entering POS or Dashboard
   const triggerLoadingPipeline = (user: Employee, branch: string) => {
     setAuthenticatedUser(user);
-    setSelectedBranch(branch);
+    setSelectedBranch(branch || "OST Comércio Geral");
     setLoadingState("AUTHENTICATING");
     setLoadingProgress(10);
 
@@ -177,8 +178,9 @@ export default function LoginModule({
 
     setTimeout(() => {
       setLoadingProgress(100);
-      setLoadingState("COMPANY_SELECTION");
-      onShowToast(`Autenticado com sucesso em ${branch}!`, "success");
+      setLoadingState("IDLE");
+      onShowToast(`Autenticado com sucesso em ${branch || "OST Comércio Geral"}!`, "success");
+      onLoginSuccess(user, branch || "OST Comércio Geral");
     }, 1800);
   };
 
@@ -428,8 +430,20 @@ export default function LoginModule({
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage(`❌ Erro Google Sign-In: ${err.message}`);
-      onShowToast(err.message || "Não foi possível autenticar com o Google.", "error");
+      
+      const isGoogleBlocked = err.message?.includes("access_denied") || 
+                              err.message?.includes("popup-closed-by-user") || 
+                              err.message?.includes("cancelled-popup-request") ||
+                              err.message?.includes("não concluiu o processo") ||
+                              err.message?.includes("403");
+                              
+      let friendlyError = `❌ Erro Google Sign-In: ${err.message}`;
+      if (isGoogleBlocked) {
+        friendlyError = `❌ Erro de Acesso (Google 403 / popup fechado): Como a aplicação está em modo de testes no Google Cloud, o Google bloqueia o login de outras contas Gmail que não foram adicionadas à lista de testadores pelo programador. Para entrar no sistema, por favor, clique em "Registe-se aqui" no final do formulário para criar uma conta de acesso rápido com qualquer e-mail e palavra-passe!`;
+      }
+      
+      setErrorMessage(friendlyError);
+      onShowToast(isGoogleBlocked ? "Acesso Google Restrito ou Fechado." : (err.message || "Não foi possível autenticar com o Google."), "error");
     }
   };
 
@@ -713,9 +727,24 @@ export default function LoginModule({
 
             {/* Feedback Notifications */}
             {errorMessage && (
-              <div className="p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs rounded-xl font-medium animate-in fade-in flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0" />
-                <span>{errorMessage}</span>
+              <div className="p-3 bg-red-950/40 border border-red-500/20 text-red-400 text-xs rounded-xl font-medium animate-in fade-in space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+                {(errorMessage.includes("iframe") || errorMessage.includes("nova aba") || errorMessage.includes("Google") || errorMessage.includes("bloqueado")) && (
+                  <div className="pt-1">
+                    <a
+                      href={window.location.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-[11px] rounded-lg transition"
+                    >
+                      <Chrome className="w-3.5 h-3.5" />
+                      Abrir Aplicativo em Nova Aba
+                    </a>
+                  </div>
+                )}
               </div>
             )}
             {successMessage && (
@@ -804,16 +833,44 @@ export default function LoginModule({
                   </button>
                 </div>
 
-                {/* Google Login Provider Button */}
-                <div className="grid grid-cols-1 gap-2 pt-1">
+                {/* Google Sign-In Button Promoted */}
+                <div className="space-y-2.5 pt-1">
                   <button
                     type="button"
                     onClick={handleGoogleSignIn}
-                    className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-white rounded-xl font-bold text-xs uppercase tracking-wider transition border border-slate-800 hover:border-slate-700 flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full py-3.5 bg-[#FF6B00]/10 hover:bg-[#FF6B00]/20 text-[#FF6B00] hover:text-orange-400 rounded-xl font-extrabold text-xs uppercase tracking-wider transition duration-300 border border-[#FF6B00]/30 hover:border-[#FF6B00]/60 flex items-center justify-center gap-2.5 cursor-pointer shadow-sm shadow-orange-950/10"
                   >
-                    <Chrome className="w-4 h-4 text-orange-500" />
-                    <span>Entrar com Google</span>
+                    <Chrome className="w-4 h-4 shrink-0" />
+                    <span>Acesso Rápido com Google</span>
                   </button>
+
+                  {/* Modern Google Autocreation Badge Info */}
+                  <div className="p-3 bg-slate-900/40 border border-slate-800/85 rounded-xl text-left space-y-1">
+                    <div className="flex items-center gap-1.5 text-[#FF6B00]">
+                      <span className="text-xs">✨</span>
+                      <p className="text-[11px] font-bold text-slate-200">Autocriação de Conta Ativa!</p>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      Agora suportamos login instantâneo com Google para qualquer conta. O sistema criará seu perfil administrativo de acesso geral de forma automática no primeiro acesso!
+                    </p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed">
+                      <em>Nota de homologação:</em> Se receber o erro 403 (access_denied) devido a restrições de teste do Google Cloud Console, use o botão <button type="button" onClick={() => { setView("SIGNUP"); setErrorMessage(null); setSuccessMessage(null); }} className="text-orange-400 hover:underline font-bold">"Registe-se aqui"</button> para criar seu perfil com qualquer e-mail de sua preferência.
+                    </p>
+                  </div>
+
+                  {window.self !== window.top && (
+                    <p className="text-[10px] text-slate-500 text-center leading-normal">
+                      Executando em ambiente de demonstração (iframe). Se o login do Google falhar,{" "}
+                      <a 
+                        href={window.location.href} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-[#FF6B00] hover:underline font-bold"
+                      >
+                        clique aqui para abrir em nova aba
+                      </a>.
+                    </p>
+                  )}
                 </div>
 
                 {/* Login Submission Button */}

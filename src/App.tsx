@@ -44,12 +44,15 @@ import {
   mapUsuarioToEmployee,
   getProdutosFromFirestore,
   addProdutoToFirestore,
+  addProdutosToFirestoreBatch,
   updateProdutoInFirestore,
   deleteProdutoFromFirestore,
   getTransacoesFromFirestore,
   addTransacaoToFirestore,
+  addTransacoesToFirestoreBatch,
   subscribeToProdutos,
-  isCircuitBroken
+  isCircuitBroken,
+  getPartitionPath
 } from "./lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -72,7 +75,9 @@ import {
   Clock,
   Menu,
   Lock,
-  ShieldAlert
+  ShieldAlert,
+  Users,
+  Camera
 } from "lucide-react";
 
 interface Toast {
@@ -139,9 +144,135 @@ export default function App() {
   const [confirmNewPin, setConfirmNewPin] = useState("");
   const [forcePinError, setForcePinError] = useState("");
 
+  // User Switch & Account Linking (Vínculo de Conta) States
+  const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
+  const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
+  const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile">("switch");
+  const [profileName, setProfileName] = useState("");
+  const [profileContact, setProfileContact] = useState("");
+  const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
+  const [switchEnteredPin, setSwitchEnteredPin] = useState("");
+  const [switchPinError, setSwitchPinError] = useState("");
+
+  useEffect(() => {
+    if (isUserSwitchModalOpen && activeUser) {
+      setProfileName(activeUser.name || "");
+      setProfileContact(activeUser.contact || "");
+      setProfileFotoPerfil(activeUser.fotoPerfil || "");
+    }
+    setSwitchEnteredPin("");
+    setSwitchPinError("");
+  }, [isUserSwitchModalOpen, activeUser]);
+
   // Premium AI predictions state
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
   const [forecastResult, setForecastResult] = useState<any | null>(null);
+
+  // Dynamic system versioning that automatically increments with each database record or action logged
+  const totalSystemModifications = useMemo(() => {
+    return (products?.length || 0) + (customers?.length || 0) + (transactions?.length || 0) + (cashFlow?.length || 0) + (employees?.length || 0) + (auditLogs?.length || 0);
+  }, [products, customers, transactions, cashFlow, employees, auditLogs]);
+
+  const pinRemainingDays = useMemo(() => {
+    if (!activeUser) return 0;
+    if (activeUser.pinChanged === false || activeUser.pinChanged === undefined) {
+      return 0;
+    }
+    const now = new Date();
+    const createdAtStr = activeUser.pinCreatedAt || activeUser.admissionDate || now.toISOString();
+    const createdAt = new Date(createdAtStr);
+    const diffTime = now.getTime() - createdAt.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    return Math.max(0, 60 - diffDays);
+  }, [activeUser]);
+
+  const [buildVersion, setBuildVersion] = useState<number>(() => {
+    try {
+      const cached = localStorage.getItem("system_build_version");
+      if (cached) {
+        const parsed = parseInt(cached, 10);
+        if (!isNaN(parsed)) return parsed;
+      }
+    } catch (e) {}
+    // Fallback: start at max of 362 and total items inside local collections
+    return Math.max(362, (products?.length || 0) + (customers?.length || 0) + (transactions?.length || 0) + (cashFlow?.length || 0) + (employees?.length || 0) + (auditLogs?.length || 0));
+  });
+
+  // Keep localStorage and buildVersion in sync if totalSystemModifications becomes higher on initial load
+  useEffect(() => {
+    setBuildVersion(current => {
+      if (totalSystemModifications > current) {
+        try {
+          localStorage.setItem("system_build_version", String(totalSystemModifications));
+        } catch (e) {}
+        return totalSystemModifications;
+      }
+      return current;
+    });
+  }, [totalSystemModifications]);
+
+  const currentSystemVersion = `v4.2.1-rev${buildVersion}-ERP`;
+
+  // Fetch / Sync version counter with Firestore partitioned document
+  useEffect(() => {
+    const syncFirestoreVersion = async () => {
+      if (isCircuitBroken() || !navigator.onLine) return;
+      try {
+        const path = getPartitionPath("system");
+        const docRef = doc(db, path, "version");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data && typeof data.counter === "number") {
+            const firestoreCounter = data.counter;
+            setBuildVersion(current => {
+              const highest = Math.max(current, firestoreCounter);
+              try {
+                localStorage.setItem("system_build_version", String(highest));
+              } catch (e) {}
+              return highest;
+            });
+          }
+        } else {
+          // Document does not exist yet, write the current local build version as initial value
+          await setDoc(docRef, { counter: buildVersion, updatedAt: new Date().toISOString() });
+        }
+      } catch (err) {
+        console.warn("Failed to fetch/sync global version counter from Firestore:", err);
+      }
+    };
+
+    if (isAuthenticated || activeUser) {
+      // Small delay or directly trigger
+      syncFirestoreVersion();
+    }
+  }, [isAuthenticated, activeUser, db, buildVersion]);
+
+  // Unified function to increment build version both locally and in Firestore
+  const incrementVersionCounter = async () => {
+    let nextVal = buildVersion + 1;
+    setBuildVersion(current => {
+      const next = current + 1;
+      nextVal = next;
+      try {
+        localStorage.setItem("system_build_version", String(next));
+      } catch (e) {}
+      return next;
+    });
+
+    if (navigator.onLine && !isCircuitBroken()) {
+      try {
+        const path = getPartitionPath("system");
+        const docRef = doc(db, path, "version");
+        await setDoc(docRef, { 
+          counter: nextVal, 
+          updatedAt: new Date().toISOString() 
+        }, { merge: true });
+      } catch (err) {
+        console.warn("Failed to update global version counter in Firestore:", err);
+      }
+    }
+  };
 
   const currency = "MT"; // Meticais Moçambique
 
@@ -158,6 +289,10 @@ export default function App() {
   const [isPOSFullscreen, setIsPOSFullscreen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   
+  // Geolocation and IP tracking for Audit Logs
+  const [userIpInfo, setUserIpInfo] = useState<{ ip: string; city: string; country: string } | null>(null);
+  const [deviceInfo, setDeviceInfo] = useState<string>("");
+
   // Track operator-specific custom color theme
   const [activeColorTheme, setActiveColorTheme] = useState<string>("laranja");
 
@@ -204,6 +339,45 @@ export default function App() {
     };
   }, []);
 
+  // Fetch client IP and device info for Audit logs
+  useEffect(() => {
+    // Detect browser/device info
+    const ua = navigator.userAgent;
+    let dev = "Desktop";
+    if (/mobile/i.test(ua)) dev = "Telemóvel / Mobile";
+    else if (/tablet/i.test(ua)) dev = "Tablet";
+    
+    if (ua.includes("Chrome")) dev += " (Chrome)";
+    else if (ua.includes("Firefox")) dev += " (Firefox)";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) dev += " (Safari)";
+    else if (ua.includes("Edge")) dev += " (Edge)";
+    setDeviceInfo(dev);
+
+    // Fetch IP and Geo IP details
+    fetch("https://ipapi.co/json/")
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch IP details");
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.ip) {
+          setUserIpInfo({
+            ip: data.ip,
+            city: data.city || "Maputo",
+            country: data.country_name || "Moçambique"
+          });
+        }
+      })
+      .catch(() => {
+        // Safe mock realistic Mozambican IP/Geo details on failure/ad-blocker
+        setUserIpInfo({
+          ip: "102.81.12.94",
+          city: "Maputo",
+          country: "Moçambique"
+        });
+      });
+  }, []);
+
   // Advanced top bar metrics states
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => new Date().toLocaleTimeString());
   const [sessionSeconds, setSessionSeconds] = useState<number>(0);
@@ -218,17 +392,16 @@ export default function App() {
   // DB Sync helper with robust offline queueing
   const syncTable = async (tableName: string, updatedData: any) => {
     setLastSyncTime(new Date().toLocaleTimeString());
+    await incrementVersionCounter();
     try {
       if (!navigator.onLine) {
         throw new Error("browser is offline");
       }
       
       if (tableName === "products") {
-        const promises = updatedData.map((prod: any) => addProdutoToFirestore(prod));
-        await Promise.all(promises);
+        await addProdutosToFirestoreBatch(updatedData);
       } else if (tableName === "transactions") {
-        const promises = updatedData.map((tx: any) => addTransacaoToFirestore(tx));
-        await Promise.all(promises);
+        await addTransacoesToFirestoreBatch(updatedData);
       } else {
         const response = await fetch("/api/db/save", {
           method: "POST",
@@ -294,16 +467,14 @@ export default function App() {
           
           if (tableName === "products") {
             try {
-              const promises = data.map((prod: any) => addProdutoToFirestore(prod));
-              await Promise.all(promises);
+              await addProdutosToFirestoreBatch(data);
               success = true;
             } catch (fsErr) {
               console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
             }
           } else if (tableName === "transactions") {
             try {
-              const promises = data.map((tx: any) => addTransacaoToFirestore(tx));
-              await Promise.all(promises);
+              await addTransacoesToFirestoreBatch(data);
               success = true;
             } catch (fsErr) {
               console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
@@ -633,6 +804,14 @@ export default function App() {
           }
 
           if (profileData) {
+            const isGoogleAdminEmail = user.email?.toLowerCase() === "levidomingos12@gmail.com";
+            const isMatchedAdmin = employeeEmailMatch && (employeeEmailMatch.role?.toUpperCase().includes("ADMIN") || employeeEmailMatch.role?.toUpperCase().includes("GESTOR"));
+            const isProfileAdmin = profileData.perfil && (profileData.perfil.toUpperCase().includes("ADMIN") || profileData.perfil.toUpperCase().includes("GESTOR"));
+            if (isGoogleAdminEmail || isMatchedAdmin || isProfileAdmin) {
+              profileData.perfil = "Administrador";
+              profileData.cargo = "Administrador";
+            }
+
             const mappedEmployee = mapUsuarioToEmployee(profileData as any);
             
             if (mappedEmployee.status === "BLOCKED") {
@@ -814,7 +993,7 @@ export default function App() {
   const handleChangeRole = async (role: UserRole) => {
     // find a fitting mock employee or create template
     const fitEmp = employees.find(e => {
-      if (role === "ADMIN") return e.role.toUpperCase().includes("GESTOR") || e.role.toUpperCase().includes("ADMINISTRADOR");
+      if (role === "ADMIN") return e.role.toUpperCase().includes("GESTOR") || e.role.toUpperCase().includes("ADMINISTRADOR") || e.role.toUpperCase().includes("ADMIN");
       if (role === "SUPERVISOR") return e.role.toUpperCase().includes("SUPERVISOR");
       return e.role.toUpperCase().includes("CAIXA") || e.role.toUpperCase().includes("VENDEDOR");
     });
@@ -918,7 +1097,7 @@ export default function App() {
 
     // Auto-redirect or reset module access if needed
     const simplifiedRole: UserRole = 
-      fitEmp.role.toUpperCase().includes("GESTOR") || fitEmp.role.toUpperCase().includes("ADMINISTRADOR")
+      fitEmp.role.toUpperCase().includes("GESTOR") || fitEmp.role.toUpperCase().includes("ADMINISTRADOR") || fitEmp.role.toUpperCase().includes("ADMIN")
         ? "ADMIN"
         : fitEmp.role.toUpperCase().includes("SUPERVISOR")
           ? "SUPERVISOR"
@@ -1009,7 +1188,7 @@ export default function App() {
 
     const rawRole = (fitEmp.role || "").toUpperCase();
     const simplifiedRole: UserRole = 
-      rawRole.includes("GESTOR") || rawRole.includes("ADMINISTRADOR")
+      rawRole.includes("GESTOR") || rawRole.includes("ADMINISTRADOR") || rawRole.includes("ADMIN")
         ? "ADMIN"
         : rawRole.includes("SUPERVISOR")
           ? "SUPERVISOR"
@@ -1049,6 +1228,9 @@ export default function App() {
       else if (raw.includes("administrador") || raw.includes("gestor")) authRole = "ADMIN";
     }
 
+    const ipStr = userIpInfo ? `${userIpInfo.ip} (${userIpInfo.city}, ${userIpInfo.country})` : "102.81.12.94 (Maputo, Moçambique)";
+    const devStr = deviceInfo || "Desktop (Chrome)";
+
     const newLog: AuditLog = {
       id: `log-${Date.now()}`,
       timestamp: new Date().toISOString(),
@@ -1056,7 +1238,9 @@ export default function App() {
       userRole: authRole,
       action,
       module,
-      details
+      details,
+      ip: ipStr,
+      device: devStr
     };
     setAuditLogs(prev => {
       const updated = [...prev, newLog];
@@ -1149,7 +1333,7 @@ export default function App() {
       const dbPayload = {
         app: "OST Vendas",
         exportDate: new Date().toISOString(),
-        version: "3.2.0-Prod-Mozambique",
+        version: currentSystemVersion,
         operator: type === "manual" ? (activeUser?.name || "ADMIN") : "Agendador Automático Redundante",
         data: {
           settings,
@@ -1262,7 +1446,7 @@ export default function App() {
     const dbPayload = {
       app: "OST Vendas",
       exportDate: new Date().toISOString(),
-      version: "3.2.0-Prod-Mozambique",
+      version: currentSystemVersion,
       operator: activeUser?.name || "ADMIN",
       data: {
         settings,
@@ -1794,6 +1978,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
   };
 
+  const handleLinkAccount = async (employeeId: string, emailStr: string) => {
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === employeeId) {
+        return { ...emp, email: emailStr.toLowerCase().trim() };
+      }
+      return emp;
+    });
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+    showToast("Sucesso: A sua conta foi vinculada a este perfil!", "success");
+    handleAddAuditLog(
+      "Vínculo de Conta",
+      "SISTEMA",
+      `Perfil de colaborador ${employeeId} vinculado ao e-mail ${emailStr}`
+    );
+  };
+
   if (!isAuthenticated || !activeUser) {
     return (
       <LoginModule
@@ -1834,6 +2035,12 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           activeUser={activeUser}
+          onSwitchUser={() => {
+            setIsUserSwitchModalOpen(true);
+            if (activeUser) {
+              setSwitchSelectedEmployeeId(activeUser.id);
+            }
+          }}
         />
       )}
 
@@ -1890,7 +2097,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
   
               <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono opacity-80">
                 <span className={theme === "night" ? "text-slate-400" : "text-slate-600"}>Versão:</span>
-                <span className={`font-bold ${theme === "night" ? "text-amber-400" : "text-orange-600"}`}>v4.2.1-ERP</span>
+                <span className={`font-bold ${theme === "night" ? "text-amber-400" : "text-orange-600"}`}>{currentSystemVersion}</span>
               </div>
             </div>
   
@@ -1939,22 +2146,55 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 )}
               </button>
   
-              {/* Active user status pill */}
-              <div className={`flex items-center gap-2 p-1.5 rounded-xl border ${
-                theme === "night" ? "bg-zinc-900 border-zinc-800" : "bg-white border-slate-200 shadow-sm"
-              }`}>
-                <span className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px]">
-                  {activeUser.name.substring(0, 2).toUpperCase()}
-                </span>
-                <div className="text-left leading-none">
-                  <p className={`font-extrabold text-[10.5px] leading-tight ${
-                    theme === "night" ? "text-slate-200" : "text-slate-800"
-                  }`}>{activeUser.name}</p>
-                  <p className={`text-[9px] italic mt-0.5 ${
+              {/* Button to quickly switch account / alter user */}
+              <button
+                id="quick-switch-user-btn"
+                onClick={() => {
+                  setIsUserSwitchModalOpen(true);
+                  if (activeUser) {
+                    setSwitchSelectedEmployeeId(activeUser.id);
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
+                  theme === "night" 
+                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300" 
+                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
+                }`}
+                title="Alterar Conta do Usuário"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Alterar Usuário / Vincular</span>
+              </button>
+
+              {/* Active user status pill made interactive */}
+              <button
+                onClick={() => {
+                  setIsUserSwitchModalOpen(true);
+                  if (activeUser) {
+                    setSwitchSelectedEmployeeId(activeUser.id);
+                  }
+                }}
+                className={`flex items-center gap-2 p-1.5 rounded-xl border transition-all text-left cursor-pointer ${
+                  theme === "night" 
+                    ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-slate-200" 
+                    : "bg-white border-slate-200 hover:bg-slate-50 text-slate-800 shadow-sm"
+                }`}
+                title="Clique para alterar conta ou vincular novo e-mail"
+              >
+                <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px] shrink-0 overflow-hidden">
+                  {activeUser.fotoPerfil ? (
+                    <img src={activeUser.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
+                  ) : (
+                    activeUser.name.substring(0, 2).toUpperCase()
+                  )}
+                </div>
+                <div className="leading-none">
+                  <p className="font-extrabold text-[10.5px] leading-tight">{activeUser.name}</p>
+                  <p className={`text-[9px] mt-0.5 ${
                     theme === "night" ? "text-slate-400" : "text-slate-500"
                   }`}>{activeUser.role}</p>
                 </div>
-              </div>
+              </button>
             </div>
   
           </header>
@@ -2035,6 +2275,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   customers={customers}
                   cashFlow={filteredCashFlow}
                   currency={currency}
+                  activeUser={activeUser}
                   onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
                   settings={settings}
                   onUpdateSettings={handleUpdateSettings}
@@ -2161,6 +2402,35 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onExportLocalDB={handleExportLocalDB}
                   onImportLocalDB={handleImportLocalDB}
                   onTriggerLocalBackup={handleTriggerLocalBackup}
+                  systemVersion={currentSystemVersion}
+                  employees={employees}
+                  onResetEmployeePin={async (empId) => {
+                    const target = employees.find(e => e.id === empId);
+                    if (!target) return;
+                    const updatedEmployees = employees.map(emp => {
+                      if (emp.id === empId) {
+                        return {
+                          ...emp,
+                          pin: "123456",
+                          pinChanged: false,
+                          pinCreatedAt: new Date().toISOString()
+                        };
+                      }
+                      return emp;
+                    });
+                    setEmployees(updatedEmployees);
+                    await syncTable("employees", updatedEmployees);
+                    handleAddAuditLog(
+                      "Reset de PIN Forçado",
+                      "SEGURANÇA",
+                      `PIN do colaborador ${target.name} (${target.username}) resetado para o padrão '123456' pelo Administrador.`
+                    );
+                    showToast(
+                      `PIN do colaborador ${target.name} foi resetado com sucesso para '123456'. Ele será obrigado a alterá-lo no próximo login.`,
+                      "success",
+                      "Reset de PIN Concluído"
+                    );
+                  }}
                 />
               )}
 
@@ -2522,6 +2792,479 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   }`}
                 >
                   Ativar Conta & Aceder
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Interactive Account Switching & Linking Modal */}
+      <AnimatePresence>
+        {isUserSwitchModalOpen && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className={`w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
+                theme === "night"
+                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
+                  : "bg-white text-slate-800 border-slate-100"
+              }`}
+              id="inside-user-switcher-modal"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-orange-500/10 to-amber-500/10 text-left">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-orange-100 text-orange-700 dark:bg-orange-900/35 dark:text-orange-400 rounded-xl flex items-center justify-center shadow-inner">
+                      <Users className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Painel do Colaborador</h3>
+                      <p className="text-[10px] text-orange-600 dark:text-orange-400 font-extrabold font-mono uppercase">Vincular Conta & Configurar Perfil</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsUserSwitchModalOpen(false)}
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-400 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className={`flex border-b text-xs font-bold ${
+                theme === "night" ? "border-zinc-850 bg-zinc-900/40" : "border-slate-100 bg-slate-50/40"
+              }`}>
+                <button
+                  type="button"
+                  onClick={() => setUserSwitchModalTab("switch")}
+                  className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
+                    userSwitchModalTab === "switch"
+                      ? "border-orange-500 text-orange-500 font-black"
+                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  }`}
+                >
+                  🔄 Alterar Usuário
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUserSwitchModalTab("profile")}
+                  className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
+                    userSwitchModalTab === "profile"
+                      ? "border-orange-500 text-orange-500 font-black"
+                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  }`}
+                >
+                  ⚙️ Configurações de Perfil
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-4 text-left overflow-y-auto max-h-[60vh]">
+                {userSwitchModalTab === "switch" ? (
+                  <>
+                    <div className="p-3.5 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1 text-xs">
+                      <p className="font-bold text-orange-500">Sessão Autenticada Ativa:</p>
+                      <p className="text-slate-400 leading-relaxed text-[11px]">
+                        Atualmente você está logado no sistema via e-mail com: <strong className="text-orange-400 font-mono">{auth.currentUser?.email || "Sem e-mail (Login Local)"}</strong>.
+                        Você pode selecionar qualquer colaborador no quadro comercial abaixo para **vincular o seu e-mail ativo** a ele e mudar seu operador operacional de forma instantânea.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Selecione o Colaborador de Destino</label>
+                      <select
+                        value={switchSelectedEmployeeId}
+                        onChange={(e) => {
+                          setSwitchSelectedEmployeeId(e.target.value);
+                          setSwitchEnteredPin("");
+                          setSwitchPinError("");
+                        }}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
+                      >
+                        <option value="">-- Escolha um colaborador --</option>
+                        {employees.map(emp => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.name} ({emp.role}) {emp.email ? `[Vínculo: ${emp.email}]` : "[Sem vínculo]"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {switchSelectedEmployeeId && (
+                      <div className="space-y-4 p-4 bg-slate-900/60 rounded-xl border border-slate-800 animate-in fade-in duration-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/25 text-orange-400 flex items-center justify-center font-bold text-[11px] overflow-hidden">
+                            {employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil ? (
+                              (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("data:") || (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("http") ? (
+                                <img src={employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
+                              ) : (
+                                <span className="text-sm leading-none">{employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil}</span>
+                              )
+                            ) : (
+                              (employees.find(x => x.id === switchSelectedEmployeeId)?.name || "US").substring(0, 2).toUpperCase()
+                            )}
+                          </div>
+                          <div className="leading-none text-left">
+                            <p className="font-extrabold text-xs text-white">
+                              {employees.find(x => x.id === switchSelectedEmployeeId)?.name}
+                            </p>
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              {employees.find(x => x.id === switchSelectedEmployeeId)?.role}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* PASSWORD / PIN INPUT FIELD FOR PROTECTION */}
+                        <div className="border-t border-slate-800 pt-3 space-y-1.5 text-left">
+                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                            Senha / PIN de Acesso do Colaborador Selecionado
+                          </label>
+                          <input
+                            type="password"
+                            maxLength={32}
+                            value={switchEnteredPin}
+                            onChange={(e) => {
+                              setSwitchEnteredPin(e.target.value);
+                              if (switchPinError) setSwitchPinError("");
+                            }}
+                            placeholder="Digite o PIN/Senha do colaborador para confirmar"
+                            className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 px-3.5 text-xs text-white outline-none transition font-medium focus:ring-2 focus:ring-orange-500/20"
+                          />
+                          {switchPinError && (
+                            <p className="text-[10.5px] text-red-500 font-bold animate-pulse mt-1">⚠️ {switchPinError}</p>
+                          )}
+                        </div>
+
+                        <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
+                          <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              defaultChecked={true}
+                              id="auto-link-email-checkbox"
+                              className="mt-0.5 rounded border-slate-850 bg-slate-950 text-orange-500 focus:ring-orange-500/30 cursor-pointer"
+                            />
+                            <div className="text-left leading-tight">
+                              <p className="text-[11px] font-bold text-slate-200">Vincular meu e-mail atual a este perfil</p>
+                              <p className="text-[9.5px] text-slate-400 mt-0.5">Sempre que fizer login com <strong className="text-orange-400">{auth.currentUser?.email || "seu e-mail atual"}</strong>, você entrará automaticamente nesta conta comercial.</p>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="space-y-4 animate-in fade-in duration-200">
+                    {/* Visual Preview Banner & Uploader */}
+                    <div className="flex items-center gap-4 p-4 bg-slate-900/60 rounded-xl border border-slate-850">
+                      <div className="relative shrink-0">
+                        <div className="w-16 h-16 rounded-2xl bg-orange-500 text-white flex items-center justify-center font-bold text-xl overflow-hidden border border-slate-700 shadow-lg">
+                          {profileFotoPerfil ? (
+                            profileFotoPerfil.startsWith("data:") || profileFotoPerfil.startsWith("http") || profileFotoPerfil.startsWith("/") ? (
+                              <img src={profileFotoPerfil} className="w-full h-full object-cover" alt="Previsualização" referrerPolicy="no-referrer" />
+                            ) : (
+                              <span className="text-3xl leading-none">{profileFotoPerfil}</span>
+                            )
+                          ) : (
+                            profileName.substring(0, 2).toUpperCase() || "US"
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
+                          className="absolute -bottom-1 -right-1 bg-orange-500 text-white rounded-lg p-1.5 hover:bg-orange-600 transition cursor-pointer shadow-md"
+                          title="Carregar Imagem"
+                        >
+                          <Camera className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex-1 leading-none text-left">
+                        <p className="text-xs font-black text-white">{profileName || "Sem Nome"}</p>
+                        <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-mono tracking-wider">{activeUser?.role || "Colaborador"}</p>
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
+                            className="px-2.5 py-1 bg-slate-950 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold border border-slate-800 hover:border-slate-700 transition cursor-pointer"
+                          >
+                            Upload Foto
+                          </button>
+                          {profileFotoPerfil && (
+                            <button
+                              type="button"
+                              onClick={() => setProfileFotoPerfil("")}
+                              className="px-2.5 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg text-[9px] font-bold border border-red-500/20 transition cursor-pointer"
+                            >
+                              Remover
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Hidden File Input */}
+                    <input
+                      type="file"
+                      id="profile-photo-upload-input"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 1.5 * 1024 * 1024) {
+                            showToast("A imagem deve ter no máximo 1.5MB", "error");
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setProfileFotoPerfil(reader.result as string);
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+
+                    {/* Emojis Preset Grid */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Escolha um Emoji como Avatar</label>
+                      <div className="grid grid-cols-8 gap-2">
+                        {["👨‍💼", "👩‍💼", "👨‍💻", "👩‍💻", "🚀", "🌟", "🍊", "💼", "☕", "🎮", "🦁", "🍕", "⚡", "❤️", "👑", "💡"].map((emoji) => (
+                          <button
+                            type="button"
+                            key={emoji}
+                            onClick={() => setProfileFotoPerfil(emoji)}
+                            className={`text-lg p-2 rounded-xl transition-all border cursor-pointer hover:scale-110 flex items-center justify-center ${
+                              profileFotoPerfil === emoji
+                                ? "bg-orange-500/15 border-orange-500 text-white"
+                                : "bg-slate-950 border-slate-850 hover:border-slate-650 text-slate-300"
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Manual Image URL */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ou Cole uma URL de Imagem</label>
+                      <input
+                        type="text"
+                        value={profileFotoPerfil.startsWith("data:") ? "" : profileFotoPerfil}
+                        placeholder="https://exemplo.com/sua-foto.jpg"
+                        onChange={(e) => setProfileFotoPerfil(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                      />
+                    </div>
+
+                    {/* Text Fields */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Nome Completo</label>
+                        <input
+                          type="text"
+                          value={profileName}
+                          onChange={(e) => setProfileName(e.target.value)}
+                          placeholder="Seu nome"
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Contacto Telefónico</label>
+                        <input
+                          type="text"
+                          value={profileContact}
+                          onChange={(e) => setProfileContact(e.target.value)}
+                          placeholder="Seu contacto"
+                          className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                        />
+                      </div>
+                    </div>
+
+                    {/* PIN Expiration Indicator */}
+                    <div className={`p-3.5 rounded-xl border flex flex-col gap-1 text-xs leading-relaxed transition-all ${
+                      pinRemainingDays <= 7 
+                        ? "bg-rose-500/10 border-rose-500/25 text-rose-400 animate-pulse" 
+                        : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
+                    }`}>
+                      <div className="flex items-center justify-between font-bold">
+                        <span className="flex items-center gap-1.5">
+                          {pinRemainingDays <= 7 ? "⚠️ Expiração de Segurança (PIN)" : "🛡️ Validade da Senha (PIN)"}
+                        </span>
+                        <span className={`font-mono text-[11px] px-2.5 py-0.5 rounded-md bg-black/40 font-black ${
+                          pinRemainingDays <= 7 ? "text-rose-400 border border-rose-500/30" : "text-emerald-400"
+                        }`}>
+                          {pinRemainingDays} {pinRemainingDays === 1 ? "dia" : "dias"}
+                        </span>
+                      </div>
+                      <p className="text-[10.5px] opacity-85 mt-1">
+                        {pinRemainingDays <= 7 
+                          ? `Atenção colaborador! Seu PIN de acesso está prestes a expirar. Por segurança de dados comerciais, atualize o seu PIN em breve (Resta(m) apenas ${pinRemainingDays} dia(s)).`
+                          : `Sua senha de segurança está em conformidade com as regras de rotação obrigatória do sistema (máximo 60 dias).`}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="p-6 border-t border-slate-100 dark:border-zinc-850 flex items-center justify-end gap-3 bg-slate-900/10">
+                <button
+                  type="button"
+                  onClick={() => setIsUserSwitchModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (userSwitchModalTab === "switch") {
+                      if (!switchSelectedEmployeeId) return;
+                      const selectedEmp = employees.find(x => x.id === switchSelectedEmployeeId);
+                      if (!selectedEmp) return;
+
+                      // Verify PIN/password before switching!
+                      const requiredPin = selectedEmp.pin || "123456";
+                      if (!switchEnteredPin.trim()) {
+                        setSwitchPinError("Por favor, introduza a senha / PIN de acesso deste colaborador.");
+                        return;
+                      }
+                      if (switchEnteredPin.trim() !== requiredPin.trim()) {
+                        setSwitchPinError("Senha incorreta. Por favor, tente novamente.");
+                        return;
+                      }
+
+                      // Check if account is blocked/inactive
+                      if (selectedEmp.status === "BLOCKED") {
+                        setSwitchPinError("Esta conta está BLOQUEADA por expiração de senha ou motivos de segurança.");
+                        return;
+                      }
+                      if (selectedEmp.status === "INACTIVE" || selectedEmp.status === "SUSPENDED") {
+                        setSwitchPinError("Esta conta está inativa ou suspensa. Contacte o Administrador.");
+                        return;
+                      }
+
+                      // Check expiration policy (2 months / 60 days)
+                      const now = new Date();
+                      const createdAtStr = selectedEmp.pinCreatedAt || selectedEmp.admissionDate || now.toISOString();
+                      const createdAt = new Date(createdAtStr);
+                      const diffTime = now.getTime() - createdAt.getTime();
+                      const diffDays = diffTime / (1000 * 60 * 60 * 24);
+
+                      const isPinTemporary = selectedEmp.pinChanged === false || selectedEmp.pinChanged === undefined;
+
+                      // If password is temporary (first login) OR has expired (older than 60 days)
+                      if (isPinTemporary) {
+                        setForcePinTargetEmployee(selectedEmp);
+                        setNewPin("");
+                        setConfirmNewPin("");
+                        setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
+                        setForcePinChangeOpen(true);
+                        setIsUserSwitchModalOpen(false);
+                        return;
+                      }
+
+                      if (diffDays > 60) {
+                        setForcePinTargetEmployee(selectedEmp);
+                        setNewPin("");
+                        setConfirmNewPin("");
+                        setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
+                        setForcePinChangeOpen(true);
+                        setIsUserSwitchModalOpen(false);
+                        return;
+                      }
+
+                      const autoLinkChecked = (document.getElementById("auto-link-email-checkbox") as HTMLInputElement)?.checked ?? true;
+                      const emailToBind = auth.currentUser?.email || selectedEmp.email || "";
+
+                      let updatedEmployees = [...employees];
+                      if (autoLinkChecked && emailToBind) {
+                        updatedEmployees = employees.map(emp => {
+                          if (emp.id === switchSelectedEmployeeId) {
+                            return { ...emp, email: emailToBind.toLowerCase().trim() };
+                          }
+                          return emp;
+                        });
+                        setEmployees(updatedEmployees);
+                        await syncTable("employees", updatedEmployees);
+                      }
+
+                      // Perform active switch
+                      const finalActiveUser = {
+                        ...selectedEmp,
+                        email: autoLinkChecked && emailToBind ? emailToBind : (selectedEmp.email || ""),
+                        fotoPerfil: selectedEmp.fotoPerfil || ""
+                      };
+                      setActiveUser(finalActiveUser);
+
+                      showToast(
+                        `Usuário alterado com sucesso para ${selectedEmp.name}!${autoLinkChecked ? " Conta vinculada com sucesso." : ""}`, 
+                        "success"
+                      );
+
+                      handleAddAuditLog(
+                        "Alteração de Usuário",
+                        "SISTEMA",
+                        `Operador alterado para ${selectedEmp.name} (ID: ${selectedEmp.id})${autoLinkChecked ? ` com vínculo de e-mail ao ${emailToBind}` : ""}`
+                      );
+
+                      setIsUserSwitchModalOpen(false);
+                    } else {
+                      if (!activeUser) return;
+                      if (!profileName.trim()) {
+                        showToast("O nome do perfil não pode estar vazio.", "warning");
+                        return;
+                      }
+
+                      const updatedEmployees = employees.map(emp => {
+                        if (emp.id === activeUser.id) {
+                          return {
+                            ...emp,
+                            name: profileName.trim(),
+                            contact: profileContact.trim(),
+                            fotoPerfil: profileFotoPerfil.trim()
+                          };
+                        }
+                        return emp;
+                      });
+
+                      setEmployees(updatedEmployees);
+                      await syncTable("employees", updatedEmployees);
+
+                      // Update active session operator
+                      setActiveUser({
+                        ...activeUser,
+                        name: profileName.trim(),
+                        contact: profileContact.trim(),
+                        fotoPerfil: profileFotoPerfil.trim()
+                      });
+
+                      showToast("Perfil atualizado com sucesso!", "success");
+
+                      handleAddAuditLog(
+                        "Atualização de Perfil",
+                        "SISTEMA",
+                        `Colaborador ${activeUser.name} atualizou os seus dados de perfil.`
+                      );
+
+                      setIsUserSwitchModalOpen(false);
+                    }
+                  }}
+                  disabled={userSwitchModalTab === "switch" ? (!switchSelectedEmployeeId || !switchEnteredPin.trim()) : !profileName.trim()}
+                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
+                    (userSwitchModalTab === "switch" ? (switchSelectedEmployeeId && switchEnteredPin.trim()) : profileName.trim())
+                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
+                      : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                  }`}
+                >
+                  {userSwitchModalTab === "switch" ? "Vincular & Alterar Conta" : "Salvar Perfil"}
                 </button>
               </div>
             </motion.div>

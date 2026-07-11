@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
-import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, getDocs, onSnapshot, disableNetwork } from "firebase/firestore";
+import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, getDocs, onSnapshot, disableNetwork, writeBatch } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase App
@@ -17,22 +17,27 @@ if (firestoreDatabaseId) {
 export const db = firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
 export const auth = getAuth(app);
 
-const provider = new GoogleAuthProvider();
-provider.addScope('https://mail.google.com/');
-provider.addScope('https://www.googleapis.com/auth/gmail.send');
-provider.addScope('https://www.googleapis.com/auth/drive');
-provider.addScope('https://www.googleapis.com/auth/drive.activity');
-provider.addScope('https://www.googleapis.com/auth/drive.activity.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.appdata');
-provider.addScope('https://www.googleapis.com/auth/drive.apps.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.file');
-provider.addScope('https://www.googleapis.com/auth/drive.install');
-provider.addScope('https://www.googleapis.com/auth/drive.meet.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.metadata');
-provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.photos.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-provider.addScope('https://www.googleapis.com/auth/drive.scripts');
+const baseProvider = new GoogleAuthProvider();
+
+const gmailProvider = new GoogleAuthProvider();
+gmailProvider.addScope('https://mail.google.com/');
+gmailProvider.addScope('https://www.googleapis.com/auth/gmail.send');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.activity');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.activity.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.appdata');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.apps.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.file');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.install');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.meet.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.metadata');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.photos.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.readonly');
+gmailProvider.addScope('https://www.googleapis.com/auth/drive.scripts');
+
+// Export the base provider for reference if needed
+export const provider = baseProvider;
 
 // Flag to indicate if we are in the middle of a sign-in flow.
 let isSigningIn = false;
@@ -64,10 +69,11 @@ export const initAuth = (
 };
 
 // Must be called from a button click or user interaction
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (withScopes: boolean = false): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
+    const selectedProvider = withScopes ? gmailProvider : baseProvider;
+    const result = await signInWithPopup(auth, selectedProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     if (!credential?.accessToken) {
       throw new Error('Failed to get access token from Firebase Auth');
@@ -78,6 +84,19 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
+    if (
+      error &&
+      (error.code === 'auth/popup-closed-by-user' ||
+       error.code === 'auth/cancelled-popup-request' ||
+       (error.message && (error.message.includes('popup-closed-by-user') || error.message.includes('cancelled-popup-request'))))
+    ) {
+      const isIframe = window.self !== window.top;
+      if (isIframe) {
+        throw new Error('O login do Google foi bloqueado ou fechado pelo navegador. Como esta aplicação está a ser executada dentro de um iframe de visualização, as janelas de popup do Google podem ser bloqueadas pelo seu navegador. Por favor, clique no link "abrir em nova aba" ou abra a aplicação numa nova aba para iniciar sessão com o Google com sucesso.');
+      } else {
+        throw new Error('O popup de login do Google foi fechado antes de concluir a autenticação. Por favor, tente novamente e mantenha a janela aberta até o fim.');
+      }
+    }
     throw error;
   } finally {
     isSigningIn = false;
@@ -384,7 +403,7 @@ export const signUpWithEmail = async (
   password: string,
   nomeCompleto: string,
   empresa: string,
-  perfil: string = "Caixa"
+  perfil: string = "Administrador"
 ): Promise<any> => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -565,6 +584,13 @@ export const signInWithEmail = async (email: string, password: string): Promise<
 
       if (docSnap.exists()) {
         profile = docSnap.data() as UsuarioDoc;
+        const normalizedEmail = (profile.email || email).toLowerCase().trim();
+        const isGoogleAdminEmail = normalizedEmail === "levidomingos12@gmail.com";
+        const isRoleAdmin = (profile.perfil || "").toUpperCase().includes("ADMIN") || (profile.perfil || "").toUpperCase().includes("GESTOR");
+        if (isGoogleAdminEmail || isRoleAdmin) {
+          profile.perfil = "Administrador";
+          profile.cargo = "Administrador";
+        }
       } else {
         throw new Error("Perfil de utilizador não encontrado no Firestore.");
       }
@@ -576,8 +602,8 @@ export const signInWithEmail = async (email: string, password: string): Promise<
         nomeCompleto: user.displayName || email.split("@")[0] || "Operador",
         email: user.email || email,
         empresa: "OST Comércio Geral",
-        perfil: "Caixa",
-        cargo: "Operador",
+        perfil: "Administrador",
+        cargo: "Administrador",
         estado: "Ativo",
         fotoPerfil: "",
         telefone: "",
@@ -742,12 +768,6 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
 
     const matchedEmp = employeesList.find(emp => emp.email?.toLowerCase().trim() === googleEmail);
 
-    // If email is not found in either Firestore or the local/mock employees list, deny access!
-    if (!existingProfileInFirestore && !matchedEmp) {
-      await auth.signOut();
-      throw new Error(`O e-mail do Google (${user.email}) não está cadastrado ou autorizado no sistema. Por favor, solicite o seu cadastro ao Administrador.`);
-    }
-
     let profile: UsuarioDoc & { adminEmail?: string };
     const userDocRef = doc(db, "usuarios", user.uid);
 
@@ -765,6 +785,13 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
         fotoPerfil: user.photoURL || currentProfile.fotoPerfil || "",
         ultimoLogin: new Date().toISOString()
       };
+
+      const isGoogleAdminEmail = googleEmail === "levidomingos12@gmail.com";
+      const isMatchedAdmin = matchedEmp && (matchedEmp.role?.toUpperCase().includes("ADMIN") || matchedEmp.role?.toUpperCase().includes("GESTOR"));
+      if (isGoogleAdminEmail || isMatchedAdmin) {
+        profile.perfil = "Administrador";
+        profile.cargo = "Administrador";
+      }
 
       // Enrich missing credentials if matched employee has them
       if (matchedEmp && (!profile.username || !profile.pin)) {
@@ -793,13 +820,17 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
       }
     } else if (matchedEmp) {
       // Create a brand new Firestore document for an existing authorized employee
+      const isGoogleAdminEmail = googleEmail === "levidomingos12@gmail.com";
+      const isMatchedAdmin = matchedEmp && (matchedEmp.role?.toUpperCase().includes("ADMIN") || matchedEmp.role?.toUpperCase().includes("GESTOR"));
+      const finalRole = (isGoogleAdminEmail || isMatchedAdmin) ? "Administrador" : matchedEmp.role;
+
       profile = {
         uid: user.uid,
         nomeCompleto: matchedEmp.name,
         email: matchedEmp.email || user.email || "",
         empresa: defaultBranch,
-        perfil: matchedEmp.role,
-        cargo: matchedEmp.role,
+        perfil: finalRole,
+        cargo: finalRole,
         estado: matchedEmp.status === "ACTIVE" ? "Ativo" : "Inativo",
         fotoPerfil: user.photoURL || "",
         telefone: matchedEmp.contact || "",
@@ -829,8 +860,33 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
         }
       }
     } else {
-      await auth.signOut();
-      throw new Error("Erro de integridade de dados ao validar utilizador.");
+      // Auto-register brand new Google user as ADMIN!
+      profile = {
+        uid: user.uid,
+        nomeCompleto: user.displayName || "Utilizador Google",
+        email: googleEmail,
+        empresa: defaultBranch,
+        perfil: "Administrador",
+        cargo: "Administrador Geral (Google)",
+        estado: "Ativo",
+        fotoPerfil: user.photoURL || "",
+        telefone: "",
+        ultimoLogin: new Date().toISOString(),
+        dataCriacao: new Date().toISOString(),
+        username: googleEmail.split("@")[0],
+        pin: "1234",
+        pinCreatedAt: new Date().toISOString(),
+        pinChanged: true
+      };
+      profile.adminEmail = googleEmail;
+
+      if (!isCircuitBroken()) {
+        try {
+          await setDoc(userDocRef, sanitizeForFirestore(profile));
+        } catch (setErr) {
+          console.warn("Falha ao auto-criar perfil de utilizador Google em Firestore:", setErr);
+        }
+      }
     }
 
     // Cache updated profile to localStorage so getPartitionPath has immediate offline/online access to it
@@ -897,6 +953,30 @@ export const addProdutoToFirestore = async (product: any): Promise<void> => {
   }
 };
 
+// Add multiple products to Firestore in batches of 400 to prevent quota/rate limiting issues
+export const addProdutosToFirestoreBatch = async (products: any[]): Promise<void> => {
+  if (!products || products.length === 0) return;
+  const collPath = getPartitionPath("produtos");
+  if (isCircuitBroken()) {
+    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
+  }
+  
+  try {
+    const batchSize = 400; // conservative batch limit (max 500)
+    for (let i = 0; i < products.length; i += batchSize) {
+      const chunk = products.slice(i, i + batchSize);
+      const batch = writeBatch(db);
+      for (const prod of chunk) {
+        const docRef = doc(db, collPath, String(prod.id));
+        batch.set(docRef, sanitizeForFirestore(prod));
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, collPath);
+  }
+};
+
 // Update product in Firestore
 export const updateProdutoInFirestore = async (productId: string, updatedFields: any): Promise<void> => {
   const collPath = getPartitionPath("produtos");
@@ -955,6 +1035,30 @@ export const addTransacaoToFirestore = async (transaction: any): Promise<void> =
     await setDoc(doc(db, collPath, transaction.id), sanitizeForFirestore(transaction));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+// Add multiple transactions to Firestore in batches of 400 to prevent quota/rate limiting issues
+export const addTransacoesToFirestoreBatch = async (transactions: any[]): Promise<void> => {
+  if (!transactions || transactions.length === 0) return;
+  const collPath = getPartitionPath("transacoes");
+  if (isCircuitBroken()) {
+    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
+  }
+  
+  try {
+    const batchSize = 400; // conservative batch limit (max 500)
+    for (let i = 0; i < transactions.length; i += batchSize) {
+      const chunk = transactions.slice(i, i + batchSize);
+      const batch = writeBatch(db);
+      for (const tx of chunk) {
+        const docRef = doc(db, collPath, String(tx.id));
+        batch.set(docRef, sanitizeForFirestore(tx));
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, collPath);
   }
 };
 
@@ -1247,9 +1351,10 @@ export const createRecoveryRequest = async (request: {
   employeeName: string; 
   type: "SENHA" | "PIN";
 }): Promise<void> => {
+  const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
     const requestId = `recov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    await setDoc(doc(db, "solicitacoes_recuperacao", requestId), sanitizeForFirestore({
+    await setDoc(doc(db, collPath, requestId), sanitizeForFirestore({
       id: requestId,
       email: request.email || "",
       employeeId: request.employeeId || "",
@@ -1268,8 +1373,9 @@ export const createRecoveryRequest = async (request: {
  * Fetches all recovery requests from Firestore.
  */
 export const getRecoveryRequests = async (): Promise<any[]> => {
+  const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
-    const querySnapshot = await getDocs(collection(db, "solicitacoes_recuperacao"));
+    const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
@@ -1292,8 +1398,9 @@ export const getRecoveryRequests = async (): Promise<any[]> => {
  * Marks a recovery request as resolved.
  */
 export const resolveRecoveryRequest = async (requestId: string): Promise<void> => {
+  const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
-    await updateDoc(doc(db, "solicitacoes_recuperacao", requestId), {
+    await updateDoc(doc(db, collPath, requestId), {
       status: "RESOLVIDO",
       resolvedAt: new Date().toISOString()
     });
