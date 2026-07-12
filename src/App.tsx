@@ -77,7 +77,20 @@ import {
   Lock,
   ShieldAlert,
   Users,
-  Camera
+  Camera,
+  LayoutDashboard,
+  ShoppingCart,
+  Package,
+  PiggyBank,
+  UserCheck,
+  FileText,
+  BookOpen,
+  Settings,
+  Smartphone,
+  ChevronDown,
+  ChevronUp,
+  Compass,
+  LogOut
 } from "lucide-react";
 
 interface Toast {
@@ -86,6 +99,20 @@ interface Toast {
   message: string;
   type: "success" | "error" | "info" | "warning";
 }
+
+const NAV_MENU_ITEMS = [
+  { id: "dashboard", label: "Dashboard Inteligente", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas (POS)", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "staff", label: "Funcionários & Auditoria", shortLabel: "Funcionários", icon: UserCheck, roles: ["ADMIN"] },
+  { id: "ai", label: "Previsão AI (Premium)", shortLabel: "Previsão AI", icon: TrendingUp, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "training", label: "Centro de Formação", shortLabel: "Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "settings", label: "Configurações Gerais", shortLabel: "Definições", icon: Settings, roles: ["ADMIN"] },
+  { id: "gateway", label: "Integração Mobile Money", shortLabel: "M-Pesa/e-Mola", icon: Smartphone, roles: ["ADMIN"] },
+];
 
 export default function App() {
   
@@ -288,6 +315,7 @@ export default function App() {
   const [theme, setTheme] = useState<"daily" | "night">("daily");
   const [isPOSFullscreen, setIsPOSFullscreen] = useState<boolean>(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [isFabOpen, setIsFabOpen] = useState<boolean>(false);
   
   // Geolocation and IP tracking for Audit Logs
   const [userIpInfo, setUserIpInfo] = useState<{ ip: string; city: string; country: string } | null>(null);
@@ -1441,6 +1469,24 @@ export default function App() {
     return () => clearInterval(intervalId);
   }, [isAuthenticated, products, customers, transactions, cashFlow, employees, auditLogs, settings]);
 
+  const handleGetBackupPayload = () => {
+    return {
+      app: "OST Vendas",
+      exportDate: new Date().toISOString(),
+      version: currentSystemVersion,
+      operator: activeUser?.name || "ADMIN",
+      data: {
+        settings,
+        products,
+        customers,
+        transactions,
+        cashFlow,
+        employees,
+        auditLogs
+      }
+    };
+  };
+
   // ADMIN-ONLY REAL DATABASE EXPORT (JSON DOWNLOAD)
   const handleExportLocalDB = () => {
     const dbPayload = {
@@ -2015,11 +2061,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       theme === "night" ? "bg-zinc-950 text-slate-200" : "bg-slate-50 text-slate-800"
     }`}>
       
-      {/* Visual background atmospheric touch for elegant negative spacing aesthetics */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/5 rounded-full blur-3xl pointer-events-none z-0"></div>
-
-      {/* Main sidebar on the left */}
-      {!isPOSFullscreen && (
+        {!isPOSFullscreen && (
         <Sidebar
           currentRole={simplifiedRole}
           onChangeRole={handleChangeRole}
@@ -2054,11 +2096,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           }`}>
             
             <div className="flex items-center gap-3">
-              {/* Hamburger Menu Toggle for Mobile/Tablet */}
+              {/* Hamburger Menu Toggle - Always Visible */}
               <button
                 type="button"
                 onClick={() => setIsSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
+                className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
                 aria-label="Abrir menu"
               >
                 <Menu className="w-5 h-5" />
@@ -2165,7 +2207,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 <Users className="w-3.5 h-3.5" />
                 <span>Alterar Usuário / Vincular</span>
               </button>
-
+ 
               {/* Active user status pill made interactive */}
               <button
                 onClick={() => {
@@ -2198,6 +2240,55 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
             </div>
   
           </header>
+        )}
+
+        {/* COMPACT HORIZONTAL TOP NAVIGATION MODULES BAR */}
+        {!isPOSFullscreen && (
+          <div className={`border-b px-4 md:px-6 py-2 shrink-0 flex items-center gap-2 overflow-x-auto scrollbar-none z-15 transition-all ${
+            theme === "night" 
+              ? "bg-zinc-900/60 border-zinc-850/60 text-slate-300" 
+              : "bg-white border-slate-150 text-slate-700 shadow-sm"
+          }`}>
+            <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scrollbar-none py-1 font-sans">
+              {NAV_MENU_ITEMS.map((item) => {
+                const allowedRoles = item.roles;
+                const authorized = allowedRoles.includes(simplifiedRole);
+                const active = activeTab.toLowerCase() === item.id;
+                
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
+                    disabled={!authorized}
+                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
+                      active 
+                        ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
+                        : authorized 
+                          ? theme === "night" 
+                            ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
+                            : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
+                          : "opacity-35 cursor-not-allowed text-slate-400"
+                    }`}
+                    title={authorized ? item.label : "Acesso Restrito (" + allowedRoles.join(", ") + ")"}
+                  >
+                    <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
+                      active 
+                        ? "text-white" 
+                        : authorized 
+                          ? theme === "night" 
+                            ? "text-slate-500 group-hover:text-slate-300" 
+                            : "text-slate-400 group-hover:text-orange-500"
+                          : "text-slate-400"
+                    }`} />
+                    <span>{item.shortLabel}</span>
+                    {!authorized && (
+                      <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         )}
         
         {isQuotaExceeded && (
@@ -2402,6 +2493,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onExportLocalDB={handleExportLocalDB}
                   onImportLocalDB={handleImportLocalDB}
                   onTriggerLocalBackup={handleTriggerLocalBackup}
+                  onGetBackupPayload={handleGetBackupPayload}
                   systemVersion={currentSystemVersion}
                   employees={employees}
                   onResetEmployeePin={async (empId) => {
@@ -3345,6 +3437,129 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           ))}
         </AnimatePresence>
       </div>
+
+      {/* Floating Action Navigation Hub (FAB) */}
+      {!isPOSFullscreen && (
+        <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end gap-3 no-print">
+          <AnimatePresence>
+            {isFabOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 15, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 15, scale: 0.9 }}
+                transition={{ duration: 0.15 }}
+                className={`p-4 rounded-3xl border shadow-2xl w-64 md:w-72 max-h-[75vh] overflow-y-auto backdrop-blur-xl flex flex-col gap-2 ${
+                  theme === "night"
+                    ? "bg-zinc-950/95 border-zinc-850/80 shadow-zinc-950/50 text-slate-100"
+                    : "bg-white/95 border-slate-200 shadow-slate-350/30 text-slate-800"
+                }`}
+              >
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-dashed border-slate-700/20 dark:border-zinc-800">
+                  <span className="text-[10px] font-black tracking-widest uppercase text-orange-500 font-mono">Navegação Rápida</span>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-900 border dark:border-zinc-800 font-mono">
+                    {activeUser ? activeUser.role : "Sessão"}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-1">
+                  {NAV_MENU_ITEMS.map((item) => {
+                    const authorized = item.roles.includes(simplifiedRole);
+                    const active = activeTab.toLowerCase() === item.id;
+                    
+                    return (
+                      <button
+                        key={item.id}
+                        disabled={!authorized}
+                        onClick={() => {
+                          setActiveTab(item.id.toUpperCase());
+                          setIsFabOpen(false);
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all group ${
+                          active
+                            ? "bg-orange-500 text-white shadow-md shadow-orange-500/25"
+                            : authorized
+                            ? theme === "night"
+                              ? "text-slate-300 hover:text-white hover:bg-zinc-900 cursor-pointer"
+                              : "text-slate-700 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
+                            : "opacity-35 cursor-not-allowed text-slate-400"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
+                            active
+                              ? "text-white"
+                              : authorized
+                              ? theme === "night"
+                                ? "text-slate-500 group-hover:text-slate-300"
+                                : "text-slate-400 group-hover:text-orange-500"
+                              : "text-slate-400"
+                          }`} />
+                          <span className="truncate">{item.label}</span>
+                        </div>
+                        
+                        {!authorized && (
+                          <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                <div className="border-t border-slate-700/10 dark:border-zinc-800/80 pt-2 mt-1 flex flex-col gap-1">
+                  <button
+                    onClick={() => {
+                      setIsSidebarOpen(true);
+                      setIsFabOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                      theme === "night"
+                        ? "bg-zinc-900/60 border-zinc-850 text-orange-400 hover:bg-zinc-900 hover:text-orange-300"
+                        : "bg-orange-50/40 border-orange-100 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
+                    }`}
+                  >
+                    <Menu className="w-3.5 h-3.5" />
+                    <span>Ver Painel Lateral 📋</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setIsFabOpen(false);
+                      handleLogout();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider text-red-500 hover:text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-all cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Terminar Sessão 🔒</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          <button
+            onClick={() => setIsFabOpen(!isFabOpen)}
+            className={`w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all cursor-pointer border relative group ${
+              isFabOpen
+                ? "bg-slate-900 text-white border-slate-800 hover:bg-slate-800 scale-105"
+                : theme === "night"
+                ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 hover:scale-110"
+                : "bg-orange-500 hover:bg-orange-600 text-white border-orange-400 hover:scale-110"
+            }`}
+            title="Menu de Navegação Rápida"
+          >
+            {isFabOpen ? (
+              <X className="w-6 h-6 animate-in spin-in duration-200" />
+            ) : (
+              <Compass className="w-6 h-6 group-hover:rotate-45 transition-transform duration-300 animate-pulse" />
+            )}
+            
+            {/* Soft pulsing visual outer ring */}
+            {!isFabOpen && (
+              <span className="absolute -inset-0.5 rounded-full border border-orange-500 animate-ping opacity-25 pointer-events-none"></span>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

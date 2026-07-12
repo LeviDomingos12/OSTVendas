@@ -85,16 +85,16 @@ export default function Sidebar({
 
   return (
     <>
-      {/* Mobile Backdrop Drawer Overlay */}
+      {/* Drawer Overlay Backdrop */}
       {isOpen && (
         <div 
           onClick={onClose}
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] lg:hidden cursor-pointer animate-in fade-in duration-200"
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] cursor-pointer animate-in fade-in duration-200"
         />
       )}
 
-      <aside className={`fixed inset-y-0 left-0 z-[101] w-72 flex flex-col shrink-0 h-screen overflow-y-auto border-r transition-all duration-300 lg:static lg:translate-x-0 ${
-        isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:translate-x-0"
+      <aside className={`fixed inset-y-0 left-0 z-[101] w-72 flex flex-col shrink-0 h-screen overflow-y-auto border-r transition-all duration-300 ${
+        isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
       } ${
         isNight 
           ? "bg-zinc-950 text-slate-100 border-zinc-900" 

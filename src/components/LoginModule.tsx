@@ -483,116 +483,14 @@ export default function LoginModule({
   };
 
   return (
-    <div className="min-h-screen w-full flex bg-gradient-to-br from-slate-900 via-slate-950 to-zinc-950 text-slate-100 overflow-hidden relative font-sans">
+    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-950 to-zinc-950 text-slate-100 overflow-y-auto relative font-sans p-4 sm:p-6 md:p-8">
       
       {/* Background Ambient Glows */}
       <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/10 via-transparent to-transparent pointer-events-none z-0"></div>
       <div className="absolute -bottom-48 -right-48 w-96 h-96 bg-orange-500/5 rounded-full blur-3xl pointer-events-none z-0"></div>
 
-      {/* LEFT SIDE PANEL - Branding & Core ERP Highlights */}
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative z-10 border-r border-slate-800/40 bg-slate-950/40 backdrop-blur-md">
-        
-        {/* Brand Header */}
-        <div className="flex items-center gap-3">
-          <img
-            src={logoUrl || "/src/assets/images/app_logo_1782658148089.jpg"}
-            alt="OST Vendas Logo"
-            className="w-12 h-12 rounded-2xl object-contain bg-white p-1 shrink-0 shadow-lg shadow-orange-950/20"
-            referrerPolicy="no-referrer"
-          />
-          <div>
-            <h2 className="font-extrabold text-lg tracking-tight text-white">OST Vendas</h2>
-            <p className="text-[10px] text-orange-500 uppercase tracking-widest font-mono font-bold">ERP de Gestão Comercial</p>
-          </div>
-        </div>
-
-        {/* Dynamic Context Widget Illustration */}
-        <div className="my-auto max-w-md w-full space-y-6">
-          <div className="space-y-2">
-            <span className="px-2.5 py-1 text-[10px] uppercase font-mono font-bold tracking-wider rounded-full bg-orange-500/10 text-orange-400 border border-orange-500/20">
-              Autenticação Unificada Firebase
-            </span>
-            <h1 className="text-3xl font-black tracking-tight text-white leading-tight">
-              Sistema de Gestão Comercial
-            </h1>
-            <p className="text-sm text-slate-400">
-              Controlo operacional em tempo real integrado com base de dados na nuvem e regras de acesso de nível militar.
-            </p>
-          </div>
-
-          {/* Real-time stats visualization simulation */}
-          <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-5 shadow-2xl relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-1.5 h-full bg-[#FF6B00]"></div>
-            
-            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span className="text-[10px] font-mono font-bold text-slate-400 uppercase">Estado da Conexão</span>
-              </div>
-              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/30 px-2 py-0.5 rounded border border-emerald-500/10">Firebase Online</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mb-4">
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850">
-                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Criptografia</p>
-                <p className="text-xs font-bold text-white mt-0.5">SHA-256 Hash</p>
-                <div className="flex items-center gap-1 text-[9px] text-slate-400 font-mono mt-1">
-                  <span>Firebase Auth</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-850">
-                <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">Sessão</p>
-                <p className="text-xs font-bold text-orange-400 mt-0.5">Persistente</p>
-                <div className="flex items-center gap-1 text-[9px] text-slate-500 font-mono mt-1">
-                  <span>Auto-Refresh Token</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2 bg-slate-950/40 p-3 rounded-xl border border-slate-850/80">
-              <div className="flex justify-between items-center text-[9.5px]">
-                <span className="text-slate-400 font-bold">Multi-perfil Autorizado</span>
-                <span className="font-mono text-orange-400 font-bold">Regras ABAC</span>
-              </div>
-              <div className="w-full bg-slate-850 h-1.5 rounded-full overflow-hidden">
-                <div className="bg-gradient-to-r from-[#FF6B00] to-orange-400 h-full w-full rounded-full"></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 pt-2 text-xs">
-            {[
-              "Login com Google integrado",
-              "Sincronização Cloud Firestore",
-              "Segurança a nível de campo",
-              "Registo de Auditoria de Acessos",
-              "Inibição de contas desativadas",
-              "Reposição automática de senhas",
-              "Faturação multiempresa",
-              "Verificação SSL fidedigna"
-            ].map((feature, i) => (
-              <div key={i} className="flex items-center gap-2 text-slate-300">
-                <div className="w-4 h-4 rounded-full bg-orange-500/10 text-[#FF6B00] flex items-center justify-center font-bold text-[9px] border border-orange-500/20">
-                  <Check className="w-2.5 h-2.5" />
-                </div>
-                <span className="font-medium text-slate-300">{feature}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Footer specifications */}
-        <div className="flex items-center justify-between text-[11px] text-slate-500">
-          <span className="font-mono">Sistema de Autenticação Homologado</span>
-          <span className="flex items-center gap-1 text-emerald-400">
-            <ShieldCheck className="w-3.5 h-3.5" /> SSL Encriptado
-          </span>
-        </div>
-      </div>
-
-      {/* RIGHT SIDE PANEL - SYSTEM AUTH FORMS */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center p-6 sm:p-12 relative z-10 bg-[#0F172A]/40 backdrop-blur-xl">
+      {/* SYSTEM AUTH PANEL - CENTERED */}
+      <div className="w-full max-w-lg flex flex-col justify-center items-center p-6 sm:p-10 relative z-10 bg-[#0F172A]/80 backdrop-blur-xl rounded-3xl border border-slate-800 shadow-2xl my-auto">
         
         {/* Branch selection screen during login pipeline */}
         {loadingState === "COMPANY_SELECTION" ? (
@@ -692,19 +590,22 @@ export default function LoginModule({
           /* AUTH FORMS (LOGIN / SIGNUP / RECOVERY / PIN / QRCODE) */
           <div className="w-full max-w-md space-y-8 animate-in fade-in duration-500">
             
-            {/* Mobile Header Logo */}
-            <div className="flex lg:hidden items-center gap-3 justify-center mb-6">
+            {/* Header Logo & Branding */}
+            <div className="flex flex-col items-center gap-2.5 justify-center mb-6 text-center">
               <img
                 src={logoUrl || "/src/assets/images/app_logo_1782658148089.jpg"}
                 alt="OST Vendas Logo"
-                className="w-10 h-10 rounded-xl object-contain bg-white p-1 shrink-0 shadow-lg shadow-orange-500/20"
+                className="w-14 h-14 rounded-2xl object-contain bg-white p-1 shadow-xl shadow-orange-950/40"
                 referrerPolicy="no-referrer"
               />
-              <h2 className="font-extrabold text-base tracking-tight text-white">OST Vendas</h2>
+              <div>
+                <h2 className="font-extrabold text-lg tracking-tight text-white leading-none">OST Vendas</h2>
+                <p className="text-[10px] text-orange-500 font-mono font-bold uppercase tracking-wider mt-1.5">ERP de Gestão Comercial</p>
+              </div>
             </div>
 
             {/* View Titles */}
-            <div className="text-center lg:text-left space-y-1.5">
+            <div className="text-center space-y-1.5">
               {view === "LOGIN" && (
                 <>
                   <h2 className="text-3xl font-black text-white tracking-tight leading-none">Sistema de Gestão</h2>
@@ -1308,7 +1209,7 @@ export default function LoginModule({
         )}
 
         {/* Bottom copyright */}
-        <div className="absolute bottom-6 text-[10.5px] text-slate-600 font-medium text-center">
+        <div className="mt-8 text-[10.5px] text-slate-600 font-medium text-center">
           <p>OST Comércio Geral © 2026</p>
         </div>
 

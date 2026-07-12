@@ -41,7 +41,7 @@ import {
   Edit
 } from "lucide-react";
 import { SystemSettings, UserRole, Employee, Branch } from "../types";
-import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore } from "../lib/firebase";
+import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
 import { SYSTEM_THEMES } from "../lib/themes";
 
@@ -58,6 +58,7 @@ interface SettingsModuleProps {
   onExportLocalDB?: () => void;
   onImportLocalDB?: (jsonData: any) => Promise<boolean> | boolean;
   onTriggerLocalBackup?: (type: "manual" | "automatic") => Promise<boolean> | boolean;
+  onGetBackupPayload?: () => any;
   systemVersion?: string;
   employees?: Employee[];
   onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
@@ -76,6 +77,7 @@ export default function SettingsModule({
   onExportLocalDB,
   onImportLocalDB,
   onTriggerLocalBackup,
+  onGetBackupPayload,
   systemVersion,
   employees = [],
   onResetEmployeePin
@@ -419,6 +421,165 @@ export default function SettingsModule({
   // NEW Backup and Recovery tab states
   const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp" | "filiais" | "seguranca" | "smtp">("geral");
   const [localBackupsLog, setLocalBackupsLog] = useState<any[]>([]);
+  
+  // CLOUD BACKUP (FIREBASE STORAGE) STATES
+  const [cloudBackups, setCloudBackups] = useState<CloudBackupItem[]>([]);
+  const [isLoadingCloudBackups, setIsLoadingCloudBackups] = useState(false);
+  const [isUploadingCloudBackup, setIsUploadingCloudBackup] = useState(false);
+  const [isRestoringCloudBackup, setIsRestoringCloudBackup] = useState(false);
+
+  const loadCloudBackups = async () => {
+    const uid = auth.currentUser?.uid || activeUser?.id;
+    if (!uid) {
+      console.warn("Nenhum UID encontrado para listar backups em nuvem.");
+      return;
+    }
+    setIsLoadingCloudBackups(true);
+    try {
+      const items = await listBackupsFromStorage(uid);
+      setCloudBackups(items);
+    } catch (error) {
+      console.error("Erro ao listar backups em nuvem:", error);
+    } finally {
+      setIsLoadingCloudBackups(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === "backup") {
+      loadCloudBackups();
+    }
+  }, [activeSubTab]);
+
+  const handleUploadCloudBackup = async () => {
+    if (!canEdit) {
+      if (onShowToast) {
+        onShowToast("Apenas administradores podem iniciar um backup em nuvem.", "error", "Permissão Negada");
+      }
+      return;
+    }
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      if (onShowToast) {
+        onShowToast("Nenhum Administrador autenticado no Firebase Auth encontrado para salvar na nuvem.", "error", "Erro de Autenticação");
+      }
+      return;
+    }
+
+    if (!onGetBackupPayload) {
+      if (onShowToast) {
+        onShowToast("Função de obter payload de backup não configurada.", "error", "Erro Interno");
+      }
+      return;
+    }
+
+    setIsUploadingCloudBackup(true);
+    try {
+      const backupData = onGetBackupPayload();
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const filename = `OST_Vendas_Cloud_Backup_${timestamp}.json`;
+      
+      await uploadBackupToStorage(uid, filename, backupData);
+      
+      if (onShowToast) {
+        onShowToast("Backup completo enviado com sucesso para o Firebase Storage!", "success", "Backup em Nuvem");
+      }
+      
+      onAddAuditLog(
+        "Backup em Nuvem (Firebase Storage)",
+        "SEGURANÇA",
+        `Administrador ${activeUser?.name || "ADMIN"} realizou um backup completo para o Firebase Storage. Ficheiro: ${filename}`
+      );
+
+      await loadCloudBackups();
+    } catch (error: any) {
+      console.error("Erro no upload de backup para nuvem:", error);
+      if (onShowToast) {
+        onShowToast("Falha ao salvar backup no Firebase Storage: " + error.message, "error", "Falha de Upload");
+      }
+    } finally {
+      setIsUploadingCloudBackup(false);
+    }
+  };
+
+  const handleRestoreFromCloud = async (backupItem: CloudBackupItem) => {
+    if (currentRole !== "ADMIN") {
+      if (onShowToast) {
+        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem restaurar o banco de dados.", "error", "Permissão Negada");
+      }
+      return;
+    }
+
+    if (window.confirm(`Deseja realmente restaurar os dados do sistema a partir do backup em nuvem "${backupItem.filename}"? Os dados atuais serão substituídos.`)) {
+      setIsRestoringCloudBackup(true);
+      try {
+        const response = await fetch(backupItem.downloadUrl);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: Falha ao descarregar ficheiro da nuvem`);
+        }
+        const parsed = await response.json();
+        
+        if (onImportLocalDB && parsed.data) {
+          const success = await onImportLocalDB(parsed.data);
+          if (success) {
+            if (onShowToast) {
+              onShowToast("Banco de dados restaurado com sucesso a partir da nuvem!", "success", "Restauro Concluído");
+            }
+            onAddAuditLog(
+              "Restauro de Backup em Nuvem",
+              "SEGURANÇA",
+              `Administrador ${activeUser?.name || "ADMIN"} restaurou o sistema a partir do backup em nuvem: ${backupItem.filename}`
+            );
+          }
+        } else {
+          if (onShowToast) {
+            onShowToast("Os dados salvos nesse backup em nuvem parecem inválidos ou incompletos.", "warning", "Dados Inválidos");
+          }
+        }
+      } catch (err: any) {
+        console.error("Erro ao restaurar backup em nuvem:", err);
+        if (onShowToast) {
+          onShowToast("Erro ao ler ou processar dados de backup da nuvem: " + err.message, "error", "Erro de Restauro");
+        }
+      } finally {
+        setIsRestoringCloudBackup(false);
+      }
+    }
+  };
+
+  const handleDeleteCloudBackup = async (filename: string) => {
+    if (currentRole !== "ADMIN") {
+      if (onShowToast) {
+        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem remover backups.", "error", "Permissão Negada");
+      }
+      return;
+    }
+
+    const uid = auth.currentUser?.uid || activeUser?.id;
+    if (!uid) {
+      if (onShowToast) {
+        onShowToast("UID de autenticação não encontrado.", "error", "Erro");
+      }
+      return;
+    }
+
+    if (window.confirm(`Deseja realmente eliminar permanentemente o backup "${filename}" do Firebase Storage?`)) {
+      try {
+        await deleteBackupFromStorage(uid, filename);
+        if (onShowToast) {
+          onShowToast("Cópia de segurança em nuvem removida com sucesso!", "success", "Backup Eliminado");
+        }
+        await loadCloudBackups();
+      } catch (err: any) {
+        console.error("Erro ao eliminar backup em nuvem:", err);
+        if (onShowToast) {
+          onShowToast("Erro ao eliminar o backup da nuvem: " + err.message, "error", "Erro");
+        }
+      }
+    }
+  };
+
   const [confirmResetEmployeeId, setConfirmResetEmployeeId] = useState<string | null>(null);
   const [isResettingPin, setIsResettingPin] = useState(false);
 
@@ -5008,13 +5169,58 @@ export default function SettingsModule({
                 </div>
               </div>
 
+              {/* Card 3: Cloud Backup (Firebase Storage) */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                <div className="flex items-center gap-2 text-orange-600">
+                  <Cloud className="w-4.5 h-4.5" />
+                  <h4 className="font-bold text-slate-800 text-sm">Cópia de Segurança em Nuvem (Firebase Storage)</h4>
+                </div>
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  Guarde uma cópia de segurança completa do banco de dados de vendas diretamente na sua conta do Firebase Storage. Cada administrador possui a sua pasta própria baseada no seu UID de autenticação.
+                </p>
+
+                {auth.currentUser ? (
+                  <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-xl space-y-1 text-[11px]">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                      Administrador Conectado:
+                    </div>
+                    <p className="font-semibold truncate font-mono text-[10px]">{auth.currentUser.email}</p>
+                    <p className="text-[10px] text-emerald-600 truncate font-mono">UID: {auth.currentUser.uid}</p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl space-y-1 text-[11px]">
+                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                      <AlertTriangle className="w-4 h-4 text-amber-600" />
+                      Aviso de Autenticação:
+                    </div>
+                    <p className="text-[10.5px]">Nenhum Administrador autenticado no Firebase Auth encontrado. Faça login com uma conta Google na tela de acesso para liberar backups em nuvem.</p>
+                  </div>
+                )}
+
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    disabled={!canEdit || !auth.currentUser || isUploadingCloudBackup}
+                    onClick={handleUploadCloudBackup}
+                    className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow shadow-orange-500/10"
+                  >
+                    <RefreshCw className={`w-4 h-4 text-white ${isUploadingCloudBackup ? "animate-spin" : ""}`} />
+                    {isUploadingCloudBackup ? "Enviando para Nuvem..." : "Fazer Backup na Nuvem Agora"}
+                  </button>
+                </div>
+              </div>
+
             </div>
 
             {/* Right List Panel */}
             <div className="lg:col-span-7 space-y-6">
               
               {/* Card: Backups Log */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col h-full min-h-[400px]">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col min-h-[300px]">
                 <div className="flex items-center justify-between border-b pb-3 border-slate-100">
                   <div className="flex items-center gap-2 text-orange-600">
                     <Database className="w-4.5 h-4.5" />
@@ -5030,7 +5236,7 @@ export default function SettingsModule({
                 </p>
 
                 {localBackupsLog.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[250px]">
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
                     <div className="bg-slate-100 text-slate-400 p-4 rounded-2xl mb-3">
                       <Database className="w-8 h-8 stroke-[1.5]" />
                     </div>
@@ -5040,7 +5246,7 @@ export default function SettingsModule({
                     </p>
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
+                  <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
                     <table className="w-full text-[11px] text-slate-600 border-collapse">
                       <thead>
                         <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
@@ -5115,7 +5321,125 @@ export default function SettingsModule({
 
                 <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 italic flex items-center gap-1">
                   <Shield className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>A restauração de qualquer backup substitui imediatamente os dados em execução no terminal offline.</span>
+                  <span>A restauração de qualquer backup local substitui os dados em execução no terminal offline.</span>
+                </div>
+              </div>
+
+              {/* Card: Cloud Backups Log */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col min-h-[300px]">
+                <div className="flex items-center justify-between border-b pb-3 border-slate-100">
+                  <div className="flex items-center gap-2 text-orange-600">
+                    <Cloud className="w-4.5 h-4.5" />
+                    <h4 className="font-bold text-slate-800 text-sm">Histórico de Backups na Nuvem (Firebase Storage)</h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={loadCloudBackups}
+                    disabled={isLoadingCloudBackups}
+                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition disabled:opacity-50"
+                    title="Recarregar Backups da Nuvem"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCloudBackups ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 leading-normal">
+                  Estas são as cópias de segurança do seu histórico pessoal salvas de forma segura no Firebase Storage para o administrador autenticado.
+                </p>
+
+                {isLoadingCloudBackups ? (
+                  <div className="flex-1 flex items-center justify-center py-12">
+                    <RefreshCw className="w-6 h-6 text-orange-500 animate-spin" />
+                    <span className="ml-2 text-xs text-slate-500 font-medium">Buscando backups em nuvem...</span>
+                  </div>
+                ) : !auth.currentUser ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
+                    <Lock className="w-8 h-8 text-slate-400 mb-2 stroke-[1.5]" />
+                    <h5 className="font-bold text-slate-700 text-xs">Acesso restrito</h5>
+                    <p className="text-[10px] text-slate-400 max-w-[240px] mt-1">
+                      Por favor, conecte a sua conta de Administrador no Firebase Auth para listar os seus backups pessoais em nuvem.
+                    </p>
+                  </div>
+                ) : cloudBackups.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
+                    <Cloud className="w-8 h-8 text-slate-400 mb-3 stroke-[1.5]" />
+                    <h5 className="font-bold text-slate-700 text-xs">Nenhum backup em nuvem encontrado</h5>
+                    <p className="text-[11px] text-slate-400 max-w-[280px] mt-1">
+                      Você ainda não realizou nenhum backup para o Firebase Storage. Utilize o botão à esquerda para criar seu primeiro ponto de restauro na nuvem.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
+                    <table className="w-full text-[11px] text-slate-600 border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
+                          <th className="py-2.5 px-3">Nome do Ficheiro</th>
+                          <th className="py-2.5 px-2">Criado em</th>
+                          <th className="py-2.5 px-2">Tamanho</th>
+                          <th className="py-2.5 px-3 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {cloudBackups.map((backup) => (
+                          <tr key={backup.filename} className="hover:bg-slate-50 transition">
+                            <td className="py-3 px-3 font-semibold text-slate-800 font-mono text-[10px] max-w-[180px] truncate" title={backup.filename}>
+                              {backup.filename}
+                            </td>
+                            <td className="py-3 px-2 font-medium text-slate-500 whitespace-nowrap">
+                              {new Date(backup.createdAt).toLocaleString("pt-MZ", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit"
+                              })}
+                            </td>
+                            <td className="py-3 px-2 font-mono text-[10.5px] text-slate-500 whitespace-nowrap">
+                              {(backup.size / 1024).toFixed(1)} KB
+                            </td>
+                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
+                              <a
+                                href={backup.downloadUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-955 border border-slate-200 rounded-lg transition shadow-sm cursor-pointer"
+                                title="Descarregar ficheiro da nuvem"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </a>
+                              <button
+                                type="button"
+                                disabled={isRestoringCloudBackup || currentRole !== "ADMIN"}
+                                onClick={() => handleRestoreFromCloud(backup)}
+                                className={`inline-flex items-center justify-center p-1.5 border rounded-lg transition-all cursor-pointer ${
+                                  currentRole === "ADMIN"
+                                    ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
+                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50"
+                                }`}
+                                title={currentRole === "ADMIN" ? "Restaurar sistema a partir deste backup" : "Apenas administradores"}
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${isRestoringCloudBackup ? "animate-spin" : ""}`} />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={currentRole !== "ADMIN"}
+                                onClick={() => handleDeleteCloudBackup(backup.filename)}
+                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-red-50 text-red-500 hover:text-red-655 border border-slate-200 hover:border-red-200 rounded-lg transition shadow-sm cursor-pointer"
+                                title="Eliminar da nuvem"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 italic flex items-center gap-1">
+                  <Shield className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>Selecione restaurar para carregar as configurações, vendas, produtos, clientes e funcionários salvos na nuvem.</span>
                 </div>
               </div>
 

@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, getDocs, onSnapshot, disableNetwork, writeBatch } from "firebase/firestore";
+import { getStorage, ref, uploadString, getDownloadURL, listAll, deleteObject, getMetadata } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 // Initialize Firebase App
@@ -318,45 +319,35 @@ export interface UsuarioDoc {
 }
 
 // Custom Helper to get partitioned collection path for dynamic data isolation (Multi-tenant structure)
-export function getPartitionPath(collectionName: string, adminEmailOverride?: string): string {
-  let adminEmail: string | null = adminEmailOverride || null;
+export function getPartitionPath(collectionName: string, adminUidOverride?: string): string {
+  let adminUid: string | null = adminUidOverride || null;
 
-  if (!adminEmail) {
+  if (!adminUid) {
     // 1. Check current authenticated Google/Firebase Auth user
     const firebaseUser = auth.currentUser;
     if (firebaseUser) {
-      const cached = localStorage.getItem(`cached_profile_${firebaseUser.uid}`);
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          adminEmail = parsed.adminEmail || parsed.email;
-        } catch (e) {}
-      }
-      if (!adminEmail) {
-        adminEmail = firebaseUser.email;
-      }
+      adminUid = firebaseUser.uid;
     }
   }
 
-  if (!adminEmail) {
+  if (!adminUid) {
     // 2. Fallback to active logged-in user in ERP local/simulated session
     const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
     if (storedSimulated) {
       try {
         const parsed = JSON.parse(storedSimulated);
-        adminEmail = parsed.adminEmail || parsed.email;
+        adminUid = parsed.uid || parsed.id;
       } catch (e) {}
     }
   }
 
-  // Clean the email to form a valid, sanitized Firestore path segment
-  const cleanEmail = (adminEmail || "default_tenant")
-    .toLowerCase()
+  // Sanitize the UID (ensure it's not empty and matches a safe Firestore path format)
+  const cleanUid = (adminUid || "default_tenant")
     .trim()
     .replace(/\s+/g, "")
-    .replace(/[^a-z0-9@._-]/g, "");
+    .replace(/[^a-zA-Z0-9_\\-]/g, "");
 
-  return `admins/${cleanEmail}/${collectionName}`;
+  return `admins/${cleanUid}/${collectionName}`;
 }
 
 // Map Firestore doc to native Employee type
@@ -438,7 +429,7 @@ export const signUpWithEmail = async (
     if (!isCircuitBroken()) {
       try {
         const logId = `log-register-${Date.now()}`;
-        const logsCollPath = getPartitionPath("logs", email);
+        const logsCollPath = getPartitionPath("logs", user.uid);
         await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,
           userId: user.uid,
@@ -896,7 +887,7 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
     if (!isCircuitBroken()) {
       try {
         const logId = `log-glogin-${Date.now()}`;
-        const logsCollPath = getPartitionPath("logs", profile.adminEmail);
+        const logsCollPath = getPartitionPath("logs", profile.uid);
         await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,
           userId: user.uid,
@@ -1406,6 +1397,94 @@ export const resolveRecoveryRequest = async (requestId: string): Promise<void> =
     });
   } catch (error) {
     console.error("Failed to resolve recovery request:", error);
+    throw error;
+  }
+};
+
+// --- FIREBASE STORAGE BACKUPS ---
+export const storage = getStorage(app);
+
+export interface CloudBackupItem {
+  filename: string;
+  fullPath: string;
+  downloadUrl: string;
+  size: number;
+  createdAt: string;
+}
+
+/**
+ * Uploads a database backup JSON string directly to Firebase Storage.
+ * Folder path: {uid}/backups/{filename}
+ */
+export const uploadBackupToStorage = async (uid: string, filename: string, backupData: any): Promise<CloudBackupItem> => {
+  try {
+    const fileRef = ref(storage, `${uid}/backups/${filename}`);
+    const jsonString = typeof backupData === "string" ? backupData : JSON.stringify(backupData);
+    
+    // Upload JSON string
+    await uploadString(fileRef, jsonString, "raw", {
+      contentType: "application/json",
+    });
+
+    const downloadUrl = await getDownloadURL(fileRef);
+    const metadata = await getMetadata(fileRef);
+
+    return {
+      filename,
+      fullPath: fileRef.fullPath,
+      downloadUrl,
+      size: metadata.size,
+      createdAt: metadata.timeCreated || new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error("[FIREBASE STORAGE] Failed to upload backup:", error);
+    throw error;
+  }
+};
+
+/**
+ * Lists all backups for a given user UID from Firebase Storage.
+ */
+export const listBackupsFromStorage = async (uid: string): Promise<CloudBackupItem[]> => {
+  try {
+    const listRef = ref(storage, `${uid}/backups`);
+    const res = await listAll(listRef);
+    
+    const items: CloudBackupItem[] = [];
+    for (const itemRef of res.items) {
+      try {
+        const downloadUrl = await getDownloadURL(itemRef);
+        const metadata = await getMetadata(itemRef);
+        items.push({
+          filename: itemRef.name,
+          fullPath: itemRef.fullPath,
+          downloadUrl,
+          size: metadata.size,
+          createdAt: metadata.timeCreated || new Date().toISOString(),
+        });
+      } catch (metaErr) {
+        console.error(`[FIREBASE STORAGE] Error fetching metadata for ${itemRef.name}:`, metaErr);
+      }
+    }
+
+    // Sort descending by creation date
+    items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    return items;
+  } catch (error) {
+    console.error("[FIREBASE STORAGE] Failed to list backups:", error);
+    return [];
+  }
+};
+
+/**
+ * Deletes a specific backup from Firebase Storage.
+ */
+export const deleteBackupFromStorage = async (uid: string, filename: string): Promise<void> => {
+  try {
+    const fileRef = ref(storage, `${uid}/backups/${filename}`);
+    await deleteObject(fileRef);
+  } catch (error) {
+    console.error("[FIREBASE STORAGE] Failed to delete backup:", error);
     throw error;
   }
 };
