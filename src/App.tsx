@@ -327,7 +327,9 @@ export default function App() {
   // Load and apply color theme dynamically
   useEffect(() => {
     const userId = activeUser?.id || "default";
-    const userTheme = localStorage.getItem("erp_theme_" + userId);
+    const matchedEmployee = employees.find(e => e.id === userId);
+    const dbTheme = matchedEmployee?.theme;
+    const userTheme = dbTheme || localStorage.getItem("erp_theme_" + userId);
     
     if (userTheme) {
       setActiveColorTheme(userTheme);
@@ -339,7 +341,7 @@ export default function App() {
       setActiveColorTheme("laranja");
       applyTheme("laranja");
     }
-  }, [activeUser, settings.theme]);
+  }, [activeUser, settings.theme, employees]);
 
   // When theme changes, apply it to document head
   useEffect(() => {
@@ -2521,6 +2523,37 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                       `PIN do colaborador ${target.name} foi resetado com sucesso para '123456'. Ele será obrigado a alterá-lo no próximo login.`,
                       "success",
                       "Reset de PIN Concluído"
+                    );
+                  }}
+                  onUpdateEmployeeTheme={async (empId, themeId) => {
+                    const target = employees.find(e => e.id === empId);
+                    if (!target) return;
+                    const updatedEmployees = employees.map(emp => {
+                      if (emp.id === empId) {
+                        return {
+                          ...emp,
+                          theme: themeId
+                        };
+                      }
+                      return emp;
+                    });
+                    setEmployees(updatedEmployees);
+                    await syncTable("employees", updatedEmployees);
+                    
+                    if (activeUser && activeUser.id === empId) {
+                      setActiveColorTheme(themeId);
+                      localStorage.setItem("erp_theme_" + empId, themeId);
+                    }
+
+                    handleAddAuditLog(
+                      "Definição de Tema de Colaborador",
+                      "SEGURANÇA",
+                      `Tema do colaborador ${target.name} (${target.username}) atualizado para ${themeId} pelo Administrador.`
+                    );
+                    showToast(
+                      `Preferência de cor para ${target.name} atualizada para '${themeId}'.`,
+                      "success",
+                      "Tema de Colaborador"
                     );
                   }}
                 />

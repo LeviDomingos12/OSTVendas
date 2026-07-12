@@ -118,6 +118,7 @@ export interface Employee {
   pinChanged?: boolean;
   password?: string;
   fotoPerfil?: string;
+  theme?: string;
 }
 
 export interface SystemSettings {

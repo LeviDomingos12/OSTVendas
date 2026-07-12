@@ -62,6 +62,7 @@ interface SettingsModuleProps {
   systemVersion?: string;
   employees?: Employee[];
   onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
+  onUpdateEmployeeTheme?: (employeeId: string, themeId: string) => Promise<void> | void;
 }
 
 export default function SettingsModule({
@@ -80,7 +81,8 @@ export default function SettingsModule({
   onGetBackupPayload,
   systemVersion,
   employees = [],
-  onResetEmployeePin
+  onResetEmployeePin,
+  onUpdateEmployeeTheme
 }: SettingsModuleProps) {
   const canEdit = currentRole === "ADMIN";
   
@@ -6256,10 +6258,10 @@ export default function SettingsModule({
                       </span>
                     </div>
 
-                    <div className="border-t border-slate-200/50 pt-2.5 flex items-center justify-between gap-2">
-                      <div className="space-y-1">
-                        <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Estado de Senha (PIN)</span>
-                        <div className="flex items-center gap-1.5">
+                    <div className="border-t border-slate-200/50 pt-2.5 flex flex-col gap-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="space-y-1">
+                          <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Estado de Senha (PIN)</span>
                           <span className={`text-[10px] px-2 py-0.5 rounded-md border font-extrabold flex items-center gap-1 ${
                             isTemp 
                               ? "bg-rose-50 border-rose-200 text-rose-700" 
@@ -6269,22 +6271,67 @@ export default function SettingsModule({
                           }`}>
                             <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
                             {isTemp 
-                              ? "PIN Temporário (Altere Já)" 
+                              ? "PIN Temporário" 
                               : remainingDays <= 7 
-                                ? `Expira em ${remainingDays} dias!` 
-                                : `Válido por ${remainingDays} dias`}
+                                ? `Expira em ${remainingDays} d` 
+                                : `Válido (${remainingDays}d)`}
                           </span>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setConfirmResetEmployeeId(emp.id)}
+                          className="py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold rounded-lg text-[10px] transition-all cursor-pointer shadow-sm hover:shadow-rose-500/20 flex items-center gap-1.5 border border-rose-600/10 font-sans"
+                        >
+                          <Lock className="w-3 h-3 shrink-0" />
+                          Resetar PIN
+                        </button>
                       </div>
 
-                      <button
-                        type="button"
-                        onClick={() => setConfirmResetEmployeeId(emp.id)}
-                        className="py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold rounded-lg text-[11px] transition-all cursor-pointer shadow-sm hover:shadow-rose-500/20 flex items-center gap-1.5 border border-rose-600/10 font-sans"
-                      >
-                        <Lock className="w-3 h-3 shrink-0" />
-                        Resetar PIN
-                      </button>
+                      <div className="border-t border-slate-200/30 pt-2.5 flex flex-col gap-1.5">
+                        <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Paleta de Cores do Colaborador</span>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {SYSTEM_THEMES.slice(0, 5).map((theme) => {
+                            const isEmpTheme = emp.theme === theme.id || (!emp.theme && theme.id === "laranja");
+                            return (
+                              <button
+                                key={theme.id}
+                                type="button"
+                                onClick={() => {
+                                  if (onUpdateEmployeeTheme) {
+                                    onUpdateEmployeeTheme(emp.id, theme.id);
+                                  }
+                                }}
+                                className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all hover:scale-110 active:scale-95 cursor-pointer ${
+                                  isEmpTheme 
+                                    ? "border-slate-800 ring-2 ring-offset-1 ring-slate-400" 
+                                    : "border-slate-200 hover:border-slate-400"
+                                }`}
+                                style={{ backgroundColor: theme.primary }}
+                                title={theme.name}
+                              >
+                                {isEmpTheme && <Check className="w-2.5 h-2.5 text-white font-bold" />}
+                              </button>
+                            );
+                          })}
+                          
+                          <select
+                            value={emp.theme || "laranja"}
+                            onChange={(e) => {
+                              if (onUpdateEmployeeTheme) {
+                                onUpdateEmployeeTheme(emp.id, e.target.value);
+                              }
+                            }}
+                            className="text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5 font-bold text-slate-600 focus:outline-none cursor-pointer"
+                          >
+                            {SYSTEM_THEMES.map((theme) => (
+                              <option key={theme.id} value={theme.id}>
+                                {theme.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
