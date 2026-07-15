@@ -2716,8 +2716,8 @@ export default function ReportsModule({
               <p className="text-xs text-slate-400 mt-0.5">Lista detalhada dos últimos logs de auditoria correspondentes ao período.</p>
             </div>
 
-            <div className="border border-slate-150 rounded-xl overflow-hidden text-xs">
-              <table className="w-full text-left border-collapse">
+            <div className="border border-slate-150 rounded-xl overflow-x-auto custom-scrollbar text-xs">
+              <table className="w-full text-left border-collapse min-w-[850px]">
                 <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-700">
                   <tr>
                     <th className="p-3">Data/Hora</th>

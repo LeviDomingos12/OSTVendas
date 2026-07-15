@@ -89,11 +89,11 @@ export default function Sidebar({
       {isOpen && (
         <div 
           onClick={onClose}
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] cursor-pointer animate-in fade-in duration-200"
+          className="lg:hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] cursor-pointer animate-in fade-in duration-200"
         />
       )}
 
-      <aside className={`fixed inset-y-0 left-0 z-[101] w-72 flex flex-col shrink-0 h-screen overflow-y-auto border-r transition-all duration-300 ${
+      <aside className={`fixed lg:static lg:translate-x-0 lg:shadow-none inset-y-0 left-0 z-[101] w-72 flex flex-col shrink-0 h-screen overflow-y-auto custom-scrollbar border-r transition-all duration-300 ${
         isOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
       } ${
         isNight 

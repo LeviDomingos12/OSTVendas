@@ -2161,11 +2161,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           }`}>
             
             <div className="flex items-center gap-3">
-              {/* Hamburger Menu Toggle - Always Visible */}
+              {/* Hamburger Menu Toggle - Visible on mobile/tablet */}
               <button
                 type="button"
                 onClick={() => setIsSidebarOpen(true)}
-                className="p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
+                className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
                 aria-label="Abrir menu"
               >
                 <Menu className="w-5 h-5" />
