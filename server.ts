@@ -252,6 +252,62 @@ Retorne no formato JSON abaixo:
     }
   });
 
+  // API Route - Promotional Slogan Generation
+  app.post("/api/gemini/marketing/slogan", async (req, res) => {
+    try {
+      const { productName, discountPercent, price } = req.body;
+      const ai = getAiClient();
+
+      if (!ai) {
+        return res.json({
+          slogans: [
+            "SUPER PROMOÇÃO IMPERDÍVEL!",
+            "QUALIDADE AO MELHOR PREÇO!",
+            "ESTOQUE LIMITADO, APROVEITE JÁ!"
+          ]
+        });
+      }
+
+      const prompt = `Você é o redator publicitário de alto impacto do OST Vendas, o principal sistema comercial de Moçambique.
+Sua tarefa é criar exatamente 3 slogans promocionais e publicitários altamente persuasivos, curtos (máximo 40 caracteres cada), em português de Moçambique, para estampar em um cartaz ou folheto de promoção do produto "${productName || 'Produto Especial'}" que está com desconto de ${discountPercent || 'X'}% custando agora apenas ${price || 'X'} MT. Use frases diretas, atrativas, vendedoras e de forte apelo.
+
+Retorne no formato JSON abaixo:
+{
+  "slogans": ["Slogan 1", "Slogan 2", "Slogan 3"]
+}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              slogans: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            },
+            required: ["slogans"]
+          }
+        }
+      });
+
+      const data = JSON.parse((response.text || "{}").trim());
+      res.json(data);
+    } catch (error: any) {
+      console.error("Erro ao gerar slogans de marketing:", error);
+      res.json({
+        slogans: [
+          "SUPER PROMOÇÃO IMPERDÍVEL!",
+          "SÓ HOJE - PREÇO INCRÍVEL!",
+          "GARANTA JÁ O SEU COM DESCONTO!"
+        ]
+      });
+    }
+  });
+
   // API Route - AI Chat Q&A
   app.post("/api/gemini/chat", async (req, res) => {
     try {
@@ -567,6 +623,41 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     } catch (err: any) {
       console.error("[SMTP TEST ERROR]", err);
       res.status(500).json({ error: err.message || "Erro desconhecido ao conectar ao servidor SMTP." });
+    }
+  });
+
+  // POST: Verifying Custom SMTP connection response without sending email
+  app.post("/api/email/verify-smtp", async (req, res) => {
+    try {
+      const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure } = req.body;
+      if (!smtpHost || !smtpPort) {
+        return res.status(400).json({ error: "Parâmetros smtpHost e smtpPort são obrigatórios." });
+      }
+
+      console.log(`[SMTP VERIFY] Checking connection to ${smtpHost}:${smtpPort}...`);
+
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: Number(smtpPort),
+        secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465,
+        auth: smtpUser ? {
+          user: smtpUser,
+          pass: smtpPassword,
+        } : undefined,
+        tls: {
+          rejectUnauthorized: false
+        },
+        connectionTimeout: 8000
+      });
+
+      await transporter.verify();
+      res.json({
+        success: true,
+        message: "O servidor SMTP está respondendo corretamente!"
+      });
+    } catch (err: any) {
+      console.error("[SMTP VERIFY ERROR]", err);
+      res.status(500).json({ error: err.message || "Não foi possível conectar ao servidor SMTP." });
     }
   });
 
@@ -1644,6 +1735,20 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       res.json({ success: true, message: "Product deleted from Cloud SQL." });
     } catch (err: any) {
       res.status(500).json({ error: "Failed to delete product in SQL: " + err.message });
+    }
+  });
+
+  // DELETE: Customer in Cloud SQL
+  app.delete("/api/sql/customers/:id", async (req, res) => {
+    if (!isCloudSqlAvailable()) {
+      return res.status(400).json({ error: "Cloud SQL is not configured." });
+    }
+    try {
+      const { id } = req.params;
+      await drizzleDb.delete(customersTable).where(eq(customersTable.id, id));
+      res.json({ success: true, message: "Customer deleted from Cloud SQL." });
+    } catch (err: any) {
+      res.status(500).json({ error: "Failed to delete customer in SQL: " + err.message });
     }
   });
 

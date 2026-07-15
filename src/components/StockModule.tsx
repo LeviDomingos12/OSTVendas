@@ -55,6 +55,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, UserRole, Transaction, SystemSettings, StockTransfer } from "../types";
 import BatchManager from "./BatchManager";
+import { useConfirm } from "../hooks/useConfirm";
+import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -99,6 +101,7 @@ export default function StockModule({
   onShowToast,
   onUpdateSettings
 }: StockModuleProps) {
+  const confirm = useConfirm();
   
   // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches"
   const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches">("list");
@@ -293,6 +296,9 @@ export default function StockModule({
   const [expiryDate, setExpiryDate] = useState("");
   const [emoji, setEmoji] = useState("📦");
   const [imageUrl, setImageUrl] = useState("");
+  const [promotion, setPromotion] = useState("");
+  const [isFlyerGeneratorOpen, setIsFlyerGeneratorOpen] = useState(false);
+  const [flyerProduct, setFlyerProduct] = useState<Product | null>(null);
 
   // Categories and Suppliers lists
   const categoriesList = useMemo(() => {
@@ -462,6 +468,7 @@ export default function StockModule({
     setExpiryDate("");
     setEmoji("📦");
     setImageUrl("");
+    setPromotion("");
     setValidationError("");
     setIsFormOpen(true);
   };
@@ -480,6 +487,7 @@ export default function StockModule({
     setExpiryDate(p.expiryDate || "");
     setEmoji(p.emoji || "📦");
     setImageUrl(p.image || "");
+    setPromotion(p.promotion || "");
     setValidationError("");
     setIsFormOpen(true);
   };
@@ -529,7 +537,8 @@ export default function StockModule({
       minStock,
       expiryDate: expiryDate || undefined,
       emoji,
-      image: imageUrl || undefined
+      image: imageUrl || undefined,
+      promotion: promotion || undefined
     };
 
     if (editingProduct) {
@@ -552,24 +561,42 @@ export default function StockModule({
   };
 
   // Delete product action
-  const handleDeleteProductClick = (productId: string) => {
-    if (confirm("Tem certeza absoluta de que deseja apagar permanentemente este produto do stock? Esta ação é irreversível.")) {
-      const prod = products.find(p => p.id === productId);
-      if (prod) {
-        onDeleteProduct(productId);
-        onAddAuditLog(
-          "Excluir Produto",
-          "STOCK",
-          `Produto '${prod.name}' excluído permanentemente por ${currentRole}.`
-        );
-        setSelectedProductIds(prev => prev.filter(id => id !== productId));
-      }
+  const handleDeleteProductClick = async (productId: string) => {
+    const prod = products.find(p => p.id === productId);
+    if (!prod) return;
+
+    const isConfirmed = await confirm({
+      title: "Você tem certeza?",
+      message: `Deseja realmente apagar permanentemente o produto "${prod.name}" do stock? Esta ação é definitiva e irreversível.`,
+      confirmText: "Sim, Excluir",
+      cancelText: "Não, Cancelar",
+      type: "danger"
+    });
+
+    if (isConfirmed) {
+      onDeleteProduct(productId);
+      onAddAuditLog(
+        "Excluir Produto",
+        "STOCK",
+        `Produto '${prod.name}' excluído permanentemente por ${currentRole}.`
+      );
+      setSelectedProductIds(prev => prev.filter(id => id !== productId));
     }
   };
 
   // Bulk actions
-  const handleBulkDelete = () => {
-    if (confirm(`Tem certeza de que deseja excluir os ${selectedProductIds.length} produtos selecionados?`)) {
+  const handleBulkDelete = async () => {
+    if (selectedProductIds.length === 0) return;
+
+    const isConfirmed = await confirm({
+      title: "Você tem certeza?",
+      message: `Deseja realmente excluir permanentemente os ${selectedProductIds.length} produtos selecionados do stock? Esta ação é definitiva e não poderá ser desfeita.`,
+      confirmText: `Sim, Excluir ${selectedProductIds.length} Itens`,
+      cancelText: "Não, Cancelar",
+      type: "danger"
+    });
+
+    if (isConfirmed) {
       selectedProductIds.forEach(id => {
         const prod = products.find(p => p.id === id);
         if (prod) {
@@ -1971,6 +1998,15 @@ export default function StockModule({
                                     >
                                       <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
                                       Notificar Stock
+                                    </button>
+
+                                    <button
+                                      onClick={() => { setFlyerProduct(p); setIsFlyerGeneratorOpen(true); setOpenDropdownId(null); }}
+                                      className="w-full px-3 py-1.5 hover:bg-slate-50 text-orange-700 font-semibold flex items-center gap-2 dark:text-orange-400 dark:hover:bg-zinc-800"
+                                      title="Gerar cartaz publicitário para este produto"
+                                    >
+                                      <Sparkles className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+                                      Gerar Cartaz Promo
                                     </button>
                                     
                                     {canMutate && (
@@ -3487,6 +3523,56 @@ export default function StockModule({
                   </select>
                 </div>
 
+                {/* Promotion Type */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Campanha Promocional</label>
+                  <select
+                    value={promotion}
+                    onChange={(e) => setPromotion(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none cursor-pointer text-slate-800 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                  >
+                    <option value="">Nenhuma</option>
+                    <option value="PROMO">PROMO - Promoção Geral</option>
+                    <option value="DESCONTO">DESCONTO - Oferta / Liquidação</option>
+                    <option value="MAIS_VENDIDO">MAIS VENDIDO - Destaque de Vendas</option>
+                    <option value="NOVO">NOVO - Lançamento</option>
+                  </select>
+                </div>
+
+                {/* Promotional Image Creator Button inside form */}
+                <div className="space-y-1 flex flex-col justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!name.trim()) {
+                        setValidationError("Por favor, preencha pelo menos o nome do produto para gerar o cartaz publicitário.");
+                        return;
+                      }
+                      const tempProduct: Product = {
+                        id: editingProduct ? editingProduct.id : `temp-${Date.now()}`,
+                        name,
+                        code: code || "PROMO-CODE",
+                        category,
+                        supplier: supplier || "OST Vendas",
+                        costPrice: costPrice || 0,
+                        salePrice: salePrice || 0,
+                        vatRate: vatRate || 16,
+                        stock: stock || 0,
+                        minStock: minStock || 0,
+                        emoji,
+                        image: imageUrl || undefined,
+                        promotion: promotion || "PROMO"
+                      };
+                      setFlyerProduct(tempProduct);
+                      setIsFlyerGeneratorOpen(true);
+                    }}
+                    className="w-full py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black rounded-lg text-xs cursor-pointer transition flex items-center justify-center gap-1.5 shadow-sm border border-orange-200/50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 animate-pulse text-amber-200" />
+                    Gerar Cartaz de Promoção
+                  </button>
+                </div>
+
               </div>
 
               <div className="flex gap-2 pt-2">
@@ -3507,6 +3593,24 @@ export default function StockModule({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Promo Poster/Flyer generator modal */}
+      {flyerProduct && (
+        <PromoFlyerGenerator
+          product={flyerProduct}
+          allProducts={products}
+          isOpen={isFlyerGeneratorOpen}
+          onClose={() => {
+            setIsFlyerGeneratorOpen(false);
+            setFlyerProduct(null);
+          }}
+          currency={currency}
+          onShowToast={(msg, type) => {
+            if (onShowToast) onShowToast(msg, type === "success" ? "success" : type === "error" ? "error" : "info");
+          }}
+          settings={settings}
+        />
       )}
 
     </div>

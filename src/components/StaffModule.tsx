@@ -40,6 +40,7 @@ import {
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
 import { sendEmail } from "../lib/gmail";
 import { getRecoveryRequests, resolveRecoveryRequest } from "../lib/firebase";
+import { useConfirm } from "../hooks/useConfirm";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -80,6 +81,7 @@ export default function StaffModule({
   currency,
   settings
 }: StaffModuleProps) {
+  const confirm = useConfirm();
   
   // Tab states
   const [activeTab, setActiveTab] = useState<"STAFF" | "AUDIT" | "ERRORS">("STAFF");
@@ -894,22 +896,29 @@ export default function StaffModule({
   };
 
   // Delete / Dismiss employee
-  const handleDeleteEmployee = (emp: Employee) => {
-    setEmployeeToDelete(emp);
+  const handleDeleteEmployee = async (emp: Employee) => {
+    const isConfirmed = await confirm({
+      title: "Você tem certeza?",
+      message: `Deseja realmente desligar e remover o registro de "${emp.name}" permanentemente? Esta ação é definitiva, irreversível e revogará todos os privilégios de acesso dele ao sistema.`,
+      confirmText: "Sim, Confirmar Remoção",
+      cancelText: "Não, Cancelar",
+      type: "danger"
+    });
+
+    if (isConfirmed) {
+      const updated = employees.filter(e => e.id !== emp.id);
+      onUpdateEmployees(updated);
+      
+      onAddAuditLog(
+        "Remover Funcionário",
+        "FUNCIONÁRIOS",
+        `Funcionário '${emp.name}' com código '${emp.id}' foi desligado permanentemente do sistema.`
+      );
+    }
   };
 
   const confirmDeleteEmployee = () => {
-    if (!employeeToDelete) return;
-    const emp = employeeToDelete;
-    const updated = employees.filter(e => e.id !== emp.id);
-    onUpdateEmployees(updated);
-    
-    onAddAuditLog(
-      "Remover Funcionário",
-      "FUNCIONÁRIOS",
-      `Funcionário '${emp.name}' com código '${emp.id}' foi desligado permanentemente do sistema.`
-    );
-    setEmployeeToDelete(null);
+    // Deprecated in favor of the beautiful async useConfirm hook
   };
 
   // Trigger quick salary payment simulation

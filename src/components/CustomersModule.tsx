@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
 import { Customer, UserRole } from "../types";
+import { useConfirm } from "../hooks/useConfirm";
 
 interface CustomersModuleProps {
   customers: Customer[];
@@ -43,6 +44,7 @@ export default function CustomersModule({
   activeUsername,
   onShowToast
 }: CustomersModuleProps) {
+  const confirm = useConfirm();
   
   // Local states
   const [searchQuery, setSearchQuery] = useState("");
@@ -151,7 +153,7 @@ export default function CustomersModule({
   };
 
   // Delete Customer
-  const handleDeleteCustomerClick = (customerId: string) => {
+  const handleDeleteCustomerClick = async (customerId: string) => {
     const cli = customers.find(c => c.id === customerId);
     if (!cli) return;
 
@@ -160,7 +162,15 @@ export default function CustomersModule({
       return;
     }
 
-    if (confirm("Deseja apagar permanentemente este registro de cliente? Todos os acúmulos de pontos e histórico serão apagados.")) {
+    const isConfirmed = await confirm({
+      title: "Você tem certeza?",
+      message: `Deseja realmente apagar permanentemente o cliente "${cli.name}"? Todos os acúmulos de pontos e histórico serão excluídos do sistema de forma definitiva e irreversível.`,
+      confirmText: "Sim, Excluir",
+      cancelText: "Não, Cancelar",
+      type: "danger"
+    });
+
+    if (isConfirmed) {
       onDeleteCustomer(customerId);
       onAddAuditLog("Excluir Cliente", "CLIENTES", `Cadastro de '${cli.name}' excluído do sistema por ${currentRole}.`);
     }

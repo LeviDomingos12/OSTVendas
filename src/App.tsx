@@ -47,6 +47,8 @@ import {
   addProdutosToFirestoreBatch,
   updateProdutoInFirestore,
   deleteProdutoFromFirestore,
+  deleteProductFromCloudSQL,
+  deleteCustomerFromCloudSQL,
   getTransacoesFromFirestore,
   addTransacaoToFirestore,
   addTransacoesToFirestoreBatch,
@@ -430,8 +432,28 @@ export default function App() {
       
       if (tableName === "products") {
         await addProdutosToFirestoreBatch(updatedData);
+        // Also update server-side local JSON and top-level Firestore (handles orphan deletes automatically on the server)
+        try {
+          await fetch("/api/db/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ table: "products", data: updatedData })
+          });
+        } catch (serverErr) {
+          console.warn("Could not save products to server DB store:", serverErr);
+        }
       } else if (tableName === "transactions") {
         await addTransacoesToFirestoreBatch(updatedData);
+        // Also update server-side local JSON and top-level Firestore
+        try {
+          await fetch("/api/db/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ table: "transactions", data: updatedData })
+          });
+        } catch (serverErr) {
+          console.warn("Could not save transactions to server DB store:", serverErr);
+        }
       } else {
         const response = await fetch("/api/db/save", {
           method: "POST",
@@ -499,6 +521,15 @@ export default function App() {
             try {
               await addProdutosToFirestoreBatch(data);
               success = true;
+              try {
+                await fetch("/api/db/save", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ table: "products", data })
+                });
+              } catch (err) {
+                console.warn("[SYNC QUEUE] Erro ao atualizar produtos no servidor:", err);
+              }
             } catch (fsErr) {
               console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
             }
@@ -506,6 +537,15 @@ export default function App() {
             try {
               await addTransacoesToFirestoreBatch(data);
               success = true;
+              try {
+                await fetch("/api/db/save", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ table: "transactions", data })
+                });
+              } catch (err) {
+                console.warn("[SYNC QUEUE] Erro ao atualizar transações no servidor:", err);
+              }
             } catch (fsErr) {
               console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
             }
@@ -1294,7 +1334,22 @@ export default function App() {
       return updated;
     });
   };
-  const handleDeleteProduct = (productId: string) => {
+  const handleDeleteProduct = async (productId: string) => {
+    // 1. Permanently delete from client-side partitioned Firestore
+    try {
+      await deleteProdutoFromFirestore(productId);
+    } catch (err) {
+      console.warn("Erro ao apagar produto no Firestore do cliente:", err);
+    }
+
+    // 2. Permanently delete from Cloud SQL
+    try {
+      await deleteProductFromCloudSQL(productId);
+    } catch (err) {
+      console.warn("Erro ao apagar produto no Cloud SQL:", err);
+    }
+
+    // 3. Update local state and sync batch
     setProducts(prev => {
       const updated = prev.filter(p => p.id !== productId);
       syncTable("products", updated);
@@ -1310,7 +1365,15 @@ export default function App() {
       return updated;
     });
   };
-  const handleDeleteCustomer = (customerId: string) => {
+  const handleDeleteCustomer = async (customerId: string) => {
+    // 1. Permanently delete from Cloud SQL
+    try {
+      await deleteCustomerFromCloudSQL(customerId);
+    } catch (err) {
+      console.warn("Erro ao apagar cliente no Cloud SQL:", err);
+    }
+
+    // 2. Update state and sync with server-side API (which cleans up top-level Firestore orphans)
     setCustomers(prev => {
       const updated = prev.filter(c => c.id !== customerId);
       syncTable("customers", updated);
@@ -2469,6 +2532,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onAddAuditLog={handleAddAuditLog}
                   currency={currency}
                   onShowToast={showToast}
+                  auditLogs={auditLogs}
                 />
               )}
 
@@ -2498,6 +2562,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onGetBackupPayload={handleGetBackupPayload}
                   systemVersion={currentSystemVersion}
                   employees={employees}
+                  auditLogs={auditLogs}
                   onResetEmployeePin={async (empId) => {
                     const target = employees.find(e => e.id === empId);
                     if (!target) return;

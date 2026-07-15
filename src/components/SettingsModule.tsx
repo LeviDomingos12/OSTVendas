@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { 
   Settings, 
   Building, 
@@ -18,6 +20,7 @@ import {
   Terminal,
   Check,
   FileText,
+  FileSpreadsheet,
   Cloud,
   Globe,
   Server,
@@ -40,7 +43,7 @@ import {
   Plus,
   Edit
 } from "lucide-react";
-import { SystemSettings, UserRole, Employee, Branch } from "../types";
+import { SystemSettings, UserRole, Employee, Branch, AuditLog } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
 import { SYSTEM_THEMES } from "../lib/themes";
@@ -61,6 +64,7 @@ interface SettingsModuleProps {
   onGetBackupPayload?: () => any;
   systemVersion?: string;
   employees?: Employee[];
+  auditLogs?: AuditLog[];
   onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
   onUpdateEmployeeTheme?: (employeeId: string, themeId: string) => Promise<void> | void;
 }
@@ -81,6 +85,7 @@ export default function SettingsModule({
   onGetBackupPayload,
   systemVersion,
   employees = [],
+  auditLogs = [],
   onResetEmployeePin,
   onUpdateEmployeeTheme
 }: SettingsModuleProps) {
@@ -153,6 +158,7 @@ export default function SettingsModule({
   const [isSmtpVerified, setIsSmtpVerified] = useState(settings.isSmtpVerified || false);
   const [testRecipient, setTestRecipient] = useState(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [isSavingSmtp, setIsSavingSmtp] = useState(false);
   const [isImportingEnv, setIsImportingEnv] = useState(false);
 
   // Expiry and Batches states
@@ -172,6 +178,10 @@ export default function SettingsModule({
   const [includeFinancial, setIncludeFinancial] = useState(true);
   const [includeAudit, setIncludeAudit] = useState(true);
   const [includeStaff, setIncludeStaff] = useState(false);
+
+  // Audit Logs Filter and Export States
+  const [auditFilterStartDate, setAuditFilterStartDate] = useState("");
+  const [auditFilterEndDate, setAuditFilterEndDate] = useState("");
 
   // AI Settings States
   const [aiAutoMonitoring, setAiAutoMonitoring] = useState(settings.aiAutoMonitoring ?? true);
@@ -1362,10 +1372,10 @@ export default function SettingsModule({
       return;
     }
 
-    const recipient = testRecipient || reportRecipientEmail || (activeUser?.email) || "test@ostvendas.com";
+    const recipient = alertsRecipientEmail || reportRecipientEmail || testRecipient || (activeUser?.email);
     if (!recipient || !recipient.includes("@")) {
       if (onShowToast) {
-        onShowToast("Insira um endereço de e-mail de destinatário válido para o teste.", "warning", "E-mail Inválido");
+        onShowToast("Nenhum e-mail de administrador configurado encontrado para o teste. Por favor, configure o E-mail de Destino para Alertas ou Relatórios primeiro.", "warning", "E-mail Não Configurado");
       }
       return;
     }
@@ -1403,7 +1413,7 @@ export default function SettingsModule({
       if (response.ok) {
         setIsSmtpVerified(true);
         if (onShowToast) {
-          onShowToast(data.message || "Conexão SMTP validada com sucesso e e-mail enviado!", "success", "Conexão Estabelecida");
+          onShowToast(data.message || "Conexão SMTP validada com sucesso e e-mail de teste enviado para o administrador!", "success", "Conexão Estabelecida");
         }
         onUpdateSettings({
           smtpHost,
@@ -1416,7 +1426,7 @@ export default function SettingsModule({
         onAddAuditLog(
           "Teste de SMTP",
           "CONFIGURAÇÕES",
-          `Conexão SMTP testada com sucesso para o host ${smtpHost}:${smtpPort}. Destinatário: ${recipient}. Estado: Verificado.`
+          `Conexão SMTP testada com sucesso para o host ${smtpHost}:${smtpPort}. Destinatário Administrador: ${recipient}. Estado: Verificado.`
         );
       } else {
         setIsSmtpVerified(false);
@@ -1453,7 +1463,7 @@ export default function SettingsModule({
         setSmtpSecure(data.smtpSecure || false);
         setIsSmtpVerified(false);
         if (onShowToast) {
-          onShowToast("Configurações SMTP importadas do arquivo .env com sucesso! Clique em 'Salvar Servidor' para gravar.", "success", "Importação Conclúida");
+          onShowToast("Configurações SMTP importadas do arquivo .env com sucesso! Clique em 'Salvar Servidor' para validar e gravar.", "success", "Importação Conclúida");
         }
       } else {
         const errorData = await response.json();
@@ -1468,7 +1478,7 @@ export default function SettingsModule({
     }
   };
 
-  const handleSaveDedicatedSmtp = () => {
+  const handleSaveDedicatedSmtp = async () => {
     if (!smtpHost || !smtpPort) {
       if (onShowToast) {
         onShowToast("O Servidor Host e a Porta do SMTP são obrigatórios para gravar.", "warning", "Campos em Falta");
@@ -1476,25 +1486,65 @@ export default function SettingsModule({
       return;
     }
 
-    onUpdateSettings({
-      smtpHost,
-      smtpPort: Number(smtpPort),
-      smtpUser,
-      smtpPassword,
-      smtpSecure,
-      isSmtpVerified
-    });
+    setIsSavingSmtp(true);
+    try {
+      // Validate that the SMTP server is responding correctly before saving
+      const response = await fetch("/api/email/verify-smtp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          smtpHost,
+          smtpPort: Number(smtpPort),
+          smtpUser,
+          smtpPassword,
+          smtpSecure
+        })
+      });
 
-    setFeedbackMsg("Configuração do Servidor SMTP Dedicado gravada com sucesso!");
-    onAddAuditLog(
-      "Salvar Configuração SMTP",
-      "CONFIGURAÇÕES",
-      `Credenciais SMTP gravadas para ${smtpHost}:${smtpPort} (Utilizador: ${smtpUser || "Nenhum"}). Verificado: ${isSmtpVerified ? "Sim" : "Não"}.`
-    );
-    if (onShowToast) {
-      onShowToast("As configurações do servidor SMTP dedicado foram gravadas!", "success", "SMTP Gravado");
+      const data = await response.json();
+      if (!response.ok) {
+        setIsSmtpVerified(false);
+        if (onShowToast) {
+          onShowToast(data.error || "O servidor SMTP não está respondendo corretamente. Por favor, verifique se as definições do host, porta e credenciais estão corretas.", "error", "Falha na Validação SMTP");
+        }
+        onUpdateSettings({
+          isSmtpVerified: false
+        });
+        return;
+      }
+
+      // If connection verify succeeds, mark as verified and update settings
+      setIsSmtpVerified(true);
+      onUpdateSettings({
+        smtpHost,
+        smtpPort: Number(smtpPort),
+        smtpUser,
+        smtpPassword,
+        smtpSecure,
+        isSmtpVerified: true
+      });
+
+      setFeedbackMsg("Configuração do Servidor SMTP Dedicado validada e gravada com sucesso!");
+      onAddAuditLog(
+        "Salvar Configuração SMTP",
+        "CONFIGURAÇÕES",
+        `Credenciais SMTP validadas e gravadas para ${smtpHost}:${smtpPort} (Utilizador: ${smtpUser || "Nenhum"}). Verificado: Sim.`
+      );
+      if (onShowToast) {
+        onShowToast("As configurações do servidor SMTP foram validadas e gravadas com sucesso!", "success", "SMTP Gravado");
+      }
+      setTimeout(() => setFeedbackMsg(""), 2200);
+    } catch (err: any) {
+      setIsSmtpVerified(false);
+      if (onShowToast) {
+        onShowToast(err.message || "Erro durante a validação de resposta do SMTP.", "error", "Erro de Conexão");
+      }
+      onUpdateSettings({
+        isSmtpVerified: false
+      });
+    } finally {
+      setIsSavingSmtp(false);
     }
-    setTimeout(() => setFeedbackMsg(""), 2200);
   };
 
   const handleSaveEmailConfig = (e: React.FormEvent) => {
@@ -1665,6 +1715,188 @@ export default function SettingsModule({
         if (onShowToast) onShowToast("Logotipo capturado pela câmara com sucesso!", "success");
       }
       stopCamera();
+    }
+  };
+
+  // Export filtered audit logs to PDF
+  const handleExportAuditLogsPDF = () => {
+    if (!auditLogs || auditLogs.length === 0) {
+      if (onShowToast) {
+        onShowToast("Não há logs de auditoria disponíveis para exportação.", "warning", "Sem dados");
+      }
+      return;
+    }
+
+    // Filter audit logs based on selected date range
+    const filteredLogs = auditLogs.filter(log => {
+      if (!log.timestamp) return true;
+      const logDate = new Date(log.timestamp);
+      if (auditFilterStartDate) {
+        const start = new Date(auditFilterStartDate);
+        start.setHours(0, 0, 0, 0);
+        if (logDate < start) return false;
+      }
+      if (auditFilterEndDate) {
+        const end = new Date(auditFilterEndDate);
+        end.setHours(23, 59, 59, 999);
+        if (logDate > end) return false;
+      }
+      return true;
+    });
+
+    if (filteredLogs.length === 0) {
+      if (onShowToast) {
+        onShowToast("Nenhum registro de auditoria atende ao intervalo de datas definido.", "warning", "Sem resultados");
+      }
+      return;
+    }
+
+    try {
+      const doc = new jsPDF();
+      
+      // Title Section
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.text("OST VENDAS ERP", 14, 20);
+      
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text("Trilha de Auditoria & Logs de Segurança", 14, 26);
+      
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("Relatório Filtrado de Auditoria", 14, 38);
+      
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      const periodText = (auditFilterStartDate || auditFilterEndDate) 
+        ? `Período: ${auditFilterStartDate || "Início"} até ${auditFilterEndDate || "Fim"}` 
+        : "Período: Completo";
+      doc.text(periodText, 14, 44);
+      doc.text(`Emitido em: ${new Date().toLocaleString()}`, 14, 49);
+      doc.text(`Total de registros: ${filteredLogs.length}`, 14, 54);
+
+      const head = [["DATA / HORA", "USUÁRIO", "CARGO", "MÓDULO", "AÇÃO", "DETALHES"]];
+      const body = filteredLogs.map(log => [
+        new Date(log.timestamp).toLocaleString(),
+        log.user || "N/A",
+        log.userRole || "N/A",
+        log.module || "N/A",
+        log.action || "N/A",
+        log.details || ""
+      ]);
+
+      autoTable(doc, {
+        startY: 60,
+        head: head,
+        body: body,
+        theme: "grid",
+        headStyles: { fillColor: [225, 29, 72] }, // rose-600 to match the security theme
+        styles: { fontSize: 8, cellPadding: 2.5 },
+        columnStyles: {
+          0: { cellWidth: 32 },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 15 },
+          3: { cellWidth: 22 },
+          4: { cellWidth: 25 },
+          5: { cellWidth: "auto" }
+        }
+      });
+
+      const fileName = `Auditoria_Filtrada_${new Date().toISOString().split("T")[0]}.pdf`;
+      doc.save(fileName);
+      
+      if (onShowToast) {
+        onShowToast(`Logs de auditoria exportados com sucesso em formato PDF (${filteredLogs.length} eventos).`, "success", "Exportação Concluída");
+      }
+
+      onAddAuditLog(
+        "Exportar Auditoria PDF (Configurações)",
+        "SEGURANÇA",
+        `Logs de auditoria filtrados salvos em PDF (${filteredLogs.length} eventos). Intervalo: ${auditFilterStartDate || "completo"} - ${auditFilterEndDate || "completo"}.`
+      );
+    } catch (err: any) {
+      console.error(err);
+      if (onShowToast) {
+        onShowToast(`Erro ao exportar PDF: ${err.message}`, "error", "Falha de Exportação");
+      }
+    }
+  };
+
+  // Export filtered audit logs to Excel/CSV
+  const handleExportAuditLogsExcel = () => {
+    if (!auditLogs || auditLogs.length === 0) {
+      if (onShowToast) {
+        onShowToast("Não há logs de auditoria disponíveis para exportação.", "warning", "Sem dados");
+      }
+      return;
+    }
+
+    // Filter audit logs based on selected date range
+    const filteredLogs = auditLogs.filter(log => {
+      if (!log.timestamp) return true;
+      const logDate = new Date(log.timestamp);
+      if (auditFilterStartDate) {
+        const start = new Date(auditFilterStartDate);
+        start.setHours(0, 0, 0, 0);
+        if (logDate < start) return false;
+      }
+      if (auditFilterEndDate) {
+        const end = new Date(auditFilterEndDate);
+        end.setHours(23, 59, 59, 999);
+        if (logDate > end) return false;
+      }
+      return true;
+    });
+
+    if (filteredLogs.length === 0) {
+      if (onShowToast) {
+        onShowToast("Nenhum registro de auditoria atende ao intervalo de datas definido.", "warning", "Sem resultados");
+      }
+      return;
+    }
+
+    try {
+      // Create CSV content with a BOM for proper UTF-8 handling in Excel
+      const BOM = "\uFEFF";
+      const header = "Data/Hora,Usuário,Cargo,Módulo,Ação,Detalhes,IP,Dispositivo\n";
+      const rows = filteredLogs.map(log => {
+        const dateStr = new Date(log.timestamp).toLocaleString();
+        const user = log.user || "N/A";
+        const role = log.userRole || "N/A";
+        const mod = log.module || "N/A";
+        const act = log.action || "N/A";
+        const details = (log.details || "").replace(/"/g, '""');
+        const ip = log.ip || "";
+        const device = (log.device || "").replace(/"/g, '""');
+        return `"${dateStr}","${user}","${role}","${mod}","${act}","${details}","${ip}","${device}"`;
+      }).join("\n");
+
+      const csvContent = BOM + header + rows;
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Auditoria_Filtrada_${new Date().toISOString().split("T")[0]}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      if (onShowToast) {
+        onShowToast(`Logs de auditoria exportados com sucesso em formato Excel/CSV (${filteredLogs.length} eventos).`, "success", "Exportação Concluída");
+      }
+
+      onAddAuditLog(
+        "Exportar Auditoria Excel (Configurações)",
+        "SEGURANÇA",
+        `Logs de auditoria filtrados salvos em Excel/CSV (${filteredLogs.length} eventos). Intervalo: ${auditFilterStartDate || "completo"} - ${auditFilterEndDate || "completo"}.`
+      );
+    } catch (err: any) {
+      console.error(err);
+      if (onShowToast) {
+        onShowToast(`Erro ao exportar Excel: ${err.message}`, "error", "Falha de Exportação");
+      }
     }
   };
 
@@ -1839,9 +2071,8 @@ export default function SettingsModule({
 
     if (emailStockAlertsEnabled && smtpEnabled && !isSmtpVerified) {
       if (onShowToast) {
-        onShowToast("O servidor SMTP precisa ser verificado com sucesso ('Testar Conexão') no painel dedicado antes de poder ativar os alertas automáticos.", "error", "SMTP Não Verificado");
+        onShowToast("Aviso: As configurações de alertas de estoque foram gravadas, mas o servidor SMTP ainda não foi testado com sucesso. Recomendamos efetuar o teste de conexão.", "warning", "SMTP Não Verificado");
       }
-      return;
     }
 
     onUpdateSettings({
@@ -3317,6 +3548,7 @@ export default function SettingsModule({
                         onChange={(e) => setBackupFrequency(e.target.value)}
                         className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-xs text-slate-750"
                       >
+                        <option value="12h">A cada 12 Horas</option>
                         <option value="daily">Diário</option>
                         <option value="weekly">Semanal</option>
                         <option value="monthly">Mensal</option>
@@ -3358,8 +3590,11 @@ export default function SettingsModule({
                       </div>
                       <div className="space-y-1">
                         <span className="text-[10px] font-bold text-slate-400 uppercase block leading-none mb-1">Cron equivalente</span>
-                        <div className="bg-slate-100 border border-slate-205 p-2 text-center rounded-lg font-mono text-[10.5px] text-slate-505 font-bold">
-                          {`0 ${backupTime.split(':')[1]} ${backupTime.split(':')[0]} * * ${backupFrequency === 'weekly' ? '1' : backupFrequency === 'monthly' ? '1' : '*'}`}
+                        <div className="bg-slate-100 border border-slate-200 p-2 text-center rounded-lg font-mono text-[10.5px] text-slate-500 font-bold">
+                          {backupFrequency === '12h' 
+                            ? `${backupTime.split(':')[1] || '0'} */12 * * *` 
+                            : `0 ${backupTime.split(':')[1] || '0'} ${backupTime.split(':')[0] || '0'} * * ${backupFrequency === 'weekly' ? '1' : backupFrequency === 'monthly' ? '1' : '*'}`
+                          }
                         </div>
                       </div>
                     </div>
@@ -3769,12 +4004,11 @@ export default function SettingsModule({
                         if (e.target.checked && smtpEnabled && !isSmtpVerified) {
                           if (onShowToast) {
                             onShowToast(
-                              "O servidor SMTP precisa ser verificado com sucesso ('Testar Conexão') no painel dedicado antes de poder ativar os alertas automáticos.",
+                              "Aviso: O servidor SMTP ainda não foi verificado com sucesso. Certifique-se de salvar e testar as credenciais para garantir que os e-mails sejam enviados.",
                               "warning",
                               "SMTP Não Verificado"
                             );
                           }
-                          return;
                         }
                         setEmailStockAlertsEnabled(e.target.checked);
                       }}
@@ -4007,22 +4241,31 @@ export default function SettingsModule({
               <div className="pt-2 flex flex-col sm:flex-row gap-2">
                 <button
                   type="button"
-                  disabled={isTestingSmtp || !canEdit}
+                  disabled={isTestingSmtp || isSavingSmtp || !canEdit}
                   onClick={handleDedicatedSmtpTest}
                   className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5 shadow shadow-slate-900/10"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isTestingSmtp ? "animate-spin" : ""}`} />
-                  {isTestingSmtp ? "A testar..." : "Testar Conexão"}
+                  {isTestingSmtp ? "A testar..." : "Testar Conexão SMTP"}
                 </button>
 
                 <button
                   type="button"
-                  disabled={!canEdit}
+                  disabled={isSavingSmtp || isTestingSmtp || !canEdit}
                   onClick={handleSaveDedicatedSmtp}
-                  className="flex-1 py-2 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow shadow-orange-500/10 flex items-center justify-center gap-1.5"
+                  className="flex-1 py-2 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 shadow shadow-orange-500/10 flex items-center justify-center gap-1.5"
                 >
-                  <Check className="w-3.5 h-3.5" />
-                  Salvar Servidor
+                  {isSavingSmtp ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Validando...
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-3.5 h-3.5" />
+                      Salvar Servidor
+                    </>
+                  )}
                 </button>
               </div>
 
@@ -5095,48 +5338,183 @@ export default function SettingsModule({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs text-slate-800">
-            {/* Left Config Panel */}
-            <div className="lg:col-span-5 space-y-6">
-              
-              {/* Card 1: Backup Interval Config */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center gap-2 text-orange-600">
-                  <Clock className="w-4.5 h-4.5" />
-                  <h4 className="font-bold text-slate-800 text-sm">Intervalo do Backup Automático</h4>
+          {/* SEÇÃO REQUISITADA: FREQUÊNCIA DE BACKUP AUTOMÁTICO & HISTÓRICO DE SUCESSO (ÚLTIMOS 5) */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in duration-300">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-2.5 text-orange-600">
+                <Database className="w-5.5 h-5.5 text-orange-500 shrink-0 animate-pulse" />
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-sm md:text-base">
+                    Gestão de Backup Automático & Histórico de Sucesso
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Selecione a frequência das cópias de segurança locais e acompanhe o progresso e estado dos últimos 5 pontos de restauro com sucesso.
+                  </p>
                 </div>
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Selecione com que frequência o sistema deve criar automaticamente um ponto de redundância do banco de dados no armazenamento local do navegador.
-                </p>
+              </div>
+              <div className="flex items-center gap-2 self-start md:self-center">
+                <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full uppercase tracking-wider border border-slate-200">
+                  Frequência Activa: {backupFrequency === "daily" ? "Diária" : backupFrequency === "weekly" ? "Semanal" : backupFrequency === "monthly" ? "Mensal" : "12 Horas"}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleCreateManualBackup}
+                  className="px-3.5 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Gerar Backup Agora
+                </button>
+              </div>
+            </div>
 
-                <div className="space-y-3 pt-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Frequência Escolhida</label>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Coluna Configuração */}
+              <div className="lg:col-span-4 space-y-4">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                    Frequência do Auto-Backup
+                  </label>
                   <div className="relative">
                     <select
                       disabled={!canEdit}
                       value={backupFrequency}
                       onChange={(e) => handleSaveBackupInterval(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl p-3 pr-10 font-bold outline-none text-xs text-slate-700 shadow-sm focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 transition cursor-pointer appearance-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-10 font-bold outline-none text-xs text-slate-700 shadow-xs focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10 transition cursor-pointer appearance-none"
                     >
-                      <option value="12h">A cada 12 Horas (Redundância Rápida)</option>
-                      <option value="daily">Diária (A cada 24 horas)</option>
-                      <option value="weekly">Semanal (A cada 7 dias)</option>
-                      <option value="monthly">Mensal (A cada 30 dias)</option>
+                      <option value="12h">A cada 12 Horas (Frequência Alta)</option>
+                      <option value="daily">Diária (Recomendado)</option>
+                      <option value="weekly">Semanal (Baixo Volume)</option>
+                      <option value="monthly">Mensal (Salvaguarda de Longo Prazo)</option>
                     </select>
                     <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
                       <ChevronDown className="w-4 h-4" />
                     </div>
                   </div>
+                </div>
 
-                  <div className="p-3.5 bg-orange-500/5 rounded-xl border border-orange-500/10 text-[11px] text-slate-600 leading-relaxed shadow-sm animate-in fade-in duration-250">
-                    <span className="font-extrabold text-orange-700 block mb-1">Configuração Ativa:</span>
-                    {backupFrequency === "12h" && "Backup de alta frequência: altamente recomendado para comércios de alta rotação e vendas constantes de modo a evitar perda de faturamento recente."}
-                    {backupFrequency === "daily" && "Frequência recomendada para a maioria das operações: salvaguarda automática ao fim de cada expediente comercial."}
-                    {backupFrequency === "weekly" && "Frequência reduzida: adequada para estabelecimentos com baixo volume de alterações cadastrais semanais."}
-                    {backupFrequency === "monthly" && "Salvaguarda básica de longo prazo: adequada apenas como recurso de arquivamento menos prioritário."}
-                  </div>
+                <div className="p-4 bg-orange-500/5 rounded-2xl border border-orange-500/10 text-[11px] text-slate-600 leading-relaxed shadow-xs">
+                  <span className="font-extrabold text-orange-700 block mb-1">Impacto da Frequência:</span>
+                  {backupFrequency === "12h" && "Alta rotação de dados: O sistema criará pontos de segurança duas vezes por dia para máxima segurança contra perdas recentes."}
+                  {backupFrequency === "daily" && "Recomendado para a maioria: Uma cópia é gerada a cada 24 horas, salvaguardando o expediente comercial de cada dia."}
+                  {backupFrequency === "weekly" && "Indicado para baixo faturamento: Uma cópia a cada 7 dias reduz a utilização de armazenamento no seu navegador."}
+                  {backupFrequency === "monthly" && "Salvaguarda básica: Apenas um ponto de segurança será mantido mensalmente."}
+                </div>
+
+                <div className="border-t border-slate-100 pt-3 flex items-center justify-between text-[11px] text-slate-400">
+                  <span className="font-medium">Último Auto-Backup:</span>
+                  <span className="font-mono text-slate-700 font-bold">
+                    {localStorage.getItem("erp_last_auto_backup_time")
+                      ? new Date(localStorage.getItem("erp_last_auto_backup_time")!).toLocaleString("pt-MZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+                      : "Nunca realizado"
+                    }
+                  </span>
                 </div>
               </div>
+
+              {/* Coluna Histórico de 5 Backups */}
+              <div className="lg:col-span-8 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
+                    Histórico dos Últimos 5 Backups de Sucesso
+                  </span>
+                  <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2.5 py-0.5 rounded border border-slate-100">
+                    {localBackupsLog.length} de 5 Slots Utilizados
+                  </span>
+                </div>
+
+                {localBackupsLog.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[160px]">
+                    <div className="bg-slate-100 text-slate-400 p-3 rounded-xl mb-2">
+                      <Database className="w-6 h-6 stroke-[1.5]" />
+                    </div>
+                    <h5 className="font-bold text-slate-750 text-xs">Nenhum backup local registado</h5>
+                    <p className="text-[11px] text-slate-400 max-w-[280px] mt-0.5">
+                      Os backups automáticos e manuais de sucesso aparecerão listados aqui.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto border border-slate-150 rounded-xl bg-slate-50/50">
+                    <table className="w-full text-[11px] text-slate-600 border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
+                          <th className="py-2.5 px-3">Data & Hora</th>
+                          <th className="py-2.5 px-2">Tipo</th>
+                          <th className="py-2.5 px-2">Frequência</th>
+                          <th className="py-2.5 px-2">Tamanho</th>
+                          <th className="py-2.5 px-2 text-center">Status</th>
+                          <th className="py-2.5 px-3 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 bg-white">
+                        {localBackupsLog.slice(0, 5).map((log: any) => (
+                          <tr key={log.id} className="hover:bg-slate-50/70 transition">
+                            <td className="py-3 px-3 font-semibold text-slate-800 font-mono">
+                              {new Date(log.date).toLocaleString("pt-MZ", {
+                                day: "2-digit",
+                                month: "2-digit",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit"
+                              })}
+                            </td>
+                            <td className="py-3 px-2">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                                log.type === "Manual"
+                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
+                                  : "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                              }`}>
+                                {log.type}
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 font-semibold text-slate-500">
+                              {log.frequency || "N/A"}
+                            </td>
+                            <td className="py-3 px-2 font-mono text-[10.5px] text-slate-500">
+                              {(log.size / 1024).toFixed(1)} KB
+                            </td>
+                            <td className="py-3 px-2 text-center">
+                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold text-[9px] border border-emerald-100">
+                                <CheckCircle className="w-3 h-3 text-emerald-500" />
+                                Sucesso
+                              </span>
+                            </td>
+                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadSlotBackup(log.id, log.date)}
+                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-950 border border-slate-200 rounded-lg transition shadow-xs cursor-pointer"
+                                title="Descarregar ficheiro JSON de backup"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={currentRole !== "ADMIN"}
+                                onClick={() => handleRestoreFromSlot(log.id)}
+                                className={`inline-flex items-center justify-center p-1.5 border rounded-lg transition-all cursor-pointer ${
+                                  currentRole === "ADMIN"
+                                    ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 shadow-xs"
+                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50"
+                                }`}
+                                title={currentRole === "ADMIN" ? "Restaurar sistema a partir deste ponto" : "Apenas administradores"}
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs text-slate-800">
+            {/* Left Config Panel */}
+            <div className="lg:col-span-5 space-y-6">
 
               {/* Card 2: Manual Trigger */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -5220,112 +5598,6 @@ export default function SettingsModule({
 
             {/* Right List Panel */}
             <div className="lg:col-span-7 space-y-6">
-              
-              {/* Card: Backups Log */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col min-h-[300px]">
-                <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-                  <div className="flex items-center gap-2 text-orange-600">
-                    <Database className="w-4.5 h-4.5" />
-                    <h4 className="font-bold text-slate-800 text-sm">Histórico de Backups realizados no localStorage</h4>
-                  </div>
-                  <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold text-[10px]">
-                    {localBackupsLog.length} de 5 Slots
-                  </span>
-                </div>
-
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Estes são os últimos 5 backups gravados localmente neste navegador. Pode descarregar cada ponto de restauro individualmente ou restaurar o banco de dados diretamente a partir deles.
-                </p>
-
-                {localBackupsLog.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
-                    <div className="bg-slate-100 text-slate-400 p-4 rounded-2xl mb-3">
-                      <Database className="w-8 h-8 stroke-[1.5]" />
-                    </div>
-                    <h5 className="font-bold text-slate-700 text-xs">Nenhum backup local registado</h5>
-                    <p className="text-[11px] text-slate-400 max-w-[280px] mt-1">
-                      Os backups automáticos e manuais serão listados aqui assim que forem gerados pelo sistema.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
-                    <table className="w-full text-[11px] text-slate-600 border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
-                          <th className="py-2.5 px-3">Data & Hora</th>
-                          <th className="py-2.5 px-2">Tipo</th>
-                          <th className="py-2.5 px-2">Frequência</th>
-                          <th className="py-2.5 px-2">Tamanho</th>
-                          <th className="py-2.5 px-2 text-center">Registos</th>
-                          <th className="py-2.5 px-3 text-right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {localBackupsLog.map((log: any) => (
-                          <tr key={log.id} className="hover:bg-slate-50 transition">
-                            <td className="py-3 px-3 font-semibold text-slate-800">
-                              {new Date(log.date).toLocaleString("pt-MZ", {
-                                day: "2-digit",
-                                month: "2-digit",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                second: "2-digit"
-                              })}
-                            </td>
-                            <td className="py-3 px-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                log.type === "Manual"
-                                  ? "bg-amber-100 text-amber-700 border border-amber-200"
-                                  : "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                              }`}>
-                                {log.type}
-                              </span>
-                            </td>
-                            <td className="py-3 px-2 font-medium text-slate-500">
-                              {log.frequency}
-                            </td>
-                            <td className="py-3 px-2 font-mono text-[10.5px] text-slate-500">
-                              {(log.size / 1024).toFixed(1)} KB
-                            </td>
-                            <td className="py-3 px-2 text-center font-bold text-slate-600">
-                              {log.itemCount || 0}
-                            </td>
-                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadSlotBackup(log.id, log.date)}
-                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-955 border border-slate-200 rounded-lg transition shadow-sm cursor-pointer"
-                                title="Descarregar ficheiro JSON de backup"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={currentRole !== "ADMIN"}
-                                onClick={() => handleRestoreFromSlot(log.id)}
-                                className={`inline-flex items-center justify-center p-1.5 border rounded-lg transition-all cursor-pointer ${
-                                  currentRole === "ADMIN"
-                                    ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 shadow-sm"
-                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50"
-                                }`}
-                                title={currentRole === "ADMIN" ? "Restaurar banco de dados para este ponto" : "Apenas administradores"}
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 italic flex items-center gap-1">
-                  <Shield className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>A restauração de qualquer backup local substitui os dados em execução no terminal offline.</span>
-                </div>
-              </div>
 
               {/* Card: Cloud Backups Log */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col min-h-[300px]">
@@ -6336,6 +6608,115 @@ export default function SettingsModule({
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Audit Trail Filter and Export Card */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div>
+                <h4 className="font-bold text-slate-850 text-sm">Trilha de Auditoria & Exportação de Eventos</h4>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Filtre eventos operacionais críticos e logs de segurança por intervalo de datas para gerar relatórios regulamentares em formato PDF ou Excel.
+                </p>
+              </div>
+              <span className="text-[10px] font-mono bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded font-black uppercase">
+                {auditLogs.length} Registros Totais
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 block">Data Inicial</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Calendar className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="date"
+                    value={auditFilterStartDate}
+                    onChange={(e) => setAuditFilterStartDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-700 block">Data Final</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                    <Calendar className="w-4 h-4" />
+                  </span>
+                  <input
+                    type="date"
+                    value={auditFilterEndDate}
+                    onChange={(e) => setAuditFilterEndDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Actions / Helpers */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+              <div className="space-y-0.5">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Registros Encontrados</span>
+                <span className="text-xs font-extrabold text-slate-700">
+                  {
+                    (() => {
+                      const count = auditLogs.filter(log => {
+                        if (!log.timestamp) return true;
+                        const logDate = new Date(log.timestamp);
+                        if (auditFilterStartDate) {
+                          const start = new Date(auditFilterStartDate);
+                          start.setHours(0, 0, 0, 0);
+                          if (logDate < start) return false;
+                        }
+                        if (auditFilterEndDate) {
+                          const end = new Date(auditFilterEndDate);
+                          end.setHours(23, 59, 59, 999);
+                          if (logDate > end) return false;
+                        }
+                        return true;
+                      }).length;
+                      return count === 1 ? "1 registro atende aos filtros" : `${count} registros atendem aos filtros`;
+                    })()
+                  }
+                </span>
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuditFilterStartDate("");
+                    setAuditFilterEndDate("");
+                  }}
+                  className="py-1.5 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition hover:bg-slate-50 hover:text-slate-800 cursor-pointer"
+                >
+                  Limpar Filtros
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleExportAuditLogsPDF}
+                className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow shadow-slate-900/10"
+              >
+                <FileText className="w-4 h-4 text-rose-400" />
+                Exportar Relatório PDF
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportAuditLogsExcel}
+                className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow shadow-emerald-600/10"
+              >
+                <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+                Exportar Planilha Excel (.xlsx)
+              </button>
             </div>
           </div>
 

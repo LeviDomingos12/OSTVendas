@@ -13,9 +13,25 @@ import {
   Calculator,
   Percent,
   Play,
-  Printer
+  Printer,
+  Calendar,
+  Activity,
+  User,
+  ShieldAlert,
+  AlertTriangle,
+  Flame
 } from "lucide-react";
-import { Transaction, SystemSettings } from "../types";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer
+} from "recharts";
+import { Transaction, SystemSettings, AuditLog } from "../types";
 import { sendEmail } from "../lib/gmail";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
 import { SYSTEM_THEMES } from "../lib/themes";
@@ -57,6 +73,7 @@ interface ReportsModuleProps {
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currency: string;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
+  auditLogs?: AuditLog[];
 }
 
 export default function ReportsModule({
@@ -65,7 +82,8 @@ export default function ReportsModule({
   onUpdateSettings,
   onAddAuditLog,
   currency,
-  onShowToast
+  onShowToast,
+  auditLogs = []
 }: ReportsModuleProps) {
   
   // Local states
@@ -102,7 +120,10 @@ export default function ReportsModule({
   const [showPrintModal, setShowPrintModal] = useState<Transaction | null>(null);
 
   // Active sub-tab state inside ReportsModule
-  const [activeSubTab, setActiveSubTab] = useState<"general" | "iva">("general");
+  const [activeSubTab, setActiveSubTab] = useState<"general" | "iva" | "activity">("general");
+
+  // Grouping for the system activity bar chart
+  const [activityGrouping, setActivityGrouping] = useState<"daily" | "hourly" | "module">("daily");
 
   // Local states for the VAT (IVA) calculator
   const [manualIvaDeduction, setManualIvaDeduction] = useState<number>(0);
@@ -171,6 +192,120 @@ export default function ReportsModule({
       totalTransactions
     };
   }, [filteredTransactions, simulatedIvaRate, manualIvaDeduction]);
+
+  // Memoized audit logs filtered by active dates
+  const filteredLogs = useMemo(() => {
+    return auditLogs.filter(log => {
+      if (!log.timestamp) return false;
+      const logDate = log.timestamp.split("T")[0];
+      return logDate >= startDate && logDate <= endDate;
+    });
+  }, [auditLogs, startDate, endDate]);
+
+  // Audit Logs analytics calculations
+  const activityAnalytics = useMemo(() => {
+    const dailyCounts: Record<string, number> = {};
+    const hourlyCounts: Record<string, number> = {};
+    const moduleCounts: Record<string, number> = {};
+    const userCounts: Record<string, number> = {};
+
+    filteredLogs.forEach(log => {
+      // Daily grouping
+      if (log.timestamp) {
+        const dateStr = log.timestamp.split("T")[0];
+        dailyCounts[dateStr] = (dailyCounts[dateStr] || 0) + 1;
+
+        // Hourly grouping
+        const parts = log.timestamp.split("T");
+        if (parts[1]) {
+          const hour = parts[1].slice(0, 2) + "h";
+          hourlyCounts[hour] = (hourlyCounts[hour] || 0) + 1;
+        }
+      }
+
+      // Module grouping
+      const mod = log.module || "GERAL";
+      moduleCounts[mod] = (moduleCounts[mod] || 0) + 1;
+
+      // User grouping
+      const usr = log.user || "Sistema";
+      userCounts[usr] = (userCounts[usr] || 0) + 1;
+    });
+
+    // Peak daily activity
+    let peakActivityValue = 0;
+    let peakActivityDate = "";
+    Object.entries(dailyCounts).forEach(([date, count]) => {
+      if (count > peakActivityValue) {
+        peakActivityValue = count;
+        peakActivityDate = date;
+      }
+    });
+
+    // Active modules count and most active
+    const activeModulesCount = Object.keys(moduleCounts).length;
+    let mostActiveModule = "";
+    let mostActiveModuleLogsCount = 0;
+    Object.entries(moduleCounts).forEach(([mod, count]) => {
+      if (count > mostActiveModuleLogsCount) {
+        mostActiveModuleLogsCount = count;
+        mostActiveModule = mod;
+      }
+    });
+
+    // Most active operator
+    let mostActiveUser = "";
+    let mostActiveUserLogsCount = 0;
+    Object.entries(userCounts).forEach(([usr, count]) => {
+      if (count > mostActiveUserLogsCount) {
+        mostActiveUserLogsCount = count;
+        mostActiveUser = usr;
+      }
+    });
+
+    return {
+      dailyCounts,
+      hourlyCounts,
+      moduleCounts,
+      peakActivityValue,
+      peakActivityDate,
+      activeModulesCount,
+      mostActiveModule,
+      mostActiveUser,
+      mostActiveUserLogsCount
+    };
+  }, [filteredLogs]);
+
+  // Chart data based on activityGrouping selector
+  const chartData = useMemo(() => {
+    if (activityGrouping === "daily") {
+      return Object.entries(activityAnalytics.dailyCounts)
+        .map(([date, count]) => ({
+          label: date,
+          count
+        }))
+        .sort((a, b) => new Date(a.label).getTime() - new Date(b.label).getTime());
+    } else if (activityGrouping === "hourly") {
+      const hours = Array.from({ length: 24 }, (_, i) => {
+        const h = String(i).padStart(2, "0") + "h";
+        return {
+          label: h,
+          count: activityAnalytics.hourlyCounts[h] || 0
+        };
+      });
+      // Filter out hours with zero activity to make it clean, or keep all to see full day.
+      // Let's keep all 24 hours to clearly show peaks across the day, or only those with activity.
+      // Keeping all 24 hours is a nice full-day curve.
+      return hours;
+    } else {
+      return Object.entries(activityAnalytics.moduleCounts)
+        .map(([moduleName, count]) => ({
+          label: moduleName,
+          count: Number(count)
+        }))
+        .sort((a, b) => b.count - a.count);
+    }
+  }, [activityGrouping, activityAnalytics]);
 
   const formatMZ = (val: number) => {
     return new Intl.NumberFormat('pt-MZ', { 
@@ -734,6 +869,356 @@ export default function ReportsModule({
     }, 1500);
   };
 
+  const handleExportDailyFinancialSummaryPDF = async () => {
+    setIsExporting(true);
+    setExportMessage("");
+    if (onShowToast) {
+      onShowToast("Preparando Resumo Financeiro Diário...", "info", "Aguarde");
+    }
+
+    setTimeout(async () => {
+      try {
+        const { jsPDF } = await import("jspdf");
+        const { default: autoTable } = await import("jspdf-autotable");
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: "a4"
+        });
+
+        const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
+        const rgbArray = activeTheme.rgb.split(",").map(Number);
+
+        // Filter transactions for the selected endDate
+        const dailyTransactions = transactions.filter(t => {
+          if (!t.timestamp) return false;
+          return t.timestamp.split("T")[0] === endDate;
+        });
+
+        // Sort by timestamp ascending
+        dailyTransactions.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        // Calculate daily totals
+        let dailySalesTotal = 0;
+        let dailyVatTotal = 0;
+        let dailyDiscountTotal = 0;
+        let dailySubtotalTotal = 0;
+
+        dailyTransactions.forEach(t => {
+          dailySalesTotal += t.grandTotal;
+          dailyVatTotal += t.vatTotal;
+          dailyDiscountTotal += t.discountTotal;
+          dailySubtotalTotal += t.subtotal;
+        });
+
+        const dailyAvgTicket = dailyTransactions.length ? Math.round(dailySalesTotal / dailyTransactions.length) : 0;
+        const dailyProfitTotal = Math.round(dailySalesTotal * 0.32); // margin estimate
+
+        // A4: 210 x 297 mm
+        // 1. Top elegant color band
+        doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.rect(0, 0, 210, 10, "F");
+
+        // 2. Company Logo
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 14, 30, 30);
+        }
+
+        // 3. Corporate Info Header
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42); // slate-900
+        doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139); // slate-500
+        doc.text(`NUIT: ${settings.companyNuit || "400293112"} | Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 29);
+        doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"} | E-mail: ${settings.smtpUser || "suporte@ost.co.mz"}`, 14, 34);
+
+        // Header Divider Line
+        doc.setDrawColor(226, 232, 240); // slate-200
+        doc.setLineWidth(0.4);
+        doc.line(14, 39, 196, 39);
+
+        // 4. Document Title
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("RESUMO FINANCEIRO DIÁRIO", 14, 48);
+
+        // Format Date beautifully
+        let formattedDateString = endDate;
+        try {
+          formattedDateString = new Date(endDate + "T00:00:00").toLocaleDateString("pt-MZ", {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric"
+          });
+          // Capitalize first letter
+          formattedDateString = formattedDateString.charAt(0).toUpperCase() + formattedDateString.slice(1);
+        } catch (e) {
+          formattedDateString = endDate;
+        }
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Dia da Apuração: ${formattedDateString}`, 14, 54);
+        doc.text(`Emitido em: ${new Date().toLocaleString("pt-MZ")} | Moeda Oficial: Meticais (MT)`, 14, 59);
+
+        // 5. Beautiful Metric Cards Row
+        // Card 1: Faturamento Bruto Diário
+        doc.setFillColor(248, 250, 252); // slate-50
+        doc.rect(14, 65, 57, 20, "F");
+        doc.setDrawColor(226, 232, 240);
+        doc.rect(14, 65, 57, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("FATURAÇÃO DIÁRIA", 18, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.text(formatMZ(dailySalesTotal), 18, 79);
+
+        // Card 2: Imposto IVA Diário
+        doc.setFillColor(248, 250, 252);
+        doc.rect(76, 65, 57, 20, "F");
+        doc.rect(76, 65, 57, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("IVA DIÁRIO (16%)", 80, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(formatMZ(dailyVatTotal), 80, 79);
+
+        // Card 3: Volume & Ticket Médio
+        doc.setFillColor(248, 250, 252);
+        doc.rect(138, 65, 58, 20, "F");
+        doc.rect(138, 65, 58, 20, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("VOLUME & TICKET MÉDIO", 142, 71);
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(`${dailyTransactions.length} vendas | ${formatMZ(dailyAvgTicket)}`, 142, 79);
+
+        // KPI Row 2
+        // Card 4: Descontos Diários
+        doc.setFillColor(248, 250, 252);
+        doc.rect(14, 89, 57, 18, "F");
+        doc.rect(14, 89, 57, 18, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("DESCONTOS DIÁRIOS", 18, 94);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(220, 38, 38); // red-600
+        doc.text(`-${formatMZ(dailyDiscountTotal)}`, 18, 101);
+
+        // Card 5: Margem Diária Est.
+        doc.setFillColor(248, 250, 252);
+        doc.rect(76, 89, 57, 18, "F");
+        doc.rect(76, 89, 57, 18, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("LUCRO ESTIMADO (32%)", 80, 94);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(16, 185, 129); // emerald-500
+        doc.text(`+${formatMZ(dailyProfitTotal)}`, 80, 101);
+
+        // Card 6: Subtotal Diário
+        doc.setFillColor(248, 250, 252);
+        doc.rect(138, 89, 58, 18, "F");
+        doc.rect(138, 89, 58, 18, "S");
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("VALOR SUB-TOTAL", 142, 94);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(formatMZ(dailySubtotalTotal), 142, 101);
+
+        // Divider
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, 113, 196, 113);
+
+        // 6. Section: Payment Methods Distribution for the day
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("MEIOS DE PAGAMENTO DO DIA", 14, 120);
+
+        const paymentBreakdown: Record<string, { count: number; total: number }> = {};
+        dailyTransactions.forEach(t => {
+          const method = t.paymentMethod || "OUTRO";
+          if (!paymentBreakdown[method]) {
+            paymentBreakdown[method] = { count: 0, total: 0 };
+          }
+          paymentBreakdown[method].count += 1;
+          paymentBreakdown[method].total += t.grandTotal;
+        });
+
+        const totalTransactions = dailyTransactions.length || 1;
+        const totalRevenue = dailySalesTotal || 1;
+
+        const paymentRows = Object.entries(paymentBreakdown).map(([method, data]) => {
+          // Translate payment methods beautifully
+          let readableMethod = method;
+          if (method === "CASH") readableMethod = "Dinheiro (Caixa)";
+          else if (method === "MPESA_PAGA_FACIL") readableMethod = "M-Pesa (Paga Fácil)";
+          else if (method === "EMOLA") readableMethod = "e-Mola";
+          else if (method === "POS_CARD") readableMethod = "POS / Cartão Débito";
+          else if (method === "CREDIT_CARD") readableMethod = "Cartão de Crédito";
+          else if (method === "BANK_TRANSFER") readableMethod = "Transferência Bancária";
+          else if (method === "MIXED") readableMethod = "Misto (Dinheiro + Digital)";
+          else if (method === "DEBT") readableMethod = "Crédito / Conta Corrente";
+
+          return [
+            readableMethod,
+            `${data.count} transações`,
+            `${((data.count / totalTransactions) * 100).toFixed(1)}%`,
+            formatMZ(data.total),
+            `${((data.total / totalRevenue) * 100).toFixed(1)}%`
+          ];
+        });
+
+        autoTable(doc, {
+          startY: 124,
+          head: [["Meio de Pagamento", "Qtd Transações", "% Transações", "Faturamento do Dia", "% Receita"]],
+          body: paymentRows.length > 0 ? paymentRows : [["Nenhum faturamento registrado no dia", "0", "0%", "0,00 MT", "0%"]],
+          theme: "striped",
+          styles: { fontSize: 8, cellPadding: 2.5 },
+          headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            3: { halign: "right", fontStyle: "bold" },
+            4: { halign: "right" }
+          }
+        });
+
+        let nextY = (doc as any).lastAutoTable.finalY + 10;
+
+        // 7. Section: Detailed Sales List for the Day
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("TRANSAÇÕES DETALHADAS DO DIA", 14, nextY);
+
+        const tableHead = [["FATURA", "HORA", "CLIENTE", "MÉTODO", "SUBTOTAL", "DESC", "IVA", "TOTAL MT"]];
+        const tableBody = dailyTransactions.map(t => {
+          let timeStr = "";
+          try {
+            timeStr = new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          } catch (e) {
+            timeStr = t.timestamp.split("T")[1]?.slice(0, 5) || "";
+          }
+
+          let readableMethod = t.paymentMethod;
+          if (t.paymentMethod === "CASH") readableMethod = "DINHEIRO" as any;
+          else if (t.paymentMethod === "MPESA_PAGA_FACIL") readableMethod = "M-PESA" as any;
+          else if (t.paymentMethod === "POS_CARD") readableMethod = "CARTÃO" as any;
+
+          return [
+            t.invoiceNumber,
+            timeStr,
+            t.customerName || "Consumidor Geral",
+            readableMethod,
+            formatMZ(t.subtotal),
+            `-${formatMZ(t.discountTotal)}`,
+            formatMZ(t.vatTotal),
+            formatMZ(t.grandTotal)
+          ];
+        });
+
+        autoTable(doc, {
+          startY: nextY + 4,
+          head: tableHead,
+          body: tableBody.length > 0 ? tableBody : [["-", "-", "Nenhuma venda registrada no dia", "-", "0,00 MT", "0,00 MT", "0,00 MT", "0,00 MT"]],
+          theme: "striped",
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            4: { halign: "right" },
+            5: { halign: "right", textColor: [220, 38, 38] },
+            6: { halign: "right" },
+            7: { halign: "right", fontStyle: "bold" }
+          },
+          didDrawPage: (data) => {
+            // Footer
+            doc.setFontSize(7.5);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(148, 163, 184);
+            doc.text(`Página ${data.pageNumber}`, 14, 288);
+            doc.text("OST Vendas - Sistema de Gestão Comercial Integrado", 120, 288);
+          }
+        });
+
+        nextY = (doc as any).lastAutoTable.finalY + 10;
+
+        // 8. Signatures Section
+        const drawDocSignatures = (targetDoc: typeof doc, startY: number) => {
+          targetDoc.setDrawColor(203, 213, 225);
+          targetDoc.line(20, startY + 12, 90, startY + 12);
+          targetDoc.line(120, startY + 12, 190, startY + 12);
+
+          targetDoc.setFont("helvetica", "bold");
+          targetDoc.setFontSize(8);
+          targetDoc.setTextColor(71, 85, 105);
+          targetDoc.text("Responsável de Vendas / Operador", 26, startY + 16);
+          targetDoc.text("Supervisor / Diretor Administrativo", 126, startY + 16);
+
+          targetDoc.setFont("helvetica", "normal");
+          targetDoc.setFontSize(7.5);
+          targetDoc.setTextColor(148, 163, 184);
+          targetDoc.text("Documento oficial gerencial para conciliação diária de faturamento físico e digital.", 14, startY + 24);
+        };
+
+        if (nextY + 30 > 280) {
+          doc.addPage();
+          doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+          doc.rect(0, 0, 210, 10, "F");
+          drawDocSignatures(doc, 20);
+        } else {
+          drawDocSignatures(doc, nextY);
+        }
+
+        // Save PDF file
+        doc.save(`Resumo_Financeiro_Diario_${endDate}.pdf`);
+
+        setExportMessage(`Resumo Financeiro Diário (A4 PDF) de ${endDate} gerado com sucesso!`);
+        onAddAuditLog(
+          "Exportar Resumo Financeiro Diário PDF",
+          "RELATÓRIOS",
+          `Gestor exportou resumo financeiro diário de ${endDate}.`
+        );
+
+        if (onShowToast) {
+          onShowToast("Resumo Financeiro Diário gerado com sucesso!", "success", "PDF Exportado");
+        }
+      } catch (err: any) {
+        console.error("Erro ao gerar PDF de resumo diário:", err);
+        setExportMessage(`Erro ao compilar PDF diário: ${err.message || err}`);
+        if (onShowToast) {
+          onShowToast("Falha ao gerar resumo financeiro diário.", "error", "Erro de Exportação");
+        }
+      } finally {
+        setIsExporting(false);
+      }
+    }, 1200);
+  };
+
   const handleExportSalesSummaryPDF = async () => {
     setIsExporting(true);
     setExportMessage("");
@@ -1185,7 +1670,7 @@ export default function ReportsModule({
   return (
     <div className="space-y-6">
       {/* Subtab Navigation inside ReportsModule */}
-      <div className="flex border-b border-slate-200 gap-1 bg-white p-2 rounded-2xl border">
+      <div className="flex border-b border-slate-200 gap-1 bg-white p-2 rounded-2xl border flex-wrap">
         <button
           id="btn-subtab-reports-general"
           type="button"
@@ -1212,9 +1697,22 @@ export default function ReportsModule({
           <Percent className="w-4 h-4" />
           Calculadora & Declaração de IVA
         </button>
+        <button
+          id="btn-subtab-reports-activity"
+          type="button"
+          onClick={() => setActiveSubTab("activity")}
+          className={`flex-1 md:flex-none px-6 py-3 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+            activeSubTab === "activity"
+              ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+              : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+          }`}
+        >
+          <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
+          Atividade & Auditoria (Gráfico)
+        </button>
       </div>
 
-      {activeSubTab === "general" ? (
+      {activeSubTab === "general" && (
         <div className="space-y-6 animate-in fade-in duration-200">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4.5">
         
@@ -1373,6 +1871,18 @@ export default function ReportsModule({
             >
               <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
               Exportar Sumário de Vendas do Período (PDF)
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportDailyFinancialSummaryPDF}
+              disabled={isExporting}
+              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
+                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
+              }`}
+            >
+              <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
+              Exportar Resumo Financeiro Diário (A4 PDF)
             </button>
 
             <button
@@ -1691,7 +2201,9 @@ export default function ReportsModule({
         </div>
       </div>
       </div>
-      ) : (
+      )}
+
+      {activeSubTab === "iva" && (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* Header Card */}
           <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
@@ -2069,6 +2581,187 @@ export default function ReportsModule({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === "activity" && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Header Card */}
+          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
+                <Activity className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-white text-base">Atividade & Auditoria do Sistema</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Análise visual dos logs de auditoria para monitorar a frequência de ações, identificar picos operacionais e rastrear acessos ou modificações.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* KPI Row */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4.5">
+            {/* KPI 1 */}
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase block">Total de Ações</span>
+                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{filteredLogs.length}</h4>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">Registros no período</span>
+              </div>
+              <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl">
+                <Activity className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* KPI 2 */}
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase block">Pico de Atividade</span>
+                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{activityAnalytics.peakActivityValue} ações</h4>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">em {activityAnalytics.peakActivityDate || "N/D"}</span>
+              </div>
+              <div className="bg-orange-50 text-orange-600 p-2.5 rounded-xl">
+                <Flame className="w-5 h-5 animate-bounce" />
+              </div>
+            </div>
+
+            {/* KPI 3 */}
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase block">Módulos Ativos</span>
+                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{activityAnalytics.activeModulesCount}</h4>
+                <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block mt-1 leading-none text-[9px]">{activityAnalytics.mostActiveModule || "N/A"}</span>
+              </div>
+              <div className="bg-emerald-50 text-emerald-600 p-2.5 rounded-xl">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* KPI 4 */}
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold uppercase block">Operador Mais Ativo</span>
+                <h4 className="text-sm font-bold text-slate-800 mt-1 truncate max-w-[130px]">{activityAnalytics.mostActiveUser || "N/D"}</h4>
+                <span className="text-[10px] text-slate-400 mt-0.5 block">{activityAnalytics.mostActiveUserLogsCount} ações registradas</span>
+              </div>
+              <div className="bg-indigo-50 text-indigo-600 p-2.5 rounded-xl">
+                <User className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Chart Controls & Recharts Visualization */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <h3 className="font-bold text-slate-800 text-sm">Cronograma Frequencial de Logs e Ações</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Representação gráfica da densidade de transações, acessos, exportações e alterações.</p>
+              </div>
+
+              {/* Grouping Toggle buttons */}
+              <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold font-mono">
+                {(["daily", "hourly", "module"] as const).map(group => (
+                  <button
+                    key={group}
+                    type="button"
+                    onClick={() => setActivityGrouping(group)}
+                    className={`px-3.5 py-1.5 rounded-lg cursor-pointer transition ${
+                      activityGrouping === group ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {group === "daily" ? "Por Dia" : group === "hourly" ? "Por Hora" : "Por Módulo"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Chart Container */}
+            <div className="h-[350px] w-full text-xs font-mono">
+              {chartData.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 bg-slate-50/50 rounded-2xl border border-dashed p-10">
+                  <AlertTriangle className="w-8 h-8 text-slate-350" />
+                  <span>Nenhuma atividade registrada no período selecionado.</span>
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="label" stroke="#94a3b8" />
+                    <YAxis stroke="#94a3b8" allowDecimals={false} />
+                    <RechartsTooltip 
+                      contentStyle={{ background: "#0f172a", border: "none", borderRadius: "12px", color: "#fff", fontSize: "11px" }}
+                      itemStyle={{ color: "#38bdf8" }}
+                    />
+                    <Bar 
+                      dataKey="count" 
+                      name="Ações Executadas" 
+                      fill={SYSTEM_THEMES.find(t => t.id === settings.theme)?.rgb ? `rgb(${SYSTEM_THEMES.find(t => t.id === settings.theme)?.rgb})` : "#f97316"} 
+                      radius={[4, 4, 0, 0]} 
+                      maxBarSize={45}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </div>
+
+          {/* Audit Logs Table for context */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm">Registro Operacional em Tempo Real</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Lista detalhada dos últimos logs de auditoria correspondentes ao período.</p>
+            </div>
+
+            <div className="border border-slate-150 rounded-xl overflow-hidden text-xs">
+              <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-700">
+                  <tr>
+                    <th className="p-3">Data/Hora</th>
+                    <th className="p-3">Operador</th>
+                    <th className="p-3">Módulo</th>
+                    <th className="p-3">Ação</th>
+                    <th className="p-3">Detalhes</th>
+                    <th className="p-3 text-right">IP/Dispositivo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Nenhum registro encontrado.</td>
+                    </tr>
+                  ) : (
+                    [...filteredLogs].reverse().slice(0, 15).map(log => (
+                      <tr key={log.id} className="hover:bg-slate-50/50 transition">
+                        <td className="p-3 text-slate-500 font-mono text-[10px] whitespace-nowrap">
+                          {new Date(log.timestamp).toLocaleString("pt-MZ")}
+                        </td>
+                        <td className="p-3 font-semibold text-slate-800">{log.user || "Sistema"}</td>
+                        <td className="p-3">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-150 text-slate-600 uppercase">
+                            {log.module}
+                          </span>
+                        </td>
+                        <td className="p-3 font-bold text-slate-800">{log.action}</td>
+                        <td className="p-3 text-slate-500 max-w-xs truncate" title={log.details}>
+                          {log.details}
+                        </td>
+                        <td className="p-3 text-right font-mono text-[10px] text-slate-400">
+                          {log.ip || "127.0.0.1"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+              {filteredLogs.length > 15 && (
+                <div className="p-3 bg-slate-50 border-t border-slate-150 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  Exibindo as 15 ações mais recentes de {filteredLogs.length} logs totais no período.
+                </div>
+              )}
             </div>
           </div>
         </div>

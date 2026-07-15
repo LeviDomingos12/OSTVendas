@@ -1195,6 +1195,25 @@ export const deleteProductFromCloudSQL = async (productId: string): Promise<bool
 };
 
 /**
+ * Deletes a customer from the Google Cloud SQL relational table.
+ */
+export const deleteCustomerFromCloudSQL = async (customerId: string): Promise<boolean> => {
+  try {
+    const response = await fetch(`/api/sql/customers/${customerId}`, {
+      method: "DELETE"
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const result = await response.json();
+    return !!result.success;
+  } catch (err: any) {
+    console.error("Failed to delete customer from structured Cloud SQL:", err);
+    return false;
+  }
+};
+
+/**
  * Fetches all customers from Google Cloud SQL.
  */
 export const getCustomersFromCloudSQL = async (): Promise<any[]> => {
