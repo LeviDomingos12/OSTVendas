@@ -116,6 +116,100 @@ const NAV_MENU_ITEMS = [
   { id: "gateway", label: "Integração Mobile Money", shortLabel: "M-Pesa/e-Mola", icon: Smartphone, roles: ["ADMIN"] },
 ];
 
+const safeLocalStorageSetItem = (key: string, value: string): boolean => {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e: any) {
+    // Catch any error during localStorage.setItem as a storage quota warning
+    console.warn(`[QUOTA] Erro de escrita no localStorage para '${key}'. Iniciando limpeza de emergência...`, e);
+
+    // Tier 1: Identify all backup keys and cached profile keys
+    const backupKeys: string[] = [];
+    const profileKeys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k) {
+        if (k.startsWith("erp_backup_slot_")) {
+          backupKeys.push(k);
+        } else if (k.startsWith("cached_profile_")) {
+          profileKeys.push(k);
+        }
+      }
+    }
+
+    // Sort backups to remove oldest first
+    backupKeys.sort();
+
+    // Remove backup slots one by one and retry
+    for (const bk of backupKeys) {
+      console.warn(`[QUOTA] Removendo backup antigo: ${bk}`);
+      localStorage.removeItem(bk);
+      try {
+        localStorage.setItem(key, value);
+        console.warn(`[QUOTA] Gravado '${key}' com sucesso após libertar espaço do backup.`);
+        return true;
+      } catch (retryErr) {
+        // continue
+      }
+    }
+
+    // Tier 2: Remove auto-backup and other less critical keys
+    localStorage.removeItem("erp_auto_backup_local_db");
+    localStorage.removeItem("erp_local_backups_log");
+    try {
+      localStorage.setItem(key, value);
+      console.warn(`[QUOTA] Gravado '${key}' com sucesso após libertar auto-backup.`);
+      return true;
+    } catch (retryErr) {
+      // continue
+    }
+
+    // Tier 3: Remove cached profiles
+    for (const pk of profileKeys) {
+      console.warn(`[QUOTA] Removendo cache de perfil: ${pk}`);
+      localStorage.removeItem(pk);
+      try {
+        localStorage.setItem(key, value);
+        console.warn(`[QUOTA] Gravado '${key}' com sucesso após remover perfis cached.`);
+        return true;
+      } catch (retryErr) {
+        // continue
+      }
+    }
+
+    // Tier 4: If still failing and key is 'pos_sync_queue', let's try to prune the value
+    if (key === "pos_sync_queue") {
+      try {
+        const queueObj = JSON.parse(value);
+        let pruned = false;
+        for (const qKey of Object.keys(queueObj)) {
+          if (Array.isArray(queueObj[qKey]) && queueObj[qKey].length > 10) {
+            console.warn(`[QUOTA] Reduzindo tamanho da fila '${qKey}' de ${queueObj[qKey].length} para 10 itens.`);
+            queueObj[qKey] = queueObj[qKey].slice(-10);
+            pruned = true;
+          }
+        }
+        if (pruned) {
+          const prunedValue = JSON.stringify(queueObj);
+          try {
+            localStorage.setItem(key, prunedValue);
+            console.warn(`[QUOTA] Gravado '${key}' com sucesso em formato compactado.`);
+            return true;
+          } catch (retryErr) {
+            // continue
+          }
+        }
+      } catch (parseErr) {
+        // ignore
+      }
+    }
+
+    console.warn(`[QUOTA-CRITICAL] Falha total ao gravar '${key}' no localStorage. Sem espaço disponível.`);
+    return false;
+  }
+};
+
 export default function App() {
   
   // SHARED STATES
@@ -472,7 +566,7 @@ export default function App() {
         const queue = JSON.parse(rawQueue);
         if (queue[tableName]) {
           delete queue[tableName];
-          localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
+          safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
         }
       }
     } catch (err: any) {
@@ -486,9 +580,9 @@ export default function App() {
         const rawQueue = localStorage.getItem("pos_sync_queue");
         const queue = rawQueue ? JSON.parse(rawQueue) : {};
         queue[tableName] = updatedData;
-        localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
+        safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
       } catch (queueErr) {
-        console.error("Erro ao guardar alteração na fila offline local:", queueErr);
+        console.warn("Erro ao guardar alteração na fila offline local (quota de armazenamento excedida):", queueErr);
       }
     }
   };
@@ -570,7 +664,7 @@ export default function App() {
           }
         }
         
-        localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
+        safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
       } catch (err) {
         console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
       }
@@ -635,7 +729,7 @@ export default function App() {
 
             // Sucesso! Remove a chave transactions da fila offline
             delete queue["transactions"];
-            localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
+            safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
             
             setLastSyncTime(new Date().toLocaleTimeString());
             console.log("[SYNC 5MIN] Sincronização automática das transações offline concluída com sucesso!");
@@ -1313,7 +1407,10 @@ export default function App() {
       device: devStr
     };
     setAuditLogs(prev => {
-      const updated = [...prev, newLog];
+      let updated = [...prev, newLog];
+      if (updated.length > 200) {
+        updated = updated.slice(-200);
+      }
       syncTable("auditlogs", updated);
       return updated;
     });
@@ -1435,7 +1532,7 @@ export default function App() {
           transactions,
           cashFlow,
           employees,
-          auditLogs
+          auditLogs: auditLogs.slice(-50) // Only backup last 50 logs to conserve localStorage quota
         }
       };
 
@@ -1443,8 +1540,8 @@ export default function App() {
       const backupId = Date.now().toString();
       
       // Save full backup payload to a unique key slot
-      localStorage.setItem(`erp_backup_slot_${backupId}`, dataStr);
-      localStorage.setItem("erp_auto_backup_local_db", dataStr);
+      safeLocalStorageSetItem(`erp_backup_slot_${backupId}`, dataStr);
+      safeLocalStorageSetItem("erp_auto_backup_local_db", dataStr);
       localStorage.setItem("erp_last_auto_backup_time", new Date().toISOString());
 
       // Update backup logs list
@@ -1468,8 +1565,8 @@ export default function App() {
       };
 
       logs.unshift(newLog);
-      logs = logs.slice(0, 5); // Keep last 5
-      localStorage.setItem("erp_local_backups_log", JSON.stringify(logs));
+      logs = logs.slice(0, 3); // Keep last 3 to be safe on localStorage quota
+      safeLocalStorageSetItem("erp_local_backups_log", JSON.stringify(logs));
 
       // Clean up backup slot keys that are no longer in the logs list
       const activeIds = logs.map((l: any) => l.id);

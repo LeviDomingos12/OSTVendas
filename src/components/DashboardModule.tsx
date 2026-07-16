@@ -34,7 +34,10 @@ import {
   FileText,
   Bell,
   Plus,
-  Circle
+  Circle,
+  Volume2,
+  List,
+  GripVertical
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -229,6 +232,145 @@ export default function DashboardModule({
 
   // Active Tab for reminders list: "diarios" or "recorrentes"
   const [activeReminderTab, setActiveReminderTab] = useState<"diarios" | "recorrentes">("diarios");
+  const [isRemindersExpanded, setIsRemindersExpanded] = useState<boolean>(false);
+  const [recurringViewMode, setRecurringViewMode] = useState<"list" | "calendar">("list");
+  const [calendarYear, setCalendarYear] = useState<number>(new Date().getFullYear());
+  const [calendarMonth, setCalendarMonth] = useState<number>(new Date().getMonth());
+  const [selectedDayReminders, setSelectedDayReminders] = useState<{ day: number, tasks: any[] } | null>(null);
+  const [draggedOverDay, setDraggedOverDay] = useState<number | null>(null);
+  const [activePopupReminder, setActivePopupReminder] = useState<any | null>(null);
+  const [snoozedReminders, setSnoozedReminders] = useState<{ [id: string]: number }>({});
+
+  const MONTHS_PT = useMemo(() => [
+    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+  ], []);
+
+  const calendarDays = useMemo(() => {
+    const totalDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+    const firstDayIndex = new Date(calendarYear, calendarMonth, 1).getDay(); // 0 is Sunday, 6 is Saturday
+    
+    const days: { dateStr: string; dayNum: number; isCurrentMonth: boolean; weekday: number }[] = [];
+    
+    const prevMonthDaysCount = new Date(calendarYear, calendarMonth, 0).getDate();
+    const startPadding = firstDayIndex === 0 ? 6 : firstDayIndex - 1; // Assuming Monday is the first day of the week
+    
+    for (let i = startPadding - 1; i >= 0; i--) {
+      const d = prevMonthDaysCount - i;
+      const m = calendarMonth === 0 ? 11 : calendarMonth - 1;
+      const y = calendarMonth === 0 ? calendarYear - 1 : calendarYear;
+      days.push({
+        dateStr: `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+        dayNum: d,
+        isCurrentMonth: false,
+        weekday: new Date(y, m, d).getDay()
+      });
+    }
+    
+    for (let d = 1; d <= totalDays; d++) {
+      days.push({
+        dateStr: `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+        dayNum: d,
+        isCurrentMonth: true,
+        weekday: new Date(calendarYear, calendarMonth, d).getDay()
+      });
+    }
+    
+    const endPadding = 42 - days.length;
+    for (let d = 1; d <= endPadding; d++) {
+      const m = calendarMonth === 11 ? 0 : calendarMonth + 1;
+      const y = calendarMonth === 11 ? calendarYear + 1 : calendarYear;
+      days.push({
+        dateStr: `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+        dayNum: d,
+        isCurrentMonth: false,
+        weekday: new Date(y, m, d).getDay()
+      });
+    }
+    
+    return days;
+  }, [calendarYear, calendarMonth]);
+
+  const getTasksForDay = (dayNum: number, isCurrentMonth: boolean) => {
+    if (!isCurrentMonth) return [];
+    
+    const currentDate = new Date(calendarYear, calendarMonth, dayNum);
+    const dayOfWeek = currentDate.getDay(); // 0-6 (Sunday-Saturday)
+    
+    return recurringReminders.filter(reminder => {
+      const createdDate = new Date(reminder.createdAt);
+      const createdZero = new Date(createdDate.getFullYear(), createdDate.getMonth(), createdDate.getDate());
+      const currentZero = new Date(calendarYear, calendarMonth, dayNum);
+      if (currentZero < createdZero) return false;
+      
+      if (reminder.frequency === "daily") {
+        return true;
+      }
+      if (reminder.frequency === "weekly") {
+        return createdDate.getDay() === dayOfWeek;
+      }
+      if (reminder.frequency === "monthly") {
+        const targetDay = createdDate.getDate();
+        const totalDaysInThisMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+        if (targetDay > totalDaysInThisMonth) {
+          return dayNum === totalDaysInThisMonth;
+        }
+        return dayNum === targetDay;
+      }
+      return false;
+    });
+  };
+
+  // Gentle audio chime utilizing the browser's Web Audio API
+  const playGentleNotificationSound = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+
+      // Resume context if suspended (browser audio safety)
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+
+      // Generates a soft synthesized bell note
+      const playChime = (freq: number, delay: number, duration: number, volume: number) => {
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+
+        // Use a clean sine wave for a warm tone
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + delay);
+
+        gainNode.gain.setValueAtTime(0, now + delay);
+        gainNode.gain.linearRampToValueAtTime(volume, now + delay + 0.04);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + delay + duration);
+
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+
+        osc.start(now + delay);
+        osc.stop(now + delay + duration);
+      };
+
+      // Play an elegant, ascending major-seventh arpeggiated chime
+      playChime(523.25, 0.0, 0.8, 0.08);    // C5
+      playChime(659.25, 0.08, 0.8, 0.08);   // E5
+      playChime(783.99, 0.16, 0.8, 0.08);   // G5
+      playChime(987.77, 0.24, 1.0, 0.06);   // B5
+    } catch (error) {
+      console.warn("Could not play notification sound:", error);
+    }
+  };
+
+  // Play the soft chime automatically when a reminder popup is triggered
+  useEffect(() => {
+    if (activePopupReminder) {
+      playGentleNotificationSound();
+    }
+  }, [activePopupReminder]);
 
   // Recurring Scheduled Reminders state
   const [recurringReminders, setRecurringReminders] = useState<any[]>(() => {
@@ -247,6 +389,75 @@ export default function DashboardModule({
     ];
   });
 
+  // Automatically reset the completed status of recurring reminders when a new cycle starts
+  useEffect(() => {
+    const now = new Date();
+    const nowTime = now.getTime();
+    let updated = false;
+
+    const newReminders = recurringReminders.map(reminder => {
+      if (!reminder.completed || !reminder.lastTriggered) return reminder;
+
+      const lastDate = new Date(reminder.lastTriggered);
+      const diffMs = nowTime - lastDate.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+      let isNewCycle = false;
+      if (reminder.frequency === "daily") {
+        isNewCycle = now.getDate() !== lastDate.getDate() || now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear();
+      } else if (reminder.frequency === "weekly") {
+        isNewCycle = diffDays >= 7;
+      } else if (reminder.frequency === "monthly") {
+        isNewCycle = diffDays >= 30;
+      }
+
+      if (isNewCycle) {
+        updated = true;
+        return { ...reminder, completed: false };
+      }
+      return reminder;
+    });
+
+    if (updated) {
+      setRecurringReminders(newReminders);
+    }
+  }, [recurringReminders]);
+
+  // Active due recurring reminders (not completed, and cycle has elapsed or never triggered)
+  const dueRecurringReminders = useMemo(() => {
+    const now = new Date();
+    const nowTime = now.getTime();
+
+    return recurringReminders.filter(reminder => {
+      if (reminder.completed) return false;
+      if (!reminder.lastTriggered) return true;
+
+      // Check if snoozed
+      const snoozeUntil = snoozedReminders[reminder.id];
+      if (snoozeUntil && nowTime < snoozeUntil) return false;
+
+      const lastDate = new Date(reminder.lastTriggered);
+      const diffMs = nowTime - lastDate.getTime();
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+      if (reminder.frequency === "daily") {
+        return now.getDate() !== lastDate.getDate() || now.getMonth() !== lastDate.getMonth() || now.getFullYear() !== lastDate.getFullYear();
+      }
+      if (reminder.frequency === "weekly") return diffDays >= 7;
+      if (reminder.frequency === "monthly") return diffDays >= 30;
+
+      return false;
+    });
+  }, [recurringReminders, snoozedReminders]);
+
+  // Uncompleted daily reminders
+  const pendingDailyReminders = useMemo(() => {
+    return reminders.filter(r => !r.completed);
+  }, [reminders]);
+
+  // Total pending reminders
+  const totalPendingCount = dueRecurringReminders.length + pendingDailyReminders.length;
+
   useEffect(() => {
     localStorage.setItem("erp_recurring_reminders", JSON.stringify(recurringReminders));
   }, [recurringReminders]);
@@ -256,12 +467,46 @@ export default function DashboardModule({
   const [newRecurFrequency, setNewRecurFrequency] = useState<"daily" | "weekly" | "monthly">("daily");
   const [newRecurEnablePopup, setNewRecurEnablePopup] = useState(true);
 
-  const [activePopupReminder, setActivePopupReminder] = useState<any | null>(null);
-  const [snoozedReminders, setSnoozedReminders] = useState<{ [id: string]: number }>({});
-
   const handleToggleRecurringReminder = (id: string) => {
     setRecurringReminders(prev => prev.map(r => r.id === id ? { ...r, completed: !r.completed } : r));
     if (onShowToast) onShowToast("Estado do lembrete recorrente atualizado!", "success");
+  };
+
+  const handleRescheduleTask = (taskId: string, targetDayNum: number) => {
+    const targetDate = new Date(calendarYear, calendarMonth, targetDayNum);
+    
+    setRecurringReminders(prev => prev.map(reminder => {
+      if (reminder.id === taskId) {
+        const oldCreated = new Date(reminder.createdAt);
+        const newCreated = new Date(
+          targetDate.getFullYear(),
+          targetDate.getMonth(),
+          targetDayNum,
+          oldCreated.getHours(),
+          oldCreated.getMinutes(),
+          oldCreated.getSeconds()
+        );
+        
+        return {
+          ...reminder,
+          createdAt: newCreated.toISOString(),
+          completed: false 
+        };
+      }
+      return reminder;
+    }));
+    
+    setSelectedDayReminders(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        tasks: prev.tasks.filter(t => t.id !== taskId)
+      };
+    });
+
+    if (onShowToast) {
+      onShowToast("Tarefa recorrente reagendada com sucesso!", "success");
+    }
   };
 
   const handleAddRecurringReminder = (e: any) => {
@@ -1502,6 +1747,192 @@ export default function DashboardModule({
 
   return (
     <div className="space-y-6">
+
+      {/* TOP NOTIFICATION BAR - VISUAL REMINDERS AND MANAGEMENT TASKS */}
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`relative overflow-hidden rounded-3xl border transition-all duration-300 p-5 ${
+          totalPendingCount > 0
+            ? "bg-gradient-to-r from-amber-500/10 via-orange-500/5 to-indigo-500/10 border-amber-500/30 shadow-md shadow-amber-500/5"
+            : "bg-gradient-to-r from-emerald-500/5 via-teal-500/5 to-emerald-500/10 border-emerald-500/20 shadow-sm"
+        }`}
+      >
+        <div className="absolute top-0 right-0 w-32 h-32 bg-amber-200/10 rounded-full blur-2xl pointer-events-none" />
+        
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 z-10 relative">
+          <div className="flex items-center gap-3.5">
+            <div className={`p-3 rounded-2xl shrink-0 transition-all ${
+              totalPendingCount > 0 
+                ? "bg-amber-500 text-white animate-pulse shadow-lg shadow-amber-500/20" 
+                : "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20"
+            }`}>
+              {totalPendingCount > 0 ? (
+                <Bell className="w-5 h-5" />
+              ) : (
+                <CheckCircle className="w-5 h-5" />
+              )}
+            </div>
+            <div>
+              <h3 className="font-extrabold text-slate-800 text-sm flex items-center gap-2">
+                {totalPendingCount > 0 ? (
+                  <span>Tarefas de Gestão Ativas</span>
+                ) : (
+                  <span>Tudo sob Controle!</span>
+                )}
+                {totalPendingCount > 0 && (
+                  <span className="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-full animate-bounce">
+                    {totalPendingCount} Pendente{totalPendingCount > 1 ? "s" : ""}
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {totalPendingCount > 0 
+                  ? `Olá ${activeUser?.name || "Administrador"}, você tem obrigações de gestão (diárias ou recorrentes) que requerem sua atenção.`
+                  : "Excelente! Todas as suas tarefas de gestão agendadas foram concluídas hoje."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto self-stretch md:self-auto justify-end">
+            {totalPendingCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setIsRemindersExpanded(!isRemindersExpanded)}
+                className="flex-1 md:flex-initial px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-extrabold rounded-xl text-xs transition shadow-md shadow-slate-900/10 cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                <span>{isRemindersExpanded ? "Ocultar Tarefas" : "Resolver Agora"}</span>
+                <ChevronRight className={`w-4 h-4 transition-transform duration-300 ${isRemindersExpanded ? "rotate-90" : ""}`} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                const el = document.getElementById("management-reminders-section");
+                if (el) el.scrollIntoView({ behavior: "smooth" });
+              }}
+              className="flex-1 md:flex-initial px-4 py-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+            >
+              <span>Gerenciar Agendamentos</span>
+              <ArrowRight className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+          </div>
+        </div>
+
+        {/* Expandable tasks list inside the alert block for super-fast actions */}
+        <AnimatePresence>
+          {isRemindersExpanded && totalPendingCount > 0 && (
+            <motion.div
+              initial={{ height: 0, opacity: 0, marginTop: 0 }}
+              animate={{ height: "auto", opacity: 1, marginTop: 16 }}
+              exit={{ height: 0, opacity: 0, marginTop: 0 }}
+              transition={{ duration: 0.25, ease: "easeInOut" }}
+              className="overflow-hidden border-t border-slate-100 pt-4"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-1 custom-scrollbar">
+                {/* Daily reminders pending list */}
+                {pendingDailyReminders.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 block mb-1">
+                      Lembretes Diários ({pendingDailyReminders.length})
+                    </span>
+                    <div className="space-y-2">
+                      {pendingDailyReminders.map(reminder => (
+                        <div key={reminder.id} className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-150 shadow-sm hover:border-amber-250 transition">
+                          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleReminder(reminder.id)}
+                              className="mt-0.5 text-slate-300 hover:text-emerald-500 transition cursor-pointer shrink-0"
+                            >
+                              <Circle className="w-4 h-4" />
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-bold text-slate-700 truncate">{reminder.title}</p>
+                              <span className="inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 mt-0.5">
+                                {reminder.category}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 ml-2">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleReminder(reminder.id)}
+                              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+                              title="Concluir"
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Due recurring reminders list */}
+                {dueRecurringReminders.length > 0 && (
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-650 block mb-1">
+                      Recorrentes Vencidos ({dueRecurringReminders.length})
+                    </span>
+                    <div className="space-y-2">
+                      {dueRecurringReminders.map(reminder => {
+                        let freqLabel = "Diária";
+                        if (reminder.frequency === "weekly") freqLabel = "Semanal";
+                        if (reminder.frequency === "monthly") freqLabel = "Mensal";
+
+                        return (
+                          <div key={reminder.id} className="flex items-center justify-between p-3 rounded-xl bg-white border border-slate-150 shadow-sm hover:border-indigo-250 transition">
+                            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                              <button
+                                type="button"
+                                onClick={() => handleTriggerCycleCompleted(reminder.id)}
+                                className="mt-0.5 text-slate-300 hover:text-indigo-600 transition cursor-pointer shrink-0"
+                              >
+                                <Circle className="w-4 h-4" />
+                              </button>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-bold text-slate-700 truncate">{reminder.title}</p>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600">
+                                    {freqLabel}
+                                  </span>
+                                  <span className="inline-block text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-slate-100 text-slate-500">
+                                    {reminder.category}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 ml-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleSnoozeReminder(reminder.id)}
+                                className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition"
+                                title="Adiar 5 min"
+                              >
+                                <Clock className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleTriggerCycleCompleted(reminder.id)}
+                                className="p-1 text-indigo-650 hover:bg-indigo-50 rounded-lg transition"
+                                title="Concluir"
+                              >
+                                <CheckCircle className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
       {/* REAL-TIME PERFORMANCE CAROUSEL */}
       <div className="relative bg-white border border-slate-200/85 rounded-3xl p-5 shadow-sm overflow-hidden min-h-[155px] flex flex-col justify-between">
@@ -2851,7 +3282,7 @@ export default function DashboardModule({
         </div>
 
         {/* Componente de Notificações de Lembretes e Tarefas */}
-        <div className="col-span-1 lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-6">
+        <div id="management-reminders-section" className="col-span-1 lg:col-span-3 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-6 scroll-mt-6">
           {/* Lembretes List */}
           <div className="flex-1 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-3">
@@ -2879,6 +3310,17 @@ export default function DashboardModule({
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
+                {/* Test Chime Button */}
+                <button
+                  type="button"
+                  onClick={playGentleNotificationSound}
+                  className="px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                  title="Testar sinal sonoro de notificações"
+                >
+                  <Volume2 className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Testar Som</span>
+                </button>
+
                 {/* Tabs */}
                 <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl text-xs">
                   <button
@@ -2896,6 +3338,29 @@ export default function DashboardModule({
                     Recorrentes Agendados
                   </button>
                 </div>
+
+                {activeReminderTab === "recorrentes" && (
+                  <div className="flex items-center gap-1 bg-indigo-50/50 p-1 rounded-xl text-xs border border-indigo-100">
+                    <button
+                      type="button"
+                      onClick={() => setRecurringViewMode("list")}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 cursor-pointer ${recurringViewMode === "list" ? "bg-indigo-650 text-white shadow-sm" : "text-indigo-600 hover:bg-indigo-100/40"}`}
+                      title="Visão de Lista"
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Lista</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRecurringViewMode("calendar")}
+                      className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 cursor-pointer ${recurringViewMode === "calendar" ? "bg-indigo-650 text-white shadow-sm" : "text-indigo-600 hover:bg-indigo-100/40"}`}
+                      title="Visão Mensal"
+                    >
+                      <Calendar className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Mensal</span>
+                    </button>
+                  </div>
+                )}
 
                 {activeReminderTab === "diarios" ? (
                   <div className="text-right hidden sm:block">
@@ -2932,7 +3397,7 @@ export default function DashboardModule({
                   <p className="text-[10px] text-slate-300">Use o formulário ao lado para programar novos afazeres.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
                   {reminders.map((reminder) => {
                     let badgeColor = "bg-slate-100 text-slate-700";
                     if (reminder.category === "vendas") badgeColor = "bg-orange-100 text-orange-700";
@@ -2983,82 +3448,323 @@ export default function DashboardModule({
                 </div>
               )
             ) : (
-              recurringReminders.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-6 text-center">
-                  <p className="text-xs font-medium text-slate-400">Nenhuma tarefa recorrente configurada!</p>
-                  <p className="text-[10px] text-slate-300">Use o formulário ao lado para programar obrigações periódicas.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1">
-                  {recurringReminders.map((reminder) => {
-                    let badgeColor = "bg-slate-100 text-slate-700";
-                    if (reminder.category === "vendas") badgeColor = "bg-orange-100 text-orange-700";
-                    if (reminder.category === "estoque") badgeColor = "bg-amber-100 text-amber-800";
-                    if (reminder.category === "financeiro") badgeColor = "bg-emerald-100 text-emerald-800";
+              recurringViewMode === "calendar" ? (
+                <div className="space-y-4">
+                  {/* Month Navigation Header */}
+                  <div className="flex items-center justify-between bg-indigo-50/50 p-2.5 rounded-2xl border border-indigo-100/55">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (calendarMonth === 0) {
+                          setCalendarMonth(11);
+                          setCalendarYear(prev => prev - 1);
+                        } else {
+                          setCalendarMonth(prev => prev - 1);
+                        }
+                        setSelectedDayReminders(null);
+                      }}
+                      className="p-1.5 hover:bg-white rounded-lg border border-slate-200 bg-slate-50 transition cursor-pointer text-slate-600"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    
+                    <span className="text-xs font-black text-indigo-950 uppercase tracking-wide">
+                      {MONTHS_PT[calendarMonth]} {calendarYear}
+                    </span>
+                    
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (calendarMonth === 11) {
+                          setCalendarMonth(0);
+                          setCalendarYear(prev => prev + 1);
+                        } else {
+                          setCalendarMonth(prev => prev + 1);
+                        }
+                        setSelectedDayReminders(null);
+                      }}
+                      className="p-1.5 hover:bg-white rounded-lg border border-slate-200 bg-slate-50 transition cursor-pointer text-slate-600"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
 
-                    let freqLabel = "Diária";
-                    if (reminder.frequency === "weekly") freqLabel = "Semanal";
-                    if (reminder.frequency === "monthly") freqLabel = "Mensal";
+                  {/* Calendar Grid */}
+                  <div className="grid grid-cols-7 gap-1 text-center">
+                    {/* Weekday labels */}
+                    {["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"].map(dayLabel => (
+                      <span key={dayLabel} className="text-[9px] font-extrabold uppercase text-slate-400 py-1">
+                        {dayLabel}
+                      </span>
+                    ))}
 
-                    return (
-                      <div 
-                        key={reminder.id}
-                        className={`flex items-start justify-between p-3 rounded-xl border transition ${
-                          reminder.completed 
-                            ? "bg-slate-50/50 border-slate-150 opacity-60 line-through text-slate-400" 
-                            : "bg-white border-slate-200 hover:border-slate-300 shadow-sm"
-                        }`}
-                      >
-                        <div className="flex items-start gap-2.5 flex-1 min-w-0">
-                          <button 
-                            type="button"
-                            onClick={() => handleToggleRecurringReminder(reminder.id)}
-                            className="mt-0.5 text-slate-400 hover:text-indigo-500 transition cursor-pointer shrink-0"
-                          >
-                            {reminder.completed ? (
-                              <CheckCircle className="w-4 h-4 text-indigo-500 fill-indigo-50" />
-                            ) : (
-                              <Circle className="w-4 h-4 text-slate-300" />
-                            )}
-                          </button>
-                          <div className="space-y-0.5 flex-1 min-w-0">
-                            <p className="text-xs font-semibold text-slate-700 break-words leading-tight">
-                              {reminder.title}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                              <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${badgeColor}`}>
-                                {reminder.category}
-                              </span>
-                              <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                <RefreshCw className="w-2.5 h-2.5" />
-                                {freqLabel}
-                              </span>
-                              {reminder.enablePopup && (
-                                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">
-                                  <Bell className="w-2 h-2 animate-pulse" />
-                                  Pop-up
-                                </span>
+                    {calendarDays.map((dayObj, idx) => {
+                      const tasksForThisDay = getTasksForDay(dayObj.dayNum, dayObj.isCurrentMonth);
+                      const isToday = dayObj.isCurrentMonth && 
+                        dayObj.dayNum === new Date().getDate() && 
+                        calendarMonth === new Date().getMonth() && 
+                        calendarYear === new Date().getFullYear();
+                      
+                      const isSelected = selectedDayReminders?.day === dayObj.dayNum && dayObj.isCurrentMonth;
+                      const isDraggedOver = draggedOverDay === dayObj.dayNum && dayObj.isCurrentMonth;
+
+                      return (
+                        <button
+                          key={`${dayObj.dateStr}-${idx}`}
+                          type="button"
+                          onClick={() => {
+                            if (dayObj.isCurrentMonth) {
+                              setSelectedDayReminders({
+                                day: dayObj.dayNum,
+                                tasks: tasksForThisDay
+                              });
+                            }
+                          }}
+                          onDragOver={(e) => {
+                            if (dayObj.isCurrentMonth) {
+                              e.preventDefault();
+                              if (draggedOverDay !== dayObj.dayNum) {
+                                setDraggedOverDay(dayObj.dayNum);
+                              }
+                            }
+                          }}
+                          onDragLeave={() => {
+                            setDraggedOverDay(null);
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setDraggedOverDay(null);
+                            if (dayObj.isCurrentMonth) {
+                              const taskId = e.dataTransfer.getData("text/plain");
+                              if (taskId) {
+                                handleRescheduleTask(taskId, dayObj.dayNum);
+                              }
+                            }
+                          }}
+                          className={`relative min-h-[44px] p-1 rounded-xl border flex flex-col items-center justify-between transition-all duration-250 cursor-pointer group ${
+                            !dayObj.isCurrentMonth 
+                              ? "bg-slate-50/20 border-slate-100 text-slate-300 pointer-events-none" 
+                              : isDraggedOver
+                                ? "bg-indigo-150 border-indigo-500 scale-[1.04] shadow-md ring-2 ring-indigo-400/50"
+                                : isSelected
+                                  ? "bg-indigo-50 border-indigo-400 text-indigo-950 ring-1 ring-indigo-400/30"
+                                  : isToday
+                                    ? "bg-amber-50/60 border-amber-300 text-amber-900 font-bold"
+                                    : "bg-white border-slate-200 hover:border-slate-300 text-slate-700"
+                          }`}
+                        >
+                          <span className={`text-[10px] font-bold ${isToday ? "bg-amber-500 text-white px-1.5 py-0.5 rounded-full" : ""}`}>
+                            {dayObj.dayNum}
+                          </span>
+
+                          {/* Dots for tasks */}
+                          {tasksForThisDay.length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 justify-center mt-1 w-full max-w-[28px]">
+                              {tasksForThisDay.slice(0, 3).map(task => {
+                                let dotColor = "bg-slate-400";
+                                if (task.category === "vendas") dotColor = "bg-orange-500";
+                                if (task.category === "estoque") dotColor = "bg-amber-500";
+                                if (task.category === "financeiro") dotColor = "bg-emerald-500";
+                                if (task.completed) dotColor = "bg-slate-300/80";
+
+                                return (
+                                  <span 
+                                    key={task.id} 
+                                    draggable={true}
+                                    onDragStart={(e) => {
+                                      e.stopPropagation();
+                                      e.dataTransfer.setData("text/plain", task.id);
+                                    }}
+                                    className={`w-1.5 h-1.5 rounded-full cursor-grab active:cursor-grabbing hover:scale-130 transition-transform ${dotColor}`}
+                                    title={`Arraste para reagendar: ${task.title}`}
+                                  />
+                                );
+                              })}
+                              {tasksForThisDay.length > 3 && (
+                                <span className="text-[6px] font-black text-indigo-600 -mt-0.5">+</span>
                               )}
                             </div>
-                            {reminder.lastTriggered && (
-                              <p className="text-[9px] text-slate-450 font-mono mt-0.5">
-                                Último disparo: {new Date(reminder.lastTriggered).toLocaleDateString()}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        <button 
-                          type="button"
-                          onClick={() => handleDeleteRecurringReminder(reminder.id)}
-                          className="text-slate-300 hover:text-red-500 p-1 rounded transition ml-2 cursor-pointer shrink-0"
-                          title="Eliminar lembrete recorrente"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          )}
                         </button>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+
+                  {/* Selected Day Reminders Sub-panel */}
+                  <AnimatePresence>
+                    {selectedDayReminders && (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 10 }}
+                        className="bg-indigo-50/30 border border-indigo-100/70 rounded-2xl p-3.5 space-y-3 mt-2"
+                      >
+                        <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                          <h4 className="text-xs font-black text-indigo-950 flex items-center gap-1.5">
+                            <Calendar className="w-4 h-4 text-indigo-600" />
+                            <span>Agenda para {selectedDayReminders.day} de {MONTHS_PT[calendarMonth]}</span>
+                          </h4>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedDayReminders(null)}
+                            className="text-indigo-450 hover:text-indigo-600 font-bold text-xs cursor-pointer"
+                          >
+                            Fechar
+                          </button>
+                        </div>
+
+                        {selectedDayReminders.tasks.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 text-center py-2">
+                            Sem tarefas recorrentes programadas para este dia.
+                          </p>
+                        ) : (
+                          <div className="space-y-2 max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
+                            {selectedDayReminders.tasks.map(task => {
+                              let badgeColor = "bg-slate-100 text-slate-700";
+                              if (task.category === "vendas") badgeColor = "bg-orange-100 text-orange-700";
+                              if (task.category === "estoque") badgeColor = "bg-amber-100 text-amber-800";
+                              if (task.category === "financeiro") badgeColor = "bg-emerald-100 text-emerald-800";
+
+                              let freqLabel = "Diária";
+                              if (task.frequency === "weekly") freqLabel = "Semanal";
+                              if (task.frequency === "monthly") freqLabel = "Mensal";
+
+                              return (
+                                <div 
+                                  key={task.id} 
+                                  draggable={true}
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.setData("text/plain", task.id);
+                                  }}
+                                  className="flex items-center justify-between p-2.5 rounded-xl bg-white border border-slate-150 shadow-xs cursor-grab active:cursor-grabbing hover:bg-slate-50 hover:border-indigo-300 transition-all group/item"
+                                  title="Arraste esta tarefa para uma nova data no calendário para reagendar"
+                                >
+                                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                                    <div className="text-slate-300 hover:text-slate-400 cursor-grab shrink-0 mt-0.5 mr-0.5">
+                                      <GripVertical className="w-3.5 h-3.5" />
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        handleToggleRecurringReminder(task.id);
+                                        // Update local state tasks to reflect completion in detail view
+                                        setSelectedDayReminders(prev => {
+                                          if (!prev) return null;
+                                          return {
+                                            ...prev,
+                                            tasks: prev.tasks.map(t => t.id === task.id ? { ...t, completed: !t.completed } : t)
+                                          };
+                                        });
+                                      }}
+                                      className="mt-0.5 text-slate-400 hover:text-indigo-600 transition shrink-0"
+                                    >
+                                      {task.completed ? (
+                                        <CheckCircle className="w-3.5 h-3.5 text-indigo-500 fill-indigo-50" />
+                                      ) : (
+                                        <Circle className="w-3.5 h-3.5 text-slate-300" />
+                                      )}
+                                    </button>
+                                    <div className="min-w-0 flex-1">
+                                      <p className={`text-xs font-bold leading-tight truncate ${task.completed ? "line-through text-slate-400" : "text-slate-700"}`}>
+                                        {task.title}
+                                      </p>
+                                      <div className="flex items-center gap-1.5 mt-0.5">
+                                        <span className={`text-[8px] font-extrabold px-1.5 py-0.2 rounded uppercase ${badgeColor}`}>
+                                          {task.category}
+                                        </span>
+                                        <span className="text-[8px] font-extrabold px-1.5 py-0.2 rounded uppercase bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                          {freqLabel}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
+              ) : (
+                recurringReminders.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-6 text-center">
+                    <p className="text-xs font-medium text-slate-400">Nenhuma tarefa recorrente configurada!</p>
+                    <p className="text-[10px] text-slate-300">Use o formulário ao lado para programar obrigações periódicas.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                    {recurringReminders.map((reminder) => {
+                      let badgeColor = "bg-slate-100 text-slate-700";
+                      if (reminder.category === "vendas") badgeColor = "bg-orange-100 text-orange-700";
+                      if (reminder.category === "estoque") badgeColor = "bg-amber-100 text-amber-800";
+                      if (reminder.category === "financeiro") badgeColor = "bg-emerald-100 text-emerald-800";
+
+                      let freqLabel = "Diária";
+                      if (reminder.frequency === "weekly") freqLabel = "Semanal";
+                      if (reminder.frequency === "monthly") freqLabel = "Mensal";
+
+                      return (
+                        <div 
+                          key={reminder.id}
+                          className={`flex items-start justify-between p-3 rounded-xl border transition ${
+                            reminder.completed 
+                              ? "bg-slate-50/50 border-slate-150 opacity-60 line-through text-slate-400" 
+                              : "bg-white border-slate-200 hover:border-slate-300 shadow-sm"
+                          }`}
+                        >
+                          <div className="flex items-start gap-2.5 flex-1 min-w-0">
+                            <button 
+                              type="button"
+                              onClick={() => handleToggleRecurringReminder(reminder.id)}
+                              className="mt-0.5 text-slate-400 hover:text-indigo-500 transition cursor-pointer shrink-0"
+                            >
+                              {reminder.completed ? (
+                                <CheckCircle className="w-4 h-4 text-indigo-500 fill-indigo-50" />
+                              ) : (
+                                <Circle className="w-4 h-4 text-slate-300" />
+                              )}
+                            </button>
+                            <div className="space-y-0.5 flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-slate-700 break-words leading-tight">
+                                {reminder.title}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                <span className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded uppercase ${badgeColor}`}>
+                                  {reminder.category}
+                                </span>
+                                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase bg-indigo-50 text-indigo-700 border border-indigo-100">
+                                  <RefreshCw className="w-2.5 h-2.5" />
+                                  {freqLabel}
+                                </span>
+                                {reminder.enablePopup && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold px-1 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100">
+                                    <Bell className="w-2 h-2 animate-pulse" />
+                                    Pop-up
+                                  </span>
+                                )}
+                              </div>
+                              {reminder.lastTriggered && (
+                                <p className="text-[9px] text-slate-450 font-mono mt-0.5">
+                                  Último disparo: {new Date(reminder.lastTriggered).toLocaleDateString()}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => handleDeleteRecurringReminder(reminder.id)}
+                            className="text-slate-300 hover:text-red-500 p-1 rounded transition ml-2 cursor-pointer shrink-0"
+                            title="Eliminar lembrete recorrente"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
               )
             )}
           </div>
