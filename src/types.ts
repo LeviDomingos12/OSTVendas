@@ -210,6 +210,33 @@ export interface SystemSettings {
   expiryEmailBody?: string;
   aiAutoMonitoring?: boolean;
   aiHealthSensitivity?: number;
+  suppliers?: Supplier[];
+  supplierOrders?: SupplierOrder[];
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  address: string;
+  nuit?: string;
+  status: "Ativo" | "Inativo";
+}
+
+export interface SupplierOrder {
+  id: string;
+  supplierId: string;
+  supplierName: string;
+  productId: string;
+  productName: string;
+  quantityRequested: number;
+  unitCost: number;
+  totalValue: number;
+  status: "Pendente" | "Recebido" | "Cancelado";
+  paymentStatus: "Pago" | "Crédito" | "Pendente";
+  requestDate: string;
+  receivedDate?: string;
 }
 
 export interface Branch {

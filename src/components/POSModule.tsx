@@ -2219,29 +2219,31 @@ export default function POSModule({
           </button>
         </div>
 
-        {/* 23. Intelligent Alerts panel */}
-        {selectedCustomer && selectedCustomer.debt > 0 && (
-          <div className="px-3.5 py-1.5 bg-amber-50 border-b border-amber-100 text-amber-800 text-[10px] font-bold flex items-center gap-1.5 animate-pulse shrink-0">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-            <span>⚠️ Cliente possui dívida activa de {selectedCustomer.debt.toLocaleString()} MT!</span>
-          </div>
-        )}
-
-        {itemsLeavingStockBelowCritical.length > 0 && (
-          <div 
-            onClick={() => setShowCriticalStockModal(true)}
-            className="px-3.5 py-2 bg-red-50 hover:bg-red-100 border-b border-red-100 text-red-800 text-[10px] font-bold flex items-start gap-1.5 cursor-pointer shrink-0 transition"
-          >
-            <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
-            <div>
-              <span className="block font-black uppercase tracking-wider">🚨 ALERTA: STOCK CRÍTICO</span>
-              <p className="font-medium text-red-600 mt-0.5">{itemsLeavingStockBelowCritical.length} {itemsLeavingStockBelowCritical.length === 1 ? "produto ficará" : "produtos ficarão"} abaixo do nível crítico de stock após concluir esta venda. <strong className="underline">Ver artigos →</strong></p>
+        {/* Scrollable container for all calculator actions, cart list, and finalize button */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col min-h-0" id="pos-sidebar-scrollable-content">
+          {/* 23. Intelligent Alerts panel */}
+          {selectedCustomer && selectedCustomer.debt > 0 && (
+            <div className="px-3.5 py-1.5 bg-amber-50 border-b border-amber-100 text-amber-800 text-[10px] font-bold flex items-center gap-1.5 animate-pulse shrink-0">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+              <span>⚠️ Cliente possui dívida activa de {selectedCustomer.debt.toLocaleString()} MT!</span>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Shopping list of cart items */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
+          {itemsLeavingStockBelowCritical.length > 0 && (
+            <div 
+              onClick={() => setShowCriticalStockModal(true)}
+              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 border-b border-red-100 text-red-800 text-[10px] font-bold flex items-start gap-1.5 cursor-pointer shrink-0 transition"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+              <div>
+                <span className="block font-black uppercase tracking-wider">🚨 ALERTA: STOCK CRÍTICO</span>
+                <p className="font-medium text-red-600 mt-0.5">{itemsLeavingStockBelowCritical.length} {itemsLeavingStockBelowCritical.length === 1 ? "produto ficará" : "produtos ficarão"} abaixo do nível crítico de stock após concluir esta venda. <strong className="underline">Ver artigos →</strong></p>
+              </div>
+            </div>
+          )}
+
+          {/* Shopping list of cart items */}
+          <div className="max-h-[320px] min-h-[150px] overflow-y-auto custom-scrollbar p-3 space-y-2.5 shrink-0 border-b border-slate-100">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 mt-12">
               <span className="text-2xl mb-2">🛒</span>
@@ -2849,6 +2851,8 @@ export default function POSModule({
             </div>
           </div>
 
+        </div>
+        {/* End of pos-sidebar-scrollable-content */}
         </div>
       </div>
 

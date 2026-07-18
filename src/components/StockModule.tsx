@@ -36,7 +36,10 @@ import {
   FileText,
   MessageSquare,
   MapPin,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Truck,
+  UserCheck,
+  ShoppingCart
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -103,8 +106,221 @@ export default function StockModule({
 }: StockModuleProps) {
   const confirm = useConfirm();
   
-  // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches"
-  const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches">("list");
+  // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches" | "suppliers"
+  const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches" | "suppliers">("list");
+
+  // Suppliers states and handlers
+  const registeredSuppliers = useMemo(() => settings?.suppliers || [], [settings?.suppliers]);
+  const supplierOrders = useMemo(() => settings?.supplierOrders || [], [settings?.supplierOrders]);
+
+  const [supplierNameInput, setSupplierNameInput] = useState("");
+  const [supplierPhoneInput, setSupplierPhoneInput] = useState("");
+  const [supplierEmailInput, setSupplierEmailInput] = useState("");
+  const [supplierAddressInput, setSupplierAddressInput] = useState("");
+  const [supplierNuitInput, setSupplierNuitInput] = useState("");
+  const [editingSupplierId, setEditingSupplierId] = useState<string | null>(null);
+  const [isSupplierFormOpen, setIsSupplierFormOpen] = useState(false);
+
+  // Stock Request / Orders states
+  const [orderSupplierId, setOrderSupplierId] = useState("");
+  const [orderProductId, setOrderProductId] = useState("");
+  const [orderQtyRequested, setOrderQtyRequested] = useState<number>(0);
+  const [orderUnitCost, setOrderUnitCost] = useState<number>(0);
+  const [orderPaymentStatus, setOrderPaymentStatus] = useState<"Pago" | "Crédito" | "Pendente">("Pendente");
+  const [isOrderFormOpen, setIsOrderFormOpen] = useState(false);
+
+  // Filtering states
+  const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
+  const [orderSearchQuery, setOrderSearchQuery] = useState("");
+  const [selectedSupplierFilter, setSelectedSupplierFilter] = useState("Todos");
+  const [selectedPaymentStatusFilter, setSelectedPaymentStatusFilter] = useState("Todos");
+  const [selectedOrderStatusFilter, setSelectedOrderStatusFilter] = useState("Todos");
+
+  // Handler to open and pre-fill "Solicitar Stock" directly for a product
+  const handleRequestStockFromSupplier = (product: Product) => {
+    setActiveModuleTab("suppliers");
+    setOrderProductId(product.id);
+    setOrderUnitCost(product.costPrice);
+    setOrderQtyRequested(product.minStock * 2 || 10);
+    
+    if (product.supplier) {
+      const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === product.supplier.toLowerCase());
+      if (matchSupp) {
+        setOrderSupplierId(matchSupp.id);
+      } else {
+        setOrderSupplierId("");
+      }
+    } else {
+      setOrderSupplierId("");
+    }
+    
+    setIsOrderFormOpen(true);
+  };
+
+  const handleSaveSupplier = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supplierNameInput.trim()) {
+      onShowToast?.("O nome do fornecedor é obrigatório.", "error");
+      return;
+    }
+
+    const currentSuppliers = settings?.suppliers || [];
+    let updated: any[];
+
+    if (editingSupplierId) {
+      updated = currentSuppliers.map((s: any) => 
+        s.id === editingSupplierId 
+          ? { ...s, name: supplierNameInput, phone: supplierPhoneInput, email: supplierEmailInput, address: supplierAddressInput, nuit: supplierNuitInput }
+          : s
+      );
+      onShowToast?.("Fornecedor atualizado com sucesso!", "success");
+      onAddAuditLog("Editar Fornecedor", "STOCK", `Atualizado fornecedor ${supplierNameInput}.`);
+    } else {
+      const newSupplier = {
+        id: `supp-${Date.now()}`,
+        name: supplierNameInput,
+        phone: supplierPhoneInput,
+        email: supplierEmailInput,
+        address: supplierAddressInput,
+        nuit: supplierNuitInput,
+        status: "Ativo" as const
+      };
+      updated = [...currentSuppliers, newSupplier];
+      onShowToast?.("Fornecedor registado com sucesso!", "success");
+      onAddAuditLog("Registar Fornecedor", "STOCK", `Registado novo fornecedor ${supplierNameInput}.`);
+    }
+
+    onUpdateSettings?.({ suppliers: updated });
+    
+    // Reset form
+    setSupplierNameInput("");
+    setSupplierPhoneInput("");
+    setSupplierEmailInput("");
+    setSupplierAddressInput("");
+    setSupplierNuitInput("");
+    setEditingSupplierId(null);
+    setIsSupplierFormOpen(false);
+  };
+
+  const handleEditSupplierClick = (supp: any) => {
+    setEditingSupplierId(supp.id);
+    setSupplierNameInput(supp.name);
+    setSupplierPhoneInput(supp.phone || "");
+    setSupplierEmailInput(supp.email || "");
+    setSupplierAddressInput(supp.address || "");
+    setSupplierNuitInput(supp.nuit || "");
+    setIsSupplierFormOpen(true);
+  };
+
+  const handleDeleteSupplier = async (suppId: string, name: string) => {
+    const ok = await confirm({
+      title: "Eliminar Fornecedor",
+      message: `Tem certeza de que deseja remover o fornecedor "${name}"? Os produtos associados não serão removidos.`
+    });
+    if (!ok) return;
+
+    const currentSuppliers = settings?.suppliers || [];
+    const updated = currentSuppliers.filter((s: any) => s.id !== suppId);
+    onUpdateSettings?.({ suppliers: updated });
+    onShowToast?.("Fornecedor removido com sucesso.", "success");
+    onAddAuditLog("Eliminar Fornecedor", "STOCK", `Removido fornecedor ${name}.`);
+  };
+
+  const handleSaveOrder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orderSupplierId) {
+      onShowToast?.("Selecione um fornecedor.", "error");
+      return;
+    }
+    if (!orderProductId) {
+      onShowToast?.("Selecione um produto.", "error");
+      return;
+    }
+    if (orderQtyRequested <= 0) {
+      onShowToast?.("A quantidade deve ser maior que zero.", "error");
+      return;
+    }
+
+    const currentSuppliers = settings?.suppliers || [];
+    const chosenSupplier = currentSuppliers.find((s: any) => s.id === orderSupplierId);
+    const chosenProduct = products.find((p: any) => p.id === orderProductId);
+
+    if (!chosenSupplier || !chosenProduct) {
+      onShowToast?.("Fornecedor ou produto inválido.", "error");
+      return;
+    }
+
+    const currentOrders = settings?.supplierOrders || [];
+    const newOrder = {
+      id: `order-${Date.now()}`,
+      supplierId: orderSupplierId,
+      supplierName: chosenSupplier.name,
+      productId: orderProductId,
+      productName: chosenProduct.name,
+      quantityRequested: orderQtyRequested,
+      unitCost: orderUnitCost || chosenProduct.costPrice,
+      totalValue: (orderQtyRequested * (orderUnitCost || chosenProduct.costPrice)),
+      status: "Pendente" as const,
+      paymentStatus: orderPaymentStatus,
+      requestDate: new Date().toISOString().split("T")[0]
+    };
+
+    const updated = [newOrder, ...currentOrders];
+    onUpdateSettings?.({ supplierOrders: updated });
+    onShowToast?.("Solicitação de stock enviada com sucesso!", "success");
+    onAddAuditLog("Solicitação de Stock", "STOCK", `Solicitado ${orderQtyRequested} un de ${chosenProduct.name} ao fornecedor ${chosenSupplier.name}.`);
+
+    // Reset Form
+    setOrderSupplierId("");
+    setOrderProductId("");
+    setOrderQtyRequested(0);
+    setOrderUnitCost(0);
+    setOrderPaymentStatus("Pendente");
+    setIsOrderFormOpen(false);
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: "Pendente" | "Recebido" | "Cancelado") => {
+    const currentOrders = settings?.supplierOrders || [];
+    const order = currentOrders.find((o: any) => o.id === orderId);
+    if (!order) return;
+
+    if (newStatus === "Recebido" && order.status !== "Recebido") {
+      const ok = await confirm({
+        title: "Confirmar Recebimento",
+        message: `Deseja confirmar o recebimento de ${order.quantityRequested} unidades de "${order.productName}"? O estoque atual do produto será incrementado automaticamente.`
+      });
+      if (!ok) return;
+
+      const productToUpdate = products.find((p: any) => p.id === order.productId);
+      if (productToUpdate) {
+        onUpdateProduct({
+          ...productToUpdate,
+          stock: productToUpdate.stock + order.quantityRequested
+        });
+      } else {
+        onShowToast?.("Produto não encontrado para atualização de estoque.", "error");
+      }
+    }
+
+    const updated = currentOrders.map((o: any) => 
+      o.id === orderId 
+        ? { ...o, status: newStatus, receivedDate: newStatus === "Recebido" ? new Date().toISOString().split("T")[0] : undefined }
+        : o
+    );
+
+    onUpdateSettings?.({ supplierOrders: updated });
+    onShowToast?.(`Estado da solicitação alterado para "${newStatus}".`, "success");
+    onAddAuditLog("Atualizar Solicitação de Stock", "STOCK", `Solicitação de stock ${orderId} (${order.productName}) marcada como ${newStatus}.`);
+  };
+
+  const handleUpdateOrderPaymentStatus = (orderId: string, newPaymentStatus: "Pago" | "Crédito" | "Pendente") => {
+    const currentOrders = settings?.supplierOrders || [];
+    const updated = currentOrders.map((o: any) => 
+      o.id === orderId ? { ...o, paymentStatus: newPaymentStatus } : o
+    );
+    onUpdateSettings?.({ supplierOrders: updated });
+    onShowToast?.(`Estado do pagamento alterado para "${newPaymentStatus}".`, "success");
+  };
 
   // Automated Batch Expiry Detection and Toast Alert
   const expiringBatchesInfo = useMemo(() => {
@@ -1121,6 +1337,18 @@ export default function StockModule({
           <MapPin className="w-4 h-4" />
           Filiais & Transferências
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveModuleTab("suppliers")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeModuleTab === "suppliers"
+              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
+              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+          }`}
+        >
+          <Truck className="w-4 h-4" />
+          Fornecedores & Pedidos
+        </button>
       </div>
 
       {/* CRITICAL STOCK LEVEL ALERT BANNER (ITEM: STOCK ALERT COMPONENT) */}
@@ -1139,29 +1367,51 @@ export default function StockModule({
               </div>
             </div>
             
-            <button
-              onClick={() => setIsReplenishmentModalOpen(true)}
-              className="bg-red-600 hover:bg-red-700 text-white font-extrabold py-2 px-4 rounded-xl text-xs cursor-pointer transition whitespace-nowrap shadow-md shadow-red-600/10 active:scale-95 flex items-center gap-1.5"
-            >
-              <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: "12s" }} />
-              Gerar Ordem de Reposição
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => {
+                  setActiveModuleTab("suppliers");
+                  setIsOrderFormOpen(true);
+                }}
+                className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs cursor-pointer transition whitespace-nowrap shadow-md shadow-orange-600/10 active:scale-95 flex items-center gap-1.5"
+              >
+                <Truck className="w-3.5 h-3.5" />
+                Solicitar aos Fornecedores
+              </button>
+              <button
+                onClick={() => setIsReplenishmentModalOpen(true)}
+                className="bg-red-600 hover:bg-red-700 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs cursor-pointer transition whitespace-nowrap shadow-md shadow-red-600/10 active:scale-95 flex items-center gap-1.5"
+              >
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" style={{ animationDuration: "12s" }} />
+                Gerar Ordem de Reposição
+              </button>
+            </div>
           </div>
 
           {/* List critical items in compact grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3.5 pt-1">
-            {products.filter(p => p.stock <= 0.20 * p.minStock).slice(0, 6).map(p => (
-              <div key={p.id} className="bg-white border border-red-100 p-2.5 rounded-xl text-[10.5px] flex items-center gap-2">
-                <span className="text-sm shrink-0">{p.emoji || "📦"}</span>
-                <div className="truncate">
-                  <span className="font-bold text-slate-800 block truncate leading-tight" title={p.name}>{p.name}</span>
-                  <span className="text-[9.5px] font-mono text-red-600 block mt-0.5">Estoque: {p.stock} un (Mín: {p.minStock})</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3.5 pt-1">
+            {products.filter(p => p.stock <= 0.20 * p.minStock).slice(0, 8).map(p => (
+              <div key={p.id} className="bg-white border border-red-100 p-2.5 rounded-xl text-[10.5px] flex items-center justify-between gap-2 shadow-sm">
+                <div className="flex items-center gap-2 truncate">
+                  <span className="text-sm shrink-0">{p.emoji || "📦"}</span>
+                  <div className="truncate">
+                    <span className="font-bold text-slate-800 block truncate leading-tight" title={p.name}>{p.name}</span>
+                    <span className="text-[9.5px] font-mono text-red-600 block mt-0.5">Estoque: {p.stock} un (Mín: {p.minStock})</span>
+                  </div>
                 </div>
+                <button
+                  onClick={() => handleRequestStockFromSupplier(p)}
+                  className="py-1 px-2 rounded-lg bg-orange-50 text-orange-600 hover:bg-orange-100 transition shrink-0 font-bold text-[9px] flex items-center gap-1"
+                  title="Solicitar stock no Fornecedor"
+                >
+                  <Truck className="w-3 h-3" />
+                  Solicitar
+                </button>
               </div>
             ))}
-            {products.filter(p => p.stock <= 0.20 * p.minStock).length > 6 && (
-              <div className="bg-red-100/50 border border-red-200/40 p-2.5 rounded-xl text-[10.5px] flex items-center justify-center font-bold text-red-700">
-                +{products.filter(p => p.stock <= 0.20 * p.minStock).length - 6} mais itens...
+            {products.filter(p => p.stock <= 0.20 * p.minStock).length > 8 && (
+              <div className="bg-red-100/50 border border-red-200/40 p-2.5 rounded-xl text-[10.5px] flex items-center justify-center font-bold text-red-700 shadow-sm">
+                +{products.filter(p => p.stock <= 0.20 * p.minStock).length - 8} mais itens...
               </div>
             )}
           </div>
@@ -3595,7 +3845,566 @@ export default function StockModule({
         </div>
       )}
 
-      {/* Promo Poster/Flyer generator modal */}
+      {/* SUPPLIERS AND ORDERS MODULE TAB VIEW */}
+      {activeModuleTab === "suppliers" && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          
+          {/* Header Dashboard Stats for Suppliers */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 dark:bg-zinc-900 dark:border-zinc-800">
+              <div className="w-11 h-11 rounded-xl bg-orange-105 bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 dark:bg-orange-950/20 dark:text-orange-400">
+                <Truck className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Total Fornecedores</span>
+                <span className="text-xl font-black text-slate-800 dark:text-zinc-100">{registeredSuppliers.length}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 dark:bg-zinc-900 dark:border-zinc-800">
+              <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0 dark:bg-amber-950/20 dark:text-amber-400">
+                <ShoppingCart className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Pedidos Pendentes</span>
+                <span className="text-xl font-black text-amber-600">{supplierOrders.filter(o => o.status === "Pendente").length}</span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 dark:bg-zinc-900 dark:border-zinc-800">
+              <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 dark:bg-emerald-950/20 dark:text-emerald-400">
+                <DollarSign className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Total Pago aos F.</span>
+                <span className="text-sm font-black text-slate-800 dark:text-zinc-100">
+                  {supplierOrders.filter(o => o.paymentStatus === "Pago").reduce((sum, o) => sum + o.totalValue, 0).toLocaleString()} MT
+                </span>
+              </div>
+            </div>
+
+            <div className="bg-white p-4.5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4 dark:bg-zinc-900 dark:border-zinc-800">
+              <div className="w-11 h-11 rounded-xl bg-red-50 text-red-650 flex items-center justify-center shrink-0 dark:bg-red-950/20 dark:text-red-400">
+                <AlertTriangle className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">Total a Crédito</span>
+                <span className="text-sm font-black text-red-600">
+                  {supplierOrders.filter(o => o.paymentStatus === "Crédito").reduce((sum, o) => sum + o.totalValue, 0).toLocaleString()} MT
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* 1. Suppliers List Container */}
+            <div className="lg:col-span-1 space-y-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-3 dark:border-zinc-800">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Fornecedores Parceiros</h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Parceiros comerciais cadastrados.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setEditingSupplierId(null);
+                      setSupplierNameInput("");
+                      setSupplierPhoneInput("");
+                      setSupplierEmailInput("");
+                      setSupplierAddressInput("");
+                      setSupplierNuitInput("");
+                      setIsSupplierFormOpen(true);
+                    }}
+                    className="p-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Registar
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                    <Search className="w-3.5 h-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Buscar fornecedor..."
+                    value={supplierSearchQuery}
+                    onChange={(e) => setSupplierSearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+
+                <div className="space-y-2.5 max-h-[380px] overflow-y-auto custom-scrollbar pr-1">
+                  {registeredSuppliers.filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase())).length === 0 ? (
+                    <p className="text-[11px] text-slate-400 italic text-center py-6">Nenhum fornecedor cadastrado.</p>
+                  ) : (
+                    registeredSuppliers
+                      .filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
+                      .map((supp) => (
+                        <div key={supp.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition flex flex-col justify-between gap-2.5 dark:bg-zinc-950/40 dark:border-zinc-800 dark:hover:bg-zinc-800/20">
+                          <div className="flex justify-between items-start gap-2">
+                            <div>
+                              <span className="font-bold text-slate-800 text-xs dark:text-zinc-100 flex items-center gap-1">
+                                <UserCheck className="w-3.5 h-3.5 text-orange-500" />
+                                {supp.name}
+                              </span>
+                              <div className="text-[10px] text-slate-500 space-y-0.5 mt-1 font-mono">
+                                {supp.phone && <p>📞 {supp.phone}</p>}
+                                {supp.email && <p>✉️ {supp.email}</p>}
+                                {supp.nuit && <p>📄 NUIT: {supp.nuit}</p>}
+                                {supp.address && <p>📍 {supp.address}</p>}
+                              </div>
+                            </div>
+                            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-emerald-100 text-emerald-800">
+                              {supp.status}
+                            </span>
+                          </div>
+
+                          <div className="flex justify-end gap-1.5 border-t border-slate-100 pt-2 dark:border-zinc-800">
+                            <button
+                              onClick={() => handleEditSupplierClick(supp)}
+                              className="px-2 py-1 text-[10px] text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition cursor-pointer"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSupplier(supp.id, supp.name)}
+                              className="px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Supplier Orders (Solicitações de Stock) */}
+            <div className="lg:col-span-2 space-y-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-slate-100 pb-3 dark:border-zinc-800">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Historial de Solicitações e Pagamentos</h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Gestão de entregas, pagamentos de crédito e encomendas de fornecedores.</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setOrderSupplierId("");
+                      setOrderProductId("");
+                      setOrderQtyRequested(0);
+                      setOrderUnitCost(0);
+                      setOrderPaymentStatus("Pendente");
+                      setIsOrderFormOpen(true);
+                    }}
+                    className="py-1.5 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] rounded-xl flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto"
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    Nova Solicitação
+                  </button>
+                </div>
+
+                {/* Filters Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="relative sm:col-span-1">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                      <Search className="w-3.5 h-3.5" />
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Buscar produto/fornecedor..."
+                      value={orderSearchQuery}
+                      onChange={(e) => setOrderSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-1.5 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
+                    />
+                  </div>
+
+                  <div>
+                    <select
+                      value={selectedSupplierFilter}
+                      onChange={(e) => setSelectedSupplierFilter(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                    >
+                      <option value="Todos">Todos Fornecedores</option>
+                      {registeredSuppliers.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <select
+                      value={selectedOrderStatusFilter}
+                      onChange={(e) => setSelectedOrderStatusFilter(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                    >
+                      <option value="Todos">Todos os Estados</option>
+                      <option value="Pendente">Pendentes ⏳</option>
+                      <option value="Recebido">Recebidos ✅</option>
+                      <option value="Cancelado">Cancelados ❌</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <select
+                      value={selectedPaymentStatusFilter}
+                      onChange={(e) => setSelectedPaymentStatusFilter(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                    >
+                      <option value="Todos">Todos Pagamentos</option>
+                      <option value="Pago">Pagos 🟢</option>
+                      <option value="Crédito">A Crédito 🔴</option>
+                      <option value="Pendente">Pendentes de Pagto 🟡</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Orders Table */}
+                <div className="overflow-x-auto border border-slate-150/80 rounded-2xl dark:border-zinc-800">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider dark:bg-zinc-950">
+                        <th className="p-3.5">PRODUTO / FORNECEDOR</th>
+                        <th className="p-3.5 text-center">QUANTIDADE</th>
+                        <th className="p-3.5 text-right">VALOR TOTAL</th>
+                        <th className="p-3.5 text-center">ESTADO PAGTO</th>
+                        <th className="p-3.5 text-center">ESTADO PEDIDO</th>
+                        <th className="p-3.5 text-center">AÇÕES</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150 dark:divide-zinc-800 text-[11px]">
+                      {supplierOrders
+                        .filter(order => {
+                          const matchesQuery = order.productName.toLowerCase().includes(orderSearchQuery.toLowerCase()) || order.supplierName.toLowerCase().includes(orderSearchQuery.toLowerCase());
+                          const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
+                          const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
+                          const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
+                          return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
+                        }).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum registro de pedido encontrado.</td>
+                        </tr>
+                      ) : (
+                        supplierOrders
+                          .filter(order => {
+                            const matchesQuery = order.productName.toLowerCase().includes(orderSearchQuery.toLowerCase()) || order.supplierName.toLowerCase().includes(orderSearchQuery.toLowerCase());
+                            const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
+                            const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
+                            const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
+                            return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
+                          })
+                          .map((order) => (
+                            <tr key={order.id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30">
+                              <td className="p-3.5">
+                                <span className="font-extrabold text-slate-800 dark:text-zinc-100 block">{order.productName}</span>
+                                <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                  <Truck className="w-3 h-3 text-slate-400" />
+                                  Fornecedor: {order.supplierName} • {order.requestDate}
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-center font-bold font-mono">
+                                {order.quantityRequested} un
+                                <span className="text-[9px] text-slate-400 block font-normal">Custo: {order.unitCost.toLocaleString()} MT</span>
+                              </td>
+                              <td className="p-3.5 text-right font-black font-mono text-slate-800 dark:text-zinc-100">
+                                {order.totalValue.toLocaleString()} MT
+                              </td>
+                              
+                              {/* Payment Status Dropdown / Badge */}
+                              <td className="p-3.5 text-center">
+                                <select
+                                  value={order.paymentStatus}
+                                  onChange={(e) => handleUpdateOrderPaymentStatus(order.id, e.target.value as any)}
+                                  className={`px-2 py-1 rounded-full text-[9px] font-bold border outline-none text-center cursor-pointer ${
+                                    order.paymentStatus === "Pago" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                    order.paymentStatus === "Crédito" ? "bg-red-50 text-red-700 border-red-200" :
+                                    "bg-amber-50 text-amber-700 border-amber-200"
+                                  }`}
+                                >
+                                  <option value="Pago">Pago 🟢</option>
+                                  <option value="Crédito">Crédito 🔴</option>
+                                  <option value="Pendente">Pendente 🟡</option>
+                                </select>
+                              </td>
+
+                              {/* Order Status Badge */}
+                              <td className="p-3.5 text-center">
+                                <span className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase ${
+                                  order.status === "Recebido" ? "bg-emerald-100 text-emerald-800" :
+                                  order.status === "Cancelado" ? "bg-slate-100 text-slate-700" :
+                                  "bg-amber-100 text-amber-850 animate-pulse"
+                                }`}>
+                                  {order.status === "Recebido" ? "✓ Recebido" :
+                                   order.status === "Cancelado" ? "✗ Cancelado" :
+                                   "⏳ Pendente"}
+                                </span>
+                              </td>
+
+                              {/* Actions */}
+                              <td className="p-3.5 text-center">
+                                {order.status === "Pendente" ? (
+                                  <div className="flex gap-1.5 justify-center">
+                                    <button
+                                      onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
+                                      className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
+                                    >
+                                      Receber
+                                    </button>
+                                    <button
+                                      onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
+                                      className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer"
+                                    >
+                                      Cancelar
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 italic">
+                                    {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Register/Edit Supplier Modal Overlay */}
+      {isSupplierFormOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            <div className="bg-slate-950 text-white p-5 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-sm flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-orange-500" />
+                  {editingSupplierId ? "Editar Fornecedor" : "Cadastrar Novo Fornecedor"}
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Cadastre os canais de comunicação direta para reposições de estoque.</p>
+              </div>
+              <button
+                onClick={() => setIsSupplierFormOpen(false)}
+                className="p-1.5 bg-slate-800 hover:bg-slate-750 text-slate-400 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSupplier} className="p-5 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Nome Comercial / Fornecedor *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: CDM - Cervejas de Moçambique, Distribuidora Sul"
+                  value={supplierNameInput}
+                  onChange={(e) => setSupplierNameInput(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Telemóvel / Telefone</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: +258 84 123 4567"
+                    value={supplierPhoneInput}
+                    onChange={(e) => setSupplierPhoneInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Email Comercial</label>
+                  <input
+                    type="email"
+                    placeholder="Ex: comercial@cdm.co.mz"
+                    value={supplierEmailInput}
+                    onChange={(e) => setSupplierEmailInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">NIF / NUIT (Moçambique)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 400123456"
+                    value={supplierNuitInput}
+                    onChange={(e) => setSupplierNuitInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Endereço Comercial / Sede</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Av. de Moçambique, Maputo"
+                    value={supplierAddressInput}
+                    onChange={(e) => setSupplierAddressInput(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsSupplierFormOpen(false)}
+                  className="w-1/2 py-2.5 border border-slate-200 bg-white text-slate-750 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-350"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-md shadow-orange-500/10"
+                >
+                  {editingSupplierId ? "Salvar Alterações" : "Registrar Fornecedor"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* New Stock Request (Supplier Order) Modal Overlay */}
+      {isOrderFormOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            <div className="bg-slate-950 text-white p-5 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-sm flex items-center gap-2">
+                  <ShoppingCart className="w-5 h-5 text-orange-500 animate-bounce" />
+                  Efetuar Pedido de Stock ao Fornecedor
+                </h3>
+                <p className="text-[10px] text-slate-400 mt-0.5">Crie uma ordem de compra para reabastecer seu inventário.</p>
+              </div>
+              <button
+                onClick={() => setIsOrderFormOpen(false)}
+                className="p-1.5 bg-slate-800 hover:bg-slate-750 text-slate-400 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveOrder} className="p-5 space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Selecione o Fornecedor *</label>
+                <select
+                  required
+                  value={orderSupplierId}
+                  onChange={(e) => setOrderSupplierId(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none cursor-pointer text-slate-800 dark:bg-zinc-950 dark:border-zinc-850"
+                >
+                  <option value="">-- Escolher Fornecedor Cadastrado --</option>
+                  {registeredSuppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} (NUIT: {s.nuit || "N/A"})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Selecione o Produto *</label>
+                <select
+                  required
+                  value={orderProductId}
+                  onChange={(e) => {
+                    const prodId = e.target.value;
+                    setOrderProductId(prodId);
+                    const prod = products.find(p => p.id === prodId);
+                    if (prod) {
+                      setOrderUnitCost(prod.costPrice);
+                    }
+                  }}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none cursor-pointer text-slate-800 dark:bg-zinc-950 dark:border-zinc-850"
+                >
+                  <option value="">-- Escolher Produto do Inventário --</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} (SKU: {p.code} | Stock: {p.stock})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Quantidade Solicitada *</label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    placeholder="Quantidade"
+                    value={orderQtyRequested || ""}
+                    onChange={(e) => setOrderQtyRequested(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Preço de Custo (MT) *</label>
+                  <input
+                    type="number"
+                    required
+                    min="0.01"
+                    step="0.01"
+                    placeholder="Preço Unitário"
+                    value={orderUnitCost || ""}
+                    onChange={(e) => setOrderUnitCost(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Estado do Pagamento inicial</label>
+                <select
+                  value={orderPaymentStatus}
+                  onChange={(e) => setOrderPaymentStatus(e.target.value as any)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none cursor-pointer text-slate-800 dark:bg-zinc-950 dark:border-zinc-850"
+                >
+                  <option value="Pago">Pago à Vista 🟢</option>
+                  <option value="Crédito">Comprar a Crédito (Fornecedor) 🔴</option>
+                  <option value="Pendente">Pagamento Pendente 🟡</option>
+                </select>
+              </div>
+
+              {orderQtyRequested > 0 && orderUnitCost > 0 && (
+                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-bold text-orange-850 flex justify-between items-center">
+                  <span>Valor Estimado do Pedido:</span>
+                  <span className="font-mono text-xs">{(orderQtyRequested * orderUnitCost).toLocaleString()} MT</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsOrderFormOpen(false)}
+                  className="w-1/2 py-2.5 border border-slate-200 bg-white text-slate-750 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-350"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-md shadow-orange-500/10"
+                >
+                  Confirmar Pedido
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
       {flyerProduct && (
         <PromoFlyerGenerator
           product={flyerProduct}
