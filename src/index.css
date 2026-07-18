@@ -83,34 +83,38 @@ h1, h2, h3, h4, th {
 /* Custom Scrollbar Helper class used throughout the modules */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(203, 213, 225, 0.5) transparent;
+  scrollbar-color: rgba(249, 115, 22, 0.5) rgba(241, 245, 249, 0.4);
   -webkit-overflow-scrolling: touch;
 }
 .dark .custom-scrollbar {
-  scrollbar-color: rgba(63, 63, 70, 0.5) transparent;
+  scrollbar-color: rgba(245, 158, 11, 0.5) rgba(9, 9, 11, 0.4);
 }
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(241, 245, 249, 0.5);
+  border-radius: 9999px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(24, 24, 27, 0.6);
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.6);
+  background: rgba(203, 213, 225, 0.85);
   border-radius: 9999px;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
   background-clip: padding-box;
   transition: background-color 0.2s ease;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(63, 63, 70, 0.6);
+  background: rgba(63, 63, 70, 0.85);
 }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(249, 115, 22, 0.7); /* Warm orange touch on hover */
+  background: rgba(249, 115, 22, 0.95); /* Vibrant orange on hover */
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.7); /* Amber touch on hover */
+  background: rgba(245, 158, 11, 0.95); /* Amber on hover */
 }
 
 /* Hide scrollbar utility class */

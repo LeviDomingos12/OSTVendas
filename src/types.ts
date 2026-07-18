@@ -50,6 +50,8 @@ export interface Customer {
   debt: number;
   loyaltyPoints: number;
   creditBlocked?: boolean;
+  preferredPaymentMethod?: string;
+  oneClickCheckoutEnabled?: boolean;
   settlements?: { id: string, date: string, amount: number, method: string }[];
 }
 
@@ -75,6 +77,8 @@ export interface Transaction {
   cashierName: string;
   customerName?: string;
   customerId?: string;
+  customerPhone?: string;
+  customerEmail?: string;
   nuit?: string;
   branchId?: string; // Associated branch ID
   fiscalHash?: string; // AGT/MEF Fiscal Hash signature

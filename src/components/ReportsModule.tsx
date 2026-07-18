@@ -119,6 +119,71 @@ export default function ReportsModule({
   const [showEmailModal, setShowEmailModal] = useState<Transaction | null>(null);
   const [showPrintModal, setShowPrintModal] = useState<Transaction | null>(null);
 
+  // Monthly summary state & calculations
+  const [showMonthlySummaryModal, setShowMonthlySummaryModal] = useState(false);
+
+  const getMonthNamePT = (monthIndex: number) => {
+    const months = [
+      "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+      "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+    ];
+    return months[monthIndex];
+  };
+
+  const monthlyStats = useMemo(() => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth(); // 0-indexed
+
+    // Filter transactions for current month
+    const monthlyTx = transactions.filter(t => {
+      if (!t.timestamp) return false;
+      const d = new Date(t.timestamp);
+      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    });
+
+    let totalSales = 0;
+    let totalVat = 0;
+    let totalDiscount = 0;
+    let totalItemsCount = 0;
+
+    const productSales: { [productName: string]: { qty: number; revenue: number } } = {};
+
+    monthlyTx.forEach(t => {
+      totalSales += t.grandTotal;
+      totalVat += t.vatTotal;
+      totalDiscount += t.discountTotal;
+      t.items.forEach(item => {
+        const name = item.productName || "Produto Geral";
+        if (!productSales[name]) {
+          productSales[name] = { qty: 0, revenue: 0 };
+        }
+        productSales[name].qty += item.quantity;
+        productSales[name].revenue += (item.price * item.quantity);
+        totalItemsCount += item.quantity;
+      });
+    });
+
+    const averageTicket = monthlyTx.length ? Math.round(totalSales / monthlyTx.length) : 0;
+
+    const topProducts = Object.entries(productSales)
+      .map(([name, data]) => ({ name, qty: data.qty, revenue: data.revenue }))
+      .sort((a, b) => b.qty - a.qty)
+      .slice(0, 5); // top 5
+
+    return {
+      monthlyTx,
+      totalSales,
+      totalVat,
+      totalDiscount,
+      totalItemsCount,
+      averageTicket,
+      topProducts,
+      monthName: getMonthNamePT(currentMonth),
+      year: currentYear
+    };
+  }, [transactions]);
+
   // Active sub-tab state inside ReportsModule
   const [activeSubTab, setActiveSubTab] = useState<"general" | "iva" | "activity">("general");
 
@@ -867,6 +932,220 @@ export default function ReportsModule({
         setIsExporting(false);
       }
     }, 1500);
+  };
+
+  const handleExportMonthlySummaryPDF = async () => {
+    setIsExporting(true);
+    if (onShowToast) {
+      onShowToast("Gerando PDF Estruturado do Resumo Executivo Mensal...", "info", "Aguarde");
+    }
+
+    setTimeout(async () => {
+      try {
+        const { jsPDF } = await import("jspdf");
+        const { default: autoTable } = await import("jspdf-autotable");
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: "a4"
+        });
+
+        const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
+        const rgbArray = activeTheme.rgb.split(",").map(Number);
+
+        // A4: 210 x 297 mm
+        // 1. Beautiful color header band
+        doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.rect(0, 0, 210, 10, "F");
+
+        // 2. Company Logo
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 14, 30, 30);
+        }
+
+        // 3. Corporate Info Header
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42); // slate-900
+        doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139); // slate-500
+        doc.text(`NUIT: ${settings.companyNuit || "400293112"} | Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 29);
+        doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"} | E-mail: ${settings.smtpUser || "suporte@ost.co.mz"}`, 14, 34);
+
+        // Header Divider Line
+        doc.setDrawColor(226, 232, 240); // slate-200
+        doc.setLineWidth(0.4);
+        doc.line(14, 39, 196, 39);
+
+        // 4. Document Title
+        doc.setFontSize(14);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(`RESUMO EXECUTIVO MENSAL - ${monthlyStats.monthName.toUpperCase()} DE ${monthlyStats.year}`, 14, 48);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Período de Apuração: 01 de ${monthlyStats.monthName} de ${monthlyStats.year} até hoje`, 14, 54);
+        doc.text(`Emitido em: ${new Date().toLocaleString("pt-MZ")} | Moeda: Meticais (MT)`, 14, 59);
+
+        // 5. Beautiful Metric Cards Row
+        // Card 1: Faturamento Mensal
+        doc.setFillColor(248, 250, 252); // slate-50
+        doc.rect(14, 65, 57, 20, "F");
+        doc.setDrawColor(226, 232, 240);
+        doc.rect(14, 65, 57, 20, "S");
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("FATURAÇÃO MENSAL", 18, 71);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.text(formatMZ(monthlyStats.totalSales), 18, 79);
+
+        // Card 2: Ticket Médio
+        doc.setFillColor(248, 250, 252);
+        doc.rect(76, 65, 57, 20, "F");
+        doc.rect(76, 65, 57, 20, "S");
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("TICKET MÉDIO", 80, 71);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(formatMZ(monthlyStats.averageTicket), 80, 79);
+
+        // Card 3: Volume & Qtd Itens
+        doc.setFillColor(248, 250, 252);
+        doc.rect(138, 65, 58, 20, "F");
+        doc.rect(138, 65, 58, 20, "S");
+        doc.setFontSize(7);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("ITENS VENDIDOS", 142, 71);
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(`${monthlyStats.totalItemsCount.toLocaleString()} unidades`, 142, 79);
+
+        // 6. Section: Resumo de Impostos e Descontos
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("BALANÇO DE ENCARGOS E IMPOSTOS DO MÊS", 14, 94);
+
+        const summaryHead = [["Métrica", "Valor Acumulado (MT)"]];
+        const summaryBody = [
+          ["Faturamento Bruto das Faturas", formatMZ(monthlyStats.totalSales)],
+          ["IVA Coletado sobre Vendas (16%)", formatMZ(monthlyStats.totalVat)],
+          ["Total de Descontos Concedidos aos Clientes", `-${formatMZ(monthlyStats.totalDiscount)}`],
+          ["Volume Total de Transações Processadas", `${monthlyStats.monthlyTx.length} vendas`]
+        ];
+
+        autoTable(doc, {
+          startY: 98,
+          head: summaryHead,
+          body: summaryBody,
+          theme: "striped",
+          styles: { fontSize: 8.5, cellPadding: 3.5 },
+          headStyles: { fillColor: [71, 85, 105], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            1: { halign: "right", fontStyle: "bold" }
+          }
+        });
+
+        const secondStartY = (doc as any).lastAutoTable.finalY + 12;
+
+        // 7. Section: Top Products Table
+        doc.setFontSize(11);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("PRODUTOS MAIS VENDIDOS (TOP 5)", 14, secondStartY);
+
+        const prodHead = [["Posição", "Nome do Produto", "Quantidade Vendida", "Faturamento Acumulado"]];
+        const prodBody = monthlyStats.topProducts.map((p, index) => [
+          `#${index + 1}`,
+          p.name,
+          `${p.qty} un`,
+          formatMZ(p.revenue)
+        ]);
+
+        autoTable(doc, {
+          startY: secondStartY + 4,
+          head: prodHead,
+          body: prodBody,
+          theme: "striped",
+          styles: { fontSize: 8.5, cellPadding: 3.5 },
+          headStyles: { fillColor: [rgbArray[0], rgbArray[1], rgbArray[2]] as [number, number, number], textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            2: { halign: "right" },
+            3: { halign: "right", fontStyle: "bold" }
+          },
+          didDrawPage: (data) => {
+            // Footer
+            doc.setFontSize(7.5);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(148, 163, 184);
+            doc.text(`Página ${data.pageNumber}`, 14, 288);
+            doc.text(`OST Vendas ERP - Resumo Mensal Comercial`, 120, 288);
+          }
+        });
+
+        const finalY = (doc as any).lastAutoTable.finalY || secondStartY + 40;
+
+        const drawSignatures = (targetDoc: typeof doc, startY: number) => {
+          targetDoc.setDrawColor(203, 213, 225);
+          targetDoc.line(20, startY + 15, 95, startY + 15);
+          targetDoc.line(115, startY + 15, 190, startY + 15);
+          
+          targetDoc.setFont("helvetica", "bold");
+          targetDoc.setFontSize(8);
+          targetDoc.setTextColor(71, 85, 105);
+          targetDoc.text("Assinatura do Responsável Comercial", 28, startY + 19);
+          targetDoc.text("Diretor Geral / Administração", 128, startY + 19);
+
+          targetDoc.setFont("helvetica", "normal");
+          targetDoc.setFontSize(7.5);
+          targetDoc.setTextColor(148, 163, 184);
+          targetDoc.text("Este documento é um balancete executivo oficial de apoio gerencial, compilado a partir de vendas registradas em terminal POS.", 14, startY + 28);
+        };
+
+        if (finalY + 35 > 280) {
+          doc.addPage();
+          doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+          doc.rect(0, 0, 210, 8, "F");
+          drawSignatures(doc, 15);
+        } else {
+          drawSignatures(doc, finalY);
+        }
+
+        doc.save(`Resumo_Executivo_Mensal_${monthlyStats.monthName}_${monthlyStats.year}.pdf`);
+        
+        onAddAuditLog(
+          "Exportar Resumo Mensal PDF",
+          "RELATÓRIOS",
+          `Gestor exportou relatório de resumo executivo do mês de ${monthlyStats.monthName} de ${monthlyStats.year} contendo ${monthlyStats.monthlyTx.length} transações.`
+        );
+
+        if (onShowToast) {
+          onShowToast("Resumo Mensal exportado com sucesso em PDF!", "success", "Relatório Gerado");
+        }
+      } catch (err: any) {
+        console.error("Erro ao gerar resumo mensal PDF:", err);
+        if (onShowToast) {
+          onShowToast("Falha ao exportar relatório PDF mensal.", "error", "Erro de Exportação");
+        }
+      } finally {
+        setIsExporting(false);
+      }
+    }, 1200);
   };
 
   const handleExportDailyFinancialSummaryPDF = async () => {
@@ -1847,6 +2126,16 @@ export default function ReportsModule({
                 {exportMessage}
               </p>
             )}
+
+            <button
+              type="button"
+              id="btn-generate-monthly-summary"
+              onClick={() => setShowMonthlySummaryModal(true)}
+              className="w-full py-3.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md shadow-orange-500/20 hover:shadow-orange-500/35 transition-all duration-250 active:scale-[0.98]"
+            >
+              <Activity className="w-4.5 h-4.5 text-white shrink-0" />
+              Gerar Resumo Mensal ({monthlyStats.monthName})
+            </button>
 
             <button
               onClick={handlePerformExport}
@@ -3009,6 +3298,129 @@ export default function ReportsModule({
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {showMonthlySummaryModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 p-4">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="bg-orange-500 text-white p-2 rounded-xl">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm md:text-base leading-tight">
+                    Resumo Executivo Mensal
+                  </h3>
+                  <p className="text-[10px] text-slate-300 font-mono mt-0.5">
+                    {monthlyStats.monthName.toUpperCase()} DE {monthlyStats.year}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMonthlySummaryModal(false)}
+                className="text-slate-400 hover:text-white font-bold text-lg cursor-pointer px-2 transition-colors"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-5 overflow-y-auto flex-1">
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Faturamento</span>
+                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
+                    {formatMZ(monthlyStats.totalSales)}
+                  </span>
+                </div>
+                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Ticket Médio</span>
+                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
+                    {formatMZ(monthlyStats.averageTicket)}
+                  </span>
+                </div>
+                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
+                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Qtd Vendida</span>
+                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
+                    {monthlyStats.totalItemsCount} un
+                  </span>
+                </div>
+              </div>
+
+              {/* Tax & Discounts info card */}
+              <div className="bg-orange-50/50 border border-orange-100 rounded-2xl p-4 space-y-2.5">
+                <h4 className="text-xs font-extrabold text-orange-950 uppercase tracking-wide">
+                  Impostos & Encargos do Mês
+                </h4>
+                <div className="text-xs space-y-1.5 font-medium text-slate-700">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Transações no período:</span>
+                    <span className="font-mono font-bold text-slate-800">{monthlyStats.monthlyTx.length} vendas</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Imposto IVA Acumulado (16%):</span>
+                    <span className="font-mono font-bold text-slate-800">{formatMZ(monthlyStats.totalVat)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Descontos Geral Concedidos:</span>
+                    <span className="font-mono font-bold text-red-650">-{formatMZ(monthlyStats.totalDiscount)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Top Products */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">
+                  Produtos Mais Vendidos (Top 5)
+                </h4>
+                {monthlyStats.topProducts.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400 italic">
+                    Nenhuma venda registrada neste mês corrente ainda.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100 text-xs bg-white shadow-sm">
+                    {monthlyStats.topProducts.map((p, index) => (
+                      <div key={index} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
+                        <div className="flex items-center gap-2.5">
+                          <span className="font-bold text-slate-400 w-4 font-mono">#{index + 1}</span>
+                          <span className="font-semibold text-slate-700">{p.name}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-bold text-slate-800 block">{p.qty} un</span>
+                          <span className="text-[10px] text-slate-400 font-mono">{formatMZ(p.revenue)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowMonthlySummaryModal(false)}
+                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 border border-slate-200 hover:bg-slate-100 transition cursor-pointer text-center"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={handleExportMonthlySummaryPDF}
+                disabled={isExporting}
+                className="flex-1 py-2.5 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition shadow-md cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                {isExporting ? "A processar..." : "Exportar PDF"}
+              </button>
+            </div>
           </div>
         </div>
       )}

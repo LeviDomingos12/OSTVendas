@@ -65,6 +65,8 @@ export default function CustomersModule({
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
   const [nuit, setNuit] = useState("");
+  const [preferredPaymentMethod, setPreferredPaymentMethod] = useState("CASH");
+  const [oneClickCheckoutEnabled, setOneClickCheckoutEnabled] = useState(false);
   const [localError, setLocalError] = useState("");
 
   // SMS Marketing states
@@ -129,7 +131,9 @@ export default function CustomersModule({
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
-      loyaltyPoints: 0
+      loyaltyPoints: 0,
+      preferredPaymentMethod: preferredPaymentMethod,
+      oneClickCheckoutEnabled: oneClickCheckoutEnabled
     };
 
     onAddCustomer(payload);
@@ -150,6 +154,8 @@ export default function CustomersModule({
     setEmail("");
     setAddress("");
     setNuit("");
+    setPreferredPaymentMethod("CASH");
+    setOneClickCheckoutEnabled(false);
   };
 
   // Delete Customer
@@ -721,12 +727,17 @@ export default function CustomersModule({
                             </span>
                           </td>
                           <td className="p-3">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-slate-850">{c.name}</span>
                               {isVip && (
                                 <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 flex items-center gap-0.5">
                                   <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500" />
                                   VIP
+                                </span>
+                              )}
+                              {c.oneClickCheckoutEnabled && (
+                                <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 flex items-center gap-0.5" title={`Método: ${c.preferredPaymentMethod || "Dinheiro"}`}>
+                                  ⚡ One-Click ({c.preferredPaymentMethod === "CASH" ? "Dinheiro" : c.preferredPaymentMethod === "MPESA_PAGA_FACIL" ? "M-Pesa" : c.preferredPaymentMethod === "EMOLA" ? "E-Mola" : c.preferredPaymentMethod === "POS_CARD" ? "POS" : c.preferredPaymentMethod === "CREDIT_CARD" ? "Cartão" : c.preferredPaymentMethod === "BANK_TRANSFER" ? "Transf" : c.preferredPaymentMethod === "DEBT" ? "Dívida" : "Dinheiro"})
                                 </span>
                               )}
                             </div>
@@ -860,6 +871,38 @@ export default function CustomersModule({
                 onChange={(e) => setAddress(e.target.value)}
                 className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500 text-slate-850"
               />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Método de Liquidação Preferido</label>
+                <select
+                  value={preferredPaymentMethod}
+                  onChange={(e) => setPreferredPaymentMethod(e.target.value)}
+                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500 text-xs text-slate-750"
+                >
+                  <option value="CASH">💵 Dinheiro</option>
+                  <option value="MPESA_PAGA_FACIL">📱 M-Pesa</option>
+                  <option value="EMOLA">📱 E-Mola</option>
+                  <option value="POS_CARD">💳 POS</option>
+                  <option value="CREDIT_CARD">💳 Cartão de Crédito</option>
+                  <option value="BANK_TRANSFER">🏦 Transferência Bancária</option>
+                  <option value="DEBT">🧾 Dívida (Venda a Crédito)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-150 self-end">
+                <input
+                  type="checkbox"
+                  id="oneClickCheckout"
+                  checked={oneClickCheckoutEnabled}
+                  onChange={(e) => setOneClickCheckoutEnabled(e.target.checked)}
+                  className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
+                />
+                <label htmlFor="oneClickCheckout" className="text-[10.5px] font-bold text-slate-650 cursor-pointer select-none">
+                  ⚡ Habilitar One-Click Checkout
+                </label>
+              </div>
             </div>
 
             <div className="flex gap-2 pt-2">

@@ -32,7 +32,8 @@ import {
   Scan,
   QrCode,
   Keyboard,
-  HelpCircle
+  HelpCircle,
+  Zap
 } from "lucide-react";
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
 import { QrReader } from "react-qr-reader";
@@ -59,6 +60,7 @@ interface POSModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
+  onTriggerPanic?: () => void;
 }
 
 // Static helper for certified digital signing (Moçambique fiscal standards)
@@ -93,7 +95,8 @@ export default function POSModule({
   currency,
   onShowToast,
   isPOSFullscreen = false,
-  onChangePOSFullscreen
+  onChangePOSFullscreen,
+  onTriggerPanic
 }: POSModuleProps) {
   
   // Local synchronized state to allow quick registering of customers and updating stock locally in the view
@@ -130,6 +133,7 @@ export default function POSModule({
   const [cart, setCart] = useState<UpgradedCartItem[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("CASH");
+  const [showPanicConfirm, setShowPanicConfirm] = useState(false);
 
   // Multi-method payment cash allocations
   const [mixedCash, setMixedCash] = useState<number>(0);
@@ -212,6 +216,7 @@ export default function POSModule({
   const [budgetTab, setBudgetTab] = useState<"PREVIEW" | "RAW_COMMANDS">("PREVIEW");
   const [selectedPaperSize, setSelectedPaperSize] = useState<"80MM" | "58MM">("80MM");
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+  const [showCriticalStockModal, setShowCriticalStockModal] = useState(false);
 
   useEffect(() => {
     if (completedBudget) {
@@ -257,12 +262,17 @@ export default function POSModule({
 
   // 24. Pre-checkout Confirmation Modal State
   const [showPreCheckoutModal, setShowPreCheckoutModal] = useState(false);
+  const [showFinalConfirmModal, setShowFinalConfirmModal] = useState(false);
+  const [pendingEmitReceipt, setPendingEmitReceipt] = useState<boolean>(true);
 
   // 10. Quick Add Customer Modal State
   const [quickCustomerModalOpen, setQuickCustomerModalOpen] = useState(false);
   const [quickCustName, setQuickCustName] = useState("");
   const [quickCustPhone, setQuickCustPhone] = useState("");
   const [quickCustNuit, setQuickCustNuit] = useState("");
+  const [quickCustPreferredMethod, setQuickCustPreferredMethod] = useState("CASH");
+  const [quickCustOneClick, setQuickCustOneClick] = useState(false);
+  const [pendingReceiptAction, setPendingReceiptAction] = useState<"email" | "sms" | "whatsapp" | null>(null);
 
   // 16. Past sales modal trigger
   const [showSalesHistoryModal, setShowSalesHistoryModal] = useState(false);
@@ -296,6 +306,26 @@ export default function POSModule({
   const selectedCustomer = useMemo(() => {
     return localCustomers.find(c => c.id === selectedCustomerId) || null;
   }, [localCustomers, selectedCustomerId]);
+
+  // Automatic digital dispatch after quick customer registration
+  useEffect(() => {
+    if (pendingReceiptAction && selectedCustomer) {
+      const action = pendingReceiptAction;
+      setPendingReceiptAction(null); // Reset to prevent any infinite loops
+      
+      const timer = setTimeout(() => {
+        if (action === "email") {
+          simulateSendEmail();
+        } else if (action === "sms") {
+          simulateSendSms();
+        } else if (action === "whatsapp") {
+          handleOpenWhatsAppModal();
+        }
+      }, 400); // 400ms delay to ensure state and DOM is fully updated
+      
+      return () => clearTimeout(timer);
+    }
+  }, [selectedCustomer, pendingReceiptAction]);
 
   // Smart Search / Autocomplete Barcode auto-addition hook
   useEffect(() => {
@@ -586,6 +616,14 @@ export default function POSModule({
     return Math.max(0, received - baseToPay);
   }, [receivedCashAmount, calculations.grandTotal, selectedPaymentMethod, mixedCash, mixedMpesa, mixedPOS]);
 
+  // Items in cart that will fall below critical stock levels after this transaction
+  const itemsLeavingStockBelowCritical = useMemo(() => {
+    return cart.filter(item => {
+      const stockAfterSale = item.product.stock - item.quantity;
+      return stockAfterSale <= (item.product.minStock || 0);
+    });
+  }, [cart]);
+
   // Mobile Payment Effects (Placed after calculations / selectedCustomer definition)
   useEffect(() => {
     if (selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") {
@@ -724,16 +762,19 @@ export default function POSModule({
     setMixedMpesa(0);
     setMixedPOS(0);
     setShowPreCheckoutModal(false);
+    setShowFinalConfirmModal(false);
     setMobilePaymentStatus("IDLE");
     setMobilePaymentProgress(0);
     setMobilePaymentTimer(120);
   };
 
   // Execute checkout
-  const handleCheckout = (emitReceipt: boolean = true) => {
+  const handleCheckout = (emitReceipt: boolean = true, isConfirmed: boolean = false, overridePaymentMethod?: string) => {
     if (cart.length === 0) return;
 
-    if (selectedPaymentMethod === "DEBT") {
+    const paymentMethodToUse = overridePaymentMethod || selectedPaymentMethod;
+
+    if (paymentMethodToUse === "DEBT") {
       if (!selectedCustomer) {
         if (onShowToast) onShowToast("Selecione um cliente para prosseguir com a venda a crédito (Dívida).", "warning");
         return;
@@ -744,17 +785,25 @@ export default function POSModule({
       }
     }
 
-    if (selectedPaymentMethod === "MIXED" && Math.abs(mixedSumTotal - calculations.grandTotal) > 1) {
+    if (paymentMethodToUse === "MIXED" && Math.abs(mixedSumTotal - calculations.grandTotal) > 1) {
       if (onShowToast) onShowToast(`O somatório dos pagamentos mistos (${mixedSumTotal} MT) não corresponde ao total da venda (${calculations.grandTotal} MT).`, "error", "Pagamento Incorreto");
       return;
     }
 
-    if ((selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") && mobilePaymentStatus !== "CONFIRMED") {
+    if ((paymentMethodToUse === "MPESA_PAGA_FACIL" || paymentMethodToUse === "EMOLA") && mobilePaymentStatus !== "CONFIRMED") {
       if (onShowToast) {
         onShowToast(`Confirmação Pendente: Certifique-se de receber e validar o pagamento via QR Code primeiro ou use "Forçar".`, "warning", "Pagamento por Confirmar");
       }
       return;
     }
+
+    if (!isConfirmed) {
+      setPendingEmitReceipt(emitReceipt);
+      setShowFinalConfirmModal(true);
+      return;
+    }
+
+    setShowFinalConfirmModal(false);
 
     const invoiceNum = `FAC-2026-${Math.floor(100000 + Math.random() * 900000)}`;
     const nowStr = new Date().toISOString();
@@ -771,16 +820,18 @@ export default function POSModule({
       vatTotal: calculations.vatTotal,
       discountTotal: calculations.discountTotal,
       grandTotal: calculations.grandTotal,
-      paymentMethod: selectedPaymentMethod as any,
+      paymentMethod: paymentMethodToUse as any,
       cashierName: activeUsername,
       customerName: selectedCustomer?.name,
       customerId: selectedCustomer?.id,
+      customerPhone: selectedCustomer?.phone,
+      customerEmail: selectedCustomer?.email,
       nuit: selectedCustomer?.nuit,
       branchId: settings.activeBranchId || "central",
       ...fiscalSign,
-      paymentDetails: selectedPaymentMethod === "MIXED" 
+      paymentDetails: paymentMethodToUse === "MIXED" 
         ? `Misto: Dinheiro: ${mixedCash} MT | M-Pesa: ${mixedMpesa} MT | POS: ${mixedPOS} MT`
-        : selectedPaymentMethod === "DEBT"
+        : paymentMethodToUse === "DEBT"
         ? `Prazo: ${debtDays} dias. Vencimento: ${new Date(Date.now() + debtDays * 24 * 60 * 60 * 1000).toLocaleDateString()}`
         : undefined,
       items: cart.map(item => ({
@@ -815,6 +866,39 @@ export default function POSModule({
       setTimeout(() => { setNoReceiptSuccess(false); }, 3000);
     }
     setShowPreCheckoutModal(false);
+  };
+
+  // One-Click Checkout for pre-configured registered customers
+  const handleOneClickCheckout = () => {
+    if (cart.length === 0) return;
+    if (!selectedCustomer) {
+      if (onShowToast) onShowToast("Selecione um cliente para prosseguir com a venda rápida.", "warning");
+      return;
+    }
+    if (!selectedCustomer.oneClickCheckoutEnabled || !selectedCustomer.preferredPaymentMethod) {
+      if (onShowToast) onShowToast("O cliente selecionado não tem o One-Click Checkout ativo ou configurado.", "warning");
+      return;
+    }
+
+    const preferredMethod = selectedCustomer.preferredPaymentMethod;
+    setSelectedPaymentMethod(preferredMethod);
+
+    // Call checkout directly with confirmation bypassed
+    handleCheckout(true, true, preferredMethod);
+
+    if (onShowToast) {
+      const methodLabels: Record<string, string> = {
+        CASH: "Dinheiro",
+        MPESA_PAGA_FACIL: "M-Pesa",
+        EMOLA: "E-Mola",
+        POS_CARD: "POS",
+        CREDIT_CARD: "Cartão de Crédito",
+        BANK_TRANSFER: "Transferência Bancária",
+        DEBT: "Dívida (Crédito)"
+      };
+      const label = methodLabels[preferredMethod] || preferredMethod;
+      onShowToast(`⚡ One-Click Checkout: Venda finalizada com sucesso via ${label}!`, "success", "One-Click Ativo");
+    }
   };
 
   // 15. Suspend and Resume Sale functions
@@ -879,6 +963,12 @@ export default function POSModule({
   // Digital communication simulation API
   const simulateSendEmail = async () => {
     if (!completedTx) return;
+    if (!selectedCustomer) {
+      if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do email começará automaticamente.", "warning", "Cliente não Registado");
+      setPendingReceiptAction("email");
+      setQuickCustomerModalOpen(true);
+      return;
+    }
     setSendEmailStatus("sending");
     const targetEmail = selectedCustomer?.email || "vendas.central@ost.co.mz";
     try {
@@ -1167,6 +1257,12 @@ export default function POSModule({
 
   const simulateSendSms = async () => {
     if (!completedTx) return;
+    if (!selectedCustomer) {
+      if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do SMS começará automaticamente.", "warning", "Cliente não Registado");
+      setPendingReceiptAction("sms");
+      setQuickCustomerModalOpen(true);
+      return;
+    }
     setSendSmsStatus("sending");
     try {
       await fetch("/api/sms/dispatch-invoice", {
@@ -1189,6 +1285,12 @@ export default function POSModule({
 
   const handleOpenWhatsAppModal = () => {
     if (!completedTx) return;
+    if (!selectedCustomer) {
+      if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio via WhatsApp começará automaticamente.", "warning", "Cliente não Registado");
+      setPendingReceiptAction("whatsapp");
+      setQuickCustomerModalOpen(true);
+      return;
+    }
     
     // Format a beautiful text invoice for Mozambique with local details
     const dateStr = new Date(completedTx.timestamp).toLocaleString();
@@ -1691,14 +1793,34 @@ export default function POSModule({
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
-      loyaltyPoints: 0
+      loyaltyPoints: 0,
+      preferredPaymentMethod: quickCustPreferredMethod,
+      oneClickCheckoutEnabled: quickCustOneClick
     };
     setLocalCustomers(prev => [...prev, newCust]);
     setSelectedCustomerId(newCust.id);
+    
+    // If we have an active completed transaction, update its customer details so digital communication works seamlessly
+    if (completedTx) {
+      setCompletedTx(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          customerId: newCust.id,
+          customerName: newCust.name,
+          customerPhone: newCust.phone !== "Sem Telemóvel" ? newCust.phone : "",
+          customerEmail: newCust.email,
+          nuit: newCust.nuit !== "400000000" ? newCust.nuit : prev.nuit,
+        };
+      });
+    }
+
     setQuickCustomerModalOpen(false);
     setQuickCustName("");
     setQuickCustPhone("");
     setQuickCustNuit("");
+    setQuickCustPreferredMethod("CASH");
+    setQuickCustOneClick(false);
     if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e selecionado!`, "success");
   };
 
@@ -1747,6 +1869,17 @@ export default function POSModule({
               </div>
             )}
 
+            {itemsLeavingStockBelowCritical.length > 0 && (
+              <button
+                onClick={() => setShowCriticalStockModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-full text-[11px] font-extrabold cursor-pointer transition animate-pulse shadow-md shadow-red-500/20"
+                title={`${itemsLeavingStockBelowCritical.length} produtos atingirão estoque crítico após a venda! Clique para inspecionar.`}
+              >
+                <AlertTriangle className="w-3.5 h-3.5 text-white animate-bounce" />
+                <span>ALERTA STOCK ({itemsLeavingStockBelowCritical.length})</span>
+              </button>
+            )}
+
             <button
               onClick={() => setShowShortcutsHelp(true)}
               className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-[11px] font-bold cursor-pointer transition shadow-sm"
@@ -1765,6 +1898,17 @@ export default function POSModule({
               <Wifi className="w-3.5 h-3.5" />
               <span>{isOnline ? "🟢 ONLINE" : "🔴 OFFLINE"}</span>
             </button>
+
+            {onTriggerPanic && (
+              <button
+                onClick={() => setShowPanicConfirm(true)}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-extrabold cursor-pointer transition-all bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/30 ring-2 ring-red-400 hover:scale-[1.03] animate-pulse"
+                title="Botão de Pânico / Alerta Crítico"
+              >
+                <AlertTriangle className="w-3.5 h-3.5 animate-bounce" />
+                <span>🚨 PÂNICO</span>
+              </button>
+            )}
 
             {onChangePOSFullscreen && (
               <button
@@ -1785,15 +1929,15 @@ export default function POSModule({
                     `O operador alterou o modo de exibição de checkout (Modo Foco: ${!isPOSFullscreen ? "ATIVADO" : "DESATIVADO"}).`
                   );
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold cursor-pointer transition ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-extrabold cursor-pointer transition-all ${
                   isPOSFullscreen 
-                    ? "bg-amber-500 text-slate-950 hover:bg-amber-400" 
-                    : "bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-750"
+                    ? "bg-rose-600 text-white hover:bg-rose-500 shadow-md shadow-rose-600/30 animate-pulse ring-2 ring-rose-400" 
+                    : "bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700"
                 }`}
-                title={isPOSFullscreen ? "Desativar Tela Inteira" : "Ativar Modo Foco (Tela Inteira)"}
+                title={isPOSFullscreen ? "Sair do Modo de Foco Imersivo" : "Expandir para Modo de Foco Imersivo"}
               >
                 {isPOSFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5 text-amber-400" />}
-                <span>{isPOSFullscreen ? "MINIMIZAR" : "TELA CHEIA"}</span>
+                <span>{isPOSFullscreen ? "SAIR DO MODO" : "EXPANDIR"}</span>
               </button>
             )}
           </div>
@@ -1889,7 +2033,7 @@ export default function POSModule({
           </div>
 
           {/* Quick Categories list with Favoritos category */}
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+          <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
             {categories.map((cat) => (
               <button
                 key={cat}
@@ -1907,7 +2051,7 @@ export default function POSModule({
         </div>
 
         {/* Products catalog list grid */}
-        <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-slate-50/50">
           {filteredProducts.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8">
               <span className="text-3xl mb-2">🔍</span>
@@ -2025,6 +2169,16 @@ export default function POSModule({
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <ShoppingCart className="w-3.5 h-3.5 text-orange-400" />
               <span className="font-mono uppercase tracking-wider">Carrinho Ativo</span>
+              {itemsLeavingStockBelowCritical.length > 0 && (
+                <span 
+                  onClick={() => setShowCriticalStockModal(true)}
+                  className="inline-flex items-center gap-1 bg-red-650 hover:bg-red-700 text-white text-[8.5px] font-extrabold px-1.5 py-0.5 rounded cursor-pointer animate-pulse shrink-0"
+                  title="Há itens que ficarão abaixo do stock crítico. Clique para ver."
+                >
+                  <AlertTriangle className="w-2.5 h-2.5" />
+                  <span>CRÍTICO</span>
+                </span>
+              )}
             </div>
             <span className="text-[10px] bg-slate-800 text-orange-300 font-mono px-2 py-0.5 rounded border border-slate-700">
               Hora: {currentTime}
@@ -2073,8 +2227,21 @@ export default function POSModule({
           </div>
         )}
 
+        {itemsLeavingStockBelowCritical.length > 0 && (
+          <div 
+            onClick={() => setShowCriticalStockModal(true)}
+            className="px-3.5 py-2 bg-red-50 hover:bg-red-100 border-b border-red-100 text-red-800 text-[10px] font-bold flex items-start gap-1.5 cursor-pointer shrink-0 transition"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+            <div>
+              <span className="block font-black uppercase tracking-wider">🚨 ALERTA: STOCK CRÍTICO</span>
+              <p className="font-medium text-red-600 mt-0.5">{itemsLeavingStockBelowCritical.length} {itemsLeavingStockBelowCritical.length === 1 ? "produto ficará" : "produtos ficarão"} abaixo do nível crítico de stock após concluir esta venda. <strong className="underline">Ver artigos →</strong></p>
+            </div>
+          </div>
+        )}
+
         {/* Shopping list of cart items */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
           {cart.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 mt-12">
               <span className="text-2xl mb-2">🛒</span>
@@ -2615,6 +2782,26 @@ export default function POSModule({
 
           {/* Checkout & extra bottom buttons panel */}
           <div className="space-y-2">
+            {selectedCustomer?.oneClickCheckoutEnabled && selectedCustomer.preferredPaymentMethod && (
+              <button
+                onClick={handleOneClickCheckout}
+                disabled={cart.length === 0}
+                className={`w-full py-2.5 h-11 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed`}
+                title={`Finalizar venda imediatamente utilizando o método preferido: ${selectedCustomer.preferredPaymentMethod}`}
+              >
+                <Zap className="w-4 h-4 text-amber-300 fill-amber-300 shrink-0 animate-pulse" />
+                <span>⚡ Checkout 1-Clique ({
+                  selectedCustomer.preferredPaymentMethod === "CASH" ? "Dinheiro" :
+                  selectedCustomer.preferredPaymentMethod === "MPESA_PAGA_FACIL" ? "M-Pesa" :
+                  selectedCustomer.preferredPaymentMethod === "EMOLA" ? "E-Mola" :
+                  selectedCustomer.preferredPaymentMethod === "POS_CARD" ? "POS" :
+                  selectedCustomer.preferredPaymentMethod === "CREDIT_CARD" ? "Cartão" :
+                  selectedCustomer.preferredPaymentMethod === "BANK_TRANSFER" ? "Transf" :
+                  selectedCustomer.preferredPaymentMethod === "DEBT" ? "Dívida" : "Dinheiro"
+                })</span>
+              </button>
+            )}
+
             <button
               onClick={() => {
                 if (cart.length > 0) setShowPreCheckoutModal(true);
@@ -2757,7 +2944,61 @@ export default function POSModule({
         </div>
       )}
 
-      {/* 19. WEIGHT PROMPT MODAL */}
+      {/* FINAL TRANSACTION CONFIRMATION MODAL */}
+      {showFinalConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-md flex items-center justify-center z-[60] p-4">
+          <div className="bg-white p-6 rounded-3xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150 text-center">
+            <div className="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <AlertTriangle className="w-8 h-8 animate-bounce" />
+            </div>
+            
+            <div className="space-y-1.5">
+              <h3 className="font-extrabold text-slate-900 text-lg">Confirmar Conclusão de Venda?</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Deseja realmente concluir e emitir esta transação no valor de <strong className="text-slate-800 font-extrabold text-sm">{calculations.grandTotal.toLocaleString()} {currency}</strong>? Esta ação não poderá ser desfeita ou editada após registada no sistema.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 text-left text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Total a Pagar:</span>
+                <span className="font-extrabold text-slate-700">{calculations.grandTotal.toLocaleString()} {currency}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Método de Pagamento:</span>
+                <span className="font-extrabold text-orange-650">{selectedPaymentMethod}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">Cliente:</span>
+                <span className="font-extrabold text-slate-750">{selectedCustomer ? selectedCustomer.name : "Consumidor Geral"}</span>
+              </div>
+              {selectedPaymentMethod === "CASH" && (
+                <div className="flex justify-between border-t border-slate-200/60 pt-2">
+                  <span className="text-slate-400">Troco Calculado:</span>
+                  <span className="font-extrabold text-emerald-600">{calculatedChange.toLocaleString()} {currency}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowFinalConfirmModal(false)}
+                className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 rounded-2xl text-xs font-bold text-slate-700 transition-all cursor-pointer"
+              >
+                Não, Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCheckout(pendingEmitReceipt, true)}
+                className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 rounded-2xl text-xs font-black text-white transition-all cursor-pointer shadow-md shadow-orange-500/20 hover:scale-[1.02] active:scale-[0.98]"
+              >
+                Sim, Finalizar ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {weightPromptProduct && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white p-6 rounded-2xl max-w-xs w-full border border-slate-100 shadow-2xl space-y-4 text-center animate-in zoom-in-95 duration-150">
@@ -3043,6 +3284,36 @@ export default function POSModule({
                   onChange={(e) => setQuickCustNuit(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
                 />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Método de Liquidação Preferido</label>
+                <select
+                  value={quickCustPreferredMethod}
+                  onChange={(e) => setQuickCustPreferredMethod(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 text-slate-700 font-bold"
+                >
+                  <option value="CASH">💵 Dinheiro</option>
+                  <option value="MPESA_PAGA_FACIL">📱 M-Pesa</option>
+                  <option value="EMOLA">📱 E-Mola</option>
+                  <option value="POS_CARD">💳 POS</option>
+                  <option value="CREDIT_CARD">💳 Cartão de Crédito</option>
+                  <option value="BANK_TRANSFER">🏦 Transferência Bancária</option>
+                  <option value="DEBT">🧾 Dívida (Venda a Crédito)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-150">
+                <input
+                  type="checkbox"
+                  id="quickCustOneClick"
+                  checked={quickCustOneClick}
+                  onChange={(e) => setQuickCustOneClick(e.target.checked)}
+                  className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
+                />
+                <label htmlFor="quickCustOneClick" className="text-xs font-bold text-slate-600 cursor-pointer select-none">
+                  ⚡ Habilitar One-Click Checkout
+                </label>
               </div>
             </div>
 
@@ -3466,6 +3737,41 @@ export default function POSModule({
             {/* Quick Digital Dispatchers */}
             <div className="space-y-2">
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Comunicações Digitais</p>
+
+              {!selectedCustomer && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-2.5 text-[10.5px] leading-relaxed text-amber-850 space-y-1">
+                  <p className="font-extrabold flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    Cliente não Registado
+                  </p>
+                  <p className="text-slate-600">
+                    O cliente atual é Consumidor Geral. Deseja registá-lo agora para enviar o recibo?
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1 font-bold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingReceiptAction("email");
+                        setQuickCustomerModalOpen(true);
+                      }}
+                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                    >
+                      Registar e Enviar Email
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingReceiptAction("whatsapp");
+                        setQuickCustomerModalOpen(true);
+                      }}
+                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                    >
+                      Registar e Enviar WhatsApp
+                    </button>
+                  </div>
+                </div>
+              )}
               
               <div className="grid grid-cols-3 gap-1.5">
                 <button
@@ -4155,6 +4461,104 @@ export default function POSModule({
         <HelpCircle className="w-6 h-6 animate-pulse" />
       </button>
 
+      {/* 26. Modal de Alerta de Stock Crítico */}
+      {showCriticalStockModal && (
+        <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div 
+            className="bg-white rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]"
+            id="pos-critical-stock-modal"
+          >
+            {/* Header */}
+            <div className="p-6 bg-red-50 border-b border-red-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center shadow-inner animate-pulse">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-slate-900 text-sm">Alerta de Stock Crítico</h3>
+                  <p className="text-[11px] text-red-650 font-bold">Produtos que ficarão abaixo do nível de alerta após a venda</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowCriticalStockModal(false)}
+                className="w-8 h-8 rounded-full bg-white hover:bg-red-100 border border-red-200 text-red-400 hover:text-red-600 flex items-center justify-center transition cursor-pointer font-bold text-xs font-mono"
+                title="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              <p className="text-[11.5px] text-slate-500 leading-normal text-left">
+                Os seguintes itens no carrinho de compras atual têm quantidades que reduzirão o estoque restante abaixo ou ao nível crítico definido individualmente nas configurações de stock.
+              </p>
+
+              <div className="space-y-3">
+                {itemsLeavingStockBelowCritical.map(item => {
+                  const currentStock = item.product.stock;
+                  const saleQty = item.quantity;
+                  const finalStock = currentStock - saleQty;
+                  const minStock = item.product.minStock || 0;
+
+                  return (
+                    <div 
+                      key={item.product.id}
+                      className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl flex flex-col gap-2 hover:bg-slate-100/70 transition text-left"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">{item.product.brand || "Genérico"} ({item.product.code})</span>
+                          <h4 className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight">{item.product.name}</h4>
+                        </div>
+                        <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+                          Mín Alerta: {minStock}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-center">
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase">Stock Atual</span>
+                          <span className="text-xs font-mono font-bold text-slate-600">{currentStock}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase">No Carrinho</span>
+                          <span className="text-xs font-mono font-bold text-orange-600">-{saleQty}</span>
+                        </div>
+                        <div className="bg-red-50 p-2 rounded-lg border border-red-100">
+                          <span className="text-[9px] font-bold text-red-400 block uppercase">Stock Final</span>
+                          <span className={`text-xs font-mono font-bold ${finalStock < 0 ? "text-red-700 underline" : "text-red-600"}`}>
+                            {finalStock}
+                          </span>
+                        </div>
+                      </div>
+
+                      {finalStock < 0 && (
+                        <p className="text-[9.5px] text-red-600 font-bold flex items-center gap-1">
+                          ⚠️ Atenção: Esta transação causará ruptura de stock (estoque negativo)!
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCriticalStockModal(false)}
+                className="py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs cursor-pointer transition shadow-sm"
+              >
+                Entendi, Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Keyboard Shortcuts Floating Help Overlay */}
       {showShortcutsHelp && (
         <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
@@ -4311,6 +4715,56 @@ export default function POSModule({
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
               >
                 Compreendi! Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Panic Button Confirmation Modal */}
+      {showPanicConfirm && (
+        <div className="fixed inset-0 bg-red-950/85 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full border-2 border-red-500 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col">
+            <div className="p-6 bg-red-50 border-b border-red-100 flex items-center gap-3">
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-extrabold text-red-900 text-base">⚠️ CONFIRMAÇÃO DE EMERGÊNCIA</h3>
+                <p className="text-xs text-red-700 font-semibold mt-0.5">SISTEMA DE SEGURANÇA OST VENDAS</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-left">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                Você está prestes a acionar o <strong>Botão de Pânico / Alerta Crítico</strong> do sistema comercial.
+              </p>
+              <div className="bg-red-50/50 p-4 rounded-xl border border-red-100 text-xs text-red-800 space-y-1.5 font-semibold">
+                <p>● Um log de emergência crítica será registado imediatamente.</p>
+                <p>● Todos os administradores receberão SMS e E-mail de pânico com a sua identidade, localização geográfica e endereço IP.</p>
+                <p>● Use apenas em caso de incidentes graves de segurança, roubo ou perigo iminente.</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPanicConfirm(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Cancelar (Não Enviar)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onTriggerPanic) {
+                    onTriggerPanic();
+                  }
+                  setShowPanicConfirm(false);
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl shadow-md shadow-red-600/30 transition cursor-pointer animate-pulse"
+              >
+                🚨 ENVIAR ALERTA DE PÂNICO
               </button>
             </div>
           </div>

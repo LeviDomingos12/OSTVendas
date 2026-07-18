@@ -35,6 +35,7 @@ import SettingsModule from "./components/SettingsModule";
 import GatewayModule from "./components/GatewayModule";
 import LoginModule from "./components/LoginModule";
 import AiForecastModule from "./components/AiForecastModule";
+import StockReplenishModal from "./components/StockReplenishModal";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { 
   testConnection, 
@@ -59,6 +60,8 @@ import {
 import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
+import { sendEmail } from "./lib/gmail";
+import { sendSMS } from "./lib/sms";
 
 import { 
   Activity, 
@@ -251,6 +254,7 @@ export default function App() {
   const [activeUser, setActiveUser] = useState<Employee | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("DASHBOARD");
+  const [showReplenishModal, setShowReplenishModal] = useState(false);
 
   // Profile Switcher PIN Verification States
   const [pinVerificationOpen, setPinVerificationOpen] = useState(false);
@@ -448,6 +452,34 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(isCircuitBroken());
 
+  // Offline sync queue state & status tracking
+  const [pendingSyncQueue, setPendingSyncQueue] = useState<Record<string, any>>(() => {
+    try {
+      const raw = localStorage.getItem("pos_sync_queue");
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
+
+  // Periodically monitor the local storage for changes to sync queue
+  useEffect(() => {
+    const checkQueue = () => {
+      try {
+        const raw = localStorage.getItem("pos_sync_queue");
+        const parsed = raw ? JSON.parse(raw) : {};
+        if (JSON.stringify(parsed) !== JSON.stringify(pendingSyncQueue)) {
+          setPendingSyncQueue(parsed);
+        }
+      } catch (e) {
+        console.warn("Erro ao monitorizar fila offline:", e);
+      }
+    };
+    const interval = setInterval(checkQueue, 1500);
+    return () => clearInterval(interval);
+  }, [pendingSyncQueue]);
+
   // Listen for Firestore Quota Exceeded events and initialize system error capturing
   useEffect(() => {
     const handleQuotaExceeded = () => {
@@ -593,83 +625,127 @@ export default function App() {
     setLogCallback(handleAddAuditLog);
   }, [activeUser, auditLogs]); // Re-bind when user context or logs state updates
 
-  useEffect(() => {
-    const processSyncQueue = async () => {
-      if (!navigator.onLine) return;
+  const processSyncQueue = async () => {
+    if (!navigator.onLine) return;
+    
+    try {
+      const rawQueue = localStorage.getItem("pos_sync_queue");
+      if (!rawQueue) return;
       
-      try {
-        const rawQueue = localStorage.getItem("pos_sync_queue");
-        if (!rawQueue) return;
+      const queue = JSON.parse(rawQueue);
+      const tableNames = Object.keys(queue);
+      if (tableNames.length === 0) return;
+      
+      console.log(`[SYNC QUEUE] Detectadas ${tableNames.length} tabelas com alterações offline pendentes. Sincronizando...`);
+      
+      for (const tableName of tableNames) {
+        const data = queue[tableName];
+        let success = false;
         
-        const queue = JSON.parse(rawQueue);
-        const tableNames = Object.keys(queue);
-        if (tableNames.length === 0) return;
-        
-        console.log(`[SYNC QUEUE] Detectadas ${tableNames.length} tabelas com alterações offline pendentes. Sincronizando...`);
-        
-        for (const tableName of tableNames) {
-          const data = queue[tableName];
-          let success = false;
-          
-          if (tableName === "products") {
+        if (tableName === "products") {
+          try {
+            await addProdutosToFirestoreBatch(data);
+            success = true;
             try {
-              await addProdutosToFirestoreBatch(data);
-              success = true;
-              try {
-                await fetch("/api/db/save", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ table: "products", data })
-                });
-              } catch (err) {
-                console.warn("[SYNC QUEUE] Erro ao atualizar produtos no servidor:", err);
-              }
-            } catch (fsErr) {
-              console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
-            }
-          } else if (tableName === "transactions") {
-            try {
-              await addTransacoesToFirestoreBatch(data);
-              success = true;
-              try {
-                await fetch("/api/db/save", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ table: "transactions", data })
-                });
-              } catch (err) {
-                console.warn("[SYNC QUEUE] Erro ao atualizar transações no servidor:", err);
-              }
-            } catch (fsErr) {
-              console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
-            }
-          } else {
-            try {
-              const response = await fetch("/api/db/save", {
+              await fetch("/api/db/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ table: tableName, data })
+                body: JSON.stringify({ table: "products", data })
               });
-              success = response.ok;
-            } catch (fetchErr) {
-              console.warn(`[SYNC QUEUE] Erro de rede ao ressincronizar tabela ${tableName}:`, fetchErr);
+            } catch (err) {
+              console.warn("[SYNC QUEUE] Erro ao atualizar produtos no servidor:", err);
             }
+          } catch (fsErr) {
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
           }
-          
-          if (success) {
-            console.log(`[SYNC QUEUE] Tabela ${tableName} ressincronizada offline com sucesso!`);
-            delete queue[tableName];
-          } else {
-            console.warn(`[SYNC QUEUE] Falha na ressincronização de ${tableName}`);
+        } else if (tableName === "transactions") {
+          try {
+            await addTransacoesToFirestoreBatch(data);
+            success = true;
+            try {
+              await fetch("/api/db/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ table: "transactions", data })
+              });
+            } catch (err) {
+              console.warn("[SYNC QUEUE] Erro ao atualizar transações no servidor:", err);
+            }
+          } catch (fsErr) {
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
+          }
+        } else {
+          try {
+            const response = await fetch("/api/db/save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ table: tableName, data })
+            });
+            success = response.ok;
+          } catch (fetchErr) {
+            console.warn(`[SYNC QUEUE] Erro de rede ao ressincronizar tabela ${tableName}:`, fetchErr);
           }
         }
         
-        safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
-      } catch (err) {
-        console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
+        if (success) {
+          console.log(`[SYNC QUEUE] Tabela ${tableName} ressincronizada offline com sucesso!`);
+          delete queue[tableName];
+        } else {
+          console.warn(`[SYNC QUEUE] Falha na ressincronização de ${tableName}`);
+        }
       }
-    };
+      
+      safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
+      setPendingSyncQueue(queue);
+    } catch (err) {
+      console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
+    }
+  };
 
+  const handleManualSync = async () => {
+    if (!navigator.onLine) {
+      showToast("Não é possível sincronizar: O seu dispositivo ainda está offline.", "warning", "Sem Ligação à Rede");
+      return;
+    }
+
+    setIsManualSyncing(true);
+    showToast("A iniciar ressincronização manual das alterações offline...", "info", "Sincronização Iniciada");
+    
+    try {
+      await processSyncQueue();
+      
+      const raw = localStorage.getItem("pos_sync_queue");
+      const parsed = raw ? JSON.parse(raw) : {};
+      const keys = Object.keys(parsed);
+      
+      if (keys.length === 0) {
+        showToast("Todas as alterações offline foram sincronizadas com sucesso!", "success", "Sincronização Concluída");
+        handleAddAuditLog(
+          "Sincronização Manual Sucedida",
+          "SISTEMA",
+          "O usuário forçou uma sincronização manual e todas as alterações pendentes foram integradas com sucesso."
+        );
+      } else {
+        const friendlyTables = keys.map(k => {
+          if (k === "products") return "Produtos";
+          if (k === "transactions") return "Vendas";
+          if (k === "customers") return "Clientes";
+          if (k === "cashflow") return "Caixa";
+          if (k === "employees") return "Funcionários";
+          if (k === "auditlogs") return "Auditoria";
+          if (k === "settings") return "Definições";
+          return k;
+        });
+        showToast(`Sincronização parcial concluída. Algumas alterações (${friendlyTables.join(", ")}) ainda estão pendentes.`, "warning", "Sincronização Parcial");
+      }
+    } catch (err: any) {
+      showToast(`Erro durante a sincronização: ${err.message}`, "error", "Falha na Sincronização");
+    } finally {
+      setIsManualSyncing(false);
+    }
+  };
+
+  useEffect(() => {
     const handleOnline = () => {
       console.log("[CONEXÃO] Conexão restabelecida! Tentando reenviar alterações offline...");
       setIsOnline(true);
@@ -788,6 +864,26 @@ export default function App() {
       window.removeEventListener("keydown", handlePOSGlobalShortcuts, true);
     };
   }, [activeTab]);
+
+  // Global keyboard shortcut for Stock Replenishment (Ctrl+S)
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if (!isAuthenticated) return;
+
+      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        e.stopPropagation();
+        setShowReplenishModal(prev => !prev);
+      } else if (e.key === "Escape" && showReplenishModal) {
+        setShowReplenishModal(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleGlobalShortcuts, true);
+    return () => {
+      window.removeEventListener("keydown", handleGlobalShortcuts, true);
+    };
+  }, [isAuthenticated, showReplenishModal]);
 
 
   // Hydrate states from existential server database on mount
@@ -1383,11 +1479,12 @@ export default function App() {
   };
 
   // GENERAL AUDIT LOGGING WRAPPER
-  const handleAddAuditLog = (action: string, module: string, details: string) => {
+  const handleAddAuditLog = (action: string, module: string, details: string, customUser?: Employee) => {
     let authRole: UserRole = "CASHIER";
-    const username = activeUser ? activeUser.name : "Sistema / Visitante";
-    if (activeUser && activeUser.role) {
-      const raw = activeUser.role.toLowerCase();
+    const targetUser = customUser || activeUser;
+    const username = targetUser ? targetUser.name : "Sistema / Visitante";
+    if (targetUser && targetUser.role) {
+      const raw = targetUser.role.toLowerCase();
       if (raw.includes("supervisor")) authRole = "SUPERVISOR";
       else if (raw.includes("administrador") || raw.includes("gestor")) authRole = "ADMIN";
     }
@@ -1414,6 +1511,150 @@ export default function App() {
       syncTable("auditlogs", updated);
       return updated;
     });
+  };
+
+  // PANIC SYSTEM / EMERGENCY SECURITY ALERT
+  const handleTriggerPanic = async () => {
+    const operatorName = activeUser?.name || "Operador Desconhecido";
+    const operatorRole = activeUser?.role || "Operador";
+    const ipStr = userIpInfo ? userIpInfo.ip : "102.81.12.94";
+    const locStr = userIpInfo ? `${userIpInfo.city}, ${userIpInfo.country}` : "Maputo, Moçambique";
+    const devStr = deviceInfo || "Chrome Desktop";
+
+    // 1. Add Immediate Critical Audit Log
+    handleAddAuditLog(
+      "BOTÃO DE PÂNICO ACIONADO",
+      "SEGURANÇA",
+      `ALERTA EMERGENCIAL CRÍTICO! O operador ${operatorName} acionou o botão de pânico. IP: ${ipStr} (${locStr}). Dispositivo: ${devStr}. Notificações em massa enviadas aos administradores.`
+    );
+
+    // 2. Identify Administrators
+    const admins = employees.filter(emp => {
+      if (!emp.role) return false;
+      const roleLower = emp.role.toLowerCase();
+      return (
+        roleLower.includes("admin") ||
+        roleLower.includes("gestor") ||
+        roleLower.includes("supervisor") ||
+        roleLower.includes("gerente") ||
+        roleLower.includes("diretor")
+      );
+    });
+
+    // 3. Extract Emails and Phone numbers
+    const emails = admins.map(a => a.email).filter(Boolean) as string[];
+    const phones = admins.map(a => a.contact).filter(Boolean) as string[];
+
+    if (settings.reportRecipientEmail && !emails.includes(settings.reportRecipientEmail)) {
+      emails.push(settings.reportRecipientEmail);
+    }
+
+    // Default emergency contact as fallback if empty
+    if (emails.length === 0) {
+      emails.push("levidomingos12@gmail.com");
+    }
+    if (phones.length === 0) {
+      phones.push("+258840000000");
+    }
+
+    // 4. Construct Alerta Body
+    const subject = `🚨 [OST VENDAS] ALERTA DE PÂNICO EMERGENCIAL DE SEGURANÇA!`;
+    const emailHtmlBody = `
+      <div style="font-family: Arial, sans-serif; border: 3px solid #dc2626; border-radius: 16px; overflow: hidden; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 25px rgba(220, 38, 38, 0.2);">
+        <div style="background-color: #dc2626; padding: 24px; text-align: center; color: white;">
+          <h2 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 0.5px;">🚨 ALERTA CRÍTICO DE PÂNICO</h2>
+          <p style="margin: 8px 0 0; font-size: 13px; font-weight: bold; text-transform: uppercase; background-color: rgba(0,0,0,0.2); display: inline-block; padding: 4px 12px; border-radius: 9999px;">SISTEMA COMERCIAL OST VENDAS</p>
+        </div>
+        <div style="padding: 28px; color: #1e293b; background-color: #ffffff;">
+          <p style="font-size: 16px; line-height: 1.6; margin-top: 0; font-weight: 600; color: #991b1b;">
+            ATENÇÃO ADMINISTRADOR! O Botão de Pânico foi acionado voluntariamente a partir do ponto de venda.
+          </p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b; width: 140px;">Operador Ativo:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #0f172a;">${operatorName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Função do Utilizador:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #dc2626;">${operatorRole}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Data e Hora:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace;">${new Date().toLocaleString('pt-MZ')} (Maputo)</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Endereço IP:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace; font-weight: bold;">${ipStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Localização IP:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-weight: bold;">${locStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Dispositivo/Browser:</td>
+                <td style="padding: 8px 0; color: #334155;">${devStr}</td>
+              </tr>
+            </table>
+          </div>
+          <div style="background-color: #fef2f2; border-left: 5px solid #dc2626; padding: 18px; border-radius: 8px; margin: 20px 0;">
+            <strong style="color: #991b1b; display: block; margin-bottom: 6px; font-size: 14px;">⚠️ PROCEDIMENTO DE SEGURANÇA:</strong>
+            <p style="margin: 0; font-size: 13px; color: #7f1d1d; line-height: 1.6;">
+              1. Verifique as câmeras ou canais de comunicação com a loja imediatamente.<br/>
+              2. Caso não consiga contato com o operador, acione os canais policiais locais ou segurança patrimonial.<br/>
+              3. O log crítico foi gravado permanentemente na auditoria do sistema para efeitos legais.
+            </p>
+          </div>
+        </div>
+        <div style="background-color: #f8fafc; padding: 18px; text-align: center; color: #64748b; font-size: 11px; border-top: 1px solid #e2e8f0;">
+          Enviado por: <strong>OST Vendas Moçambique Fiscal Cloud</strong>. Não responda a esta mensagem eletrônica.
+        </div>
+      </div>
+    `;
+
+    const smsText = `🚨 OST VENDAS - PANICO ATIVADO! Operador: ${operatorName} (${operatorRole}). IP: ${ipStr} (${locStr}). Verifique a loja de imediato!`;
+
+    // 5. Send Email Notifications
+    const emailPromises = emails.map(async (email) => {
+      try {
+        await sendEmail({
+          to: email,
+          subject,
+          body: emailHtmlBody,
+          isHtml: true
+        });
+        console.log(`[Panic] Email alert sent successfully to \${email}`);
+        return { email, success: true };
+      } catch (err: any) {
+        console.error(`[Panic] Failed to send email alert to \${email}:`, err);
+        return { email, success: false, error: err.message };
+      }
+    });
+
+    // 6. Send SMS Notifications
+    const smsPromises = phones.map(async (phone) => {
+      try {
+        await sendSMS(phone, smsText);
+        console.log(`[Panic] SMS alert sent successfully to \${phone}`);
+        return { phone, success: true };
+      } catch (err: any) {
+        console.error(`[Panic] Failed to send SMS alert to \${phone}:`, err);
+        return { phone, success: false, error: err.message };
+      }
+    });
+
+    // Run parallel
+    const emailResults = await Promise.all(emailPromises);
+    const smsResults = await Promise.all(smsPromises);
+
+    const successfulEmailsCount = emailResults.filter(r => r.success).length;
+    const successfulSmsCount = smsResults.filter(r => r.success).length;
+
+    showToast(
+      `Alerta crítico disparado! \${successfulEmailsCount} e-mails e \${successfulSmsCount} SMS de emergência enviados aos administradores.`,
+      "warning",
+      "🚨 ALERTA MÁXIMO"
+    );
   };
 
   // CENTRAL MUTATION HOOKS - PRODUCTS
@@ -2153,6 +2394,171 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       ...prev,
       companyName: branchName
     }));
+
+    // Record login audit log
+    handleAddAuditLog(
+      "Login efetuado",
+      "AUTENTICAÇÃO",
+      `Sessão iniciada com sucesso para o colaborador ${user.name} (${user.role}) no ramo ${branchName}.`,
+      user
+    );
+
+    // GEOLOCATION SECURITY CHECK:
+    // Determine if the current city/country is new or unusual for this user
+    const currentCity = userIpInfo?.city || "Maputo";
+    const currentCountry = userIpInfo?.country || "Moçambique";
+    const currentIp = userIpInfo?.ip || "102.81.12.94";
+
+    // Filter audit logs for previous successful logins for this user
+    const userPreviousLogins = auditLogs.filter(log => 
+      log.user === user.name && 
+      log.action === "Login efetuado"
+    );
+
+    let isNewLocation = false;
+    let locationHistoryString = "";
+
+    if (userPreviousLogins.length > 0) {
+      // Extract cities and countries from previous logs
+      const knownLocations = userPreviousLogins.map(log => {
+        const match = log.ip?.match(/\(([^)]+)\)/);
+        if (match) {
+          const parts = match[1].split(",");
+          const city = parts[0] ? parts[0].trim().toLowerCase() : "";
+          const country = parts[1] ? parts[1].trim().toLowerCase() : "";
+          return { city, country };
+        }
+        return { city: "maputo", country: "moçambique" };
+      });
+
+      const hasCity = knownLocations.some(loc => loc.city === currentCity.toLowerCase());
+      const hasCountry = knownLocations.some(loc => loc.country === currentCountry.toLowerCase());
+
+      if (!hasCity || !hasCountry) {
+        isNewLocation = true;
+        const uniqueHistory = Array.from(new Set(userPreviousLogins.map(log => {
+          const match = log.ip?.match(/\(([^)]+)\)/);
+          return match ? match[1].trim() : "Maputo, Moçambique";
+        })));
+        locationHistoryString = uniqueHistory.join(" | ");
+      }
+    } else {
+      // If there are no previous logs at all (first login), but they are logging in from outside Moçambique,
+      // let's treat it as unusual to protect the company.
+      const isOutsideMozambique = currentCountry.toLowerCase() !== "moçambique" && 
+                                  currentCountry.toLowerCase() !== "mozambique";
+      if (isOutsideMozambique) {
+        isNewLocation = true;
+        locationHistoryString = "Nenhum histórico (Primeiro Login - Local Internacional)";
+      }
+    }
+
+    if (isNewLocation) {
+      const alertMsg = `ALERTA DE SEGURANÇA: Login de ${user.name} detectado a partir de uma localização não habitual: ${currentCity}, ${currentCountry}. IP: ${currentIp}.`;
+      
+      // Add a security warning log entry
+      setTimeout(() => {
+        handleAddAuditLog(
+          "Alerta de Segurança",
+          "SEGURANÇA",
+          alertMsg,
+          user
+        );
+      }, 300);
+
+      // Email details to admin
+      const adminEmail = settings.reportRecipientEmail || "admin@example.com";
+      const subject = `🚨 ALERTA DE SEGURANÇA: Login de Localização Incomum (${user.name})`;
+      
+      const emailBody = `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 30px; border: 1px solid #fee2e2; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 20px rgba(0,0,0,0.05);">
+          <div style="text-align: center; border-bottom: 2px solid #ef4444; padding-bottom: 20px; margin-bottom: 25px;">
+            <span style="background-color: #fef2f2; border: 1px solid #fee2e2; color: #ef4444; font-size: 11px; font-weight: bold; padding: 4px 10px; border-radius: 9999px; text-transform: uppercase; tracking-wider: 1px;">Alerta do Módulo de Auditoria</span>
+            <h1 style="color: #991b1b; margin: 10px 0 0 0; font-size: 24px; font-weight: 800;">Acesso Não Habitual</h1>
+            <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">OST Vendas - ERP Comercial</p>
+          </div>
+          
+          <div style="margin-bottom: 30px; line-height: 1.6; color: #334155; font-size: 14px;">
+            <p>Prezado <strong>Administrador do Sistema</strong>,</p>
+            <p>O sistema de segurança integrativa da OST detectou um evento de autenticação originado de uma <strong>localização geográfica nova ou não habitual</strong>.</p>
+            
+            <div style="background-color: #fffaf0; border: 1px solid #feebc8; border-left: 4px solid #dd6b20; border-radius: 12px; padding: 20px; margin: 25px 0;">
+              <h3 style="margin: 0 0 12px 0; font-size: 15px; color: #dd6b20; font-weight: bold;">Dados de Acesso Suspeito</h3>
+              <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold; width: 40%;">Colaborador:</td>
+                  <td style="padding: 6px 0; color: #2d3748; font-weight: bold;">${user.name}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold;">Perfil / Função:</td>
+                  <td style="padding: 6px 0; color: #2d3748; font-weight: bold;">${user.role}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold;">Localização Detectada:</td>
+                  <td style="padding: 6px 0; color: #e53e3e; font-weight: 900; font-size: 14px;">${currentCity}, ${currentCountry}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold;">Endereço de IP:</td>
+                  <td style="padding: 6px 0; color: #2d3748; font-family: monospace; font-weight: bold;">${currentIp}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold;">Dispositivo/Browser:</td>
+                  <td style="padding: 6px 0; color: #2d3748; font-size: 12px;">${deviceInfo || "Desktop (Chrome)"}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #718096; font-weight: bold;">Data e Hora (Local):</td>
+                  <td style="padding: 6px 0; color: #2d3748;">${new Date().toLocaleString()}</td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="font-size: 12.5px; color: #4a5568; line-height: 1.5;">
+              <strong>Histórico Conhecido de Localizações:</strong><br/>
+              <span style="color: #718096; font-family: monospace; font-size: 12px; display: block; margin-top: 5px; padding: 8px; background-color: #f7fafc; border-radius: 6px; border: 1px solid #e2e8f0; word-break: break-all;">${locationHistoryString || "Nenhum histórico anterior registado (primeiro acesso do utilizador)."}</span>
+            </p>
+            
+            <p style="margin-top: 25px; padding: 15px; background-color: #f7fafc; border-radius: 8px; font-size: 12px; color: #4a5568; border-left: 4px solid #4a5568;">
+              <strong>Medida Recomendada:</strong> Se este acesso não for reconhecido pelo utilizador em causa, aceda ao painel de controlo do ERP, secção <strong>"Recursos Humanos / Funcionários"</strong>, e altere imediatamente o PIN de acesso ou suspenda a conta do colaborador para mitigar riscos de intrusão.
+            </p>
+          </div>
+
+          <div style="text-align: center; font-size: 11px; color: #a0aec0; border-top: 1px solid #edf2f7; padding-top: 15px; margin-top: 25px;">
+            <p>Este alerta automatizado foi disparado pelo sistema de integridade OST Vendas.</p>
+          </div>
+        </div>
+      `;
+
+      // Send Email Alerta
+      sendEmail({
+        to: adminEmail,
+        subject,
+        body: emailBody
+      }).catch(err => console.error("[SECURITY] Falha ao enviar email de alerta ao administrador:", err));
+
+      // Send SMS Alerta
+      const smsMessage = `🚨 ALERTA OST: Login suspeito detectado de ${user.name} em ${currentCity}, ${currentCountry}. IP: ${currentIp}. Verifique o e-mail de auditoria.`;
+
+      // Send SMS to all administrator employees in the store
+      const adminUsers = employees.filter(emp => 
+        emp.role?.toUpperCase().includes("ADMIN") || 
+        emp.role?.toUpperCase().includes("GESTOR")
+      );
+
+      adminUsers.forEach(adm => {
+        if (adm.contact && adm.contact.trim()) {
+          sendSMS(adm.contact.trim(), smsMessage).catch(err => 
+            console.error(`[SECURITY] Falha ao enviar SMS para o administrador ${adm.name}:`, err)
+          );
+        }
+      });
+
+      // Send SMS to current store contact if set
+      if (settings.storeContact && settings.storeContact.trim()) {
+        sendSMS(settings.storeContact.trim(), smsMessage).catch(err => 
+          console.error("[SECURITY] Falha ao enviar SMS para o storeContact:", err)
+        );
+      }
+    }
     
     // Auto-redirect conforming to profile role
     const raw = (user.role || "").toLowerCase();
@@ -2494,17 +2900,16 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         {/* INNER SCROLLABLE WORKPORT PANEL CONTENT */}
         <main className={`flex-1 overflow-y-auto relative ${isPOSFullscreen ? "p-0" : "p-4 md:p-6"}`}>
           <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.15 }}
-              className="h-full"
-            >
-              
-              {/* POS DIRECT CHECKOUT */}
-              {activeTab === "POS" && (
+            {/* POS DIRECT CHECKOUT */}
+            {activeTab === "POS" && (
+              <motion.div
+                key="POS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <POSModule
                   products={products}
                   customers={customers}
@@ -2517,11 +2922,21 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onShowToast={showToast}
                   isPOSFullscreen={isPOSFullscreen}
                   onChangePOSFullscreen={setIsPOSFullscreen}
+                  onTriggerPanic={handleTriggerPanic}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* STATS ANALYTICS CONTROL PANEL */}
-              {activeTab === "DASHBOARD" && (
+            {/* STATS ANALYTICS CONTROL PANEL */}
+            {activeTab === "DASHBOARD" && (
+              <motion.div
+                key="DASHBOARD"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <DashboardModule
                   transactions={filteredTransactions}
                   products={products}
@@ -2536,11 +2951,26 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onAddAuditLog={handleAddAuditLog}
                   onShowToast={showToast}
                   onCompleteSale={handleCompleteSaleAction}
+                  pendingSyncQueue={pendingSyncQueue}
+                  isManualSyncing={isManualSyncing}
+                  isOnline={isOnline}
+                  onManualSync={handleManualSync}
+                  theme={theme}
+                  onTriggerPanic={handleTriggerPanic}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* DAILY BOOK BALANCE CASH OPERATIONS */}
-              {activeTab === "CASH" && (
+            {/* DAILY BOOK BALANCE CASH OPERATIONS */}
+            {activeTab === "CASH" && (
+              <motion.div
+                key="CASH"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <CashRegisterModule
                   cashFlow={filteredCashFlow}
                   transactions={filteredTransactions}
@@ -2551,10 +2981,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   currency={currency}
                   settings={settings}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* ACTIVE STOCK INVENTORY MANAGER */}
-              {activeTab === "STOCK" && (
+            {/* ACTIVE STOCK INVENTORY MANAGER */}
+            {activeTab === "STOCK" && (
+              <motion.div
+                key="STOCK"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <StockModule
                   products={products}
                   transactions={filteredTransactions}
@@ -2568,10 +3007,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onShowToast={showToast}
                   onUpdateSettings={handleUpdateSettings}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* CUSTOMER LOYALTY CRM & MARKETING SMS */}
-              {(activeTab === "CUSTOMERS" || activeTab === "CLIENTES") && (
+            {/* CUSTOMER LOYALTY CRM & MARKETING SMS */}
+            {(activeTab === "CUSTOMERS" || activeTab === "CLIENTES") && (
+              <motion.div
+                key="CUSTOMERS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <CustomersModule
                   customers={customers}
                   onAddCustomer={handleAddCustomer}
@@ -2590,10 +3038,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   currency={currency}
                   onShowToast={showToast}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* STAFF EMPLOYEES & SECURITY TRAIL AUDITOR */}
-              {activeTab === "STAFF" && (
+            {/* STAFF EMPLOYEES & SECURITY TRAIL AUDITOR */}
+            {activeTab === "STAFF" && (
+              <motion.div
+                key="STAFF"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <StaffModule
                   employees={employees}
                   auditLogs={auditLogs}
@@ -2605,10 +3062,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   currency={currency}
                   settings={settings}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* REVENUE PREDICTION AI PANEL */}
-              {activeTab === "AI" && (
+            {/* REVENUE PREDICTION AI PANEL */}
+            {activeTab === "AI" && (
+              <motion.div
+                key="AI"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <AiForecastModule
                   products={products}
                   transactions={filteredTransactions}
@@ -2618,10 +3084,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onShowToast={showToast}
                   onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
-              {activeTab === "REPORTS" && (
+            {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
+            {activeTab === "REPORTS" && (
+              <motion.div
+                key="REPORTS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <ReportsModule
                   transactions={filteredTransactions}
                   settings={settings}
@@ -2631,18 +3106,36 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onShowToast={showToast}
                   auditLogs={auditLogs}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* TUTORIAL LESSONS CENTER */}
-              {activeTab === "TRAINING" && (
+            {/* TUTORIAL LESSONS CENTER */}
+            {activeTab === "TRAINING" && (
+              <motion.div
+                key="TRAINING"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <TrainingModule
                   videos={masterclassVideos}
                   currency={currency}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS */}
-              {activeTab === "SETTINGS" && (
+            {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS */}
+            {activeTab === "SETTINGS" && (
+              <motion.div
+                key="SETTINGS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <SettingsModule
                   settings={settings}
                   onUpdateSettings={handleUpdateSettings}
@@ -2663,11 +3156,13 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   onResetEmployeePin={async (empId) => {
                     const target = employees.find(e => e.id === empId);
                     if (!target) return;
+                    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
                     const updatedEmployees = employees.map(emp => {
                       if (emp.id === empId) {
                         return {
                           ...emp,
-                          pin: "123456",
+                          pin: generatedPin,
+                          password: generatedPin,
                           pinChanged: false,
                           pinCreatedAt: new Date().toISOString()
                         };
@@ -2679,10 +3174,45 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     handleAddAuditLog(
                       "Reset de PIN Forçado",
                       "SEGURANÇA",
-                      `PIN do colaborador ${target.name} (${target.username}) resetado para o padrão '123456' pelo Administrador.`
+                      `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
                     );
+
+                    let emailDetails = "";
+                    const targetEmail = target.email?.trim();
+                    if (targetEmail) {
+                      try {
+                        await sendEmail({
+                          to: targetEmail,
+                          subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
+                          body: `
+                            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                              <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+                                <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                                <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
+                              </div>
+                              <h2 style="color: #1e293b; font-size: 18px;">Olá, ${target.name}!</h2>
+                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que as suas credenciais de acesso ao sistema <strong>OST Vendas</strong> foram redefinidas com sucesso pela Administração.</p>
+                              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+                                <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN Temporário de Acesso:</span>
+                                <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
+                              </div>
+                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize este PIN temporário para efetuar o login. O sistema exigirá que defina uma senha definitiva personalizada no primeiro acesso.</p>
+                              <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, entre em contacto imediatamente com o Administrador.</p>
+                            </div>
+                          `,
+                          isHtml: true
+                        });
+                        emailDetails = ` Um e-mail com a nova senha foi enviado com sucesso para ${targetEmail}.`;
+                      } catch (emailErr) {
+                        console.error("Erro ao enviar e-mail de redefinição de PIN:", emailErr);
+                        emailDetails = " (Nota: Ocorreu um erro ao enviar o e-mail de notificação. Certifique-se de que as configurações de SMTP estão ativas).";
+                      }
+                    } else {
+                      emailDetails = " (Aviso: O colaborador não possui e-mail cadastrado no sistema para o envio automático).";
+                    }
+
                     showToast(
-                      `PIN do colaborador ${target.name} foi resetado com sucesso para '123456'. Ele será obrigado a alterá-lo no próximo login.`,
+                      `PIN do colaborador ${target.name} redefinido com sucesso para '${generatedPin}'.${emailDetails}`,
                       "success",
                       "Reset de PIN Concluído"
                     );
@@ -2719,10 +3249,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     );
                   }}
                 />
-              )}
+              </motion.div>
+            )}
 
-              {/* GATEWAY INTEGRATION PANEL */}
-              {activeTab === "GATEWAY" && (
+            {/* GATEWAY INTEGRATION PANEL */}
+            {activeTab === "GATEWAY" && (
+              <motion.div
+                key="GATEWAY"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
                 <GatewayModule
                   settings={settings}
                   onUpdateSettings={handleUpdateSettings}
@@ -2732,9 +3271,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   products={products}
                   customers={customers}
                 />
-              )}
-
-            </motion.div>
+              </motion.div>
+            )}
           </AnimatePresence>
         </main>
 
@@ -3558,6 +4096,16 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           </div>
         )}
       </AnimatePresence>
+
+      <StockReplenishModal
+        isOpen={showReplenishModal}
+        onClose={() => setShowReplenishModal(false)}
+        products={products}
+        onUpdateProduct={handleUpdateProduct}
+        activeBranchId={settings.activeBranchId || "central"}
+        onShowToast={showToast}
+        theme={theme}
+      />
 
       {/* Toast Notifications Overlay Container */}
       <div className="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">

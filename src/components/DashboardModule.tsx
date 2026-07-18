@@ -37,7 +37,8 @@ import {
   Circle,
   Volume2,
   List,
-  GripVertical
+  GripVertical,
+  WifiOff
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -75,6 +76,12 @@ interface DashboardModuleProps {
   onAddAuditLog?: (action: string, module: string, description: string) => void;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
   onCompleteSale?: (transaction: Transaction) => void;
+  pendingSyncQueue?: Record<string, any>;
+  isManualSyncing?: boolean;
+  isOnline?: boolean;
+  onManualSync?: () => Promise<void> | void;
+  theme?: string;
+  onTriggerPanic?: () => void;
 }
 
 export default function DashboardModule({
@@ -90,7 +97,13 @@ export default function DashboardModule({
   onUpdateProduct,
   onAddAuditLog,
   onShowToast,
-  onCompleteSale
+  onCompleteSale,
+  pendingSyncQueue = {},
+  isManualSyncing = false,
+  isOnline = true,
+  onManualSync,
+  theme = "daily",
+  onTriggerPanic
 }: DashboardModuleProps) {
   
   // Date operations helpers
@@ -111,6 +124,7 @@ export default function DashboardModule({
 
   // 1. Interactive Scope States
   const [timeScope, setTimeScope] = useState<"TODAY" | "YESTERDAY" | "LAST_7" | "CUSTOM">("TODAY");
+  const [showPanicConfirm, setShowPanicConfirm] = useState(false);
   
   // Target Goal State with LocalStorage persistence
   const [targetGoal, setTargetGoal] = useState<number>(() => {
@@ -1748,6 +1762,69 @@ export default function DashboardModule({
   return (
     <div className="space-y-6">
 
+      {/* PERSISTENT OFFLINE SYNC PENDING BANNER */}
+      {Object.keys(pendingSyncQueue).length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`p-4 rounded-3xl border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm transition-all duration-200 ${
+            theme === "night"
+              ? "bg-amber-500/10 border-amber-500/20 text-amber-100"
+              : "bg-amber-50 border-amber-200 text-slate-800"
+          }`}
+        >
+          <div className="flex items-start gap-3.5">
+            <div className={`p-2.5 rounded-2xl shrink-0 transition-all ${
+              theme === "night" ? "bg-amber-500/25 text-amber-400" : "bg-amber-100 text-amber-700"
+            }`}>
+              <WifiOff className="w-5 h-5 animate-pulse" />
+            </div>
+            <div className="space-y-0.5">
+              <h4 className="font-extrabold text-sm md:text-base flex flex-wrap items-center gap-2">
+                <span>Alterações Pendentes de Sincronização</span>
+                <span className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase ${
+                  isOnline 
+                    ? theme === "night"
+                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      : "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                    : theme === "night"
+                      ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                      : "bg-rose-50 text-rose-600 border border-rose-200"
+                }`}>
+                  {isOnline ? "Ligação Disponível" : "Sem Ligação"}
+                </span>
+              </h4>
+              <p className={`text-xs leading-relaxed ${theme === "night" ? "text-slate-400" : "text-slate-600"}`}>
+                Existem dados registados offline localmente que ainda não foram sincronizados com o servidor principal. 
+                Secções pendentes: <strong className="font-extrabold text-amber-500">{Object.keys(pendingSyncQueue).map(k => {
+                  if (k === "products") return "Produtos";
+                  if (k === "transactions") return "Vendas";
+                  if (k === "customers") return "Clientes";
+                  if (k === "cashflow") return "Caixa";
+                  if (k === "employees") return "Funcionários";
+                  if (k === "auditlogs") return "Auditoria";
+                  if (k === "settings") return "Definições";
+                  return k;
+                }).join(", ")}</strong>.
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={onManualSync}
+            disabled={isManualSyncing}
+            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+              isManualSyncing
+                ? "bg-slate-300 dark:bg-zinc-800 text-slate-500 cursor-not-allowed"
+                : "bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 shadow-md shadow-orange-500/20 hover:scale-[1.02] active:scale-[0.98]"
+            }`}
+          >
+            <RefreshCw className={`w-4 h-4 ${isManualSyncing ? "animate-spin" : ""}`} />
+            <span>{isManualSyncing ? "Sincronizar Agora" : "Sincronizar Agora"}</span>
+          </button>
+        </motion.div>
+      )}
+
       {/* TOP NOTIFICATION BAR - VISUAL REMINDERS AND MANAGEMENT TASKS */}
       <motion.div 
         initial={{ opacity: 0, y: -10 }}
@@ -2273,6 +2350,17 @@ export default function DashboardModule({
             >
               <ShoppingBag className="w-4 h-4 text-emerald-100" />
               <span>Registar Venda Rápida</span>
+            </button>
+          )}
+
+          {onTriggerPanic && (
+            <button
+              onClick={() => setShowPanicConfirm(true)}
+              className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-2xl cursor-pointer transition shadow-lg shadow-red-950/30 active:scale-95 w-full sm:w-auto animate-pulse"
+              title="Botão de Pânico / Alerta Crítico"
+            >
+              <AlertTriangle className="w-4 h-4 text-red-100 animate-bounce" />
+              <span>🚨 ATIVAR PÂNICO</span>
             </button>
           )}
         </div>
@@ -4565,6 +4653,56 @@ export default function DashboardModule({
           }}
           settings={settings}
         />
+      )}
+
+      {/* Panic Button Confirmation Modal */}
+      {showPanicConfirm && (
+        <div className="fixed inset-0 bg-red-950/85 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full border-2 border-red-500 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col">
+            <div className="p-6 bg-red-50 border-b border-red-100 flex items-center gap-3">
+              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="text-left">
+                <h3 className="font-extrabold text-red-900 text-base">⚠️ CONFIRMAÇÃO DE EMERGÊNCIA</h3>
+                <p className="text-xs text-red-700 font-semibold mt-0.5">SISTEMA DE SEGURANÇA OST VENDAS</p>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4 text-left">
+              <p className="text-xs text-slate-700 font-medium leading-relaxed">
+                Você está prestes a acionar o <strong>Botão de Pânico / Alerta Crítico</strong> do sistema comercial.
+              </p>
+              <div className="bg-red-50/50 p-4 rounded-xl border border-red-100 text-xs text-red-800 space-y-1.5 font-semibold">
+                <p>● Um log de emergência crítica será registado imediatamente.</p>
+                <p>● Todos os administradores receberão SMS e E-mail de pânico com a sua identidade, localização geográfica e endereço IP.</p>
+                <p>● Use apenas em caso de incidentes graves de segurança, roubo ou perigo iminente.</p>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setShowPanicConfirm(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+              >
+                Cancelar (Não Enviar)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onTriggerPanic) {
+                    onTriggerPanic();
+                  }
+                  setShowPanicConfirm(false);
+                }}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl shadow-md shadow-red-600/30 transition cursor-pointer animate-pulse"
+              >
+                🚨 ENVIAR ALERTA DE PÂNICO
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

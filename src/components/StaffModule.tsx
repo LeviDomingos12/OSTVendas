@@ -35,7 +35,9 @@ import {
   Copy,
   Activity,
   UserX,
-  FileSpreadsheet
+  FileSpreadsheet,
+  MapPin,
+  Globe
 } from "lucide-react";
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
 import { sendEmail } from "../lib/gmail";
@@ -199,6 +201,7 @@ export default function StaffModule({
   const [email, setEmail] = useState("");
   const [sendEmailCredentials, setSendEmailCredentials] = useState(true);
   const [emailSendingStatus, setEmailSendingStatus] = useState<"IDLE" | "SENDING" | "SUCCESS" | "ERROR">("IDLE");
+  const [copiedLogs, setCopiedLogs] = useState(false);
 
   const generateSuggestedUsername = (fullName: string, phoneContact: string = ""): string => {
     const nameParts = fullName.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, " ").split(/\s+/).filter(Boolean);
@@ -456,6 +459,101 @@ export default function StaffModule({
       doc.text(`Período: ${startDate} até ${endDate}`, 14, 47);
       doc.text(`Emitido em: ${new Date().toLocaleString()}`, 14, 52);
 
+      // --- EXECUTIVE SECURITY SUMMARY CALCULATIONS ---
+      const totalEvents = filteredAuditLogs.length;
+
+      const securityEvents = filteredAuditLogs.filter(log => {
+        const m = (log.module || "").toUpperCase();
+        const a = (log.action || "").toUpperCase();
+        const d = (log.details || "").toUpperCase();
+        return m.includes("SEGURANÇA") || m.includes("AUTENTICAÇÃO") || m.includes("AUDIT") ||
+               a.includes("LOGIN") || a.includes("ALTERAÇÃO DE SENHA") || a.includes("ALERTA") || a.includes("RECUPERAÇÃO") ||
+               d.includes("SUSPEITO") || d.includes("IP INTERNACIONAL") || d.includes("INCOMPATÍVEL") || d.includes("ACESSO");
+      });
+
+      const criticalSecurityEvents = filteredAuditLogs.filter(log => {
+        const d = (log.details || "").toUpperCase();
+        const a = (log.action || "").toUpperCase();
+        return d.includes("SUSPEITO") || d.includes("ALERTA DE SEGURANÇA") || d.includes("IP INTERNACIONAL") || d.includes("CRÍTICO") || a.includes("FALHA") || d.includes("FALHA DE LOGIN") || d.includes("INTRUSÃO");
+      });
+
+      const uniqueUsers = Array.from(new Set(filteredAuditLogs.map(log => log.user))).filter(Boolean);
+
+      const summaryText = `Durante o período de auditoria correspondente, o sistema OST Vendas monitorou de forma contínua a integridade e os acessos ao ERP comercial. Foram auditados ${totalEvents} eventos totais de sistema, dos quais ${securityEvents.length} estão associados a fluxos de autenticação ou segurança de utilizadores. O sistema identificou ${criticalSecurityEvents.length} alertas ou acessos críticos (incluindo falhas de login sucessivas, conexões fora de horas de serviço padrão ou geolocalizações não habituais fora do território de Moçambique). Recomenda-se a verificação dos logs abaixo indicados.`;
+
+      // Draw Soft-colored grey card for Executive Summary
+      doc.setFillColor(248, 250, 252); // slate-50
+      doc.rect(14, 58, 182, 54, "F");
+      
+      // Border around Executive Summary card
+      doc.setDrawColor(226, 232, 240); // slate-200
+      doc.setLineWidth(0.5);
+      doc.rect(14, 58, 182, 54, "S");
+      
+      // Vertical left accent line for the card in Orange/Amber
+      doc.setFillColor(249, 115, 22); // orange-500
+      doc.rect(14, 58, 2.5, 54, "F");
+
+      // Executive Summary Title
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59); // slate-800
+      doc.text("RESUMO EXECUTIVO DO PERÍODO - AUDITORIA DE SEGURANÇA", 20, 65);
+
+      // Section Content
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(71, 85, 105); // slate-600
+      
+      // Split paragraph text so it wraps beautifully
+      const textLines = doc.splitTextToSize(summaryText, 172);
+      doc.text(textLines, 20, 71);
+
+      // Simple metric cards inside the summary block
+      // 1. Total events card
+      doc.setFillColor(255, 255, 255); // white
+      doc.rect(20, 94, 50, 14, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(20, 94, 50, 14, "S");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text("EVENTOS FILTRADOS", 24, 98);
+      doc.setFontSize(10);
+      doc.setTextColor(15, 23, 42); // slate-900
+      doc.text(`${totalEvents}`, 24, 105);
+
+      // 2. Authentication/Security events card
+      doc.setFillColor(255, 255, 255); // white
+      doc.rect(76, 94, 58, 14, "F");
+      doc.rect(76, 94, 58, 14, "S");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139); // slate-500
+      doc.text("EVENTOS AUTENTICAÇÃO", 80, 98);
+      doc.setFontSize(10);
+      doc.setTextColor(30, 41, 59); // slate-800
+      doc.text(`${securityEvents.length}`, 80, 105);
+
+      // 3. Critical events card
+      doc.setFillColor(254, 242, 242); // red-50
+      doc.setDrawColor(254, 202, 202); // red-200
+      doc.rect(140, 94, 50, 14, "F");
+      doc.rect(140, 94, 50, 14, "S");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(220, 38, 38); // red-600
+      doc.text("ALERTAS CRÍTICOS", 144, 98);
+      doc.setFontSize(10);
+      doc.setTextColor(153, 27, 27); // red-800
+      doc.text(`${criticalSecurityEvents.length}`, 144, 105);
+
+      // Subtitle for log table
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59); // slate-800
+      doc.text("REGISTO DETALHADO DOS EVENTOS DE AUDITORIA", 14, 119);
+
       const head = [["DATA / HORA", "USUÁRIO", "CARGO", "ACÇÃO", "MÓDULO", "DETALHES"]];
       const body = filteredAuditLogs.map(log => [
         new Date(log.timestamp).toLocaleString(),
@@ -467,7 +565,7 @@ export default function StaffModule({
       ]);
 
       autoTable(doc, {
-        startY: 60,
+        startY: 123,
         head: head,
         body: body,
         theme: 'grid',
@@ -483,6 +581,60 @@ export default function StaffModule({
         `Logs de auditoria exportados em PDF (${filteredAuditLogs.length} eventos).`
       );
       setIsExportAuditDropdownOpen(false);
+    } catch (err) {
+      console.warn(err);
+    }
+  };
+
+  // Copy Logs to Clipboard as structured text
+  const handleCopyLogs = () => {
+    try {
+      if (filteredAuditLogs.length === 0) {
+        alert("Nenhum log disponível para copiar com os filtros atuais.");
+        return;
+      }
+
+      const reportHeader = [
+        "==================================================",
+        "         RELATÓRIO DE AUDITORIA - OST VENDAS       ",
+        `Exportado em: ${new Date().toLocaleString()}`,
+        `Total de Eventos: ${filteredAuditLogs.length}`,
+        `Filtros - Período: ${startDate || "Qualquer"} a ${endDate || "Qualquer"}`,
+        `Filtros - Módulo: ${auditModuleFilter}`,
+        `Filtros - Pesquisa: ${auditSearch || "Nenhuma"}`,
+        "==================================================",
+        ""
+      ].join("\n");
+
+      const reportBody = filteredAuditLogs.map((log, idx) => {
+        const formattedTime = new Date(log.timestamp).toLocaleString();
+        return [
+          `[#${idx + 1}] DATA/HORA: ${formattedTime}`,
+          `UTENTE: ${log.user || "Sistema"} (${log.userRole || "N/D"})`,
+          `MÓDULO: ${log.module || "Geral"}`,
+          `AÇÃO: ${log.action}`,
+          `DETALHES: ${log.details}`,
+          log.ip || log.device ? `ORIGEM: ${[log.ip, log.device].filter(Boolean).join(" / ")}` : null,
+          "--------------------------------------------------"
+        ].filter(Boolean).join("\n");
+      }).join("\n\n");
+
+      const fullText = reportHeader + "\n" + reportBody;
+
+      navigator.clipboard.writeText(fullText)
+        .then(() => {
+          setCopiedLogs(true);
+          onAddAuditLog(
+            "Copiar Logs Auditoria",
+            "AUDIT",
+            `Logs de auditoria copiados para a área de transferência (${filteredAuditLogs.length} eventos).`
+          );
+          setTimeout(() => setCopiedLogs(false), 2000);
+        })
+        .catch((err) => {
+          console.error("Falha ao copiar logs: ", err);
+          alert("Erro ao copiar logs para a área de transferência.");
+        });
     } catch (err) {
       console.warn(err);
     }
@@ -1253,7 +1405,7 @@ export default function StaffModule({
                 Exportar ▼
               </button>
               {isExportAuditDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-40 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                <div className="absolute right-0 mt-2 w-42 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
                   <button 
                     onClick={handleDownloadAuditCSV} 
                     className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 border-b border-slate-100"
@@ -1263,10 +1415,17 @@ export default function StaffModule({
                   </button>
                   <button 
                     onClick={handleDownloadAuditPDF} 
-                    className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2"
+                    className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 border-b border-slate-100"
                   >
                     <FileText className="w-3.5 h-3.5 text-red-500" />
                     Relatório PDF
+                  </button>
+                  <button 
+                    onClick={handleCopyLogs} 
+                    className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 transition"
+                  >
+                    <Copy className="w-3.5 h-3.5 text-orange-500" />
+                    {copiedLogs ? "Copiado!" : "Copiar Logs"}
                   </button>
                 </div>
               )}
@@ -1862,6 +2021,28 @@ export default function StaffModule({
                   {modules.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
+
+              <button
+                onClick={handleDownloadAuditCSV}
+                title="Exportar logs de auditoria filtrados para formato CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm hover:shadow transition-all duration-150 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Exportar CSV</span>
+              </button>
+
+              <button
+                onClick={handleCopyLogs}
+                title="Copiar logs de auditoria filtrados em formato de texto estruturado"
+                className={`flex items-center gap-1.5 px-3 py-1.5 font-extrabold text-xs rounded-xl shadow-sm hover:shadow transition-all duration-150 cursor-pointer hover:scale-[1.02] active:scale-[0.98] ${
+                  copiedLogs 
+                    ? "bg-amber-600 hover:bg-amber-700 text-white" 
+                    : "bg-slate-800 hover:bg-slate-900 text-white"
+                }`}
+              >
+                {copiedLogs ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedLogs ? "Copiado!" : "Copiar Logs"}</span>
+              </button>
             </div>
           </div>
 
@@ -1987,6 +2168,23 @@ export default function StaffModule({
                                   <span className="font-mono text-slate-500 block">IP: {log.ip || "197.218.12.82 (Maputo, MZ)"} | Ses: erp-pos-3000</span>
                                 </div>
                               </div>
+
+                              {/* GEOLOCATION & ACCESS MAP FOR LOGIN/SECURITY LOGS */}
+                              {(() => {
+                                const isLoginOrSecurityLog = 
+                                  log.module?.toLowerCase().includes("segurança") ||
+                                  log.module?.toLowerCase().includes("autenticação") ||
+                                  log.action?.toLowerCase().includes("login") ||
+                                  log.action?.toLowerCase().includes("logout") ||
+                                  log.action?.toLowerCase().includes("recuperação") ||
+                                  log.action?.toLowerCase().includes("acesso") ||
+                                  log.details?.toLowerCase().includes("login") ||
+                                  log.details?.toLowerCase().includes("sessão");
+                                if (isLoginOrSecurityLog) {
+                                  return <AuditLogLocationMap log={log} />;
+                                }
+                                return null;
+                              })()}
 
                               {/* Stack trace / detailed log visualization (Item 11 Firestore handling) */}
                               <div className="bg-slate-900 text-slate-300 p-3 rounded-xl border border-slate-800 font-mono text-[10px] space-y-2 relative overflow-hidden">
@@ -2956,6 +3154,217 @@ export default function StaffModule({
         </div>
       )}
 
+    </div>
+  );
+}
+
+function AuditLogLocationMap({ log }: { log: AuditLog }) {
+  const [geo, setGeo] = React.useState<{
+    city?: string;
+    country?: string;
+    countryCode?: string;
+    lat?: number;
+    lon?: number;
+    org?: string;
+  } | null>(null);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    const rawIp = log.ip || "";
+    const ipMatch = rawIp.match(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/);
+    const ipAddress = ipMatch ? ipMatch[0] : "";
+
+    let parsedCity = "Maputo";
+    let parsedCountry = "Moçambique";
+    let parsedCountryCode = "MZ";
+    let parsedLat = -25.9692;
+    let parsedLon = 32.5732;
+
+    const parenMatch = rawIp.match(/\(([^)]+)\)/);
+    if (parenMatch) {
+      const parts = parenMatch[1].split(",");
+      if (parts[0]) parsedCity = parts[0].trim();
+      if (parts[1]) {
+        parsedCountry = parts[1].trim();
+        const countryLower = parsedCountry.toLowerCase();
+        if (countryLower.includes("mz") || countryLower.includes("moçambique") || countryLower.includes("mocambique")) {
+          parsedCountryCode = "MZ";
+        } else {
+          parsedCountryCode = parsedCountry.toUpperCase().slice(0, 2);
+        }
+      }
+    }
+
+    const isLocalOrSimulated = !ipAddress || 
+      ipAddress === "127.0.0.1" || 
+      ipAddress === "localhost" || 
+      ipAddress.startsWith("192.168.") || 
+      ipAddress.startsWith("10.");
+
+    if (isLocalOrSimulated) {
+      setGeo({
+        city: parsedCity,
+        country: parsedCountry,
+        countryCode: parsedCountryCode,
+        lat: parsedLat,
+        lon: parsedLon,
+        org: "Rede Local / VPN"
+      });
+      setLoading(false);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchGeo = async () => {
+      try {
+        const res = await fetch(`https://ip-api.com/json/${ipAddress}`);
+        const data = await res.json();
+        if (isMounted) {
+          if (data && data.status === "success") {
+            setGeo({
+              city: data.city || parsedCity,
+              country: data.country || parsedCountry,
+              countryCode: data.countryCode || parsedCountryCode,
+              lat: data.lat || parsedLat,
+              lon: data.lon || parsedLon,
+              org: data.org || "Provedor ISP Local"
+            });
+          } else {
+            setGeo({
+              city: parsedCity,
+              country: parsedCountry,
+              countryCode: parsedCountryCode,
+              lat: parsedLat,
+              lon: parsedLon,
+              org: "Provedor IP Local"
+            });
+          }
+        }
+      } catch (err) {
+        if (isMounted) {
+          setGeo({
+            city: parsedCity,
+            country: parsedCountry,
+            countryCode: parsedCountryCode,
+            lat: parsedLat,
+            lon: parsedLon,
+            org: "Provedor Local"
+          });
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    };
+
+    fetchGeo();
+    return () => {
+      isMounted = false;
+    };
+  }, [log.ip]);
+
+  if (loading) {
+    return (
+      <div className="bg-slate-50 border border-slate-150 p-4 rounded-2xl flex items-center justify-center h-40 animate-pulse text-slate-400 text-xs gap-2 font-sans mt-3">
+        <Activity className="w-4 h-4 animate-spin text-orange-500" />
+        <span>A carregar mapa de geolocalização do IP...</span>
+      </div>
+    );
+  }
+
+  if (!geo) return null;
+
+  const { city, country, countryCode, lat, lon, org } = geo;
+
+  const isOutsideMozambique = countryCode !== "MZ" && !country?.toLowerCase().includes("moçambique") && !country?.toLowerCase().includes("mozambique");
+  
+  let isAfterHours = false;
+  try {
+    const d = new Date(log.timestamp);
+    const hours = d.getHours();
+    if (hours >= 22 || hours < 6) {
+      isAfterHours = true;
+    }
+  } catch (e) {}
+
+  let securityBadgeColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+  let securityText = "Conexão de local esperado e seguro (Moçambique).";
+  let securityStatus = "✓ ACESSO REGULAR";
+
+  if (isOutsideMozambique) {
+    securityBadgeColor = "text-red-700 bg-red-50 border-red-200 animate-pulse ring-1 ring-red-300";
+    securityText = "AVISO: Este acesso foi registado a partir de um IP fora de Moçambique. Recomenda-se validar as credenciais do utilizador.";
+    securityStatus = "🚨 CRÍTICO: IP INTERNACIONAL SUSPEITO";
+  } else if (isAfterHours) {
+    securityBadgeColor = "text-amber-700 bg-amber-50 border-amber-200";
+    securityText = "Alerta: Conexão registada fora de horas de serviço padrão (22:00h - 06:00h).";
+    securityStatus = "⚠️ ATENÇÃO: ACESSO FORA DE HORAS";
+  }
+
+  const latVal = lat || -25.9692;
+  const lonVal = lon || 32.5732;
+  const delta = 0.015;
+  const minLon = lonVal - delta;
+  const minLat = latVal - delta;
+  const maxLon = lonVal + delta;
+  const maxLat = latVal + delta;
+  const embedUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${minLon}%2C${minLat}%2C${maxLon}%2C${maxLat}&layer=mapnik&marker=${latVal}%2C${lonVal}`;
+
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4 mt-3">
+      <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+        <div className="flex items-center gap-2">
+          <MapPin className="w-4 h-4 text-orange-500" />
+          <h4 className="font-extrabold text-slate-800 text-xs font-sans">Geolocalização & Segurança do IP</h4>
+        </div>
+        <span className={`text-[8.5px] font-bold px-2 py-0.5 rounded-full border tracking-wide uppercase font-sans ${securityBadgeColor}`}>
+          {securityStatus}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+        {/* Geolocation Details column */}
+        <div className="md:col-span-5 space-y-2.5 font-sans text-xs">
+          <div className="bg-white border border-slate-100 p-3 rounded-xl space-y-2.5 shadow-sm">
+            <div className="flex justify-between items-center text-[11px]">
+              <span className="text-slate-400 text-[9.5px] uppercase font-bold tracking-wider">Endereço IP</span>
+              <span className="font-mono text-[10px] text-slate-800 font-bold bg-slate-50 px-2 py-0.5 rounded border border-slate-200 select-all">{log.ip?.split(" ")[0] || "102.81.12.94"}</span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span className="text-slate-400 text-[9.5px] uppercase font-bold tracking-wider">Cidade</span>
+              <span className="text-slate-700 font-bold">{city}</span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span className="text-slate-400 text-[9.5px] uppercase font-bold tracking-wider">País</span>
+              <span className="text-slate-700 font-bold flex items-center gap-1">
+                <Globe className="w-3.5 h-3.5 text-slate-400" />
+                {country} ({countryCode})
+              </span>
+            </div>
+            <div className="flex justify-between text-[11px]">
+              <span className="text-slate-400 text-[9.5px] uppercase font-bold tracking-wider">Provedor ISP</span>
+              <span className="text-slate-700 font-extrabold truncate max-w-[130px]">{org}</span>
+            </div>
+          </div>
+
+          <div className="bg-white/80 border border-slate-100 p-2.5 rounded-xl text-[10.5px] text-slate-600 leading-normal font-medium shadow-sm">
+            <span className="text-slate-400 text-[9px] uppercase font-black block tracking-wider mb-0.5">Parecer de Segurança</span>
+            {securityText}
+          </div>
+        </div>
+
+        {/* Static/Interactive Map Iframe Column */}
+        <div className="md:col-span-7 h-44 rounded-2xl border border-slate-200 overflow-hidden relative shadow-inner bg-slate-100">
+          <iframe 
+            src={embedUrl}
+            className="w-full h-full border-none"
+            scrolling="no"
+            title={`Mapa do IP ${log.ip}`}
+          />
+          <div className="absolute bottom-2 right-2 bg-white/95 backdrop-blur-sm border border-slate-200 px-2 py-0.5 rounded text-[8px] font-bold text-slate-500 pointer-events-none select-none font-mono shadow-sm">
+            OpenStreetMap
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
