@@ -39,7 +39,11 @@ import {
   ArrowLeftRight,
   Truck,
   UserCheck,
-  ShoppingCart
+  ShoppingCart,
+  Printer,
+  CreditCard,
+  Settings,
+  Sliders
 } from "lucide-react";
 import { 
   ResponsiveContainer, 
@@ -108,10 +112,72 @@ export default function StockModule({
   
   // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches" | "suppliers"
   const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches" | "suppliers">("list");
+  const [supplierSubTab, setSupplierSubTab] = useState<"orders" | "finance" | "config">("orders");
+  const [selectedFinanceSupplierId, setSelectedFinanceSupplierId] = useState<string | null>(null);
+  const [supplierChartLayout, setSupplierChartLayout] = useState<"grouped" | "stacked">("grouped");
 
   // Suppliers states and handlers
   const registeredSuppliers = useMemo(() => settings?.suppliers || [], [settings?.suppliers]);
   const supplierOrders = useMemo(() => settings?.supplierOrders || [], [settings?.supplierOrders]);
+
+  const supplierMonthlyChartData = useMemo(() => {
+    const paidOrders = supplierOrders.filter((o: any) => o.paymentStatus === "Pago" && o.status !== "Cancelado");
+    const monthLabels: { key: string; label: string }[] = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = d.getFullYear();
+      const monthNum = String(d.getMonth() + 1).padStart(2, "0");
+      const monthShort = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][d.getMonth()];
+      monthLabels.push({
+        key: `${year}-${monthNum}`,
+        label: `${monthShort}/${String(year).slice(-2)}`
+      });
+    }
+
+    return monthLabels.map(({ key, label }) => {
+      const item: any = { month: label, rawMonth: key };
+      registeredSuppliers.forEach((s: any) => {
+        item[s.name] = 0;
+      });
+      
+      const ordersInMonth = paidOrders.filter((o: any) => o.requestDate && o.requestDate.startsWith(key));
+      ordersInMonth.forEach((o: any) => {
+        if (item[o.supplierName] !== undefined) {
+          item[o.supplierName] += o.totalValue;
+        } else {
+          item[o.supplierName] = o.totalValue;
+        }
+      });
+      return item;
+    });
+  }, [supplierOrders, registeredSuppliers]);
+
+  const supplierDependencyStats = useMemo(() => {
+    const paidOrders = supplierOrders.filter((o: any) => o.paymentStatus === "Pago" && o.status !== "Cancelado");
+    const totalPaid = paidOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+    
+    if (totalPaid === 0) return { totalPaid: 0, items: [], dominant: null };
+
+    const items = registeredSuppliers.map((s: any) => {
+      const paid = paidOrders.filter((o: any) => o.supplierId === s.id).reduce((sum: number, o: any) => sum + o.totalValue, 0);
+      const percentage = (paid / totalPaid) * 100;
+      return {
+        id: s.id,
+        name: s.name,
+        totalPaid: paid,
+        percentage
+      };
+    }).sort((a: any, b: any) => b.totalPaid - a.totalPaid);
+
+    const dominant = items[0] && items[0].percentage >= 40 ? items[0] : null;
+
+    return {
+      totalPaid,
+      items,
+      dominant
+    };
+  }, [supplierOrders, registeredSuppliers]);
 
   const [supplierNameInput, setSupplierNameInput] = useState("");
   const [supplierPhoneInput, setSupplierPhoneInput] = useState("");
@@ -127,6 +193,7 @@ export default function StockModule({
   const [orderQtyRequested, setOrderQtyRequested] = useState<number>(0);
   const [orderUnitCost, setOrderUnitCost] = useState<number>(0);
   const [orderPaymentStatus, setOrderPaymentStatus] = useState<"Pago" | "Crédito" | "Pendente">("Pendente");
+  const [orderPaymentDueDate, setOrderPaymentDueDate] = useState("");
   const [isOrderFormOpen, setIsOrderFormOpen] = useState(false);
 
   // Filtering states
@@ -142,6 +209,7 @@ export default function StockModule({
     setOrderProductId(product.id);
     setOrderUnitCost(product.costPrice);
     setOrderQtyRequested(product.minStock * 2 || 10);
+    setOrderPaymentDueDate("");
     
     if (product.supplier) {
       const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === product.supplier.toLowerCase());
@@ -250,6 +318,12 @@ export default function StockModule({
       return;
     }
 
+    const calcDefaultDueDate = () => {
+      const d = new Date();
+      d.setDate(d.getDate() + 15);
+      return d.toISOString().split("T")[0];
+    };
+
     const currentOrders = settings?.supplierOrders || [];
     const newOrder = {
       id: `order-${Date.now()}`,
@@ -262,6 +336,7 @@ export default function StockModule({
       totalValue: (orderQtyRequested * (orderUnitCost || chosenProduct.costPrice)),
       status: "Pendente" as const,
       paymentStatus: orderPaymentStatus,
+      paymentDueDate: orderPaymentStatus === "Pago" ? "" : (orderPaymentDueDate || calcDefaultDueDate()),
       requestDate: new Date().toISOString().split("T")[0]
     };
 
@@ -276,7 +351,44 @@ export default function StockModule({
     setOrderQtyRequested(0);
     setOrderUnitCost(0);
     setOrderPaymentStatus("Pendente");
+    setOrderPaymentDueDate("");
     setIsOrderFormOpen(false);
+  };
+
+  const isPaymentOverdue = (order: any) => {
+    if (order.status === "Cancelado" || order.paymentStatus === "Pago") return false;
+    
+    let dueDateStr = order.paymentDueDate;
+    if (!dueDateStr && order.requestDate) {
+      const reqDate = new Date(order.requestDate);
+      if (!isNaN(reqDate.getTime())) {
+        reqDate.setDate(reqDate.getDate() + 15);
+        dueDateStr = reqDate.toISOString().split("T")[0];
+      }
+    }
+    
+    if (!dueDateStr) return false;
+
+    // Apply tolerance days if configured
+    const tolerance = Number(settings?.supplierOverdueToleranceDays ?? 0);
+    if (tolerance > 0) {
+      const parts = dueDateStr.split("-");
+      if (parts.length === 3) {
+        const yr = parseInt(parts[0], 10);
+        const mo = parseInt(parts[1], 10) - 1;
+        const dy = parseInt(parts[2], 10);
+        const d = new Date(yr, mo, dy);
+        d.setDate(d.getDate() + tolerance);
+        
+        const resYr = d.getFullYear();
+        const resMo = String(d.getMonth() + 1).padStart(2, "0");
+        const resDy = String(d.getDate()).padStart(2, "0");
+        dueDateStr = `${resYr}-${resMo}-${resDy}`;
+      }
+    }
+    
+    const todayStr = new Date().toISOString().split("T")[0];
+    return dueDateStr < todayStr;
   };
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: "Pendente" | "Recebido" | "Cancelado") => {
@@ -320,6 +432,225 @@ export default function StockModule({
     );
     onUpdateSettings?.({ supplierOrders: updated });
     onShowToast?.(`Estado do pagamento alterado para "${newPaymentStatus}".`, "success");
+  };
+
+  const handleLiquidateAllDebts = async (supplierId: string, supplierName: string) => {
+    const currentOrders = settings?.supplierOrders || [];
+    const supplierPendingOrders = currentOrders.filter(
+      (o: any) => o.supplierId === supplierId && (o.paymentStatus === "Crédito" || o.paymentStatus === "Pendente") && o.status !== "Cancelado"
+    );
+
+    if (supplierPendingOrders.length === 0) {
+      onShowToast?.("Este fornecedor não possui pagamentos ou dívidas pendentes.", "info");
+      return;
+    }
+
+    const totalDebtAmount = supplierPendingOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+
+    const ok = await confirm({
+      title: `Liquidar Dívidas - ${supplierName}`,
+      message: `Deseja marcar todas as ${supplierPendingOrders.length} transações pendentes/a crédito como PAGAS? Valor Total: ${totalDebtAmount.toLocaleString()} MT.`
+    });
+    if (!ok) return;
+
+    const updated = currentOrders.map((o: any) => 
+      o.supplierId === supplierId && (o.paymentStatus === "Crédito" || o.paymentStatus === "Pendente") && o.status !== "Cancelado"
+        ? { ...o, paymentStatus: "Pago" as const }
+        : o
+    );
+
+    onUpdateSettings?.({ supplierOrders: updated });
+    onShowToast?.(`Todas as dívidas com ${supplierName} foram liquidadas!`, "success");
+    if (onAddAuditLog) {
+      onAddAuditLog("Liquidação de Dívidas", "STOCK", `Todas as dívidas do fornecedor ${supplierName} (${totalDebtAmount.toLocaleString()} MT) foram liquidadas.`);
+    }
+  };
+
+  const handleExportSupplierLedgerPDF = (supplier: any) => {
+    const doc = new jsPDF();
+    const sOrders = supplierOrders.filter((o: any) => o.supplierId === supplier.id && o.status !== "Cancelado");
+    
+    const totalPurchased = sOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+    const paidAmount = sOrders.filter((o: any) => o.paymentStatus === "Pago").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+    const creditDebt = sOrders.filter((o: any) => o.paymentStatus === "Crédito").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+    const pendingPayment = sOrders.filter((o: any) => o.paymentStatus === "Pendente").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text("OST VENDAS - EXTRATO DE FORNECEDOR", 14, 20);
+    
+    doc.setFontSize(10);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`Data de Emissão: ${new Date().toLocaleDateString("pt-MZ")} ${new Date().toLocaleTimeString("pt-MZ")}`, 14, 26);
+    
+    doc.setDrawColor(220, 220, 220);
+    doc.line(14, 30, 196, 30);
+    
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("FORNECEDOR:", 14, 38);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`${supplier.name}`, 45, 38);
+    
+    doc.setFont("Helvetica", "bold");
+    doc.text("NUIT:", 14, 44);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`${supplier.nuit || "N/A"}`, 45, 44);
+    
+    doc.setFont("Helvetica", "bold");
+    doc.text("Contacto:", 14, 50);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`${supplier.phone || "N/A"} | ${supplier.email || "N/A"}`, 45, 50);
+    
+    doc.line(14, 55, 196, 55);
+    
+    doc.setFont("Helvetica", "bold");
+    doc.text("RESUMO FINANCEIRO", 14, 63);
+    
+    doc.setFont("Helvetica", "normal");
+    doc.text(`Total Comprado: ${totalPurchased.toLocaleString()} MT`, 14, 71);
+    doc.text(`Total Pago: ${paidAmount.toLocaleString()} MT`, 14, 77);
+    doc.text(`Dívida em Crédito: ${creditDebt.toLocaleString()} MT`, 110, 71);
+    doc.text(`Pagamentos Pendentes: ${pendingPayment.toLocaleString()} MT`, 110, 77);
+    
+    doc.line(14, 83, 196, 83);
+    
+    const tableData = sOrders.map((o: any) => [
+      o.requestDate,
+      o.productName,
+      `${o.quantityRequested} un`,
+      `${o.unitCost.toLocaleString()} MT`,
+      `${o.totalValue.toLocaleString()} MT`,
+      o.status,
+      o.paymentStatus
+    ]);
+    
+    autoTable(doc, {
+      startY: 88,
+      head: [["Data", "Produto", "Qtd", "Custo Unit.", "Total", "Estado Pedido", "Estado Pagto"]],
+      body: tableData,
+      theme: "striped",
+      headStyles: { fillColor: [249, 115, 22] },
+      styles: { fontSize: 9 }
+    });
+    
+    doc.save(`extrato_fornecedor_${supplier.name.toLowerCase().replace(/\s+/g, "_")}.pdf`);
+    onShowToast?.(`Extrato de ${supplier.name} exportado com sucesso!`, "success");
+  };
+
+  const handleExportAllSuppliersFinance = (format: "pdf" | "csv") => {
+    if (registeredSuppliers.length === 0) {
+      onShowToast?.("Não existem fornecedores para exportar.", "error");
+      return;
+    }
+
+    const data = registeredSuppliers.map((supp) => {
+      const sOrders = supplierOrders.filter((o: any) => o.supplierId === supp.id && o.status !== "Cancelado");
+      const totalPurchased = sOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+      const paidAmount = sOrders.filter((o: any) => o.paymentStatus === "Pago").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+      const creditDebt = sOrders.filter((o: any) => o.paymentStatus === "Crédito").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+      const pendingPayment = sOrders.filter((o: any) => o.paymentStatus === "Pendente").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+      const hasOverduePayment = sOrders.some((o: any) => isPaymentOverdue(o));
+      
+      let status = "Regular";
+      if (creditDebt > 0 && hasOverduePayment) {
+        status = "Crédito em Atraso";
+      } else if (creditDebt > 0) {
+        status = "Crédito Ativo";
+      } else if (pendingPayment > 0) {
+        status = "Pendente";
+      }
+
+      return {
+        name: supp.name,
+        nuit: supp.nuit || "N/A",
+        totalPurchased,
+        paidAmount,
+        creditDebt,
+        pendingPayment,
+        status,
+      };
+    });
+
+    if (format === "csv") {
+      let csvContent = "\uFEFF"; // UTF-8 BOM
+      csvContent += "Fornecedor;NUIT;Total Compras (MT);Total Pago (MT);Dívida Crédito (MT);Pendente Pagamento (MT);Estado\n";
+      
+      data.forEach((item) => {
+        csvContent += `"${item.name.replace(/"/g, '""')}";"${item.nuit}";${item.totalPurchased};${item.paidAmount};${item.creditDebt};${item.pendingPayment};"${item.status}"\n`;
+      });
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `balanco_financeiro_fornecedores_${new Date().toISOString().split("T")[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      onShowToast?.("Balanço financeiro exportado em CSV!", "success");
+    } else {
+      // PDF export
+      const doc = new jsPDF();
+      doc.setFont("Helvetica", "bold");
+      doc.setFontSize(18);
+      doc.text("BALANCO FINANCEIRO DE FORNECEDORES", 14, 20);
+
+      doc.setFontSize(10);
+      doc.setFont("Helvetica", "normal");
+      doc.text(`Data de Emissao: ${new Date().toLocaleDateString("pt-MZ")} ${new Date().toLocaleTimeString("pt-MZ")}`, 14, 26);
+      doc.text("Relatorio unificado de contas a pagar, pagamentos efetuados e dividas ativas por parceiro comercial.", 14, 31);
+
+      doc.setDrawColor(220, 220, 220);
+      doc.line(14, 35, 196, 35);
+
+      // Financial totals block
+      const grandTotalPurchases = data.reduce((sum, item) => sum + item.totalPurchased, 0);
+      const grandTotalPaid = data.reduce((sum, item) => sum + item.paidAmount, 0);
+      const grandTotalDebt = data.reduce((sum, item) => sum + item.creditDebt, 0);
+      const grandTotalPending = data.reduce((sum, item) => sum + item.pendingPayment, 0);
+
+      doc.setFont("Helvetica", "bold");
+      doc.text("RESUMO CONSOLIDADO DO CAIXA:", 14, 43);
+      doc.setFont("Helvetica", "normal");
+      doc.text(`Total em Compras de Stock: ${grandTotalPurchases.toLocaleString()} MT`, 14, 50);
+      doc.text(`Total Liquidado (Pago): ${grandTotalPaid.toLocaleString()} MT`, 14, 56);
+      doc.text(`Total em Divida Ativa (Credito): ${grandTotalDebt.toLocaleString()} MT`, 110, 50);
+      doc.text(`Total Pendente de Liquidacao: ${grandTotalPending.toLocaleString()} MT`, 110, 56);
+
+      doc.line(14, 62, 196, 62);
+
+      const tableRows = data.map((item) => [
+        item.name,
+        item.nuit,
+        `${item.totalPurchased.toLocaleString()} MT`,
+        `${item.paidAmount.toLocaleString()} MT`,
+        `${item.creditDebt.toLocaleString()} MT`,
+        `${item.pendingPayment.toLocaleString()} MT`,
+        item.status
+      ]);
+
+      autoTable(doc, {
+        startY: 67,
+        head: [["Fornecedor", "NUIT", "Total Compras", "Total Pago", "Divida Credito", "Pendente Pgto", "Estado"]],
+        body: tableRows,
+        theme: "striped",
+        headStyles: { fillColor: [249, 115, 22] }, // orange color matching theme
+        styles: { fontSize: 8, cellPadding: 3 },
+        columnStyles: {
+          0: { cellWidth: "auto" },
+          1: { cellWidth: 20 },
+          2: { halign: "right" },
+          3: { halign: "right" },
+          4: { halign: "right" },
+          5: { halign: "right" },
+          6: { halign: "center" }
+        }
+      });
+
+      doc.save(`balanco_financeiro_fornecedores_${new Date().toISOString().split("T")[0]}.pdf`);
+      onShowToast?.("Relatorio PDF exportado com sucesso!", "success");
+    }
   };
 
   // Automated Batch Expiry Detection and Toast Alert
@@ -1371,6 +1702,12 @@ export default function StockModule({
               <button
                 onClick={() => {
                   setActiveModuleTab("suppliers");
+                  setOrderSupplierId("");
+                  setOrderProductId("");
+                  setOrderQtyRequested(0);
+                  setOrderUnitCost(0);
+                  setOrderPaymentStatus("Pendente");
+                  setOrderPaymentDueDate("");
                   setIsOrderFormOpen(true);
                 }}
                 className="bg-orange-600 hover:bg-orange-700 text-white font-extrabold py-2.5 px-4 rounded-xl text-xs cursor-pointer transition whitespace-nowrap shadow-md shadow-orange-600/10 active:scale-95 flex items-center gap-1.5"
@@ -3896,285 +4233,915 @@ export default function StockModule({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* 1. Suppliers List Container */}
-            <div className="lg:col-span-1 space-y-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
-                <div className="flex justify-between items-center border-b border-slate-100 pb-3 dark:border-zinc-800">
-                  <div>
-                    <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Fornecedores Parceiros</h3>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Parceiros comerciais cadastrados.</p>
+          {/* Sub Tab Navigation inside Suppliers */}
+          <div className="flex border-b border-slate-150 dark:border-zinc-800 gap-6">
+            <button
+              onClick={() => setSupplierSubTab("orders")}
+              className={`pb-2.5 font-extrabold text-xs transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+                supplierSubTab === "orders"
+                  ? "border-orange-500 text-orange-500 dark:text-orange-400 dark:border-orange-400 font-black"
+                  : "border-transparent text-slate-400 hover:text-slate-650 dark:hover:text-zinc-300"
+              }`}
+            >
+              <ShoppingCart className="w-4 h-4" />
+              Encomendas & Pedidos de Stock
+            </button>
+            <button
+              onClick={() => setSupplierSubTab("finance")}
+              className={`pb-2.5 font-extrabold text-xs transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+                supplierSubTab === "finance"
+                  ? "border-orange-500 text-orange-500 dark:text-orange-400 dark:border-orange-400 font-black"
+                  : "border-transparent text-slate-400 hover:text-slate-650 dark:hover:text-zinc-300"
+              }`}
+            >
+              <DollarSign className="w-4 h-4" />
+              Histórico Financeiro & Dívidas Pendentes
+            </button>
+            <button
+              onClick={() => setSupplierSubTab("config")}
+              className={`pb-2.5 font-extrabold text-xs transition-all border-b-2 flex items-center gap-2 cursor-pointer ${
+                supplierSubTab === "config"
+                  ? "border-orange-500 text-orange-500 dark:text-orange-400 dark:border-orange-400 font-black"
+                  : "border-transparent text-slate-400 hover:text-slate-650 dark:hover:text-zinc-300"
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              Configurações
+            </button>
+          </div>
+
+          {supplierSubTab === "orders" && (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-in fade-in duration-300">
+              
+              {/* 1. Suppliers List Container */}
+              <div className="lg:col-span-1 space-y-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-3 dark:border-zinc-800">
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Fornecedores Parceiros</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Parceiros comerciais cadastrados.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setEditingSupplierId(null);
+                        setSupplierNameInput("");
+                        setSupplierPhoneInput("");
+                        setSupplierEmailInput("");
+                        setSupplierAddressInput("");
+                        setSupplierNuitInput("");
+                        setIsSupplierFormOpen(true);
+                      }}
+                      className="p-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      Registar
+                    </button>
                   </div>
-                  <button
-                    onClick={() => {
-                      setEditingSupplierId(null);
-                      setSupplierNameInput("");
-                      setSupplierPhoneInput("");
-                      setSupplierEmailInput("");
-                      setSupplierAddressInput("");
-                      setSupplierNuitInput("");
-                      setIsSupplierFormOpen(true);
-                    }}
-                    className="p-1.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] flex items-center gap-1 transition cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    Registar
-                  </button>
-                </div>
 
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                    <Search className="w-3.5 h-3.5" />
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Buscar fornecedor..."
-                    value={supplierSearchQuery}
-                    onChange={(e) => setSupplierSearchQuery(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
-                  />
-                </div>
-
-                <div className="space-y-2.5 max-h-[380px] overflow-y-auto custom-scrollbar pr-1">
-                  {registeredSuppliers.filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase())).length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic text-center py-6">Nenhum fornecedor cadastrado.</p>
-                  ) : (
-                    registeredSuppliers
-                      .filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
-                      .map((supp) => (
-                        <div key={supp.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition flex flex-col justify-between gap-2.5 dark:bg-zinc-950/40 dark:border-zinc-800 dark:hover:bg-zinc-800/20">
-                          <div className="flex justify-between items-start gap-2">
-                            <div>
-                              <span className="font-bold text-slate-800 text-xs dark:text-zinc-100 flex items-center gap-1">
-                                <UserCheck className="w-3.5 h-3.5 text-orange-500" />
-                                {supp.name}
-                              </span>
-                              <div className="text-[10px] text-slate-500 space-y-0.5 mt-1 font-mono">
-                                {supp.phone && <p>📞 {supp.phone}</p>}
-                                {supp.email && <p>✉️ {supp.email}</p>}
-                                {supp.nuit && <p>📄 NUIT: {supp.nuit}</p>}
-                                {supp.address && <p>📍 {supp.address}</p>}
-                              </div>
-                            </div>
-                            <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-emerald-100 text-emerald-800">
-                              {supp.status}
-                            </span>
-                          </div>
-
-                          <div className="flex justify-end gap-1.5 border-t border-slate-100 pt-2 dark:border-zinc-800">
-                            <button
-                              onClick={() => handleEditSupplierClick(supp)}
-                              className="px-2 py-1 text-[10px] text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition cursor-pointer"
-                            >
-                              Editar
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSupplier(supp.id, supp.name)}
-                              className="px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                            >
-                              Eliminar
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 2. Supplier Orders (Solicitações de Stock) */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-slate-100 pb-3 dark:border-zinc-800">
-                  <div>
-                    <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Historial de Solicitações e Pagamentos</h3>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Gestão de entregas, pagamentos de crédito e encomendas de fornecedores.</p>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setOrderSupplierId("");
-                      setOrderProductId("");
-                      setOrderQtyRequested(0);
-                      setOrderUnitCost(0);
-                      setOrderPaymentStatus("Pendente");
-                      setIsOrderFormOpen(true);
-                    }}
-                    className="py-1.5 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] rounded-xl flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto"
-                  >
-                    <ShoppingCart className="w-3.5 h-3.5" />
-                    Nova Solicitação
-                  </button>
-                </div>
-
-                {/* Filters Row */}
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                  <div className="relative sm:col-span-1">
+                  <div className="relative">
                     <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
                       <Search className="w-3.5 h-3.5" />
                     </span>
                     <input
                       type="text"
-                      placeholder="Buscar produto/fornecedor..."
-                      value={orderSearchQuery}
-                      onChange={(e) => setOrderSearchQuery(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-1.5 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
+                      placeholder="Buscar fornecedor..."
+                      value={supplierSearchQuery}
+                      onChange={(e) => setSupplierSearchQuery(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
                     />
                   </div>
 
-                  <div>
-                    <select
-                      value={selectedSupplierFilter}
-                      onChange={(e) => setSelectedSupplierFilter(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
-                    >
-                      <option value="Todos">Todos Fornecedores</option>
-                      {registeredSuppliers.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                  <div className="space-y-2.5 max-h-[380px] overflow-y-auto custom-scrollbar pr-1">
+                    {registeredSuppliers.filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase())).length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic text-center py-6">Nenhum fornecedor cadastrado.</p>
+                    ) : (
+                      registeredSuppliers
+                        .filter(s => s.name.toLowerCase().includes(supplierSearchQuery.toLowerCase()))
+                        .map((supp) => (
+                          <div key={supp.id} className="p-3 rounded-xl border border-slate-100 bg-slate-50/50 hover:bg-slate-50 transition flex flex-col justify-between gap-2.5 dark:bg-zinc-950/40 dark:border-zinc-800 dark:hover:bg-zinc-800/20">
+                            <div className="flex justify-between items-start gap-2">
+                              <div>
+                                <span className="font-bold text-slate-800 text-xs dark:text-zinc-100 flex items-center gap-1">
+                                  <UserCheck className="w-3.5 h-3.5 text-orange-500" />
+                                  {supp.name}
+                                </span>
+                                <div className="text-[10px] text-slate-500 space-y-0.5 mt-1 font-mono">
+                                  {supp.phone && <p>📞 {supp.phone}</p>}
+                                  {supp.email && <p>✉️ {supp.email}</p>}
+                                  {supp.nuit && <p>📄 NUIT: {supp.nuit}</p>}
+                                  {supp.address && <p>📍 {supp.address}</p>}
+                                </div>
+                              </div>
+                              <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400">
+                                {supp.status}
+                              </span>
+                            </div>
 
-                  <div>
-                    <select
-                      value={selectedOrderStatusFilter}
-                      onChange={(e) => setSelectedOrderStatusFilter(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
-                    >
-                      <option value="Todos">Todos os Estados</option>
-                      <option value="Pendente">Pendentes ⏳</option>
-                      <option value="Recebido">Recebidos ✅</option>
-                      <option value="Cancelado">Cancelados ❌</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <select
-                      value={selectedPaymentStatusFilter}
-                      onChange={(e) => setSelectedPaymentStatusFilter(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
-                    >
-                      <option value="Todos">Todos Pagamentos</option>
-                      <option value="Pago">Pagos 🟢</option>
-                      <option value="Crédito">A Crédito 🔴</option>
-                      <option value="Pendente">Pendentes de Pagto 🟡</option>
-                    </select>
+                            <div className="flex justify-end gap-1.5 border-t border-slate-100 pt-2 dark:border-zinc-800">
+                              <button
+                                onClick={() => handleEditSupplierClick(supp)}
+                                className="px-2 py-1 text-[10px] text-slate-600 hover:text-orange-500 hover:bg-orange-50 rounded-lg transition cursor-pointer dark:text-zinc-400 dark:hover:bg-zinc-800"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSupplier(supp.id, supp.name)}
+                                className="px-2 py-1 text-[10px] text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer dark:hover:bg-red-950/20"
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                    )}
                   </div>
                 </div>
+              </div>
 
-                {/* Orders Table */}
-                <div className="overflow-x-auto border border-slate-150/80 rounded-2xl dark:border-zinc-800">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider dark:bg-zinc-950">
-                        <th className="p-3.5">PRODUTO / FORNECEDOR</th>
-                        <th className="p-3.5 text-center">QUANTIDADE</th>
-                        <th className="p-3.5 text-right">VALOR TOTAL</th>
-                        <th className="p-3.5 text-center">ESTADO PAGTO</th>
-                        <th className="p-3.5 text-center">ESTADO PEDIDO</th>
-                        <th className="p-3.5 text-center">AÇÕES</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-150 dark:divide-zinc-800 text-[11px]">
-                      {supplierOrders
-                        .filter(order => {
-                          const matchesQuery = order.productName.toLowerCase().includes(orderSearchQuery.toLowerCase()) || order.supplierName.toLowerCase().includes(orderSearchQuery.toLowerCase());
-                          const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
-                          const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
-                          const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
-                          return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
-                        }).length === 0 ? (
-                        <tr>
-                          <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum registro de pedido encontrado.</td>
+              {/* 2. Supplier Orders (Solicitações de Stock) */}
+              <div className="lg:col-span-2 space-y-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 border-b border-slate-100 pb-3 dark:border-zinc-800">
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Historial de Solicitações e Pagamentos</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Gestão de entregas, pagamentos de crédito e encomendas de fornecedores.</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setOrderSupplierId("");
+                        setOrderProductId("");
+                        setOrderQtyRequested(0);
+                        setOrderUnitCost(0);
+                        setOrderPaymentStatus("Pendente");
+                        setOrderPaymentDueDate("");
+                        setIsOrderFormOpen(true);
+                      }}
+                      className="py-1.5 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold text-[10px] rounded-xl flex items-center gap-1.5 transition cursor-pointer self-start sm:self-auto"
+                    >
+                      <ShoppingCart className="w-3.5 h-3.5" />
+                      Nova Solicitação
+                    </button>
+                  </div>
+
+                  {/* Filters Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div className="relative sm:col-span-1">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                        <Search className="w-3.5 h-3.5" />
+                      </span>
+                      <input
+                        type="text"
+                        placeholder="Buscar produto/fornecedor..."
+                        value={orderSearchQuery}
+                        onChange={(e) => setOrderSearchQuery(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-1.5 pl-9 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850"
+                      />
+                    </div>
+
+                    <div>
+                      <select
+                        value={selectedSupplierFilter}
+                        onChange={(e) => setSelectedSupplierFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="Todos">Todos Fornecedores</option>
+                        {registeredSuppliers.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <select
+                        value={selectedOrderStatusFilter}
+                        onChange={(e) => setSelectedOrderStatusFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="Todos">Todos os Estados</option>
+                        <option value="Pendente">Pendentes ⏳</option>
+                        <option value="Recebido">Recebidos ✅</option>
+                        <option value="Cancelado">Cancelados ❌</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <select
+                        value={selectedPaymentStatusFilter}
+                        onChange={(e) => setSelectedPaymentStatusFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="Todos">Todos Pagamentos</option>
+                        <option value="Pago">Pagos 🟢</option>
+                        <option value="Crédito">A Crédito 🔴</option>
+                        <option value="Pendente">Pendentes de Pagto 🟡</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Orders Table */}
+                  <div className="overflow-x-auto border border-slate-150/80 rounded-2xl dark:border-zinc-800">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider dark:bg-zinc-950">
+                          <th className="p-3.5">PRODUTO / FORNECEDOR</th>
+                          <th className="p-3.5 text-center">QUANTIDADE</th>
+                          <th className="p-3.5 text-right">VALOR TOTAL</th>
+                          <th className="p-3.5 text-center">ESTADO PAGTO</th>
+                          <th className="p-3.5 text-center">ESTADO PEDIDO</th>
+                          <th className="p-3.5 text-center">AÇÕES</th>
                         </tr>
-                      ) : (
-                        supplierOrders
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 dark:divide-zinc-800 text-[11px]">
+                        {supplierOrders
                           .filter(order => {
                             const matchesQuery = order.productName.toLowerCase().includes(orderSearchQuery.toLowerCase()) || order.supplierName.toLowerCase().includes(orderSearchQuery.toLowerCase());
                             const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
                             const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
                             const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
                             return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
-                          })
-                          .map((order) => (
-                            <tr key={order.id} className="hover:bg-slate-50/50 dark:hover:bg-zinc-800/30">
-                              <td className="p-3.5">
-                                <span className="font-extrabold text-slate-800 dark:text-zinc-100 block">{order.productName}</span>
-                                <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
-                                  <Truck className="w-3 h-3 text-slate-400" />
-                                  Fornecedor: {order.supplierName} • {order.requestDate}
-                                </span>
-                              </td>
-                              <td className="p-3.5 text-center font-bold font-mono">
-                                {order.quantityRequested} un
-                                <span className="text-[9px] text-slate-400 block font-normal">Custo: {order.unitCost.toLocaleString()} MT</span>
-                              </td>
-                              <td className="p-3.5 text-right font-black font-mono text-slate-800 dark:text-zinc-100">
-                                {order.totalValue.toLocaleString()} MT
-                              </td>
-                              
-                              {/* Payment Status Dropdown / Badge */}
-                              <td className="p-3.5 text-center">
-                                <select
-                                  value={order.paymentStatus}
-                                  onChange={(e) => handleUpdateOrderPaymentStatus(order.id, e.target.value as any)}
-                                  className={`px-2 py-1 rounded-full text-[9px] font-bold border outline-none text-center cursor-pointer ${
-                                    order.paymentStatus === "Pago" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
-                                    order.paymentStatus === "Crédito" ? "bg-red-50 text-red-700 border-red-200" :
-                                    "bg-amber-50 text-amber-700 border-amber-200"
-                                  }`}
-                                >
-                                  <option value="Pago">Pago 🟢</option>
-                                  <option value="Crédito">Crédito 🔴</option>
-                                  <option value="Pendente">Pendente 🟡</option>
-                                </select>
-                              </td>
+                          }).length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum registro de pedido encontrado.</td>
+                          </tr>
+                        ) : (
+                          supplierOrders
+                            .filter(order => {
+                              const matchesQuery = order.productName.toLowerCase().includes(orderSearchQuery.toLowerCase()) || order.supplierName.toLowerCase().includes(orderSearchQuery.toLowerCase());
+                              const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
+                              const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
+                              const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
+                              return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
+                            })
+                            .map((order) => {
+                              const isOverdue = isPaymentOverdue(order);
+                              const calculatedDueDate = order.paymentDueDate || (order.requestDate ? (() => {
+                                const d = new Date(order.requestDate);
+                                d.setDate(d.getDate() + 15);
+                                return d.toISOString().split("T")[0];
+                              })() : "");
 
-                              {/* Order Status Badge */}
-                              <td className="p-3.5 text-center">
-                                <span className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase ${
-                                  order.status === "Recebido" ? "bg-emerald-100 text-emerald-800" :
-                                  order.status === "Cancelado" ? "bg-slate-100 text-slate-700" :
-                                  "bg-amber-100 text-amber-850 animate-pulse"
+                              return (
+                                <tr key={order.id} className={`transition ${
+                                  isOverdue 
+                                    ? "bg-red-50/50 hover:bg-red-50/70 border-l-4 border-l-red-500 dark:bg-red-950/15 dark:hover:bg-red-950/25" 
+                                    : "hover:bg-slate-50/50 dark:hover:bg-zinc-800/30"
                                 }`}>
-                                  {order.status === "Recebido" ? "✓ Recebido" :
-                                   order.status === "Cancelado" ? "✗ Cancelado" :
-                                   "⏳ Pendente"}
-                                </span>
-                              </td>
+                                  <td className="p-3.5">
+                                    <span className="font-extrabold text-slate-800 dark:text-zinc-100 block">{order.productName}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono flex flex-wrap items-center gap-1 mt-0.5">
+                                      <Truck className="w-3 h-3 text-slate-400" />
+                                      Fornecedor: {order.supplierName} • Solic.: {order.requestDate}
+                                      {order.paymentStatus !== "Pago" && (
+                                        isOverdue ? (
+                                          <span className="text-red-600 dark:text-red-400 font-bold ml-1 flex items-center gap-1 animate-pulse">
+                                            ⚠️ ATRASADO (Venceu em: {calculatedDueDate})
+                                          </span>
+                                        ) : (
+                                          <span className="text-slate-500 font-medium ml-1">
+                                            • Vencimento: {calculatedDueDate}
+                                          </span>
+                                        )
+                                      )}
+                                    </span>
+                                  </td>
+                                <td className="p-3.5 text-center font-bold font-mono">
+                                  {order.quantityRequested} un
+                                  <span className="text-[9px] text-slate-400 block font-normal">Custo: {order.unitCost.toLocaleString()} MT</span>
+                                </td>
+                                <td className="p-3.5 text-right font-black font-mono text-slate-800 dark:text-zinc-100">
+                                  {order.totalValue.toLocaleString()} MT
+                                </td>
+                                
+                                {/* Payment Status Dropdown / Badge */}
+                                <td className="p-3.5 text-center">
+                                  <select
+                                    value={order.paymentStatus}
+                                    onChange={(e) => handleUpdateOrderPaymentStatus(order.id, e.target.value as any)}
+                                    className={`px-2 py-1 rounded-full text-[9px] font-bold border outline-none text-center cursor-pointer ${
+                                      order.paymentStatus === "Pago" ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30" :
+                                      order.paymentStatus === "Crédito" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/20 dark:text-red-400 dark:border-red-900/30" :
+                                      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30"
+                                    }`}
+                                  >
+                                    <option value="Pago">Pago 🟢</option>
+                                    <option value="Crédito">Crédito 🔴</option>
+                                    <option value="Pendente">Pendente 🟡</option>
+                                  </select>
+                                </td>
 
-                              {/* Actions */}
-                              <td className="p-3.5 text-center">
-                                {order.status === "Pendente" ? (
-                                  <div className="flex gap-1.5 justify-center">
-                                    <button
-                                      onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
-                                      className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
-                                    >
-                                      Receber
-                                    </button>
-                                    <button
-                                      onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
-                                      className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer"
-                                    >
-                                      Cancelar
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 italic">
-                                    {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
+                                {/* Order Status Badge */}
+                                <td className="p-3.5 text-center">
+                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase ${
+                                    order.status === "Recebido" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400" :
+                                    order.status === "Cancelado" ? "bg-slate-100 text-slate-700 dark:bg-zinc-850 dark:text-zinc-400" :
+                                    "bg-amber-100 text-amber-850 animate-pulse dark:bg-amber-950/30 dark:text-amber-450"
+                                  }`}>
+                                    {order.status === "Recebido" ? "✓ Recebido" :
+                                     order.status === "Cancelado" ? "✗ Cancelado" :
+                                     "⏳ Pendente"}
                                   </span>
-                                )}
-                              </td>
-                            </tr>
-                          ))
-                      )}
-                    </tbody>
-                  </table>
+                                </td>
+
+                                {/* Actions */}
+                                <td className="p-3.5 text-center">
+                                  {order.status === "Pendente" ? (
+                                    <div className="flex gap-1.5 justify-center">
+                                      <button
+                                        onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
+                                        className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
+                                      >
+                                        Receber
+                                      </button>
+                                      <button
+                                        onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
+                                        className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 italic">
+                                      {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                              );
+                            })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {supplierSubTab === "finance" && (
+            /* NEW FINANCE & DEBT VIEW */
+            <div className="space-y-6 animate-in fade-in duration-300">
+              
+              {/* Chart Comparison of Monthly Payments per Supplier */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3 dark:border-zinc-800">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100 flex items-center gap-1.5">
+                      <BarChart3 className="w-4 h-4 text-orange-500" />
+                      Fluxo de Caixa Mensal por Fornecedor (Volume de Pagamentos)
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Comparativo dos valores totais pagos mensalmente para cada fornecedor parceiro nos últimos 6 meses.
+                    </p>
+                  </div>
+                  
+                  {/* Layout Selector */}
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg text-[10px] font-bold dark:bg-zinc-950">
+                    <button
+                      type="button"
+                      onClick={() => setSupplierChartLayout("grouped")}
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition ${
+                        supplierChartLayout === "grouped"
+                          ? "bg-white text-slate-850 shadow-xs dark:bg-zinc-800 dark:text-zinc-200"
+                          : "text-slate-400 hover:text-slate-600"
+                      }`}
+                    >
+                      Lado a Lado
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSupplierChartLayout("stacked")}
+                      className={`px-2.5 py-1 rounded-md cursor-pointer transition ${
+                        supplierChartLayout === "stacked"
+                          ? "bg-white text-slate-850 shadow-xs dark:bg-zinc-800 dark:text-zinc-200"
+                          : "text-slate-400 hover:text-slate-600"
+                      }`}
+                    >
+                      Empilhado
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch">
+                  {/* Chart view column */}
+                  <div className="lg:col-span-3 min-h-[280px] flex items-center justify-center relative">
+                    {supplierOrders.filter((o: any) => o.paymentStatus === "Pago" && o.status !== "Cancelado").length === 0 ? (
+                      <div className="text-center space-y-2 py-8">
+                        <TrendingUp className="w-8 h-8 text-slate-300 mx-auto" />
+                        <p className="text-[11px] text-slate-400 italic">Sem registros de ordens pagas para exibir no gráfico.</p>
+                        <p className="text-[10px] text-slate-500">Registre pagamentos como "Pago" para preencher o histórico.</p>
+                      </div>
+                    ) : (
+                      <div className="w-full h-[280px]">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={supplierMonthlyChartData}
+                            margin={{ top: 10, right: 10, left: -10, bottom: 5 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" className="dark:stroke-zinc-800" />
+                            <XAxis 
+                              dataKey="month" 
+                              tick={{ fontSize: 9, fontWeight: 700, fill: '#64748b' }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <YAxis 
+                              tickFormatter={(value) => `${value >= 1000 ? (value / 1000) + 'k' : value} MT`}
+                              tick={{ fontSize: 9, fontWeight: 600, fill: '#64748b' }}
+                              axisLine={false}
+                              tickLine={false}
+                            />
+                            <Tooltip 
+                              formatter={(value: any) => [`${Number(value).toLocaleString()} MT`, 'Volume Pago']}
+                              contentStyle={{
+                                fontSize: '11px',
+                                fontWeight: 'bold',
+                                borderRadius: '12px',
+                                border: '1px solid #e2e8f0',
+                                backgroundColor: '#ffffff',
+                                boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                              }}
+                              itemStyle={{ color: '#0f172a' }}
+                            />
+                            <Legend 
+                              wrapperStyle={{ fontSize: '10px', fontWeight: 'bold', paddingTop: '10px' }}
+                              iconSize={8}
+                              iconType="circle"
+                            />
+                            {registeredSuppliers.map((supp, index) => {
+                              const colors = ["#f97316", "#3b82f6", "#10b981", "#8b5cf6", "#ec4899", "#f59e0b", "#06b6d4", "#14b8a6", "#a855f7", "#f43f5e"];
+                              const color = colors[index % colors.length];
+                              return (
+                                <Bar 
+                                  key={supp.id} 
+                                  dataKey={supp.name} 
+                                  name={supp.name} 
+                                  fill={color} 
+                                  stackId={supplierChartLayout === "stacked" ? "a" : undefined}
+                                  radius={supplierChartLayout === "stacked" ? 0 : [4, 4, 0, 0]}
+                                />
+                              );
+                            })}
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dependency Insights Column */}
+                  <div className="lg:col-span-1 bg-slate-50 p-4 rounded-2xl dark:bg-zinc-950/40 border border-slate-150/40 dark:border-zinc-850 flex flex-col justify-between space-y-4">
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200">
+                        <TrendingUp className="w-4 h-4 text-orange-500" />
+                        <h4 className="font-extrabold text-[11px] uppercase tracking-wider">Dependência Financeira</h4>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                        Esta análise ajuda a identificar o nível de risco operacional de acordo com a distribuição de pagamentos aos parceiros.
+                      </p>
+
+                      {supplierDependencyStats.totalPaid > 0 ? (
+                        <div className="space-y-3 pt-2">
+                          <div className="border-t border-slate-200/60 dark:border-zinc-800/60 pt-2 space-y-1">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold">Total Liquidado</span>
+                            <p className="text-sm font-black text-slate-800 dark:text-zinc-100 font-mono">
+                              {supplierDependencyStats.totalPaid.toLocaleString()} MT
+                            </p>
+                          </div>
+
+                          {supplierDependencyStats.dominant ? (
+                            <div className="bg-red-50/75 border border-red-150 p-2.5 rounded-xl dark:bg-red-950/15 dark:border-red-900/30 text-[10px] text-red-850 dark:text-red-300 leading-relaxed font-medium">
+                              <span className="font-extrabold block text-red-900 dark:text-red-450 flex items-center gap-1">
+                                ⚠️ Concentração Elevada
+                              </span>
+                              O fornecedor <strong className="font-extrabold text-slate-800 dark:text-zinc-100">"{supplierDependencyStats.dominant.name}"</strong> representa <strong className="font-extrabold text-slate-800 dark:text-zinc-100">{supplierDependencyStats.dominant.percentage.toFixed(1)}%</strong> do total pago. Considere diversificar para reduzir o risco.
+                            </div>
+                          ) : (
+                            <div className="bg-emerald-50/75 border border-emerald-150 p-2.5 rounded-xl dark:bg-emerald-950/15 dark:border-emerald-900/30 text-[10px] text-emerald-850 dark:text-emerald-300 leading-relaxed font-medium">
+                              <span className="font-extrabold block text-emerald-900 dark:text-emerald-450 flex items-center gap-1">
+                                ✅ Risco Controlado
+                              </span>
+                              Seus pagamentos estão distribuídos de forma saudável. Nenhum parceiro individual supera 40% dos custos liquidados.
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-[10.5px] italic text-slate-400">Aguardando dados de liquidação para gerar diagnósticos.</p>
+                      )}
+                    </div>
+
+                    {supplierDependencyStats.totalPaid > 0 && (
+                      <div className="space-y-1.5 border-t border-slate-200/60 dark:border-zinc-800/60 pt-3">
+                        <span className="text-[9px] text-slate-400 uppercase font-extrabold block">Participação no Caixa (%)</span>
+                        <div className="space-y-2">
+                          {supplierDependencyStats.items.slice(0, 3).map((item) => (
+                            <div key={item.id} className="space-y-1">
+                              <div className="flex justify-between items-center text-[10px] font-bold text-slate-700 dark:text-zinc-300">
+                                <span className="truncate max-w-[120px]">{item.name}</span>
+                                <span className="font-mono">{item.percentage.toFixed(1)}%</span>
+                              </div>
+                              <div className="w-full bg-slate-200 rounded-full h-1 dark:bg-zinc-800">
+                                <div 
+                                  className="bg-orange-500 h-1 rounded-full" 
+                                  style={{ width: `${Math.min(item.percentage, 100)}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 animate-in fade-in duration-300">
+              {/* Left / Main table column */}
+              <div className="xl:col-span-2 space-y-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3 dark:border-zinc-800">
+                    <div>
+                      <h3 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Balanço Financeiro por Fornecedor</h3>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Acompanhamento consolidado de compras, pagamentos liquidados e contas a crédito.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExportAllSuppliersFinance("csv")}
+                        className="px-2.5 py-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-750 font-bold rounded-xl text-[10px] flex items-center gap-1.5 transition cursor-pointer"
+                        title="Exportar em formato CSV (Excel)"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                        Exportar CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportAllSuppliersFinance("pdf")}
+                        className="px-2.5 py-1.5 bg-orange-50 text-orange-600 hover:bg-orange-100 dark:bg-orange-950/20 dark:text-orange-400 dark:hover:bg-orange-950/45 font-bold rounded-xl text-[10px] flex items-center gap-1.5 transition cursor-pointer"
+                        title="Exportar Relatório PDF Detalhado"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Exportar PDF
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto border border-slate-150/80 rounded-2xl dark:border-zinc-800">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider dark:bg-zinc-950">
+                          <th className="p-3.5">FORNECEDOR</th>
+                          <th className="p-3.5 text-center">TOTAL COMPRAS</th>
+                          <th className="p-3.5 text-right text-emerald-600 dark:text-emerald-450">TOTAL PAGO</th>
+                          <th className="p-3.5 text-right text-red-600 dark:text-red-450">DÍVIDA CRÉDITO</th>
+                          <th className="p-3.5 text-right text-amber-650 dark:text-amber-450">PENDENTE PGTO</th>
+                          <th className="p-3.5 text-center">ESTADO</th>
+                          <th className="p-3.5 text-center">AÇÕES</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-150 dark:divide-zinc-800 text-[11px]">
+                        {registeredSuppliers.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="p-8 text-center text-slate-400 italic">Nenhum fornecedor cadastrado para balanço financeiro.</td>
+                          </tr>
+                        ) : (
+                          registeredSuppliers.map((supp) => {
+                            const sOrders = supplierOrders.filter((o: any) => o.supplierId === supp.id && o.status !== "Cancelado");
+                            const totalPurchased = sOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                            const paidAmount = sOrders.filter((o: any) => o.paymentStatus === "Pago").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                            const creditDebt = sOrders.filter((o: any) => o.paymentStatus === "Crédito").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                            const pendingPayment = sOrders.filter((o: any) => o.paymentStatus === "Pendente").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                            const hasActiveDebt = creditDebt > 0;
+                            const hasPendingPayment = pendingPayment > 0;
+                            const hasOverduePayment = sOrders.some((o: any) => isPaymentOverdue(o));
+
+                            return (
+                              <tr
+                                key={supp.id}
+                                className={`hover:bg-slate-50/50 dark:hover:bg-zinc-800/30 cursor-pointer transition ${
+                                  selectedFinanceSupplierId === supp.id 
+                                    ? "bg-orange-50/25 dark:bg-orange-950/10 font-bold" 
+                                    : hasOverduePayment 
+                                      ? "bg-red-50/20 dark:bg-red-950/5 border-l-2 border-l-red-500 font-medium text-red-900 dark:text-red-300" 
+                                      : ""
+                                }`}
+                                onClick={() => setSelectedFinanceSupplierId(supp.id)}
+                              >
+                                <td className="p-3.5">
+                                  <span className="font-extrabold text-slate-800 dark:text-zinc-100 block">{supp.name}</span>
+                                  <span className="text-[9px] text-slate-400 block font-mono">NUIT: {supp.nuit || "N/A"}</span>
+                                </td>
+                                <td className="p-3.5 text-center font-bold font-mono">
+                                  {sOrders.length} ped.
+                                  <span className="text-[9px] text-slate-400 block font-normal">{totalPurchased.toLocaleString()} MT</span>
+                                </td>
+                                <td className="p-3.5 text-right font-bold text-emerald-600 dark:text-emerald-400 font-mono">
+                                  {paidAmount.toLocaleString()} MT
+                                </td>
+                                <td className="p-3.5 text-right font-black text-red-600 dark:text-red-400 font-mono">
+                                  {creditDebt.toLocaleString()} MT
+                                </td>
+                                <td className="p-3.5 text-right font-bold text-amber-650 dark:text-amber-400 font-mono">
+                                  {pendingPayment.toLocaleString()} MT
+                                </td>
+                                <td className="p-3.5 text-center">
+                                  {hasOverduePayment ? (
+                                    <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-red-600 text-white dark:bg-red-700 dark:text-white animate-pulse inline-flex items-center gap-0.5">
+                                      ⚠️ Atrasado
+                                    </span>
+                                  ) : creditDebt === 0 && pendingPayment === 0 ? (
+                                    <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400">
+                                      Regularizado
+                                    </span>
+                                  ) : hasActiveDebt ? (
+                                    <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-red-100 text-red-800 dark:bg-red-950/30 dark:text-red-400 animate-pulse">
+                                      Dívida Ativa
+                                    </span>
+                                  ) : (
+                                    <span className="px-1.5 py-0.5 text-[8px] font-black uppercase rounded-md bg-amber-100 text-amber-850 dark:bg-amber-950/30 dark:text-amber-400">
+                                      Pendente
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="p-3.5 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex gap-1.5 justify-center">
+                                    <button
+                                      onClick={() => setSelectedFinanceSupplierId(supp.id)}
+                                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-750 text-slate-700 dark:text-zinc-200 rounded-lg transition font-bold text-[9px] cursor-pointer"
+                                    >
+                                      Extrato
+                                    </button>
+                                    {(hasActiveDebt || hasPendingPayment) && (
+                                      <button
+                                        onClick={() => handleLiquidateAllDebts(supp.id, supp.name)}
+                                        className="px-2 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition font-bold text-[9px] cursor-pointer"
+                                      >
+                                        Liquidar
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right / Ledger detailed panel column */}
+              <div className="xl:col-span-1">
+                {selectedFinanceSupplierId ? (
+                  (() => {
+                    const supp = registeredSuppliers.find((s: any) => s.id === selectedFinanceSupplierId);
+                    if (!supp) return (
+                      <div className="bg-white p-5 rounded-2xl border border-slate-100 text-center text-xs dark:bg-zinc-900 dark:border-zinc-800 text-slate-400">
+                        Selecione um parceiro para carregar as transações.
+                      </div>
+                    );
+
+                    const sOrders = supplierOrders.filter((o: any) => o.supplierId === supp.id && o.status !== "Cancelado");
+                    const totalPurchased = sOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                    const paidAmount = sOrders.filter((o: any) => o.paymentStatus === "Pago").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                    const creditDebt = sOrders.filter((o: any) => o.paymentStatus === "Crédito").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+                    const pendingPayment = sOrders.filter((o: any) => o.paymentStatus === "Pendente").reduce((sum: number, o: any) => sum + o.totalValue, 0);
+
+                    return (
+                      <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4 dark:bg-zinc-900 dark:border-zinc-800 animate-in slide-in-from-right duration-300">
+                        <div className="border-b border-slate-100 pb-3 dark:border-zinc-800 flex justify-between items-start">
+                          <div>
+                            <h4 className="font-extrabold text-slate-800 text-xs dark:text-zinc-100">Extrato Consolidado</h4>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{supp.name}</p>
+                          </div>
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => handleExportSupplierLedgerPDF(supp)}
+                              title="Exportar PDF do Extrato"
+                              className="p-1.5 bg-slate-100 hover:bg-slate-250 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 rounded-xl transition cursor-pointer"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setSelectedFinanceSupplierId(null)}
+                              className="p-1.5 bg-slate-100 hover:bg-slate-250 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-400 rounded-xl transition cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Supplier Metadata info */}
+                        <div className="p-3 bg-slate-50 dark:bg-zinc-950/40 rounded-xl space-y-1 text-[10px] text-slate-500 dark:text-zinc-400 font-mono">
+                          {supp.phone && <p>📞 {supp.phone}</p>}
+                          {supp.email && <p>✉️ {supp.email}</p>}
+                          {supp.nuit && <p>📄 NUIT: {supp.nuit}</p>}
+                          {supp.address && <p>📍 {supp.address}</p>}
+                        </div>
+
+                        {/* Mini Balances Display */}
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="bg-emerald-50/50 border border-emerald-100 p-2 rounded-xl text-center dark:bg-emerald-950/10 dark:border-emerald-900/30">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider block">PAGO</span>
+                            <span className="text-[10px] font-mono font-black text-emerald-600 block">{paidAmount.toLocaleString()}</span>
+                          </div>
+                          <div className="bg-red-50/50 border border-red-100 p-2 rounded-xl text-center dark:bg-red-950/10 dark:border-red-900/30">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider block">CRÉDITO</span>
+                            <span className="text-[10px] font-mono font-black text-red-600 block">{creditDebt.toLocaleString()}</span>
+                          </div>
+                          <div className="bg-amber-50/50 border border-amber-100 p-2 rounded-xl text-center dark:bg-amber-950/10 dark:border-amber-900/30">
+                            <span className="text-[8px] text-slate-400 font-bold uppercase tracking-wider block">PENDENTE</span>
+                            <span className="text-[10px] font-mono font-black text-amber-600 block">{pendingPayment.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        {/* Transaction History Items */}
+                        <div className="space-y-2.5 max-h-[290px] overflow-y-auto custom-scrollbar pr-1">
+                          <h5 className="text-[9px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-50 pb-1.5 dark:border-zinc-800">Historial de Transações</h5>
+                          {sOrders.length === 0 ? (
+                            <p className="text-[10px] text-slate-400 italic text-center py-6">Nenhum pedido efetuado com este parceiro.</p>
+                          ) : (
+                            sOrders.map((order: any) => {
+                              const isOverdue = isPaymentOverdue(order);
+                              const calculatedDueDate = order.paymentDueDate || (order.requestDate ? (() => {
+                                const d = new Date(order.requestDate);
+                                d.setDate(d.getDate() + 15);
+                                return d.toISOString().split("T")[0];
+                              })() : "");
+
+                              return (
+                                <div
+                                  key={order.id}
+                                  className={`p-2.5 rounded-xl border space-y-2 transition ${
+                                    isOverdue
+                                      ? "bg-red-50/60 border-red-200 dark:bg-red-950/15 dark:border-red-900/30 shadow-sm shadow-red-500/5"
+                                      : "bg-slate-50/30 border-slate-100 dark:bg-zinc-950/20 dark:border-zinc-800"
+                                  }`}
+                                >
+                                  <div className="flex justify-between items-start gap-2">
+                                    <div>
+                                      <span className="font-extrabold text-slate-800 dark:text-zinc-100 text-[11px] block">{order.productName}</span>
+                                      <span className="text-[9px] text-slate-400 block font-mono">{order.requestDate} • {order.quantityRequested} un</span>
+                                      {order.paymentStatus !== "Pago" && isOverdue && (
+                                        <span className="text-red-600 dark:text-red-400 font-bold text-[9px] block mt-0.5 animate-pulse">
+                                          ⚠️ ATRASADO (Prazo: {calculatedDueDate})
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="font-black text-slate-800 dark:text-zinc-100 text-[11px] font-mono shrink-0">
+                                      {order.totalValue.toLocaleString()} MT
+                                    </span>
+                                  </div>
+
+                                <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-slate-100/50 dark:border-zinc-850">
+                                  <span className={`px-1.5 py-0.5 rounded text-[8px] font-extrabold uppercase ${
+                                    order.status === "Recebido" ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-450" :
+                                    order.status === "Cancelado" ? "bg-slate-100 text-slate-600 dark:bg-zinc-850 dark:text-zinc-400" :
+                                    "bg-amber-50 text-amber-850 dark:bg-amber-950/30 dark:text-amber-450"
+                                  }`}>
+                                    {order.status}
+                                  </span>
+
+                                  {/* Payment status dropdown for individual order inside details */}
+                                  <select
+                                    value={order.paymentStatus}
+                                    onChange={(e) => handleUpdateOrderPaymentStatus(order.id, e.target.value as any)}
+                                    className={`px-1.5 py-0.5 rounded text-[8px] font-bold border outline-none text-center cursor-pointer ${
+                                      order.paymentStatus === "Pago" ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/20" :
+                                      order.paymentStatus === "Crédito" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-450 dark:border-red-900/20" :
+                                      "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-450 dark:border-amber-900/20"
+                                    }`}
+                                  >
+                                    <option value="Pago">Pago</option>
+                                    <option value="Crédito">Crédito</option>
+                                    <option value="Pendente">Pendente</option>
+                                  </select>
+                                </div>
+                              </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="bg-white p-8 rounded-2xl border border-slate-100 text-center dark:bg-zinc-900 dark:border-zinc-800 flex flex-col items-center justify-center gap-3 text-slate-400 py-16 h-full shadow-sm">
+                    <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-450 dark:bg-zinc-950">
+                      <CreditCard className="w-6 h-6 text-slate-400" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-xs text-slate-700 dark:text-zinc-200">Nenhum Extrato Selecionado</h4>
+                      <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] mx-auto">Clique no botão "Extrato" de qualquer fornecedor para carregar o histórico consolidado de faturamento.</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            </div>
+          )}
+
+          {supplierSubTab === "config" && (
+            <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+              <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm space-y-6 dark:bg-zinc-900 dark:border-zinc-800">
+                <div className="flex items-start gap-4 border-b border-slate-100 pb-4 dark:border-zinc-800">
+                  <div className="p-3 rounded-xl bg-orange-50 text-orange-600 dark:bg-orange-950/20 dark:text-orange-450 shrink-0">
+                    <Sliders className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm text-slate-800 dark:text-zinc-100">
+                      Configurações do Módulo de Fornecedores
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Personalize regras globais de faturamento, prazos de pagamento e critérios de tolerância para alertas de atraso.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      Dias de Tolerância para Pagamento Vencido
+                    </label>
+                    <div className="flex gap-3">
+                      <input
+                        type="number"
+                        min="0"
+                        max="180"
+                        value={settings?.supplierOverdueToleranceDays ?? 0}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                          onUpdateSettings?.({ supplierOverdueToleranceDays: val });
+                          onShowToast?.(`Tolerância atualizada para ${val} dias.`, "success");
+                        }}
+                        className="w-32 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-orange-500 text-slate-800 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100"
+                      />
+                      <span className="flex items-center text-xs text-slate-400 font-bold">Dias de tolerância</span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed mt-1">
+                      Este número de dias será adicionado à data de vencimento combinada de cada pedido de stock antes de o sistema destacar o fornecedor e o pedido com o status <span className="text-red-500 font-extrabold">⚠️ Atrasado</span> nas tabelas de controle e painéis de dependência financeira.
+                    </p>
+                  </div>
+
+                  {/* Visual Simulation / Interactive Preview Card */}
+                  <div className="bg-slate-50 border border-slate-150 p-4.5 rounded-2xl dark:bg-zinc-950/40 dark:border-zinc-850 space-y-3">
+                    <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+                      <Info className="w-3.5 h-3.5 text-orange-500" /> Simulação de Prazo de Alerta
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">
+                      <div className="p-2.5 rounded-xl bg-white border border-slate-100 dark:bg-zinc-900 dark:border-zinc-800">
+                        <span className="text-[9px] text-slate-400 font-bold block uppercase">Data de Vencimento</span>
+                        <span className="text-xs font-extrabold text-slate-800 dark:text-zinc-200 font-mono">20/07/2026</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white border border-slate-100 dark:bg-zinc-900 dark:border-zinc-800">
+                        <span className="text-[9px] text-slate-400 font-bold block uppercase">Tolerância Aplicada</span>
+                        <span className="text-xs font-extrabold text-orange-600 font-mono">+{settings?.supplierOverdueToleranceDays ?? 0} dias</span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-white border border-slate-100 dark:bg-zinc-900 dark:border-zinc-800">
+                        <span className="text-[9px] text-slate-400 font-bold block uppercase">Início dos Alertas</span>
+                        <span className="text-xs font-extrabold text-red-600 font-mono">
+                          {(() => {
+                            const d = new Date(2026, 6, 20); // July 20th, 2026
+                            d.setDate(d.getDate() + Number(settings?.supplierOverdueToleranceDays ?? 0));
+                            const day = String(d.getDate()).padStart(2, "0");
+                            const month = String(d.getMonth() + 1).padStart(2, "0");
+                            return `${day}/${month}/${d.getFullYear()}`;
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <p className="text-[10px] text-slate-500 leading-relaxed text-center italic">
+                      {(settings?.supplierOverdueToleranceDays ?? 0) === 0 ? (
+                        "Nenhuma tolerância configurada: cobranças não liquidadas serão marcadas como atrasadas imediatamente no dia seguinte ao vencimento."
+                      ) : (
+                        `Com ${settings?.supplierOverdueToleranceDays} dias de carência, as faturas só receberão destaque vermelho de cobrança vencida a partir do dia ${(() => {
+                          const d = new Date(2026, 6, 20);
+                          d.setDate(d.getDate() + Number(settings?.supplierOverdueToleranceDays ?? 0));
+                          const day = String(d.getDate()).padStart(2, "0");
+                          const month = String(d.getMonth() + 1).padStart(2, "0");
+                          return `${day}/${month}/${d.getFullYear()}`;
+                        })()}.`
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-4 flex justify-between items-center dark:border-zinc-800">
+                  <span className="text-[10px] text-slate-400 font-mono">Configuração instantânea • Persistida localmente</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onShowToast?.("Configurações do módulo salvas com sucesso!", "success");
+                    }}
+                    className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-sm"
+                  >
+                    Confirmar & Guardar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4378,6 +5345,19 @@ export default function StockModule({
                   <option value="Pendente">Pagamento Pendente 🟡</option>
                 </select>
               </div>
+
+              {orderPaymentStatus !== "Pago" && (
+                <div className="space-y-1 animate-in slide-in-from-top duration-200">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Prazo de Vencimento do Pagamento</label>
+                  <input
+                    type="date"
+                    value={orderPaymentDueDate}
+                    onChange={(e) => setOrderPaymentDueDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850 text-slate-800"
+                  />
+                  <p className="text-[9px] text-slate-400">Deixe em branco para assumir o prazo padrão de 15 dias.</p>
+                </div>
+              )}
 
               {orderQtyRequested > 0 && orderUnitCost > 0 && (
                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-bold text-orange-850 flex justify-between items-center">

@@ -212,6 +212,7 @@ export interface SystemSettings {
   aiHealthSensitivity?: number;
   suppliers?: Supplier[];
   supplierOrders?: SupplierOrder[];
+  supplierOverdueToleranceDays?: number;
 }
 
 export interface Supplier {
