@@ -311,4 +311,110 @@ h1, h2, h3, h4, th {
   animation: softPulse 3s infinite ease-in-out;
 }
 
+/* ==========================================================
+   OPTIMIZED PRINT LAYOUT FOR 80MM THERMAL MINI-PRINTERS
+   ========================================================== */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide navigation, overlays, and non-printable elements */
+  .no-print, nav, header, sidebar, .modal-backdrop {
+    display: none !important;
+  }
+
+  /* 80mm Thermal Receipt Layout Container */
+  .thermal-receipt-80mm, #pos-completed-receipt {
+    width: 76mm !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 3mm 2mm !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace, 'Lucida Console', sans-serif !important;
+    font-size: 11px !important;
+    line-height: 1.25 !important;
+    border: none !important;
+    box-shadow: none !important;
+    position: static !important;
+    display: block !important;
+    overflow: visible !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .thermal-receipt-80mm *, #pos-completed-receipt * {
+    color: #000000 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    text-shadow: none !important;
+    visibility: visible !important;
+  }
+
+  /* Header & Store Info */
+  .thermal-receipt-header {
+    text-align: center !important;
+    margin-bottom: 6px !important;
+    padding-bottom: 6px !important;
+    border-bottom: 1px dashed #000000 !important;
+  }
+
+  .thermal-receipt-title {
+    font-size: 14px !important;
+    font-weight: 900 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+    margin-bottom: 2px !important;
+  }
+
+  .thermal-items-header {
+    font-weight: bold !important;
+    border-bottom: 1px dashed #000000 !important;
+    padding-bottom: 3px !important;
+    margin-bottom: 3px !important;
+  }
+
+  .thermal-dashed-divider {
+    border-top: 1px dashed #000000 !important;
+    margin: 6px 0 !important;
+  }
+
+  .thermal-total-row {
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    border-top: 1px dashed #000000 !important;
+    border-bottom: 1px dashed #000000 !important;
+    padding: 4px 0 !important;
+    margin: 4px 0 !important;
+  }
+
+  .thermal-qr-code {
+    width: 30mm !important;
+    height: 30mm !important;
+    margin: 4px auto !important;
+    display: block !important;
+    image-rendering: pixelated !important;
+  }
+
+  .thermal-footer {
+    text-align: center !important;
+    font-size: 9.5px !important;
+    margin-top: 6px !important;
+    padding-top: 4px !important;
+    border-top: 1px dashed #000000 !important;
+  }
+}
+
+
 

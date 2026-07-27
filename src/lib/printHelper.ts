@@ -514,3 +514,355 @@ export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
   printWindow.document.write(htmlContent);
   printWindow.document.close();
 }
+
+/**
+ * Generates and triggers print for a specific 80mm thermal receipt layout.
+ */
+export function printThermal80mmReceipt(tx: Transaction, settings: SystemSettings) {
+  const currency = settings.currency || "MT";
+  const companyName = settings.companyName || "OST COMÉRCIO CENTRAL";
+  const address = settings.companyAddress || settings.storeAddress || "Av. Marginal, Kiosk 14, Maputo";
+  const nuit = settings.companyNuit || "400293112";
+  const contact = settings.storeContact || "+258 84 000 0000";
+  const logo = settings.logoUrl || "";
+  const certificationNumber = settings.fiscalCertificationNumber || "OST/CERT/00249/2026";
+  
+  const marginTop = settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4;
+  const marginBottom = settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8;
+
+  const printWindow = window.open("", "_blank", "width=420,height=750");
+  if (!printWindow) {
+    alert("Por favor, permita pop-ups para imprimir o recibo térmico de 80mm.");
+    return;
+  }
+
+  const formattedDate = new Date(tx.timestamp).toLocaleString("pt-MZ");
+  const itemsRows = tx.items.map((item) => `
+    <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+      <span style="font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 4px;">
+        ${item.productName}
+      </span>
+      <span style="white-space: nowrap; font-weight: 700;">
+        ${item.quantity}x ${(item.price * item.quantity).toLocaleString("pt-MZ")} ${currency}
+      </span>
+    </div>
+    <div style="font-size: 9px; color: #444; margin-bottom: 4px; padding-left: 8px;">
+      @ ${item.price.toLocaleString("pt-MZ")} ${currency}/un
+    </div>
+  `).join("");
+
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(tx.invoiceNumber)}`;
+
+  const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="pt">
+    <head>
+      <meta charset="UTF-8">
+      <title>Recibo Térmico 80mm #${tx.invoiceNumber}</title>
+      <style>
+        @page {
+          size: 80mm auto;
+          margin: ${marginTop}mm 0mm ${marginBottom}mm 0mm;
+        }
+
+        * {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
+
+        body {
+          font-family: 'Courier New', Courier, monospace, sans-serif;
+          background-color: #ffffff;
+          color: #000000;
+          line-height: 1.25;
+          font-size: 11px;
+          padding: ${marginTop}mm 4px ${marginBottom}mm 4px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+
+        .receipt-container {
+          width: 76mm;
+          max-width: 80mm;
+          background: #ffffff;
+          color: #000000;
+        }
+
+        .header {
+          text-align: center;
+          border-bottom: 1px dashed #000000;
+          padding-bottom: 8px;
+          margin-bottom: 8px;
+        }
+
+        .logo {
+          max-width: 48mm;
+          max-height: 20mm;
+          object-fit: contain;
+          filter: grayscale(100%) contrast(200%);
+          margin-bottom: 4px;
+        }
+
+        .company-title {
+          font-size: 14px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 2px;
+        }
+
+        .store-info {
+          font-size: 9.5px;
+          color: #222222;
+        }
+
+        .meta-section {
+          border-bottom: 1px dashed #000000;
+          padding-bottom: 6px;
+          margin-bottom: 6px;
+          font-size: 10px;
+        }
+
+        .meta-row {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 2px;
+        }
+
+        .meta-label {
+          color: #444444;
+        }
+
+        .meta-val {
+          font-weight: 700;
+        }
+
+        .items-section {
+          border-bottom: 1px dashed #000000;
+          padding-bottom: 6px;
+          margin-bottom: 6px;
+        }
+
+        .items-header {
+          display: flex;
+          justify-content: space-between;
+          font-weight: 900;
+          font-size: 10px;
+          border-bottom: 1px dashed #000000;
+          padding-bottom: 4px;
+          margin-bottom: 6px;
+        }
+
+        .summary-section {
+          text-align: right;
+          border-bottom: 1px dashed #000000;
+          padding-bottom: 6px;
+          margin-bottom: 6px;
+          font-size: 10.5px;
+        }
+
+        .summary-row {
+          display: flex;
+          justify-content: space-between;
+          margin-bottom: 2px;
+        }
+
+        .total-row {
+          font-size: 13px;
+          font-weight: 900;
+          border-top: 1px dashed #000000;
+          border-bottom: 1px dashed #000000;
+          padding: 4px 0;
+          margin-top: 4px;
+          margin-bottom: 4px;
+        }
+
+        .qr-container {
+          text-align: center;
+          margin: 8px 0;
+        }
+
+        .qr-image {
+          width: 30mm;
+          height: 30mm;
+          image-rendering: pixelated;
+        }
+
+        .fiscal-box {
+          font-size: 8.5px;
+          text-align: center;
+          border-top: 1px dashed #000000;
+          padding-top: 6px;
+          margin-top: 6px;
+          word-break: break-all;
+        }
+
+        .footer-thanks {
+          text-align: center;
+          font-weight: 700;
+          font-size: 10px;
+          margin-top: 8px;
+          border-top: 1px dashed #000000;
+          padding-top: 6px;
+        }
+
+        .actions-bar {
+          display: flex;
+          justify-content: center;
+          gap: 10px;
+          margin-bottom: 12px;
+          width: 100%;
+        }
+
+        .btn {
+          font-family: sans-serif;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 8px 16px;
+          border-radius: 8px;
+          cursor: pointer;
+          border: none;
+        }
+
+        .btn-print {
+          background-color: #f97316;
+          color: #ffffff;
+        }
+
+        .btn-close {
+          background-color: #e2e8f0;
+          color: #334155;
+        }
+
+        @media print {
+          .actions-bar {
+            display: none !important;
+          }
+          body {
+            padding: 0 !important;
+          }
+        }
+      </style>
+    </head>
+    <body>
+      <div class="actions-bar">
+        <button class="btn btn-close" onclick="window.close()">Fechar</button>
+        <button class="btn btn-print" onclick="window.print()">🖨️ Imprimir Recibo 80mm</button>
+      </div>
+
+      <div class="receipt-container">
+        <!-- Header -->
+        <div class="header">
+          ${logo ? `<img src="${logo}" class="logo" alt="Logo" />` : ''}
+          <div class="company-title">${companyName}</div>
+          <div class="store-info">${address}</div>
+          <div class="store-info">NUIT: ${nuit} | Tel: ${contact}</div>
+        </div>
+
+        <!-- Metadata -->
+        <div class="meta-section">
+          <div class="meta-row">
+            <span class="meta-label">DOCUMENTO:</span>
+            <span class="meta-val">${tx.invoiceNumber}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">DATA/HORA:</span>
+            <span class="meta-val">${formattedDate}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">OPERADOR:</span>
+            <span class="meta-val">${tx.cashierName}</span>
+          </div>
+          <div class="meta-row">
+            <span class="meta-label">CLIENTE:</span>
+            <span class="meta-val">${tx.customerName || "Consumidor Geral"}</span>
+          </div>
+          ${tx.nuit ? `
+            <div class="meta-row">
+              <span class="meta-label">NUIT CLIENTE:</span>
+              <span class="meta-val">${tx.nuit}</span>
+            </div>
+          ` : ''}
+        </div>
+
+        <!-- Items -->
+        <div class="items-section">
+          <div class="items-header">
+            <span>ARTIGO</span>
+            <span>QTD x TOTAL</span>
+          </div>
+          ${itemsRows}
+        </div>
+
+        <!-- Totals Summary -->
+        <div class="summary-section">
+          <div class="summary-row">
+            <span>SUBTOTAL:</span>
+            <span>${tx.subtotal.toLocaleString("pt-MZ")} ${currency}</span>
+          </div>
+          ${tx.discountTotal > 0 ? `
+            <div class="summary-row" style="color: #000; font-weight: 700;">
+              <span>DESCONTO:</span>
+              <span>-${tx.discountTotal.toLocaleString("pt-MZ")} ${currency}</span>
+            </div>
+          ` : ''}
+          <div class="summary-row">
+            <span>IVA (16% Incluído):</span>
+            <span>${tx.vatTotal.toLocaleString("pt-MZ")} ${currency}</span>
+          </div>
+
+          <div class="summary-row total-row">
+            <span>TOTAL PAGO:</span>
+            <span>${tx.grandTotal.toLocaleString("pt-MZ")} ${currency}</span>
+          </div>
+
+          <div class="summary-row" style="margin-top: 4px;">
+            <span>MÉTODO:</span>
+            <span style="font-weight: 700;">${tx.paymentMethod}</span>
+          </div>
+          ${tx.paymentDetails ? `
+            <div style="font-size: 9.5px; color: #333;">(${tx.paymentDetails})</div>
+          ` : ''}
+        </div>
+
+        <!-- QR Code -->
+        <div class="qr-container">
+          <img src="${qrCodeUrl}" class="qr-image" alt="QR Recibo Digital" />
+          <div style="font-size: 8.5px; font-weight: 700; margin-top: 2px;">RECIBO DIGITAL #${tx.invoiceNumber}</div>
+        </div>
+
+        <!-- Fiscal Certification -->
+        ${tx.fiscalCertified ? `
+          <div class="fiscal-box">
+            <div><strong>DOCUMENTO FISCAL HOMOLOGADO</strong></div>
+            <div>Certificado: ${certificationNumber}</div>
+            ${tx.fiscalKeys ? `<div>Chave: ${tx.fiscalKeys}</div>` : ''}
+            ${tx.fiscalHash ? `<div style="font-size: 7.5px;">Hash: ${tx.fiscalHash}</div>` : ''}
+          </div>
+        ` : ''}
+
+        <!-- Footer -->
+        <div class="footer-thanks">
+          *** OBRIGADO PELA PREFERÊNCIA! ***<br>
+          <span style="font-size: 8px; font-weight: normal;">Processado por Computador / OST VENDAS</span>
+        </div>
+      </div>
+
+      <script>
+        window.addEventListener('DOMContentLoaded', () => {
+          setTimeout(() => {
+            window.print();
+          }, 350);
+        });
+      </script>
+    </body>
+    </html>
+  `;
+
+  printWindow.document.write(htmlContent);
+  printWindow.document.close();
+}

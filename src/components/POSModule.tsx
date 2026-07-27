@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import QRCode from "qrcode";
+import { motion, AnimatePresence } from "motion/react";
 import { 
   Search, 
   Trash2, 
@@ -41,7 +42,7 @@ import { sendEmail } from "../lib/gmail";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { SYSTEM_THEMES } from "../lib/themes";
-import { printInvoiceHTML } from "../lib/printHelper";
+import { printInvoiceHTML, printThermal80mmReceipt } from "../lib/printHelper";
 
 // Extends CartItem type locally for inline observations
 interface UpgradedCartItem extends CartItem {
@@ -2251,104 +2252,111 @@ export default function POSModule({
               <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] mx-auto">Insira produtos utilizando o catálogo ao lado ou passe o código de barras no scanner.</p>
             </div>
           ) : (
-            cart.map((item) => {
-              const isInsufficient = item.quantity > item.product.stock;
-              const hasNoVat = item.product.vatRate === 0;
-              
-              return (
-                <div 
-                  key={item.product.id} 
-                  className={`p-2.5 rounded-xl border space-y-2 relative group transition-all ${
-                    isInsufficient 
-                      ? "bg-red-50/70 border-red-200" 
-                      : "bg-slate-50 border-slate-100 hover:border-slate-300"
-                  }`}
-                >
-                  <button
-                    onClick={() => handleDeleteRow(item.product.id)}
-                    className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 rounded-lg cursor-pointer"
-                    title="Remover Item"
+            <AnimatePresence initial={false}>
+              {cart.map((item) => {
+                const isInsufficient = item.quantity > item.product.stock;
+                const hasNoVat = item.product.vatRate === 0;
+                
+                return (
+                  <motion.div 
+                    key={item.product.id} 
+                    layout
+                    initial={{ opacity: 0, y: -10, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.92, height: 0, marginBottom: 0, overflow: "hidden" }}
+                    transition={{ duration: 0.2, ease: "easeOut" }}
+                    className={`p-2.5 rounded-xl border space-y-2 relative group transition-colors ${
+                      isInsufficient 
+                        ? "bg-red-50/70 border-red-200" 
+                        : "bg-slate-50 border-slate-100 hover:border-slate-300"
+                    }`}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <button
+                      onClick={() => handleDeleteRow(item.product.id)}
+                      className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 rounded-lg cursor-pointer"
+                      title="Remover Item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
 
-                  <div className="pr-6">
-                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">{item.product.brand || "Generico"}</span>
-                    <h5 className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight">{item.product.name}</h5>
-                    
-                    {/* Item price / calculations breakdown */}
-                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                      {item.product.salePrice.toLocaleString()} MT × {item.quantity} {item.product.weightBased ? "kg" : "un"}
-                    </p>
-
-                    {/* Inline active alerts inside items */}
-                    {isInsufficient && (
-                      <p className="text-[9px] text-red-600 font-bold flex items-center gap-1 mt-1">
-                        <AlertTriangle className="w-3 h-3" /> Estoque insuficiente! Max: {item.product.stock}
+                    <div className="pr-6">
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">{item.product.brand || "Generico"}</span>
+                      <h5 className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight">{item.product.name}</h5>
+                      
+                      {/* Item price / calculations breakdown */}
+                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">
+                        {item.product.salePrice.toLocaleString()} MT × {item.quantity} {item.product.weightBased ? "kg" : "un"}
                       </p>
-                    )}
-                    {hasNoVat && (
-                      <p className="text-[9px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
-                        💡 Remessa Isenta de IVA (Isento)
-                      </p>
-                    )}
 
-                    {/* Show Observation note if configured */}
-                    {item.observation && (
-                      <div className="mt-1 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[9.5px] font-mono inline-block">
-                        📝 Obs: "{item.observation}"
+                      {/* Inline active alerts inside items */}
+                      {isInsufficient && (
+                        <p className="text-[9px] text-red-600 font-bold flex items-center gap-1 mt-1">
+                          <AlertTriangle className="w-3 h-3" /> Estoque insuficiente! Max: {item.product.stock}
+                        </p>
+                      )}
+                      {hasNoVat && (
+                        <p className="text-[9px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
+                          💡 Remessa Isenta de IVA (Isento)
+                        </p>
+                      )}
+
+                      {/* Show Observation note if configured */}
+                      {item.observation && (
+                        <div className="mt-1 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[9.5px] font-mono inline-block">
+                          📝 Obs: "{item.observation}"
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 25. Large Touch Target Controls for Tablet */}
+                    <div className="flex items-center justify-between pt-1">
+                      <div className="flex items-center gap-1">
+                        <button 
+                          onClick={() => handleRemoveFromCart(item.product.id)}
+                          className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95 shrink-0"
+                          title="Decrementar"
+                        >
+                          <Minus className="w-4 h-4" />
+                        </button>
+                        
+                        {/* Direct quantity input */}
+                        <input
+                          type="number"
+                          step={item.product.weightBased ? "0.05" : "1"}
+                          value={item.quantity}
+                          onChange={(e) => handleDirectQuantityEdit(item.product.id, e.target.value)}
+                          className="w-12 h-10 bg-white border text-center font-mono font-bold text-xs rounded-lg outline-none focus:ring-1 focus:ring-orange-500"
+                          title="Quantidade Directa"
+                        />
+
+                        <button 
+                          onClick={() => handleTriggerAddToCart(item.product.id as any)}
+                          disabled={item.quantity >= item.product.stock}
+                          className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95 shrink-0"
+                          title="Incrementar"
+                        >
+                          <Plus className="w-4 h-4" />
+                        </button>
                       </div>
-                    )}
-                  </div>
 
-                  {/* 25. Large Touch Target Controls for Tablet */}
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-1">
-                      <button 
-                        onClick={() => handleRemoveFromCart(item.product.id)}
-                        className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95 shrink-0"
-                        title="Decrementar"
-                      >
-                        <Minus className="w-4 h-4" />
-                      </button>
-                      
-                      {/* Direct quantity input */}
-                      <input
-                        type="number"
-                        step={item.product.weightBased ? "0.05" : "1"}
-                        value={item.quantity}
-                        onChange={(e) => handleDirectQuantityEdit(item.product.id, e.target.value)}
-                        className="w-12 h-10 bg-white border text-center font-mono font-bold text-xs rounded-lg outline-none focus:ring-1 focus:ring-orange-500"
-                        title="Quantidade Directa"
-                      />
-
-                      <button 
-                        onClick={() => handleTriggerAddToCart(item.product.id as any)}
-                        disabled={item.quantity >= item.product.stock}
-                        className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95 shrink-0"
-                        title="Incrementar"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
+                      <div className="flex flex-col items-end gap-1">
+                        {/* 6. Obs button trigger */}
+                        <button
+                          onClick={() => handleAddObservation(item.product.id)}
+                          className="text-[10px] text-slate-500 hover:text-orange-600 flex items-center gap-0.5 font-medium hover:underline bg-white px-2 py-1 rounded border border-slate-100 cursor-pointer"
+                        >
+                          📝 Nota
+                        </button>
+                        
+                        <span className="text-xs font-black text-slate-800">
+                          {(item.product.salePrice * item.quantity).toLocaleString()} MT
+                        </span>
+                      </div>
                     </div>
-
-                    <div className="flex flex-col items-end gap-1">
-                      {/* 6. Obs button trigger */}
-                      <button
-                        onClick={() => handleAddObservation(item.product.id)}
-                        className="text-[10px] text-slate-500 hover:text-orange-600 flex items-center gap-0.5 font-medium hover:underline bg-white px-2 py-1 rounded border border-slate-100 cursor-pointer"
-                      >
-                        📝 Nota
-                      </button>
-                      
-                      <span className="text-xs font-black text-slate-800">
-                        {(item.product.salePrice * item.quantity).toLocaleString()} MT
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })
+                  </motion.div>
+                );
+              })}
+            </AnimatePresence>
           )}
         </div>
 
@@ -3431,6 +3439,10 @@ export default function POSModule({
               <div id="pos-completed-receipt" className="border border-slate-200 bg-slate-50 rounded-xl p-4 font-mono text-[11px] leading-tight text-slate-700 select-all max-h-60 overflow-y-auto">
                 <style>{`
                   @media print {
+                    @page {
+                      size: ${printMode === "invoice" ? "A4 portrait" : "80mm auto"};
+                      margin: ${printMode === "invoice" ? "10mm" : "0mm"};
+                    }
                     body * {
                       visibility: hidden !important;
                     }
@@ -3461,16 +3473,20 @@ export default function POSModule({
                       position: absolute !important;
                       left: 0 !important;
                       top: 0 !important;
-                      width: 100% !important;
+                      width: 76mm !important;
+                      max-width: 80mm !important;
                       height: auto !important;
                       border: none !important;
                       background: white !important;
                       color: black !important;
-                      padding: 20px !important;
-                      margin: 0 !important;
+                      padding: ${settings?.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4}mm 1mm ${settings?.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8}mm 1mm !important;
+                      margin: 0 auto !important;
                       box-shadow: none !important;
                       overflow: visible !important;
                       display: block !important;
+                      font-family: 'Courier New', Courier, monospace !important;
+                      font-size: 11px !important;
+                      line-height: 1.25 !important;
                     }
                     `}
                     .no-print {
@@ -3804,28 +3820,7 @@ export default function POSModule({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setPrintMode("invoice");
-                  setIsSimulatingPrint(true);
-                  setTimeout(() => {
-                    try {
-                      window.print();
-                    } catch (err) {
-                      console.warn("Dispositivo em iFrame bloqueado para window.print.");
-                    }
-                  }, 150);
-                  setTimeout(() => {
-                    setIsSimulatingPrint(false);
-                  }, 4000);
-                }}
-                className="w-full flex items-center justify-center gap-2 py-2.5 bg-orange-600 hover:bg-orange-700 rounded-xl text-xs font-bold text-white transition shadow-lg shadow-orange-600/15 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Imprimir Fatura (A4)
-              </button>
-
+              {/* Primary 80mm Thermal Receipt Button */}
               <button
                 type="button"
                 onClick={() => {
@@ -3842,26 +3837,76 @@ export default function POSModule({
                     setIsSimulatingPrint(false);
                   }, 4000);
                 }}
-                className="w-full flex items-center justify-center gap-2 py-2 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition cursor-pointer"
+                className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 rounded-xl text-xs font-bold text-white transition shadow-lg shadow-orange-600/20 cursor-pointer active:scale-[0.99]"
               >
-                <Printer className="w-3.5 h-3.5" />
-                Via Rolo Térmico (Standard)
+                <div className="flex items-center gap-2">
+                  <Printer className="w-4 h-4 shrink-0" />
+                  <span>Imprimir Recibo</span>
+                </div>
+                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-mono font-semibold tracking-wide">
+                  Térmica 80mm
+                </span>
               </button>
 
+              {/* Secondary A4 Invoice Button */}
               <button
                 type="button"
                 onClick={() => {
-                  try {
-                    printInvoiceHTML(completedTx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
-                  } catch (err) {
-                    console.error(err);
-                  }
+                  setPrintMode("invoice");
+                  setIsSimulatingPrint(true);
+                  setTimeout(() => {
+                    try {
+                      window.print();
+                    } catch (err) {
+                      console.warn("Dispositivo em iFrame bloqueado para window.print.");
+                    }
+                  }, 150);
+                  setTimeout(() => {
+                    setIsSimulatingPrint(false);
+                  }, 4000);
                 }}
-                className="w-full flex items-center justify-center gap-2 py-1.5 text-slate-500 hover:text-slate-700 text-[10px] font-semibold transition hover:bg-slate-50 rounded-lg cursor-pointer"
+                className="w-full flex items-center justify-between px-4 py-2.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition cursor-pointer"
               >
-                <Printer className="w-3 h-3" />
-                Abrir em Nova Janela (PDF/A4)
+                <div className="flex items-center gap-2">
+                  <Printer className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                  <span>Imprimir Fatura (A4)</span>
+                </div>
+                <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-sans">
+                  Folha A4
+                </span>
               </button>
+
+              {/* Popup window options */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      printThermal80mmReceipt(completedTx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1.5 border border-orange-200 bg-orange-50/50 hover:bg-orange-100/80 text-orange-800 text-[10.5px] font-semibold transition rounded-lg cursor-pointer"
+                >
+                  <Printer className="w-3 h-3 text-orange-600" />
+                  <span>Janela Recibo 80mm</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      printInvoiceHTML(completedTx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[10.5px] font-semibold transition rounded-lg cursor-pointer"
+                >
+                  <Printer className="w-3 h-3 text-slate-400" />
+                  <span>Janela Fatura A4</span>
+                </button>
+              </div>
             </div>
 
             {/* Close button */}

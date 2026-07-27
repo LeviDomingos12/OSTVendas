@@ -13,14 +13,26 @@ import {
   Send,
   CheckCircle2,
   PhoneCall,
-  DollarSign
+  DollarSign,
+  ShoppingBag,
+  Receipt,
+  Calendar,
+  Printer,
+  Eye,
+  X,
+  FileText,
+  ChevronRight,
+  UserCheck
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
-import { Customer, UserRole } from "../types";
+import { Customer, UserRole, Transaction, SystemSettings } from "../types";
 import { useConfirm } from "../hooks/useConfirm";
+import { printInvoiceHTML } from "../lib/printHelper";
 
 interface CustomersModuleProps {
   customers: Customer[];
+  transactions?: Transaction[];
+  settings?: SystemSettings;
   onAddCustomer: (c: Customer) => void;
   onUpdateCustomer?: (c: Customer) => void;
   onAddCashFlowEntry?: (entry: any) => void;
@@ -34,6 +46,8 @@ interface CustomersModuleProps {
 
 export default function CustomersModule({
   customers,
+  transactions = [],
+  settings,
   onAddCustomer,
   onUpdateCustomer,
   onAddCashFlowEntry,
@@ -51,7 +65,12 @@ export default function CustomersModule({
   const [filterType, setFilterType] = useState<"ALL" | "VIP" | "DEBT" | "INACTIVE">("ALL");
 
   // Sub-tabs navigation inside Customer Module
-  const [activeSubTab, setActiveSubTab] = useState<"list" | "register" | "history" | "debts">("list");
+  const [activeSubTab, setActiveSubTab] = useState<"list" | "register" | "history" | "debts" | "purchases">("list");
+
+  // Customer Purchase History States
+  const [selectedCustomerHistory, setSelectedCustomerHistory] = useState<Customer | null>(null);
+  const [historySearchQuery, setHistorySearchQuery] = useState("");
+  const [selectedTxDetail, setSelectedTxDetail] = useState<Transaction | null>(null);
 
   // Debt Settlement Modal States
   const [settleDebtCustomer, setSettleDebtCustomer] = useState<Customer | null>(null);
@@ -111,6 +130,32 @@ export default function CustomersModule({
       return true;
     }).length;
   }, [customers, campaignTarget]);
+
+  // Filter transactions for selected customer purchase history
+  const selectedCustomerTransactions = useMemo(() => {
+    if (!selectedCustomerHistory) return [];
+    const cust = selectedCustomerHistory;
+    
+    // Filter matching customer ID, phone, or name
+    const list = (transactions || []).filter(tx => {
+      if (tx.customerId && tx.customerId === cust.id) return true;
+      if (cust.phone && tx.customerPhone && tx.customerPhone.replace(/\s+/g, '').includes(cust.phone.replace(/\s+/g, ''))) return true;
+      if (cust.name && tx.customerName && tx.customerName.toLowerCase().trim() === cust.name.toLowerCase().trim()) return true;
+      return false;
+    });
+
+    if (!historySearchQuery.trim()) {
+      return list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    }
+
+    const q = historySearchQuery.toLowerCase();
+    return list.filter(tx => 
+      (tx.invoiceNumber && tx.invoiceNumber.toLowerCase().includes(q)) ||
+      (tx.cashierName && tx.cashierName.toLowerCase().includes(q)) ||
+      (tx.paymentMethod && tx.paymentMethod.toLowerCase().includes(q)) ||
+      (tx.items && tx.items.some(i => i.productName && i.productName.toLowerCase().includes(q)))
+    ).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [transactions, selectedCustomerHistory, historySearchQuery]);
 
   // Handle customer registration
   const handleSubmitCustomer = (e: React.FormEvent) => {
@@ -418,7 +463,7 @@ export default function CustomersModule({
     <div className="space-y-6">
       
       {/* Sub tabs navigation */}
-      <div className="flex gap-1 border-b border-slate-200/30 pb-px mb-5">
+      <div className="flex gap-1 border-b border-slate-200/30 pb-px mb-5 flex-wrap">
         <button
           type="button"
           onClick={() => setActiveSubTab("list")}
@@ -430,6 +475,23 @@ export default function CustomersModule({
         >
           <Users className="w-4 h-4" />
           Fichas de Clientes ({customers.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            if (!selectedCustomerHistory && customers.length > 0) {
+              setSelectedCustomerHistory(customers[0]);
+            }
+            setActiveSubTab("purchases");
+          }}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeSubTab === "purchases"
+              ? "border-amber-500 text-amber-500"
+              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+          }`}
+        >
+          <ShoppingBag className="w-4 h-4" />
+          Histórico de Compras
         </button>
         <button
           type="button"
@@ -768,7 +830,18 @@ export default function CustomersModule({
                             </div>
                           </td>
                           <td className="p-3 text-center">
-                            <div className="flex items-center justify-center gap-2">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setSelectedCustomerHistory(c);
+                                  setActiveSubTab("purchases");
+                                }}
+                                className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-[10.5px] font-bold flex items-center gap-1 transition cursor-pointer"
+                                title="Ver Histórico de Compras"
+                              >
+                                <ShoppingBag className="w-3 h-3 text-amber-600 shrink-0" />
+                                Compras
+                              </button>
                               {hasDebt && (
                                 <button
                                   onClick={() => {
@@ -784,6 +857,7 @@ export default function CustomersModule({
                               <button
                                 onClick={() => handleDeleteCustomerClick(c.id)}
                                 className="p-1 text-slate-350 hover:text-red-650 rounded cursor-pointer animate-none"
+                                title="Excluir Cliente"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -1074,6 +1148,335 @@ export default function CustomersModule({
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === "purchases" && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm animate-in fade-in duration-200 space-y-6">
+          {/* Header Customer Selector */}
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center font-bold shadow-md shadow-amber-500/20 shrink-0">
+                <ShoppingBag className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">Histórico de Compras por Cliente</h3>
+                <p className="text-xs text-slate-500">Histórico de transações comerciais e faturas emitidas por cliente.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <label className="text-xs font-bold text-slate-600 shrink-0">Cliente:</label>
+              <select
+                value={selectedCustomerHistory?.id || ""}
+                onChange={(e) => {
+                  const found = customers.find(c => c.id === e.target.value);
+                  setSelectedCustomerHistory(found || null);
+                }}
+                className="bg-white border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-800 outline-none focus:border-amber-500 w-full sm:w-72 shadow-sm"
+              >
+                <option value="">-- Selecionar Cliente --</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.phone}) - {c.purchaseCount} compras
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {!selectedCustomerHistory ? (
+            <div className="text-center py-12 text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+              <Users className="w-10 h-10 mx-auto text-slate-300 mb-2" />
+              <p className="font-bold text-slate-600 text-sm">Nenhum cliente selecionado</p>
+              <p className="text-xs text-slate-400 mt-1">Por favor, selecione um cliente no menu acima para consultar o seu histórico de compras.</p>
+            </div>
+          ) : (
+            <>
+              {/* Customer Info & Executive KPIs */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-4 rounded-xl shadow-md flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono">Ficha de Cliente</span>
+                      {selectedCustomerHistory.purchaseCount >= 10 && (
+                        <span className="bg-amber-500 text-slate-950 font-black text-[9px] px-2 py-0.5 rounded-full uppercase">VIP</span>
+                      )}
+                    </div>
+                    <h4 className="font-extrabold text-base text-white mt-1 leading-tight">{selectedCustomerHistory.name}</h4>
+                    <p className="text-xs text-slate-300 font-mono mt-1">📱 {selectedCustomerHistory.phone}</p>
+                    <p className="text-xs text-slate-400 font-mono">🏢 NUIT: {selectedCustomerHistory.nuit || "N/A"}</p>
+                  </div>
+                  {selectedCustomerHistory.address && (
+                    <p className="text-[10.5px] text-slate-400 mt-3 truncate border-t border-slate-700/60 pt-2">
+                      📍 {selectedCustomerHistory.address}
+                    </p>
+                  )}
+                </div>
+
+                <div className="bg-amber-50/70 p-4 rounded-xl border border-amber-200/60 flex flex-col justify-center">
+                  <span className="text-[10px] font-extrabold text-amber-700 uppercase tracking-wider font-mono">Total de Vendas Acumuladas</span>
+                  <p className="text-2xl font-black font-mono text-amber-900 mt-1">
+                    {selectedCustomerTransactions.reduce((acc, t) => acc + t.grandTotal, 0).toLocaleString()} {currency}
+                  </p>
+                  <p className="text-[10.5px] text-amber-700 font-medium mt-1">
+                    Em {selectedCustomerTransactions.length} transações liquidadas
+                  </p>
+                </div>
+
+                <div className="bg-emerald-50/70 p-4 rounded-xl border border-emerald-200/60 flex flex-col justify-center">
+                  <span className="text-[10px] font-extrabold text-emerald-700 uppercase tracking-wider font-mono">Pontos de Fidelidade</span>
+                  <p className="text-2xl font-black font-mono text-emerald-900 mt-1 flex items-center gap-1.5">
+                    <Award className="w-6 h-6 text-emerald-600" />
+                    {selectedCustomerHistory.loyaltyPoints}
+                  </p>
+                  <p className="text-[10.5px] text-emerald-700 font-medium mt-1">
+                    Saldo atual de pontos acumulados
+                  </p>
+                </div>
+
+                <div className={`p-4 rounded-xl border flex flex-col justify-center ${
+                  selectedCustomerHistory.debt > 0 
+                    ? "bg-red-50/70 border-red-200/70 text-red-900" 
+                    : "bg-slate-50 border-slate-200 text-slate-800"
+                }`}>
+                  <span className={`text-[10px] font-extrabold uppercase tracking-wider font-mono ${
+                    selectedCustomerHistory.debt > 0 ? "text-red-700" : "text-slate-500"
+                  }`}>
+                    Dívida Pendente
+                  </span>
+                  <p className={`text-2xl font-black font-mono mt-1 ${
+                    selectedCustomerHistory.debt > 0 ? "text-red-700" : "text-slate-700"
+                  }`}>
+                    {selectedCustomerHistory.debt.toLocaleString()} {currency}
+                  </p>
+                  <p className="text-[10.5px] font-medium mt-1 opacity-80">
+                    {selectedCustomerHistory.debt > 0 ? "⚠️ Pendente de pagamento" : "✓ Sem pendências financeiras"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Filter / Search within transaction list */}
+              <div className="flex flex-col sm:flex-row gap-3 items-center justify-between pt-2">
+                <div className="relative w-full sm:w-80">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Filtrar por nº fatura, produto ou operador..."
+                    value={historySearchQuery}
+                    onChange={(e) => setHistorySearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs outline-none focus:border-amber-500 focus:bg-white"
+                  />
+                </div>
+                <span className="text-xs text-slate-500 font-medium">
+                  Exibindo <span className="font-bold text-slate-800">{selectedCustomerTransactions.length}</span> transação(ões)
+                </span>
+              </div>
+
+              {/* Transactions Table */}
+              <div className="overflow-x-auto max-h-[420px] overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-100 text-[10px] uppercase font-bold text-slate-600 tracking-wider sticky top-0 z-10">
+                      <th className="p-3 border-b border-slate-200">Data e Hora</th>
+                      <th className="p-3 border-b border-slate-200">Nº Fatura</th>
+                      <th className="p-3 border-b border-slate-200">Itens / Artigos Comprados</th>
+                      <th className="p-3 border-b border-slate-200">Método Pagamento</th>
+                      <th className="p-3 border-b border-slate-200">Operador / Caixa</th>
+                      <th className="p-3 border-b border-slate-200 text-right">Total ({currency})</th>
+                      <th className="p-3 border-b border-slate-200 text-center">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {selectedCustomerTransactions.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="p-8 text-center text-slate-400 italic">
+                          Nenhuma transação comercial encontrada para os critérios selecionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      selectedCustomerTransactions.map((tx) => (
+                        <tr key={tx.id} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="p-3 font-mono text-slate-600 shrink-0 whitespace-nowrap">
+                            {new Date(tx.timestamp).toLocaleString("pt-MZ", { dateStyle: "short", timeStyle: "short" })}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-800 shrink-0 whitespace-nowrap">
+                            {tx.invoiceNumber || tx.id}
+                          </td>
+                          <td className="p-3 max-w-xs">
+                            <div className="space-y-1">
+                              {tx.items.slice(0, 3).map((item, idx) => (
+                                <div key={idx} className="flex items-center justify-between text-[11px] text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
+                                  <span className="font-semibold truncate max-w-[180px]">{item.productName}</span>
+                                  <span className="font-mono text-slate-500 text-[10px] shrink-0 ml-1">
+                                    {item.quantity}x {item.price.toLocaleString()} MT
+                                  </span>
+                                </div>
+                              ))}
+                              {tx.items.length > 3 && (
+                                <span className="text-[10px] text-amber-600 font-bold block">
+                                  + {tx.items.length - 3} mais artigo(s)
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 shrink-0 whitespace-nowrap">
+                            <span className="px-2 py-1 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-lg border border-slate-200 font-mono">
+                              {tx.paymentMethod === "CASH" ? "💵 Dinheiro" :
+                               tx.paymentMethod === "MPESA_PAGA_FACIL" ? "📱 M-Pesa" :
+                               tx.paymentMethod === "EMOLA" ? "📱 E-Mola" :
+                               tx.paymentMethod === "POS_CARD" ? "💳 POS Card" :
+                               tx.paymentMethod === "CREDIT_CARD" ? "💳 Cartão" :
+                               tx.paymentMethod === "BANK_TRANSFER" ? "🏦 Transferência" :
+                               tx.paymentMethod === "DEBT" ? "🧾 Dívida" : tx.paymentMethod}
+                            </span>
+                          </td>
+                          <td className="p-3 font-medium text-slate-600 shrink-0 whitespace-nowrap">
+                            👤 {tx.cashierName || "Caixa"}
+                          </td>
+                          <td className="p-3 text-right font-mono font-bold text-slate-900 text-sm shrink-0 whitespace-nowrap">
+                            {tx.grandTotal.toLocaleString()} {currency}
+                          </td>
+                          <td className="p-3 text-center shrink-0 whitespace-nowrap">
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => setSelectedTxDetail(tx)}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold text-[10.5px] transition flex items-center gap-1 cursor-pointer"
+                                title="Ver Detalhes da Fatura"
+                              >
+                                <Eye className="w-3.5 h-3.5" /> Detalhes
+                              </button>
+                              {settings && (
+                                <button
+                                  onClick={() => printInvoiceHTML(tx, settings)}
+                                  className="p-1 text-slate-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition cursor-pointer"
+                                  title="Imprimir / Descarregar Fatura HTML"
+                                >
+                                  <Printer className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Transaction Detail Modal */}
+      {selectedTxDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+            <div className="bg-slate-900 p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="font-bold text-sm">Fatura / Comprovante #{selectedTxDetail.invoiceNumber || selectedTxDetail.id}</h3>
+                  <p className="text-[10.5px] text-slate-300 font-mono">
+                    {new Date(selectedTxDetail.timestamp).toLocaleString("pt-MZ")}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedTxDetail(null)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 grid grid-cols-2 gap-2 font-mono text-[11px]">
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase font-sans">Cliente</span>
+                  <p className="font-bold text-slate-800">{selectedTxDetail.customerName || "Consumidor Final"}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase font-sans">Operador / Caixa</span>
+                  <p className="font-bold text-slate-800">{selectedTxDetail.cashierName}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase font-sans">Método de Pagamento</span>
+                  <p className="font-bold text-slate-800">{selectedTxDetail.paymentMethod}</p>
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 block uppercase font-sans">NUIT Cliente</span>
+                  <p className="font-bold text-slate-800">{selectedTxDetail.nuit || "N/A"}</p>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="font-bold text-slate-800 mb-2 uppercase text-[10px] tracking-wider font-mono">Itens da Compra</h4>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-100 text-[10px] font-bold text-slate-500 uppercase">
+                      <tr>
+                        <th className="p-2">Produto</th>
+                        <th className="p-2 text-center">Qtd</th>
+                        <th className="p-2 text-right">Preço</th>
+                        <th className="p-2 text-right">Subtotal</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                      {selectedTxDetail.items.map((it, idx) => (
+                        <tr key={idx}>
+                          <td className="p-2 font-sans font-medium text-slate-800">{it.productName}</td>
+                          <td className="p-2 text-center text-slate-600">{it.quantity}</td>
+                          <td className="p-2 text-right text-slate-600">{it.price.toLocaleString()}</td>
+                          <td className="p-2 text-right font-bold text-slate-900">{it.subtotal.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 space-y-1 text-right font-mono">
+                <div className="flex justify-between text-slate-600 text-xs">
+                  <span>Subtotal:</span>
+                  <span>{selectedTxDetail.subtotal.toLocaleString()} {currency}</span>
+                </div>
+                {selectedTxDetail.vatTotal > 0 && (
+                  <div className="flex justify-between text-slate-600 text-xs">
+                    <span>IVA Total (16%):</span>
+                    <span>{selectedTxDetail.vatTotal.toLocaleString()} {currency}</span>
+                  </div>
+                )}
+                {selectedTxDetail.discountTotal > 0 && (
+                  <div className="flex justify-between text-emerald-700 text-xs font-bold">
+                    <span>Desconto Aplicado:</span>
+                    <span>-{selectedTxDetail.discountTotal.toLocaleString()} {currency}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-slate-900 text-sm font-black pt-1 border-t border-amber-200/80">
+                  <span>TOTAL PAGO:</span>
+                  <span className="text-amber-700">{selectedTxDetail.grandTotal.toLocaleString()} {currency}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex gap-2">
+              <button
+                onClick={() => setSelectedTxDetail(null)}
+                className="flex-1 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Fechar
+              </button>
+              {settings && (
+                <button
+                  onClick={() => printInvoiceHTML(selectedTxDetail, settings)}
+                  className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs shadow-md shadow-amber-500/20 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" /> Imprimir Fatura
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

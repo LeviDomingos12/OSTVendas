@@ -1111,6 +1111,39 @@ export default function DashboardModule({
     });
   }, [transactions, selectedDateStr]);
 
+  // Volume de Vendas Diário (Últimos 7 Dias) usando recharts
+  const chartLast7DaysVolume = useMemo(() => {
+    const dayNames = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+    const dailyMap: Record<string, { date: string; shortDate: string; dayLabel: string; totalSales: number; txCount: number }> = {};
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(selectedDateStr);
+      d.setDate(d.getDate() - i);
+      const str = d.toISOString().split("T")[0];
+      const parts = str.split("-");
+      const shortDate = `${parts[2]}/${parts[1]}`;
+      const dayName = dayNames[d.getDay()];
+
+      dailyMap[str] = {
+        date: str,
+        shortDate,
+        dayLabel: `${dayName} (${shortDate})`,
+        totalSales: 0,
+        txCount: 0
+      };
+    }
+
+    transactions.forEach(tx => {
+      const txDate = dateSplit(tx.timestamp);
+      if (dailyMap[txDate] !== undefined) {
+        dailyMap[txDate].totalSales += tx.grandTotal;
+        dailyMap[txDate].txCount += 1;
+      }
+    });
+
+    return Object.values(dailyMap);
+  }, [transactions, selectedDateStr]);
+
   // Vendas vs Metas Recorrentes (Past 7 Days relative to selectedDateStr)
   const chartSalesVsGoals = useMemo(() => {
     const dailyMap: Record<string, { Vendas: number; Meta: number }> = {};
@@ -2863,27 +2896,44 @@ export default function DashboardModule({
       {/* 2. MAIN VISUAL CHARTS ROWS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         
-        {/* Daily sales timeline widget */}
+        {/* Daily sales volume for last 7 days (Bar Chart with recharts) */}
         <div className="col-span-2 bg-white p-5 rounded-2xl border border-slate-200 outline-none overflow-hidden shadow-sm flex flex-col h-96">
-          <div className="mb-4">
-            <h3 className="font-bold text-slate-800 text-sm">Vendas por Dia</h3>
-            <p className="text-xs text-slate-400 mt-0.5">Fluxo de caixa gerado nos últimos 10 dias correntes.</p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block"></span>
+                Volume de Vendas Diário (Últimos 7 Dias)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Volume de vendas diário acumulado e transações realizadas nos últimos 7 dias.
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-xs font-mono font-bold text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-200">
+                {chartLast7DaysVolume.reduce((acc, curr) => acc + curr.totalSales, 0).toLocaleString()} {currency}
+              </span>
+            </div>
           </div>
           <div className="flex-1 min-h-0 text-[11px] font-mono">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartDailySales} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#f97316" stopOpacity={0.25}/>
-                    <stop offset="95%" stopColor="#f97316" stopOpacity={0.01}/>
-                  </linearGradient>
-                </defs>
+              <BarChart data={chartLast7DaysVolume} margin={{ top: 10, right: 10, left: -15, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="data" stroke="#94a3b8" />
-                <YAxis stroke="#94a3b8" />
-                <Tooltip formatter={(value) => [`${value.toLocaleString()} MT`, 'Vendas']} />
-                <Area type="monotone" dataKey="Vendas" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSales)" />
-              </AreaChart>
+                <XAxis dataKey="dayLabel" stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} />
+                <Tooltip 
+                  formatter={(value: any, name: string) => [
+                    name === "totalSales" ? `${Number(value).toLocaleString()} ${currency}` : `${value} vendas`,
+                    name === "totalSales" ? "Volume de Vendas" : "Transações"
+                  ]}
+                  contentStyle={{ backgroundColor: "#0f172a", borderRadius: "12px", border: "none", color: "#fff", fontSize: "11px" }}
+                  itemStyle={{ color: "#f8fafc" }}
+                />
+                <Bar dataKey="totalSales" name="totalSales" fill="#f97316" radius={[6, 6, 0, 0]}>
+                  {chartLast7DaysVolume.map((entry, index) => (
+                    <Cell key={`cell-vol-${index}`} fill={entry.date === selectedDateStr ? "#ea580c" : "#f97316"} />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         </div>

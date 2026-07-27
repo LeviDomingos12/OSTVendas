@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { 
   initialProducts, 
   initialCustomers, 
@@ -62,6 +64,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
+import QRCode from "qrcode";
 
 import { 
   Activity, 
@@ -73,6 +76,7 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
+  AlertTriangle,
   X,
   Wifi,
   WifiOff,
@@ -95,7 +99,14 @@ import {
   ChevronDown,
   ChevronUp,
   Compass,
-  LogOut
+  LogOut,
+  Eye,
+  EyeOff,
+  QrCode,
+  Key,
+  UserX,
+  ShieldCheck,
+  Globe
 } from "lucide-react";
 
 interface Toast {
@@ -274,22 +285,357 @@ export default function App() {
   // User Switch & Account Linking (Vínculo de Conta) States
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
   const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
-  const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile">("switch");
+  const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile" | "activity">("switch");
   const [profileName, setProfileName] = useState("");
   const [profileContact, setProfileContact] = useState("");
   const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
+  const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
+  const [testPinInput, setTestPinInput] = useState<string>("");
   const [switchEnteredPin, setSwitchEnteredPin] = useState("");
   const [switchPinError, setSwitchPinError] = useState("");
+  const [showSwitchPin, setShowSwitchPin] = useState(false);
+  const [showPaymentQrModal, setShowPaymentQrModal] = useState(false);
+  const [paymentQrUrl, setPaymentQrUrl] = useState("");
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
 
   useEffect(() => {
     if (isUserSwitchModalOpen && activeUser) {
       setProfileName(activeUser.name || "");
       setProfileContact(activeUser.contact || "");
       setProfileFotoPerfil(activeUser.fotoPerfil || "");
+      setTestPinInput(activeUser.pin || "");
+      setProfileTwoFactorEmail(activeUser.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
     }
     setSwitchEnteredPin("");
     setSwitchPinError("");
-  }, [isUserSwitchModalOpen, activeUser]);
+    setShowSwitchPin(false);
+  }, [isUserSwitchModalOpen, activeUser, settings.twoFactorEmailEnabled]);
+
+  const pinStrength = useMemo(() => {
+    const pin = testPinInput.trim();
+    if (!pin) {
+      return {
+        score: 0,
+        label: "Aguardando PIN",
+        colorBg: "bg-slate-700",
+        colorText: "text-slate-400",
+        bars: [false, false, false],
+        feedback: "Digite um PIN ou clique em 'Resetar PIN' para gerar um novo PIN temporário."
+      };
+    }
+
+    if (/^(\d)\1+$/.test(pin)) {
+      return {
+        score: 1,
+        label: "Muito Fraca (Números Repetidos)",
+        colorBg: "bg-rose-500",
+        colorText: "text-rose-400",
+        bars: [true, false, false],
+        feedback: "❌ Inseguro: Contém apenas dígitos repetidos (ex: 111111)."
+      };
+    }
+
+    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789"];
+    if (seqs.some(s => s.includes(pin))) {
+      return {
+        score: 1,
+        label: "Muito Fraca (Sequência Simples)",
+        colorBg: "bg-rose-500",
+        colorText: "text-rose-400",
+        bars: [true, false, false],
+        feedback: "❌ Inseguro: Contém uma sequência numérica simples (ex: 123456)."
+      };
+    }
+
+    if (pin.length < 4) {
+      return {
+        score: 1,
+        label: "Fraca (Curto)",
+        colorBg: "bg-orange-500",
+        colorText: "text-orange-400",
+        bars: [true, false, false],
+        feedback: "⚠️ O PIN deve possuir no mínimo 4 a 6 dígitos numéricos."
+      };
+    }
+
+    if (pin.length < 6 || /^(\d{2})\1+$/.test(pin)) {
+      return {
+        score: 2,
+        label: "Média",
+        colorBg: "bg-amber-500",
+        colorText: "text-amber-400",
+        bars: [true, true, false],
+        feedback: "⚡ Nível moderado: Recomendado utilizar 6 dígitos numéricos aleatórios."
+      };
+    }
+
+    return {
+      score: 3,
+      label: "Forte (Segurança Máxima)",
+      colorBg: "bg-emerald-500",
+      colorText: "text-emerald-400",
+      bars: [true, true, true],
+      feedback: "✅ PIN Seguro: Atende a todos os critérios sem sequências nem repetições simples."
+    };
+  }, [testPinInput]);
+
+  const currentPinWarning = useMemo(() => {
+    const pinToCheck = (testPinInput || activeUser?.pin || "").trim();
+    if (!pinToCheck) return null;
+
+    const isRepeated = /^(\d)\1+$/.test(pinToCheck);
+    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789", "1234", "4321"];
+    const isSequential = seqs.some(s => s.includes(pinToCheck));
+
+    if (isRepeated) {
+      return {
+        type: "repeated",
+        title: "Alerta de Segurança: PIN Inseguro (Repetição de Dígitos)",
+        message: `O PIN atual ('${pinToCheck}') consiste apenas em dígitos repetidos (ex: 111111). Esta escolha representa um alto risco de acesso não autorizado.`
+      };
+    }
+
+    if (isSequential) {
+      return {
+        type: "sequential",
+        title: "Alerta de Segurança: PIN Inseguro (Sequência Simples)",
+        message: `O PIN atual ('${pinToCheck}') é uma sequência numérica muito simples (ex: '123456'). Recomenda-se redefinir o PIN.`
+      };
+    }
+
+    return null;
+  }, [testPinInput, activeUser?.pin]);
+
+  const handleGeneratePaymentQr = async () => {
+    try {
+      setIsGeneratingQr(true);
+      const paymentData = JSON.stringify({
+        type: "RECEIVE_PAYMENT",
+        user: activeUser?.name || "Colaborador",
+        contact: activeUser?.contact || "840000000",
+        role: activeUser?.role || "Operador",
+        company: settings.companyName || "Sistema OST Vendas",
+        nuit: settings.companyNuit || "400000000",
+        timestamp: new Date().toISOString()
+      });
+      const url = await QRCode.toDataURL(paymentData, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: "#0f172a",
+          light: "#ffffff"
+        }
+      });
+      setPaymentQrUrl(url);
+      setShowPaymentQrModal(true);
+    } catch (err) {
+      console.error("Erro ao gerar QR Code:", err);
+      showToast("Erro ao gerar QR Code de pagamento", "error");
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  };
+
+  const handleResetPin = async () => {
+    if (!activeUser) return;
+
+    let newTempPin = "";
+    let attempts = 0;
+    while (attempts < 100) {
+      const candidate = Math.floor(100000 + Math.random() * 900000).toString();
+      const isRepeated = /^(\d)\1+$/.test(candidate);
+      const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789"];
+      const isSequential = seqs.some(s => s.includes(candidate));
+      if (!isRepeated && !isSequential) {
+        newTempPin = candidate;
+        break;
+      }
+      attempts++;
+    }
+    if (!newTempPin) newTempPin = "839251";
+
+    const nowIso = new Date().toISOString();
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === activeUser.id) {
+        return {
+          ...emp,
+          pin: newTempPin,
+          pinCreatedAt: nowIso,
+          pinChanged: false
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    setActiveUser({
+      ...activeUser,
+      pin: newTempPin,
+      pinCreatedAt: nowIso,
+      pinChanged: false
+    });
+
+    setTestPinInput(newTempPin);
+
+    handleAddAuditLog(
+      "Reset de PIN",
+      "SISTEMA",
+      `PIN temporário gerado para o colaborador ${activeUser.name} (ID: ${activeUser.id}).`
+    );
+
+    showToast(`Novo PIN temporário gerado: ${newTempPin}`, "success");
+
+    alert(
+      `✅ PIN RESETADO COM SUCESSO!\n\nColaborador: ${activeUser.name}\nNovo PIN Temporário: ${newTempPin}\nData de Criação: ${new Date(nowIso).toLocaleDateString("pt-PT")} às ${new Date(nowIso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}\n\nO colaborador deverá alterar esta senha no próximo acesso.`
+    );
+  };
+
+  const handleExportCollaboratorPdf = () => {
+    const targetEmployee = switchSelectedEmployeeId 
+      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+      : activeUser;
+
+    if (!targetEmployee) {
+      showToast("Nenhum colaborador selecionado para exportar.", "warning");
+      return;
+    }
+
+    const doc = new jsPDF();
+
+    // Header Banner
+    doc.setFillColor(249, 115, 22);
+    doc.rect(0, 0, 210, 28, "F");
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("FICHA DE COLABORADOR", 14, 18);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`${settings.companyName || "OST Vendas"} | NUIT: ${settings.companyNuit || "400000000"}`, 14, 24);
+
+    // Profile Data Section
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("1. Dados do Perfil e Credenciais", 14, 38);
+
+    const pinCreatedFormatted = targetEmployee.pinCreatedAt
+      ? new Date(targetEmployee.pinCreatedAt).toLocaleDateString("pt-PT", {
+          day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+        })
+      : targetEmployee.admissionDate
+      ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT")
+      : "Não registrada";
+
+    autoTable(doc, {
+      startY: 42,
+      head: [["Campo", "Informação"]],
+      body: [
+        ["ID do Colaborador", targetEmployee.id],
+        ["Nome Completo", targetEmployee.name],
+        ["Cargo / Função", targetEmployee.role],
+        ["Contacto Telefónico", targetEmployee.contact || "Não informado"],
+        ["E-mail Registrado", targetEmployee.email || "Sem e-mail vinculado"],
+        ["Estado da Conta", targetEmployee.status],
+        ["Data de Admissão", targetEmployee.admissionDate ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT") : "N/A"],
+        ["Data de Criação do PIN Atual", pinCreatedFormatted],
+        ["Status do PIN", targetEmployee.pinChanged === false ? "PIN Temporário" : "Senha Pessoal Ativa"]
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
+      styles: { fontSize: 9.5 }
+    });
+
+    // Activity Summary Section
+    const lastY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("2. Resumo de Atividade do Colaborador", 14, lastY);
+
+    const empName = targetEmployee.name.toLowerCase();
+    const empId = targetEmployee.id.toLowerCase();
+
+    const targetLogs = auditLogs
+      .filter(log => {
+        const logUser = (log.user || "").toLowerCase();
+        const logDetails = (log.details || "").toLowerCase();
+        return logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
+      })
+      .slice(-10)
+      .reverse();
+
+    if (targetLogs.length === 0) {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "italic");
+      doc.text("Nenhum registro de auditoria encontrado para este colaborador.", 14, lastY + 8);
+    } else {
+      autoTable(doc, {
+        startY: lastY + 5,
+        head: [["Data / Hora", "Módulo", "Ação", "Detalhes"]],
+        body: targetLogs.map(log => [
+          new Date(log.timestamp).toLocaleString("pt-PT", {
+            day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+          }),
+          log.module || "SISTEMA",
+          log.action || "AÇÃO",
+          log.details || "-"
+        ]),
+        theme: "grid",
+        headStyles: { fillColor: [249, 115, 22], textColor: [255, 255, 255], fontStyle: "bold" },
+        styles: { fontSize: 8.5 }
+      });
+    }
+
+    // Footer
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Ficha emitida em ${new Date().toLocaleString("pt-PT")} pelo Operador: ${activeUser?.name || "Sistema"}`, 14, pageHeight - 10);
+
+    doc.save(`Ficha_Colaborador_${targetEmployee.name.replace(/\s+/g, "_")}.pdf`);
+    showToast("Ficha do colaborador exportada em PDF com sucesso!", "success");
+  };
+
+  const handleSuspendCollaborator = async () => {
+    if (!activeUser) return;
+    const confirmSuspend = window.confirm(
+      `Tem a certeza que deseja suspender o colaborador "${activeUser.name}"?\n\nO status passará a 'SUSPENDED' e novos logins serão bloqueados imediatamente.`
+    );
+    if (!confirmSuspend) return;
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === activeUser.id) {
+        return {
+          ...emp,
+          status: "SUSPENDED" as const
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    setActiveUser({
+      ...activeUser,
+      status: "SUSPENDED"
+    });
+
+    handleAddAuditLog(
+      "Suspensão de Colaborador",
+      "SISTEMA",
+      `Colaborador ${activeUser.name} (ID: ${activeUser.id}) teve o status alterado para SUSPENDED.`
+    );
+
+    showToast(`Colaborador ${activeUser.name} foi suspenso com sucesso.`, "error");
+
+    setIsUserSwitchModalOpen(false);
+  };
 
   // Premium AI predictions state
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
@@ -3022,6 +3368,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               >
                 <CustomersModule
                   customers={customers}
+                  transactions={transactions}
+                  settings={settings}
                   onAddCustomer={handleAddCustomer}
                   onUpdateCustomer={(updatedC) => {
                     setCustomers(prev => {
@@ -3639,459 +3987,834 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               }`}
               id="inside-user-switcher-modal"
             >
-              {/* Header */}
-              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-orange-500/10 to-amber-500/10 text-left">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-orange-100 text-orange-700 dark:bg-orange-900/35 dark:text-orange-400 rounded-xl flex items-center justify-center shadow-inner">
-                      <Users className="w-5 h-5" />
+              <motion.div
+                initial={{ x: 40, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: -40, opacity: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="w-full h-full flex flex-col"
+              >
+                {/* Header */}
+                <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-orange-500/10 to-amber-500/10 text-left">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-orange-100 text-orange-700 dark:bg-orange-900/35 dark:text-orange-400 rounded-xl flex items-center justify-center shadow-inner">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Painel do Colaborador</h3>
+                        <p className="text-[10px] text-orange-600 dark:text-orange-400 font-extrabold font-mono uppercase">Vincular Conta & Configurar Perfil</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Painel do Colaborador</h3>
-                      <p className="text-[10px] text-orange-600 dark:text-orange-400 font-extrabold font-mono uppercase">Vincular Conta & Configurar Perfil</p>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsUserSwitchModalOpen(false)}
+                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-400 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
+                </div>
+
+                {/* Tabs */}
+                <div className={`flex border-b text-xs font-bold ${
+                  theme === "night" ? "border-zinc-850 bg-zinc-900/40" : "border-slate-100 bg-slate-50/40"
+                }`}>
                   <button
                     type="button"
-                    onClick={() => setIsUserSwitchModalOpen(false)}
-                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-400 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
+                    onClick={() => setUserSwitchModalTab("switch")}
+                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
+                      userSwitchModalTab === "switch"
+                        ? "border-orange-500 text-orange-500 font-black"
+                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    }`}
                   >
-                    <X className="w-4 h-4" />
+                    🔄 Alterar Usuário
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserSwitchModalTab("profile")}
+                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
+                      userSwitchModalTab === "profile"
+                        ? "border-orange-500 text-orange-500 font-black"
+                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    ⚙️ Configurações de Perfil
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setUserSwitchModalTab("activity")}
+                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
+                      userSwitchModalTab === "activity"
+                        ? "border-orange-500 text-orange-500 font-black"
+                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    📜 Histórico de Atividade
                   </button>
                 </div>
-              </div>
 
-              {/* Tabs */}
-              <div className={`flex border-b text-xs font-bold ${
-                theme === "night" ? "border-zinc-850 bg-zinc-900/40" : "border-slate-100 bg-slate-50/40"
-              }`}>
-                <button
-                  type="button"
-                  onClick={() => setUserSwitchModalTab("switch")}
-                  className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
-                    userSwitchModalTab === "switch"
-                      ? "border-orange-500 text-orange-500 font-black"
-                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  }`}
-                >
-                  🔄 Alterar Usuário
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUserSwitchModalTab("profile")}
-                  className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
-                    userSwitchModalTab === "profile"
-                      ? "border-orange-500 text-orange-500 font-black"
-                      : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                  }`}
-                >
-                  ⚙️ Configurações de Perfil
-                </button>
-              </div>
-
-              {/* Body */}
-              <div className="p-6 space-y-4 text-left overflow-y-auto max-h-[60vh]">
-                {userSwitchModalTab === "switch" ? (
-                  <>
-                    <div className="p-3.5 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1 text-xs">
-                      <p className="font-bold text-orange-500">Sessão Autenticada Ativa:</p>
-                      <p className="text-slate-400 leading-relaxed text-[11px]">
-                        Atualmente você está logado no sistema via e-mail com: <strong className="text-orange-400 font-mono">{auth.currentUser?.email || "Sem e-mail (Login Local)"}</strong>.
-                        Você pode selecionar qualquer colaborador no quadro comercial abaixo para **vincular o seu e-mail ativo** a ele e mudar seu operador operacional de forma instantânea.
-                      </p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Selecione o Colaborador de Destino</label>
-                      <select
-                        value={switchSelectedEmployeeId}
-                        onChange={(e) => {
-                          setSwitchSelectedEmployeeId(e.target.value);
-                          setSwitchEnteredPin("");
-                          setSwitchPinError("");
-                        }}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                      >
-                        <option value="">-- Escolha um colaborador --</option>
-                        {employees.map(emp => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.name} ({emp.role}) {emp.email ? `[Vínculo: ${emp.email}]` : "[Sem vínculo]"}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {switchSelectedEmployeeId && (
-                      <div className="space-y-4 p-4 bg-slate-900/60 rounded-xl border border-slate-800 animate-in fade-in duration-200">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/25 text-orange-400 flex items-center justify-center font-bold text-[11px] overflow-hidden">
-                            {employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil ? (
-                              (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("data:") || (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("http") ? (
-                                <img src={employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
-                              ) : (
-                                <span className="text-sm leading-none">{employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil}</span>
-                              )
-                            ) : (
-                              (employees.find(x => x.id === switchSelectedEmployeeId)?.name || "US").substring(0, 2).toUpperCase()
-                            )}
-                          </div>
-                          <div className="leading-none text-left">
-                            <p className="font-extrabold text-xs text-white">
-                              {employees.find(x => x.id === switchSelectedEmployeeId)?.name}
-                            </p>
-                            <p className="text-[10px] text-slate-400 mt-1">
-                              {employees.find(x => x.id === switchSelectedEmployeeId)?.role}
+                {/* Body */}
+                <div className="p-6 text-left overflow-y-auto max-h-[60vh]">
+                  <AnimatePresence mode="wait">
+                    <motion.div
+                      key={userSwitchModalTab}
+                      initial={{ opacity: 0, x: userSwitchModalTab === "switch" ? -15 : 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: userSwitchModalTab === "switch" ? 15 : -15 }}
+                      transition={{ duration: 0.22, ease: "easeInOut" }}
+                      className="space-y-4"
+                    >
+                      {userSwitchModalTab === "switch" ? (
+                        <>
+                          <div className="p-3.5 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1 text-xs">
+                            <p className="font-bold text-orange-500">Sessão Autenticada Ativa:</p>
+                            <p className="text-slate-400 leading-relaxed text-[11px]">
+                              Atualmente você está logado no sistema via e-mail com: <strong className="text-orange-400 font-mono">{auth.currentUser?.email || "Sem e-mail (Login Local)"}</strong>.
+                              Você pode selecionar qualquer colaborador no quadro comercial abaixo para **vincular o seu e-mail ativo** a ele e mudar seu operador operacional de forma instantânea.
                             </p>
                           </div>
-                        </div>
 
-                        {/* PASSWORD / PIN INPUT FIELD FOR PROTECTION */}
-                        <div className="border-t border-slate-800 pt-3 space-y-1.5 text-left">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                            Senha / PIN de Acesso do Colaborador Selecionado
-                          </label>
-                          <input
-                            type="password"
-                            maxLength={32}
-                            value={switchEnteredPin}
-                            onChange={(e) => {
-                              setSwitchEnteredPin(e.target.value);
-                              if (switchPinError) setSwitchPinError("");
-                            }}
-                            placeholder="Digite o PIN/Senha do colaborador para confirmar"
-                            className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 px-3.5 text-xs text-white outline-none transition font-medium focus:ring-2 focus:ring-orange-500/20"
-                          />
-                          {switchPinError && (
-                            <p className="text-[10.5px] text-red-500 font-bold animate-pulse mt-1">⚠️ {switchPinError}</p>
-                          )}
-                        </div>
-
-                        <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
-                          <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              defaultChecked={true}
-                              id="auto-link-email-checkbox"
-                              className="mt-0.5 rounded border-slate-850 bg-slate-950 text-orange-500 focus:ring-orange-500/30 cursor-pointer"
-                            />
-                            <div className="text-left leading-tight">
-                              <p className="text-[11px] font-bold text-slate-200">Vincular meu e-mail atual a este perfil</p>
-                              <p className="text-[9.5px] text-slate-400 mt-0.5">Sempre que fizer login com <strong className="text-orange-400">{auth.currentUser?.email || "seu e-mail atual"}</strong>, você entrará automaticamente nesta conta comercial.</p>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-4 animate-in fade-in duration-200">
-                    {/* Visual Preview Banner & Uploader */}
-                    <div className="flex items-center gap-4 p-4 bg-slate-900/60 rounded-xl border border-slate-850">
-                      <div className="relative shrink-0">
-                        <div className="w-16 h-16 rounded-2xl bg-orange-500 text-white flex items-center justify-center font-bold text-xl overflow-hidden border border-slate-700 shadow-lg">
-                          {profileFotoPerfil ? (
-                            profileFotoPerfil.startsWith("data:") || profileFotoPerfil.startsWith("http") || profileFotoPerfil.startsWith("/") ? (
-                              <img src={profileFotoPerfil} className="w-full h-full object-cover" alt="Previsualização" referrerPolicy="no-referrer" />
-                            ) : (
-                              <span className="text-3xl leading-none">{profileFotoPerfil}</span>
-                            )
-                          ) : (
-                            profileName.substring(0, 2).toUpperCase() || "US"
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
-                          className="absolute -bottom-1 -right-1 bg-orange-500 text-white rounded-lg p-1.5 hover:bg-orange-600 transition cursor-pointer shadow-md"
-                          title="Carregar Imagem"
-                        >
-                          <Camera className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="flex-1 leading-none text-left">
-                        <p className="text-xs font-black text-white">{profileName || "Sem Nome"}</p>
-                        <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-mono tracking-wider">{activeUser?.role || "Colaborador"}</p>
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            type="button"
-                            onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
-                            className="px-2.5 py-1 bg-slate-950 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold border border-slate-800 hover:border-slate-700 transition cursor-pointer"
-                          >
-                            Upload Foto
-                          </button>
-                          {profileFotoPerfil && (
-                            <button
-                              type="button"
-                              onClick={() => setProfileFotoPerfil("")}
-                              className="px-2.5 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg text-[9px] font-bold border border-red-500/20 transition cursor-pointer"
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Selecione o Colaborador de Destino</label>
+                            <select
+                              value={switchSelectedEmployeeId}
+                              onChange={(e) => {
+                                setSwitchSelectedEmployeeId(e.target.value);
+                                setSwitchEnteredPin("");
+                                setSwitchPinError("");
+                              }}
+                              className="w-full bg-slate-950 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
                             >
-                              Remover
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                              <option value="">-- Escolha um colaborador --</option>
+                              {employees.map(emp => (
+                                <option key={emp.id} value={emp.id}>
+                                  {emp.name} ({emp.role}) {emp.email ? `[Vínculo: ${emp.email}]` : "[Sem vínculo]"}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                    {/* Hidden File Input */}
-                    <input
-                      type="file"
-                      id="profile-photo-upload-input"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          if (file.size > 1.5 * 1024 * 1024) {
-                            showToast("A imagem deve ter no máximo 1.5MB", "error");
+                          {switchSelectedEmployeeId && (
+                            <div className="space-y-4 p-4 bg-slate-900/60 rounded-xl border border-slate-800 animate-in fade-in duration-200">
+                              <div className="flex items-center gap-3">
+                                <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/25 text-orange-400 flex items-center justify-center font-bold text-[11px] overflow-hidden">
+                                  {employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil ? (
+                                    (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("data:") || (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("http") ? (
+                                      <img src={employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <span className="text-sm leading-none">{employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil}</span>
+                                    )
+                                  ) : (
+                                    (employees.find(x => x.id === switchSelectedEmployeeId)?.name || "US").substring(0, 2).toUpperCase()
+                                  )}
+                                </div>
+                                <div className="leading-none text-left">
+                                  <p className="font-extrabold text-xs text-white">
+                                    {employees.find(x => x.id === switchSelectedEmployeeId)?.name}
+                                  </p>
+                                  <p className="text-[10px] text-slate-400 mt-1">
+                                    {employees.find(x => x.id === switchSelectedEmployeeId)?.role}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* PASSWORD / PIN INPUT FIELD FOR PROTECTION WITH SHOW/HIDE TOGGLE */}
+                              <div className="border-t border-slate-800 pt-3 space-y-1.5 text-left">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                  Senha / PIN de Acesso do Colaborador Selecionado
+                                </label>
+                                <div className="relative">
+                                  <input
+                                    type={showSwitchPin ? "text" : "password"}
+                                    maxLength={32}
+                                    value={switchEnteredPin}
+                                    onChange={(e) => {
+                                      setSwitchEnteredPin(e.target.value);
+                                      if (switchPinError) setSwitchPinError("");
+                                    }}
+                                    placeholder="Digite o PIN/Senha do colaborador para confirmar"
+                                    className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 pl-3.5 pr-10 text-xs text-white outline-none transition font-medium focus:ring-2 focus:ring-orange-500/20"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowSwitchPin(!showSwitchPin)}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1 cursor-pointer"
+                                    title={showSwitchPin ? "Ocultar Senha" : "Mostrar Senha"}
+                                  >
+                                    {showSwitchPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                  </button>
+                                </div>
+                                {switchPinError && (
+                                  <p className="text-[10.5px] text-red-500 font-bold animate-pulse mt-1">⚠️ {switchPinError}</p>
+                                )}
+                              </div>
+
+                              <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
+                                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    defaultChecked={true}
+                                    id="auto-link-email-checkbox"
+                                    className="mt-0.5 rounded border-slate-850 bg-slate-950 text-orange-500 focus:ring-orange-500/30 cursor-pointer"
+                                  />
+                                  <div className="text-left leading-tight">
+                                    <p className="text-[11px] font-bold text-slate-200">Vincular meu e-mail atual a este perfil</p>
+                                    <p className="text-[9.5px] text-slate-400 mt-0.5">Sempre que fizer login com <strong className="text-orange-400">{auth.currentUser?.email || "seu e-mail atual"}</strong>, você entrará automaticamente nesta conta comercial.</p>
+                                  </div>
+                                </label>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : userSwitchModalTab === "profile" ? (
+                        <div className="space-y-4">
+                          {/* Visual Alert Banner for Simple / Insecure PIN */}
+                          {currentPinWarning && (
+                            <div id="profile-pin-warning-alert" className="p-3.5 bg-rose-500/15 border border-rose-500/40 rounded-xl flex items-start gap-3 text-rose-300 shadow-sm animate-pulse">
+                              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                              <div className="space-y-1 text-left flex-1">
+                                <div className="flex items-center justify-between gap-2">
+                                  <h4 className="text-xs font-bold text-rose-200 uppercase tracking-wide">
+                                    {currentPinWarning.title}
+                                  </h4>
+                                  <span className="text-[9px] font-bold uppercase font-mono px-1.5 py-0.5 bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded">
+                                    Aviso de Risco
+                                  </span>
+                                </div>
+                                <p className="text-[11px] leading-relaxed text-rose-300 font-medium">
+                                  {currentPinWarning.message}
+                                </p>
+                                <div className="pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={handleResetPin}
+                                    className="px-2.5 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[10px] rounded-lg transition cursor-pointer inline-flex items-center gap-1 shadow active:scale-95"
+                                  >
+                                    <Key className="w-3 h-3" />
+                                    Gerar Novo PIN Seguro Agora
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          {/* Visual Preview Banner & Uploader */}
+                          <div className="flex items-center gap-4 p-4 bg-slate-900/60 rounded-xl border border-slate-850">
+                            <div className="relative shrink-0">
+                              <div className="w-16 h-16 rounded-2xl bg-orange-500 text-white flex items-center justify-center font-bold text-xl overflow-hidden border border-slate-700 shadow-lg">
+                                {profileFotoPerfil ? (
+                                  profileFotoPerfil.startsWith("data:") || profileFotoPerfil.startsWith("http") || profileFotoPerfil.startsWith("/") ? (
+                                    <img src={profileFotoPerfil} className="w-full h-full object-cover" alt="Previsualização" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <span className="text-3xl leading-none">{profileFotoPerfil}</span>
+                                  )
+                                ) : (
+                                  profileName.substring(0, 2).toUpperCase() || "US"
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
+                                className="absolute -bottom-1 -right-1 bg-orange-500 text-white rounded-lg p-1.5 hover:bg-orange-600 transition cursor-pointer shadow-md"
+                                title="Carregar Imagem"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+
+                            <div className="flex-1 leading-none text-left">
+                              <p className="text-xs font-black text-white">{profileName || "Sem Nome"}</p>
+                              <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-mono tracking-wider">{activeUser?.role || "Colaborador"}</p>
+                              <div className="flex gap-2 mt-2">
+                                <button
+                                  type="button"
+                                  onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
+                                  className="px-2.5 py-1 bg-slate-950 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold border border-slate-800 hover:border-slate-700 transition cursor-pointer"
+                                >
+                                  Upload Foto
+                                </button>
+                                {profileFotoPerfil && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setProfileFotoPerfil("")}
+                                    className="px-2.5 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg text-[9px] font-bold border border-red-500/20 transition cursor-pointer"
+                                  >
+                                    Remover
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Hidden File Input */}
+                          <input
+                            type="file"
+                            id="profile-photo-upload-input"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                if (file.size > 1.5 * 1024 * 1024) {
+                                  showToast("A imagem deve ter no máximo 1.5MB", "error");
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                  setProfileFotoPerfil(reader.result as string);
+                                };
+                                reader.readAsDataURL(file);
+                              }
+                            }}
+                          />
+
+                          {/* Emojis Preset Grid */}
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Escolha um Emoji como Avatar</label>
+                            <div className="grid grid-cols-8 gap-2">
+                              {["👨‍💼", "👩‍💼", "👨‍💻", "👩‍💻", "🚀", "🌟", "🍊", "💼", "☕", "🎮", "🦁", "🍕", "⚡", "❤️", "👑", "💡"].map((emoji) => (
+                                <button
+                                  type="button"
+                                  key={emoji}
+                                  onClick={() => setProfileFotoPerfil(emoji)}
+                                  className={`text-lg p-2 rounded-xl transition-all border cursor-pointer hover:scale-110 flex items-center justify-center ${
+                                    profileFotoPerfil === emoji
+                                      ? "bg-orange-500/15 border-orange-500 text-white"
+                                      : "bg-slate-950 border-slate-850 hover:border-slate-650 text-slate-300"
+                                  }`}
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Manual Image URL */}
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ou Cole uma URL de Imagem</label>
+                            <input
+                              type="text"
+                              value={profileFotoPerfil.startsWith("data:") ? "" : profileFotoPerfil}
+                              placeholder="https://exemplo.com/sua-foto.jpg"
+                              onChange={(e) => setProfileFotoPerfil(e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                            />
+                          </div>
+
+                          {/* Text Fields */}
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Nome Completo</label>
+                              <input
+                                type="text"
+                                value={profileName}
+                                onChange={(e) => setProfileName(e.target.value)}
+                                placeholder="Seu nome"
+                                className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Contacto Telefónico</label>
+                              <input
+                                type="text"
+                                value={profileContact}
+                                onChange={(e) => setProfileContact(e.target.value)}
+                                placeholder="Seu contacto"
+                                className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Read-only PIN Creation Date, Reset PIN & Visual Strength Indicator */}
+                          <div className="space-y-3 p-3.5 bg-slate-900/60 rounded-xl border border-slate-800">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="space-y-1 flex-1">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                  Data de Criação do PIN Atual
+                                </label>
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={
+                                    activeUser?.pinCreatedAt
+                                      ? new Date(activeUser.pinCreatedAt).toLocaleDateString("pt-PT", {
+                                          day: "2-digit",
+                                          month: "2-digit",
+                                          year: "numeric",
+                                          hour: "2-digit",
+                                          minute: "2-digit"
+                                        })
+                                      : activeUser?.admissionDate
+                                      ? new Date(activeUser.admissionDate).toLocaleDateString("pt-PT", {
+                                          day: "2-digit",
+                                          month: "2-digit",
+                                          year: "numeric"
+                                        })
+                                      : "Data não registrada"
+                                  }
+                                  className="bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs rounded-lg py-1.5 px-3 outline-none cursor-not-allowed w-full"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={handleResetPin}
+                                className="shrink-0 mt-5 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
+                                title="Gerar novo PIN temporário aleatório"
+                              >
+                                <Key className="w-3.5 h-3.5 text-amber-500" />
+                                Resetar PIN
+                              </button>
+                            </div>
+
+                            {/* PIN Entry & Visual Strength Indicator */}
+                            <div className="border-t border-slate-800/80 pt-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                  PIN Gerado / Testar Força do PIN
+                                </label>
+                                {testPinInput && (
+                                  <span className={`text-[10px] font-bold font-mono ${pinStrength.colorText}`}>
+                                    {pinStrength.label}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  maxLength={8}
+                                  value={testPinInput}
+                                  onChange={(e) => setTestPinInput(e.target.value.replace(/\D/g, ""))}
+                                  placeholder="Digite um PIN ou clique em Resetar PIN"
+                                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none transition"
+                                />
+                              </div>
+
+                              {/* Visual Strength Progress Bar (3-segment indicator) */}
+                              <div className="space-y-1">
+                                <div className="grid grid-cols-3 gap-1.5 h-1.5 w-full">
+                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[0] ? pinStrength.colorBg : "bg-slate-800"}`} />
+                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[1] ? pinStrength.colorBg : "bg-slate-800"}`} />
+                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[2] ? pinStrength.colorBg : "bg-slate-800"}`} />
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium leading-tight pt-0.5">
+                                  {pinStrength.feedback}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* PIN Expiration Indicator */}
+                          <div className={`p-3.5 rounded-xl border flex flex-col gap-1 text-xs leading-relaxed transition-all ${
+                            pinRemainingDays <= 7 
+                              ? "bg-rose-500/10 border-rose-500/25 text-rose-400 animate-pulse" 
+                              : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
+                          }`}>
+                            <div className="flex items-center justify-between font-bold">
+                              <span className="flex items-center gap-1.5">
+                                {pinRemainingDays <= 7 ? "⚠️ Expiração de Segurança (PIN)" : "🛡️ Validade da Senha (PIN)"}
+                              </span>
+                              <span className={`font-mono text-[11px] px-2.5 py-0.5 rounded-md bg-black/40 font-black ${
+                                pinRemainingDays <= 7 ? "text-rose-400 border border-rose-500/30" : "text-emerald-400"
+                              }`}>
+                                {pinRemainingDays} {pinRemainingDays === 1 ? "dia" : "dias"}
+                              </span>
+                            </div>
+                            <p className="text-[10.5px] opacity-85 mt-1">
+                              {pinRemainingDays <= 7 
+                                ? `Atenção colaborador! Seu PIN de acesso está prestes a expirar. Por segurança de dados comerciais, atualize o seu PIN em breve (Resta(m) apenas ${pinRemainingDays} dia(s)).`
+                                : `Sua senha de segurança está em conformidade com as regras de rotação obrigatória do sistema (máximo 60 dias).`}
+                            </p>
+                          </div>
+
+                          {/* 2FA Verification Selector Card */}
+                          <div id="profile-2fa-setting-card" className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5">
+                                <div className={`p-2 rounded-xl transition-all ${profileTwoFactorEmail ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>
+                                  <ShieldCheck className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                                    <span>Verificação em Dois Passos (2FA) via E-mail</span>
+                                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${profileTwoFactorEmail ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>
+                                      {profileTwoFactorEmail ? "ATIVADO" : "DESATIVADO"}
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10.5px] text-slate-400 mt-0.5">
+                                    Autenticação por e-mail para logins de novas localizações
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Interactive Switch Selector */}
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={profileTwoFactorEmail}
+                                onClick={() => {
+                                  const newValue = !profileTwoFactorEmail;
+                                  setProfileTwoFactorEmail(newValue);
+                                  showToast(
+                                    newValue 
+                                      ? "2FA via e-mail ativado para novas localizações!" 
+                                      : "2FA via e-mail desativado.",
+                                    newValue ? "success" : "info"
+                                  );
+                                }}
+                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                                  profileTwoFactorEmail ? "bg-orange-500" : "bg-slate-700"
+                                }`}
+                                title="Ativar/Desativar Verificação em Dois Passos"
+                              >
+                                <span className="sr-only">Habilitar Verificação em Dois Passos</span>
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                                    profileTwoFactorEmail ? "translate-x-5" : "translate-x-0"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            <div className="p-2.5 bg-slate-950/70 rounded-lg border border-slate-850 flex items-start gap-2 text-[10.5px] text-slate-300">
+                              <Globe className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
+                              <p className="leading-snug">
+                                Ao realizar login a partir de um novo navegador, dispositivo ou localização não reconhecida, um código de verificação será enviado ao e-mail cadastrado (<strong>{activeUser?.email || settings.reportRecipientEmail || "e-mail do sistema"}</strong>).
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {(() => {
+                            const selectedOrActiveEmp = switchSelectedEmployeeId 
+                              ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+                              : activeUser;
+
+                            const empName = selectedOrActiveEmp?.name?.toLowerCase() || "";
+                            const empId = selectedOrActiveEmp?.id?.toLowerCase() || "";
+
+                            const filteredCollaboratorLogs = auditLogs
+                              .filter(log => {
+                                if (!selectedOrActiveEmp) return false;
+                                const logUser = (log.user || "").toLowerCase();
+                                const logDetails = (log.details || "").toLowerCase();
+                                return logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
+                              })
+                              .slice(-10)
+                              .reverse();
+
+                            return (
+                              <>
+                                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl space-y-1 text-xs">
+                                  <p className="font-bold text-orange-400 flex items-center justify-between">
+                                    <span>Histórico das Últimas 10 Atividades</span>
+                                    <span className="font-mono text-[10px] text-slate-400">{filteredCollaboratorLogs.length} registro(s)</span>
+                                  </p>
+                                  <p className="text-slate-400 text-[11px]">
+                                    Exibindo ações de auditoria recentes do colaborador: <strong className="text-white font-bold">{selectedOrActiveEmp?.name}</strong>.
+                                  </p>
+                                </div>
+
+                                {filteredCollaboratorLogs.length > 0 ? (
+                                  <div className="space-y-2">
+                                    {filteredCollaboratorLogs.map(log => (
+                                      <div key={log.id} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-left hover:border-slate-750 transition">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <span className="px-2 py-0.5 bg-orange-500/15 text-orange-400 border border-orange-500/30 font-bold font-mono text-[9.5px] rounded-md uppercase">
+                                            {log.module || "SISTEMA"} • {log.action || "AÇÃO"}
+                                          </span>
+                                          <span className="text-[10px] text-slate-400 font-mono">
+                                            {new Date(log.timestamp).toLocaleString("pt-PT", {
+                                              day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+                                            })}
+                                          </span>
+                                        </div>
+                                        <p className="text-xs text-slate-200 font-medium leading-tight pt-1">
+                                          {log.details || "Ação registrada no sistema."}
+                                        </p>
+                                        <p className="text-[9.5px] text-slate-500 font-mono">
+                                          Operador: <strong className="text-slate-400">{log.user}</strong>
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-800 space-y-2">
+                                    <p className="text-2xl">📜</p>
+                                    <p className="text-xs font-bold text-slate-300">Nenhum registro recente encontrado</p>
+                                    <p className="text-[10.5px] text-slate-500">
+                                      Não foram encontradas ações no log de auditoria para {selectedOrActiveEmp?.name || "este colaborador"}.
+                                    </p>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </div>
+
+                {/* Footer */}
+                <div className="p-6 border-t border-slate-100 dark:border-zinc-850 flex items-center justify-between gap-3 bg-slate-900/10">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleGeneratePaymentQr}
+                      disabled={isGeneratingQr}
+                      className="px-3.5 py-2 text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                    >
+                      <QrCode className="w-4 h-4 text-emerald-500 shrink-0" />
+                      {isGeneratingQr ? "Gerando QR..." : "Gerar QR de Pagamento"}
+                    </button>
+
+                    <button
+                      type="button"
+                      id="export-collaborator-pdf-button"
+                      onClick={handleExportCollaboratorPdf}
+                      className="px-3.5 py-2 text-xs font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                      title="Gerar e exportar Ficha do Colaborador em PDF"
+                    >
+                      <FileText className="w-4 h-4 text-sky-500 shrink-0" />
+                      Exportar Ficha de Colaborador
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleSuspendCollaborator}
+                      className="px-3.5 py-2 text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                      title="Suspender Colaborador Atual"
+                    >
+                      <UserX className="w-4 h-4 text-rose-500 shrink-0" />
+                      Suspender Colaborador
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsUserSwitchModalOpen(false)}
+                      className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+                    >
+                      Fechar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (userSwitchModalTab === "switch") {
+                          if (!switchSelectedEmployeeId) return;
+                          const selectedEmp = employees.find(x => x.id === switchSelectedEmployeeId);
+                          if (!selectedEmp) return;
+
+                          // Verify PIN/password before switching!
+                          const requiredPin = selectedEmp.pin || "123456";
+                          if (!switchEnteredPin.trim()) {
+                            setSwitchPinError("Por favor, introduza a senha / PIN de acesso deste colaborador.");
                             return;
                           }
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setProfileFotoPerfil(reader.result as string);
-                          };
-                          reader.readAsDataURL(file);
-                        }
-                      }}
-                    />
-
-                    {/* Emojis Preset Grid */}
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Escolha um Emoji como Avatar</label>
-                      <div className="grid grid-cols-8 gap-2">
-                        {["👨‍💼", "👩‍💼", "👨‍💻", "👩‍💻", "🚀", "🌟", "🍊", "💼", "☕", "🎮", "🦁", "🍕", "⚡", "❤️", "👑", "💡"].map((emoji) => (
-                          <button
-                            type="button"
-                            key={emoji}
-                            onClick={() => setProfileFotoPerfil(emoji)}
-                            className={`text-lg p-2 rounded-xl transition-all border cursor-pointer hover:scale-110 flex items-center justify-center ${
-                              profileFotoPerfil === emoji
-                                ? "bg-orange-500/15 border-orange-500 text-white"
-                                : "bg-slate-950 border-slate-850 hover:border-slate-650 text-slate-300"
-                            }`}
-                          >
-                            {emoji}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Manual Image URL */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ou Cole uma URL de Imagem</label>
-                      <input
-                        type="text"
-                        value={profileFotoPerfil.startsWith("data:") ? "" : profileFotoPerfil}
-                        placeholder="https://exemplo.com/sua-foto.jpg"
-                        onChange={(e) => setProfileFotoPerfil(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                      />
-                    </div>
-
-                    {/* Text Fields */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Nome Completo</label>
-                        <input
-                          type="text"
-                          value={profileName}
-                          onChange={(e) => setProfileName(e.target.value)}
-                          placeholder="Seu nome"
-                          className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Contacto Telefónico</label>
-                        <input
-                          type="text"
-                          value={profileContact}
-                          onChange={(e) => setProfileContact(e.target.value)}
-                          placeholder="Seu contacto"
-                          className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                        />
-                      </div>
-                    </div>
-
-                    {/* PIN Expiration Indicator */}
-                    <div className={`p-3.5 rounded-xl border flex flex-col gap-1 text-xs leading-relaxed transition-all ${
-                      pinRemainingDays <= 7 
-                        ? "bg-rose-500/10 border-rose-500/25 text-rose-400 animate-pulse" 
-                        : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
-                    }`}>
-                      <div className="flex items-center justify-between font-bold">
-                        <span className="flex items-center gap-1.5">
-                          {pinRemainingDays <= 7 ? "⚠️ Expiração de Segurança (PIN)" : "🛡️ Validade da Senha (PIN)"}
-                        </span>
-                        <span className={`font-mono text-[11px] px-2.5 py-0.5 rounded-md bg-black/40 font-black ${
-                          pinRemainingDays <= 7 ? "text-rose-400 border border-rose-500/30" : "text-emerald-400"
-                        }`}>
-                          {pinRemainingDays} {pinRemainingDays === 1 ? "dia" : "dias"}
-                        </span>
-                      </div>
-                      <p className="text-[10.5px] opacity-85 mt-1">
-                        {pinRemainingDays <= 7 
-                          ? `Atenção colaborador! Seu PIN de acesso está prestes a expirar. Por segurança de dados comerciais, atualize o seu PIN em breve (Resta(m) apenas ${pinRemainingDays} dia(s)).`
-                          : `Sua senha de segurança está em conformidade com as regras de rotação obrigatória do sistema (máximo 60 dias).`}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="p-6 border-t border-slate-100 dark:border-zinc-850 flex items-center justify-end gap-3 bg-slate-900/10">
-                <button
-                  type="button"
-                  onClick={() => setIsUserSwitchModalOpen(false)}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
-                >
-                  Fechar
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (userSwitchModalTab === "switch") {
-                      if (!switchSelectedEmployeeId) return;
-                      const selectedEmp = employees.find(x => x.id === switchSelectedEmployeeId);
-                      if (!selectedEmp) return;
-
-                      // Verify PIN/password before switching!
-                      const requiredPin = selectedEmp.pin || "123456";
-                      if (!switchEnteredPin.trim()) {
-                        setSwitchPinError("Por favor, introduza a senha / PIN de acesso deste colaborador.");
-                        return;
-                      }
-                      if (switchEnteredPin.trim() !== requiredPin.trim()) {
-                        setSwitchPinError("Senha incorreta. Por favor, tente novamente.");
-                        return;
-                      }
-
-                      // Check if account is blocked/inactive
-                      if (selectedEmp.status === "BLOCKED") {
-                        setSwitchPinError("Esta conta está BLOQUEADA por expiração de senha ou motivos de segurança.");
-                        return;
-                      }
-                      if (selectedEmp.status === "INACTIVE" || selectedEmp.status === "SUSPENDED") {
-                        setSwitchPinError("Esta conta está inativa ou suspensa. Contacte o Administrador.");
-                        return;
-                      }
-
-                      // Check expiration policy (2 months / 60 days)
-                      const now = new Date();
-                      const createdAtStr = selectedEmp.pinCreatedAt || selectedEmp.admissionDate || now.toISOString();
-                      const createdAt = new Date(createdAtStr);
-                      const diffTime = now.getTime() - createdAt.getTime();
-                      const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-                      const isPinTemporary = selectedEmp.pinChanged === false || selectedEmp.pinChanged === undefined;
-
-                      // If password is temporary (first login) OR has expired (older than 60 days)
-                      if (isPinTemporary) {
-                        setForcePinTargetEmployee(selectedEmp);
-                        setNewPin("");
-                        setConfirmNewPin("");
-                        setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
-                        setForcePinChangeOpen(true);
-                        setIsUserSwitchModalOpen(false);
-                        return;
-                      }
-
-                      if (diffDays > 60) {
-                        setForcePinTargetEmployee(selectedEmp);
-                        setNewPin("");
-                        setConfirmNewPin("");
-                        setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
-                        setForcePinChangeOpen(true);
-                        setIsUserSwitchModalOpen(false);
-                        return;
-                      }
-
-                      const autoLinkChecked = (document.getElementById("auto-link-email-checkbox") as HTMLInputElement)?.checked ?? true;
-                      const emailToBind = auth.currentUser?.email || selectedEmp.email || "";
-
-                      let updatedEmployees = [...employees];
-                      if (autoLinkChecked && emailToBind) {
-                        updatedEmployees = employees.map(emp => {
-                          if (emp.id === switchSelectedEmployeeId) {
-                            return { ...emp, email: emailToBind.toLowerCase().trim() };
+                          if (switchEnteredPin.trim() !== requiredPin.trim()) {
+                            setSwitchPinError("Senha incorreta. Por favor, tente novamente.");
+                            return;
                           }
-                          return emp;
-                        });
-                        setEmployees(updatedEmployees);
-                        await syncTable("employees", updatedEmployees);
-                      }
 
-                      // Perform active switch
-                      const finalActiveUser = {
-                        ...selectedEmp,
-                        email: autoLinkChecked && emailToBind ? emailToBind : (selectedEmp.email || ""),
-                        fotoPerfil: selectedEmp.fotoPerfil || ""
-                      };
-                      setActiveUser(finalActiveUser);
+                          // Check if account is blocked/inactive
+                          if (selectedEmp.status === "BLOCKED") {
+                            setSwitchPinError("Esta conta está BLOQUEADA por expiração de senha ou motivos de segurança.");
+                            return;
+                          }
+                          if (selectedEmp.status === "INACTIVE" || selectedEmp.status === "SUSPENDED") {
+                            setSwitchPinError("Esta conta está inativa ou suspensa. Contacte o Administrador.");
+                            return;
+                          }
 
-                      showToast(
-                        `Usuário alterado com sucesso para ${selectedEmp.name}!${autoLinkChecked ? " Conta vinculada com sucesso." : ""}`, 
-                        "success"
-                      );
+                          // Check expiration policy (2 months / 60 days)
+                          const now = new Date();
+                          const createdAtStr = selectedEmp.pinCreatedAt || selectedEmp.admissionDate || now.toISOString();
+                          const createdAt = new Date(createdAtStr);
+                          const diffTime = now.getTime() - createdAt.getTime();
+                          const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-                      handleAddAuditLog(
-                        "Alteração de Usuário",
-                        "SISTEMA",
-                        `Operador alterado para ${selectedEmp.name} (ID: ${selectedEmp.id})${autoLinkChecked ? ` com vínculo de e-mail ao ${emailToBind}` : ""}`
-                      );
+                          const isPinTemporary = selectedEmp.pinChanged === false || selectedEmp.pinChanged === undefined;
 
-                      setIsUserSwitchModalOpen(false);
-                    } else {
-                      if (!activeUser) return;
-                      if (!profileName.trim()) {
-                        showToast("O nome do perfil não pode estar vazio.", "warning");
-                        return;
-                      }
+                          // If password is temporary (first login) OR has expired (older than 60 days)
+                          if (isPinTemporary) {
+                            setForcePinTargetEmployee(selectedEmp);
+                            setNewPin("");
+                            setConfirmNewPin("");
+                            setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
+                            setForcePinChangeOpen(true);
+                            setIsUserSwitchModalOpen(false);
+                            return;
+                          }
 
-                      const updatedEmployees = employees.map(emp => {
-                        if (emp.id === activeUser.id) {
-                          return {
-                            ...emp,
+                          if (diffDays > 60) {
+                            setForcePinTargetEmployee(selectedEmp);
+                            setNewPin("");
+                            setConfirmNewPin("");
+                            setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
+                            setForcePinChangeOpen(true);
+                            setIsUserSwitchModalOpen(false);
+                            return;
+                          }
+
+                          const autoLinkChecked = (document.getElementById("auto-link-email-checkbox") as HTMLInputElement)?.checked ?? true;
+                          const emailToBind = auth.currentUser?.email || selectedEmp.email || "";
+
+                          let updatedEmployees = [...employees];
+                          if (autoLinkChecked && emailToBind) {
+                            updatedEmployees = employees.map(emp => {
+                              if (emp.id === switchSelectedEmployeeId) {
+                                return { ...emp, email: emailToBind.toLowerCase().trim() };
+                              }
+                              return emp;
+                            });
+                            setEmployees(updatedEmployees);
+                            await syncTable("employees", updatedEmployees);
+                          }
+
+                          // Perform active switch
+                          const finalActiveUser = {
+                            ...selectedEmp,
+                            email: autoLinkChecked && emailToBind ? emailToBind : (selectedEmp.email || ""),
+                            fotoPerfil: selectedEmp.fotoPerfil || ""
+                          };
+                          setActiveUser(finalActiveUser);
+
+                          showToast(
+                            `Usuário alterado com sucesso para ${selectedEmp.name}!${autoLinkChecked ? " Conta vinculada com sucesso." : ""}`, 
+                            "success"
+                          );
+
+                          handleAddAuditLog(
+                            "Alteração de Usuário",
+                            "SISTEMA",
+                            `Operador alterado para ${selectedEmp.name} (ID: ${selectedEmp.id})${autoLinkChecked ? ` com vínculo de e-mail ao ${emailToBind}` : ""}`
+                          );
+
+                          setIsUserSwitchModalOpen(false);
+                        } else {
+                          if (!activeUser) return;
+                          if (!profileName.trim()) {
+                            showToast("O nome do perfil não pode estar vazio.", "warning");
+                            return;
+                          }
+
+                          const updatedEmployees = employees.map(emp => {
+                            if (emp.id === activeUser.id) {
+                              return {
+                                ...emp,
+                                name: profileName.trim(),
+                                contact: profileContact.trim(),
+                                fotoPerfil: profileFotoPerfil.trim(),
+                                twoFactorEmailEnabled: profileTwoFactorEmail
+                              };
+                            }
+                            return emp;
+                          });
+
+                          setEmployees(updatedEmployees);
+                          await syncTable("employees", updatedEmployees);
+
+                          // Sync setting to System Settings
+                          const updatedSettings = {
+                            ...settings,
+                            twoFactorEmailEnabled: profileTwoFactorEmail,
+                            twoFactorNewLocationEmail: profileTwoFactorEmail
+                          };
+                          setSettings(updatedSettings);
+                          await syncTable("settings", updatedSettings);
+
+                          // Update active session operator
+                          setActiveUser({
+                            ...activeUser,
                             name: profileName.trim(),
                             contact: profileContact.trim(),
-                            fotoPerfil: profileFotoPerfil.trim()
-                          };
+                            fotoPerfil: profileFotoPerfil.trim(),
+                            twoFactorEmailEnabled: profileTwoFactorEmail
+                          });
+
+                          showToast("Perfil e configurações de 2FA atualizados com sucesso!", "success");
+
+                          handleAddAuditLog(
+                            "Atualização de Perfil",
+                            "SISTEMA",
+                            `Colaborador ${activeUser.name} atualizou o perfil (2FA por E-mail: ${profileTwoFactorEmail ? "Ativado" : "Desativado"}).`
+                          );
+
+                          setIsUserSwitchModalOpen(false);
                         }
-                        return emp;
-                      });
+                      }}
+                      disabled={userSwitchModalTab === "switch" ? (!switchSelectedEmployeeId || !switchEnteredPin.trim()) : !profileName.trim()}
+                      className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
+                        (userSwitchModalTab === "switch" ? (switchSelectedEmployeeId && switchEnteredPin.trim()) : profileName.trim())
+                          ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
+                          : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
+                      }`}
+                    >
+                      {userSwitchModalTab === "switch" ? "Vincular & Alterar Conta" : "Salvar Perfil"}
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-                      setEmployees(updatedEmployees);
-                      await syncTable("employees", updatedEmployees);
+      {/* Payment QR Code Modal Overlay */}
+      <AnimatePresence>
+        {showPaymentQrModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 15 }}
+              className="bg-white dark:bg-zinc-900 text-slate-800 dark:text-slate-100 rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 text-center space-y-4 relative"
+            >
+              <button
+                type="button"
+                onClick={() => setShowPaymentQrModal(false)}
+                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-                      // Update active session operator
-                      setActiveUser({
-                        ...activeUser,
-                        name: profileName.trim(),
-                        contact: profileContact.trim(),
-                        fotoPerfil: profileFotoPerfil.trim()
-                      });
-
-                      showToast("Perfil atualizado com sucesso!", "success");
-
-                      handleAddAuditLog(
-                        "Atualização de Perfil",
-                        "SISTEMA",
-                        `Colaborador ${activeUser.name} atualizou os seus dados de perfil.`
-                      );
-
-                      setIsUserSwitchModalOpen(false);
-                    }
-                  }}
-                  disabled={userSwitchModalTab === "switch" ? (!switchSelectedEmployeeId || !switchEnteredPin.trim()) : !profileName.trim()}
-                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
-                    (userSwitchModalTab === "switch" ? (switchSelectedEmployeeId && switchEnteredPin.trim()) : profileName.trim())
-                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
-                      : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-                  }`}
-                >
-                  {userSwitchModalTab === "switch" ? "Vincular & Alterar Conta" : "Salvar Perfil"}
-                </button>
+              <div className="w-12 h-12 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <QrCode className="w-6 h-6" />
               </div>
+
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">QR Code de Recebimento</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Escaneie com a carteira móvel (M-Pesa / E-Mola) para realizar a transferência de pagamento para este utilizador.
+                </p>
+              </div>
+
+              {paymentQrUrl ? (
+                <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-inner inline-block">
+                  <img src={paymentQrUrl} alt="QR Code de Pagamento" className="w-52 h-52 mx-auto rounded-lg object-contain" />
+                </div>
+              ) : (
+                <div className="py-12 text-slate-400 text-xs font-mono">Gerando QR Code...</div>
+              )}
+
+              <div className="bg-slate-50 dark:bg-zinc-950/60 p-3.5 rounded-xl border border-slate-100 dark:border-zinc-800 text-xs text-left space-y-1 font-mono">
+                <p className="text-[10px] uppercase font-sans font-bold text-slate-400">Titular da Conta / Operador</p>
+                <p className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">{activeUser?.name || "Colaborador"}</p>
+                <p className="text-slate-500 dark:text-slate-400">📱 Contacto: {activeUser?.contact || "840000000"}</p>
+                <p className="text-slate-500 dark:text-slate-400">🏢 Empresa: {settings.companyName || "OST Vendas"}</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPaymentQrModal(false)}
+                className="w-full py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs hover:bg-slate-800 dark:hover:bg-slate-100 transition cursor-pointer shadow-md"
+              >
+                Concluído / Fechar
+              </button>
             </motion.div>
           </div>
         )}

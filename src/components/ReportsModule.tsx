@@ -2134,7 +2134,20 @@ export default function ReportsModule({
               className="w-full py-3.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md shadow-orange-500/20 hover:shadow-orange-500/35 transition-all duration-250 active:scale-[0.98]"
             >
               <Activity className="w-4.5 h-4.5 text-white shrink-0" />
-              Gerar Resumo Mensal ({monthlyStats.monthName})
+              Visualizar Resumo Mensal ({monthlyStats.monthName})
+            </button>
+
+            <button
+              type="button"
+              id="btn-export-monthly-pdf"
+              onClick={handleExportMonthlySummaryPDF}
+              disabled={isExporting}
+              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
+                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
+              }`}
+            >
+              <Download className="w-4 h-4 text-amber-500 shrink-0" />
+              {isExporting ? "Exportando PDF Mensal..." : `Exportar Resumo Financeiro Mensal (PDF - ${monthlyStats.monthName})`}
             </button>
 
             <button

@@ -123,6 +123,7 @@ export interface Employee {
   password?: string;
   fotoPerfil?: string;
   theme?: string;
+  twoFactorEmailEnabled?: boolean;
 }
 
 export interface SystemSettings {
@@ -187,6 +188,8 @@ export interface SystemSettings {
   smsManagerPhone?: string;
   smsStockThreshold?: number;
   printerEnabled?: boolean;
+  twoFactorEmailEnabled?: boolean;
+  twoFactorNewLocationEmail?: boolean;
   printerName?: string;
   printerConnectionType?: "USB" | "BLUETOOTH" | "NETWORK";
   printerIpAddress?: string;
@@ -195,6 +198,8 @@ export interface SystemSettings {
   printerType?: "RECEIPT" | "LABEL";
   paperSize?: "A4" | "80MM" | "58MM";
   printerAutoCut?: boolean;
+  thermalMarginTop?: number;
+  thermalMarginBottom?: number;
   branches?: Branch[];
   stockTransfers?: StockTransfer[];
   batches?: ProductBatch[];

@@ -41,7 +41,8 @@ import {
   MapPin,
   Phone,
   Plus,
-  Edit
+  Edit,
+  Sliders
 } from "lucide-react";
 import { SystemSettings, UserRole, Employee, Branch, AuditLog } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
@@ -1035,6 +1036,8 @@ export default function SettingsModule({
   const [printerType, setPrinterType] = useState<"RECEIPT" | "LABEL">(settings.printerType || "RECEIPT");
   const [paperSize, setPaperSize] = useState<"A4" | "80MM" | "58MM">(settings.paperSize || "80MM");
   const [printerAutoCut, setPrinterAutoCut] = useState(settings.printerAutoCut !== undefined ? settings.printerAutoCut : true);
+  const [thermalMarginTop, setThermalMarginTop] = useState<number>(settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4);
+  const [thermalMarginBottom, setThermalMarginBottom] = useState<number>(settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8);
   const [isTestingPrinter, setIsTestingPrinter] = useState(false);
   const [printerLogs, setPrinterLogs] = useState<string[]>([]);
   const [showTestReceipt, setShowTestReceipt] = useState(false);
@@ -1252,14 +1255,16 @@ export default function SettingsModule({
       printerBaudRate,
       printerType,
       paperSize,
-      printerAutoCut
+      printerAutoCut,
+      thermalMarginTop,
+      thermalMarginBottom,
     });
 
     setFeedbackMsg("Configuração da Impressora de Vendas salva com sucesso!");
     onAddAuditLog(
       "Configuração da Impressora",
       "CONFIGURAÇÕES",
-      `Impressora configurada: ${printerName}, Tipo: ${printerType}, Papel: ${paperSize}, Conectividade: ${printerConnectionType}, Corte Automático: ${printerAutoCut ? "Ativo" : "Inativo"}.`
+      `Impressora configurada: ${printerName}, Tipo: ${printerType}, Papel: ${paperSize}, Margens Térmicas: Topo ${thermalMarginTop}mm / Fundo ${thermalMarginBottom}mm, Conectividade: ${printerConnectionType}, Corte Automático: ${printerAutoCut ? "Ativo" : "Inativo"}.`
     );
     if (onShowToast) onShowToast("As configurações da Impressora de Vendas foram gravadas com sucesso!", "success", "Configurações Salvas");
     setTimeout(() => setFeedbackMsg(""), 2200);
@@ -1328,6 +1333,8 @@ export default function SettingsModule({
     setPrinterType(settings.printerType || "RECEIPT");
     setPaperSize(settings.paperSize || "80MM");
     setPrinterAutoCut(settings.printerAutoCut !== undefined ? settings.printerAutoCut : true);
+    setThermalMarginTop(settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4);
+    setThermalMarginBottom(settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8);
 
     if (settings.inventoryStrategy) setInventoryStrategy(settings.inventoryStrategy);
     if (settings.expiryAlertDays !== undefined) setExpiryAlertDays(settings.expiryAlertDays);
@@ -3041,23 +3048,28 @@ export default function SettingsModule({
 
               {/* Logotipo da Empresa Section */}
               <div className="space-y-3 pt-3 border-t border-slate-100">
-                <label className="text-[10px] font-bold text-slate-500 uppercase block">Logotipo do Estabelecimento</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Logotipo do Estabelecimento (Recibos & Faturas)</label>
+                  <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
+                    Exibido no topo do Recibo 80mm
+                  </span>
+                </div>
                 
-                <div className="flex flex-col sm:flex-row gap-4 items-center">
+                <div className="flex flex-col sm:flex-row gap-4 items-start">
                   {/* Current Logo Preview */}
-                  <div className="relative group w-24 h-24 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden shrink-0">
+                  <div className="relative group w-28 h-28 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center overflow-hidden shrink-0">
                     {logoUrl ? (
                       <>
                         <img 
                           src={logoUrl} 
                           alt="Logotipo Corporativo" 
-                          className="w-full h-full object-contain p-1"
+                          className="w-full h-full object-contain p-2"
                           referrerPolicy="no-referrer"
                         />
                         <button
                           type="button"
                           onClick={() => setLogoUrl("")}
-                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-all"
+                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-all cursor-pointer"
                         >
                           Remover 🗑️
                         </button>
@@ -3065,18 +3077,19 @@ export default function SettingsModule({
                     ) : (
                       <div className="text-center p-2">
                         <Building className="w-8 h-8 text-slate-300 mx-auto mb-1" />
-                        <span className="text-[9px] text-slate-400 block font-medium">Sem Logo</span>
+                        <span className="text-[9px] text-slate-400 block font-medium">Sem Logotipo</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Actions Panel */}
-                  <div className="flex-1 w-full space-y-2">
+                  {/* Actions & Inputs Panel */}
+                  <div className="flex-1 w-full space-y-3">
+                    {/* Action Buttons */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       {/* Upload Button */}
-                      <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold border border-slate-200 rounded-xl text-[11px] cursor-pointer transition-all">
-                        <Upload className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Carregar</span>
+                      <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-[11px] cursor-pointer transition-all shadow-sm">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Upload de Imagem</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -3089,7 +3102,7 @@ export default function SettingsModule({
                       <button
                         type="button"
                         onClick={startCamera}
-                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold border border-slate-200 rounded-xl text-[11px] cursor-pointer transition-all"
+                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border border-slate-200 rounded-xl text-[11px] cursor-pointer transition-all"
                       >
                         <Camera className="w-3.5 h-3.5 text-slate-500" />
                         <span>Câmara</span>
@@ -3108,8 +3121,21 @@ export default function SettingsModule({
                         <span>Gerar por IA</span>
                       </button>
                     </div>
-                    <p className="text-[10px] text-slate-400 text-center sm:text-left">
-                      Suporta ficheiros PNG, JPG ou SVG. Tamanho máximo recomendado de 2MB.
+
+                    {/* Direct Image URL input */}
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-bold text-slate-400 uppercase">Ou cole o link URL da imagem</label>
+                      <input
+                        type="url"
+                        value={logoUrl}
+                        onChange={(e) => setLogoUrl(e.target.value)}
+                        placeholder="https://exemplo.com/logo.png"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-700 outline-none focus:border-orange-500"
+                      />
+                    </div>
+
+                    <p className="text-[10px] text-slate-400">
+                      Suporta ficheiros PNG, JPG ou SVG (máx. 2MB). O logotipo será automaticamente posicionado no topo da fita térmica de 80mm e documentos A4.
                     </p>
                   </div>
                 </div>
@@ -5173,6 +5199,73 @@ export default function SettingsModule({
                   />
                 </div>
 
+                {/* Margens Dinâmicas do Layout Térmico */}
+                <div className="space-y-3 bg-orange-50/20 p-3.5 rounded-xl border border-orange-200/60">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                        <Sliders className="w-3.5 h-3.5 text-orange-600" />
+                        Ajuste de Margens Térmicas (80mm / 58mm)
+                      </h5>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        Ajuste o espaçamento superior e inferior para compensar variações no avanço de papel e guilhotina da mini-impressora.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {/* Margem Superior */}
+                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-slate-200">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-slate-700 uppercase">Margem Superior (Topo)</label>
+                        <span className="text-xs font-mono font-extrabold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                          {thermalMarginTop} mm
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={30}
+                        step={1}
+                        disabled={!canEdit}
+                        value={thermalMarginTop}
+                        onChange={(e) => setThermalMarginTop(Number(e.target.value))}
+                        className="w-full accent-orange-600 cursor-pointer"
+                      />
+                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                        <span>0 mm</span>
+                        <span>15 mm</span>
+                        <span>30 mm</span>
+                      </div>
+                    </div>
+
+                    {/* Margem Inferior */}
+                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-slate-200">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-slate-700 uppercase">Margem Inferior (Fundo)</label>
+                        <span className="text-xs font-mono font-extrabold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
+                          {thermalMarginBottom} mm
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={40}
+                        step={1}
+                        disabled={!canEdit}
+                        value={thermalMarginBottom}
+                        onChange={(e) => setThermalMarginBottom(Number(e.target.value))}
+                        className="w-full accent-orange-600 cursor-pointer"
+                      />
+                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                        <span>0 mm</span>
+                        <span>20 mm</span>
+                        <span>40 mm</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-400 uppercase">Tipo de Conexão</label>
                   <div className="grid grid-cols-3 gap-2">
@@ -5455,7 +5548,9 @@ export default function SettingsModule({
                       </div>
                     ) : (
                       /* 80mm and 58mm Thermal Receipt Layout */
-                      <div className={`bg-white border border-slate-200 rounded-xl p-4 font-mono text-slate-700 shadow-sm relative overflow-hidden mx-auto transition-all duration-300 ${
+                      <div 
+                        style={{ paddingTop: `${thermalMarginTop * 1.5 + 4}px`, paddingBottom: `${thermalMarginBottom * 1.5 + 4}px` }}
+                        className={`bg-white border border-slate-200 rounded-xl px-4 font-mono text-slate-700 shadow-sm relative overflow-hidden mx-auto transition-all duration-300 ${
                         paperSize === "58MM" ? "max-w-[215px] text-[8.5px]" : "max-w-[290px] text-[10px]"
                       }`}>
                         {/* Decorative receipt zig-zag top */}
