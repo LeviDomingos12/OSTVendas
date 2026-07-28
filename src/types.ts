@@ -124,6 +124,10 @@ export interface Employee {
   fotoPerfil?: string;
   theme?: string;
   twoFactorEmailEnabled?: boolean;
+  whatsapp?: string;
+  observacoes?: string;
+  expirationDate?: string;
+  logoUrl?: string;
 }
 
 export interface SystemSettings {

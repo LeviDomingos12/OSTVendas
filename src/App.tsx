@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -106,7 +106,19 @@ import {
   Key,
   UserX,
   ShieldCheck,
-  Globe
+  Globe,
+  Search,
+  Calendar,
+  Filter,
+  Video,
+  Upload,
+  Save,
+  History,
+  Trash2,
+  CheckCircle2,
+  Mail,
+  Image,
+  Building
 } from "lucide-react";
 
 interface Toast {
@@ -287,9 +299,14 @@ export default function App() {
   const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
   const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile" | "activity">("switch");
   const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
   const [profileContact, setProfileContact] = useState("");
+  const [profileWhatsapp, setProfileWhatsapp] = useState("");
   const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
+  const [profileLogoUrl, setProfileLogoUrl] = useState(settings?.logoUrl || "");
   const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
+  const [profileObservacoes, setProfileObservacoes] = useState("");
+  const [profileExpirationDate, setProfileExpirationDate] = useState("");
   const [testPinInput, setTestPinInput] = useState<string>("");
   const [switchEnteredPin, setSwitchEnteredPin] = useState("");
   const [switchPinError, setSwitchPinError] = useState("");
@@ -298,18 +315,55 @@ export default function App() {
   const [paymentQrUrl, setPaymentQrUrl] = useState("");
   const [isGeneratingQr, setIsGeneratingQr] = useState(false);
 
+  // Activity Log Tab Filters State
+  const [activitySearchText, setActivitySearchText] = useState("");
+  const [activityStartDate, setActivityStartDate] = useState("");
+  const [activityEndDate, setActivityEndDate] = useState("");
+
+  // Camera Profile Photo Capture State
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  const stopCamera = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setCameraError("");
+  };
+
   useEffect(() => {
-    if (isUserSwitchModalOpen && activeUser) {
-      setProfileName(activeUser.name || "");
-      setProfileContact(activeUser.contact || "");
-      setProfileFotoPerfil(activeUser.fotoPerfil || "");
-      setTestPinInput(activeUser.pin || "");
-      setProfileTwoFactorEmail(activeUser.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
+    if (!isUserSwitchModalOpen || userSwitchModalTab !== "profile") {
+      stopCamera();
+    }
+  }, [isUserSwitchModalOpen, userSwitchModalTab]);
+
+  useEffect(() => {
+    if (isUserSwitchModalOpen) {
+      const targetEmp = switchSelectedEmployeeId 
+        ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+        : activeUser;
+
+      if (targetEmp) {
+        setProfileName(targetEmp.name || "");
+        setProfileEmail(targetEmp.email || "");
+        setProfileContact(targetEmp.contact || "");
+        setProfileWhatsapp(targetEmp.whatsapp || targetEmp.contact || "");
+        setProfileFotoPerfil(targetEmp.fotoPerfil || "");
+        setProfileLogoUrl(settings.logoUrl || targetEmp.logoUrl || "");
+        setTestPinInput(targetEmp.pin || "");
+        setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
+        setProfileObservacoes(targetEmp.observacoes || "");
+        setProfileExpirationDate(targetEmp.expirationDate || "");
+      }
     }
     setSwitchEnteredPin("");
     setSwitchPinError("");
     setShowSwitchPin(false);
-  }, [isUserSwitchModalOpen, activeUser, settings.twoFactorEmailEnabled]);
+  }, [isUserSwitchModalOpen, activeUser, settings.twoFactorEmailEnabled, switchSelectedEmployeeId, employees]);
 
   const pinStrength = useMemo(() => {
     const pin = testPinInput.trim();
@@ -493,6 +547,108 @@ export default function App() {
     );
   };
 
+  const isMozambicanPhoneValid = (phone: string): boolean => {
+    if (!phone || !phone.trim()) return true;
+    const cleanPhone = phone.trim().replace(/[\s-]/g, "");
+    return /^\+258[289]\d{8}$/.test(cleanPhone);
+  };
+
+  const formatMozambicanPhoneInput = (val: string): string => {
+    let digits = val.replace(/\D/g, "");
+    if (digits.startsWith("258")) {
+      digits = digits.slice(3);
+    }
+    digits = digits.slice(0, 9);
+    return digits ? `+258${digits}` : "";
+  };
+
+  const isEmailFormatValid = (email: string): boolean => {
+    if (!email || !email.trim()) return true;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  };
+
+  const handleSaveProfileChanges = async () => {
+    const targetEmp = switchSelectedEmployeeId 
+      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+      : activeUser;
+    const targetEmpId = targetEmp?.id;
+    if (!targetEmpId) return;
+
+    if (!profileName.trim()) {
+      showToast("O nome do colaborador não pode estar vazio.", "warning");
+      return;
+    }
+
+    if (profileEmail.trim() && !isEmailFormatValid(profileEmail)) {
+      showToast("E-mail profissional inválido. Insira um endereço de e-mail válido (ex: colaborador@empresa.com).", "warning");
+      return;
+    }
+
+    if (profileContact.trim() && !isMozambicanPhoneValid(profileContact)) {
+      showToast("Contacto telefónico inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
+      return;
+    }
+
+    if (profileWhatsapp.trim() && !isMozambicanPhoneValid(profileWhatsapp)) {
+      showToast("Número de WhatsApp inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
+      return;
+    }
+
+    const updatedSettings = {
+      ...settings,
+      logoUrl: profileLogoUrl.trim()
+    };
+    setSettings(updatedSettings);
+    syncTable("settings", [updatedSettings]);
+    if (handleUpdateSettings) {
+      handleUpdateSettings(updatedSettings);
+    }
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === targetEmpId) {
+        return {
+          ...emp,
+          name: profileName.trim(),
+          email: profileEmail.trim(),
+          contact: profileContact.trim(),
+          whatsapp: profileWhatsapp.trim(),
+          fotoPerfil: profileFotoPerfil.trim(),
+          logoUrl: profileLogoUrl.trim(),
+          twoFactorEmailEnabled: profileTwoFactorEmail,
+          observacoes: profileObservacoes.trim(),
+          expirationDate: profileExpirationDate
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    if (activeUser && activeUser.id === targetEmpId) {
+      setActiveUser({
+        ...activeUser,
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        contact: profileContact.trim(),
+        whatsapp: profileWhatsapp.trim(),
+        fotoPerfil: profileFotoPerfil.trim(),
+        logoUrl: profileLogoUrl.trim(),
+        twoFactorEmailEnabled: profileTwoFactorEmail,
+        observacoes: profileObservacoes.trim(),
+        expirationDate: profileExpirationDate
+      });
+    }
+
+    showToast("Perfil e Logotipo salvos no Firestore com sucesso!", "success");
+
+    handleAddAuditLog(
+      "Atualização de Perfil",
+      "COLABORADORES",
+      `Perfil do colaborador ${profileName.trim()} (ID: ${targetEmpId}) atualizado (E-mail: ${profileEmail.trim() || "N/A"}, Contacto: ${profileContact.trim() || "N/A"}, WhatsApp: ${profileWhatsapp.trim() || "N/A"}).`
+    );
+  };
+
   const handleExportCollaboratorPdf = () => {
     const targetEmployee = switchSelectedEmployeeId 
       ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
@@ -544,7 +700,9 @@ export default function App() {
         ["Estado da Conta", targetEmployee.status],
         ["Data de Admissão", targetEmployee.admissionDate ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT") : "N/A"],
         ["Data de Criação do PIN Atual", pinCreatedFormatted],
-        ["Status do PIN", targetEmployee.pinChanged === false ? "PIN Temporário" : "Senha Pessoal Ativa"]
+        ["Status do PIN", targetEmployee.pinChanged === false ? "PIN Temporário" : "Senha Pessoal Ativa"],
+        ["Observações / Notas", targetEmployee.observacoes || "Nenhuma observação registrada"],
+        ["Data de Expiração (Validade)", targetEmployee.expirationDate ? new Date(targetEmployee.expirationDate).toLocaleDateString("pt-PT") : "Não definida"]
       ],
       theme: "striped",
       headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
@@ -4081,9 +4239,13 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                             <select
                               value={switchSelectedEmployeeId}
                               onChange={(e) => {
-                                setSwitchSelectedEmployeeId(e.target.value);
+                                const newId = e.target.value;
+                                setSwitchSelectedEmployeeId(newId);
                                 setSwitchEnteredPin("");
                                 setSwitchPinError("");
+                                const found = employees.find(x => x.id === newId) || activeUser;
+                                setProfileObservacoes(found?.observacoes || "");
+                                setProfileExpirationDate(found?.expirationDate || "");
                               }}
                               className="w-full bg-slate-950 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
                             >
@@ -4269,6 +4431,119 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                             }}
                           />
 
+                          {/* Componente de Upload e Captura de Foto de Perfil via Câmera */}
+                          <div id="profile-photo-camera-upload-component" className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <Camera className="w-3.5 h-3.5 text-orange-400" />
+                                <span>Personalizar com Câmera ou Ficheiro</span>
+                              </span>
+                              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wide">
+                                {isCameraActive ? "Câmera Ativa" : "Dispositivo"}
+                              </span>
+                            </div>
+
+                            {!isCameraActive ? (
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  id="profile-start-camera-btn"
+                                  onClick={async () => {
+                                    setCameraError("");
+                                    setIsCameraActive(true);
+                                    try {
+                                      const stream = await navigator.mediaDevices.getUserMedia({
+                                        video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" }
+                                      });
+                                      mediaStreamRef.current = stream;
+                                      if (videoRef.current) {
+                                        videoRef.current.srcObject = stream;
+                                        videoRef.current.play();
+                                      }
+                                    } catch (err: any) {
+                                      console.error("Erro ao acessar câmera:", err);
+                                      setCameraError("Acesso à câmera bloqueado ou indisponível.");
+                                    }
+                                  }}
+                                  className="flex items-center justify-center gap-1.5 p-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 shadow-sm"
+                                >
+                                  <Video className="w-3.5 h-3.5" />
+                                  <span>Usar Câmera</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  id="profile-trigger-upload-btn"
+                                  onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
+                                  className="flex items-center justify-center gap-1.5 p-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 shadow-sm"
+                                >
+                                  <Upload className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>Carregar Ficheiro</span>
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="space-y-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800">
+                                <div className="relative aspect-square max-w-[200px] mx-auto rounded-xl overflow-hidden bg-black border border-slate-700 shadow-inner">
+                                  <video
+                                    ref={videoRef}
+                                    autoPlay
+                                    playsInline
+                                    muted
+                                    className="w-full h-full object-cover transform -scale-x-100"
+                                  />
+                                  <div className="absolute top-2 right-2 bg-slate-900/80 text-orange-400 text-[9px] font-mono px-2 py-0.5 rounded-full border border-orange-500/30 flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
+                                    <span>Ao Vivo</span>
+                                  </div>
+                                </div>
+
+                                {cameraError && (
+                                  <p className="text-[10.5px] text-rose-400 font-medium text-center bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
+                                    {cameraError}
+                                  </p>
+                                )}
+
+                                <div className="flex items-center justify-center gap-2 pt-1">
+                                  <button
+                                    type="button"
+                                    id="profile-capture-snapshot-btn"
+                                    onClick={() => {
+                                      if (videoRef.current) {
+                                        const canvas = document.createElement("canvas");
+                                        canvas.width = 400;
+                                        canvas.height = 400;
+                                        const ctx = canvas.getContext("2d");
+                                        if (ctx) {
+                                          ctx.translate(canvas.width, 0);
+                                          ctx.scale(-1, 1);
+                                          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+                                          const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+                                          setProfileFotoPerfil(dataUrl);
+                                          showToast("Foto capturada com sucesso!", "success");
+                                          stopCamera();
+                                        }
+                                      }
+                                    }}
+                                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" />
+                                    <span>Capturar Foto</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    id="profile-close-camera-btn"
+                                    onClick={stopCamera}
+                                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1 border border-slate-700"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    <span>Cancelar</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+
                           {/* Emojis Preset Grid */}
                           <div className="space-y-2">
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Escolha um Emoji como Avatar</label>
@@ -4302,27 +4577,284 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                             />
                           </div>
 
-                          {/* Text Fields */}
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Nome Completo</label>
-                              <input
-                                type="text"
-                                value={profileName}
-                                onChange={(e) => setProfileName(e.target.value)}
-                                placeholder="Seu nome"
-                                className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                              />
+                          {/* Campos Editáveis de Nome, Contacto e WhatsApp com Botão de Gravar Alterações */}
+                          <div id="editable-profile-info-section" className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <UserCheck className="w-3.5 h-3.5 text-orange-400" />
+                                <span>Dados do Colaborador (Editável)</span>
+                              </label>
+                              <button
+                                type="button"
+                                id="save-profile-changes-btn"
+                                onClick={handleSaveProfileChanges}
+                                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
+                                title="Gravar alterações no Firestore"
+                              >
+                                <Save className="w-3.5 h-3.5" />
+                                <span>Gravar Alterações</span>
+                              </button>
                             </div>
-                            <div className="space-y-1.5">
-                              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Contacto Telefónico</label>
-                              <input
-                                type="text"
-                                value={profileContact}
-                                onChange={(e) => setProfileContact(e.target.value)}
-                                placeholder="Seu contacto"
-                                className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                              />
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <label htmlFor="profile-name-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                    Nome Completo
+                                  </label>
+                                  {profileName.trim() ? (
+                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                      Preenchido
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
+                                      <AlertCircle className="w-3 h-3 text-rose-400" />
+                                      Obrigatório
+                                    </span>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  id="profile-name-input"
+                                  value={profileName}
+                                  onChange={(e) => setProfileName(e.target.value)}
+                                  placeholder="Digite o nome completo"
+                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
+                                    profileName.trim()
+                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
+                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
+                                  }`}
+                                />
+                                {!profileName.trim() && (
+                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
+                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
+                                    <span>O nome é obrigatório para identificação do colaborador.</span>
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <label htmlFor="profile-email-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                    <Mail className="w-3 h-3 text-sky-400" />
+                                    <span>E-mail Profissional</span>
+                                  </label>
+                                  {profileEmail.trim() && (
+                                    isEmailFormatValid(profileEmail) ? (
+                                      <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                        Válido
+                                      </span>
+                                    ) : (
+                                      <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
+                                        <AlertCircle className="w-3 h-3 text-rose-400" />
+                                        Formato Inválido
+                                      </span>
+                                    )
+                                  )}
+                                </div>
+                                <input
+                                  type="email"
+                                  id="profile-email-input"
+                                  value={profileEmail}
+                                  onChange={(e) => setProfileEmail(e.target.value)}
+                                  placeholder="colaborador@empresa.com"
+                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
+                                    profileEmail.trim()
+                                      ? isEmailFormatValid(profileEmail)
+                                        ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
+                                        : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
+                                      : "border-slate-800 focus:border-orange-500"
+                                  }`}
+                                />
+                                {profileEmail.trim() && !isEmailFormatValid(profileEmail) && (
+                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
+                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
+                                    <span>Insira um formato válido de e-mail (ex: usuario@dominio.com).</span>
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <label htmlFor="profile-contact-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                                    Contacto Telefónico
+                                  </label>
+                                  {profileContact.trim() && isMozambicanPhoneValid(profileContact) ? (
+                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                      Válido (+258)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
+                                      <AlertCircle className="w-3 h-3 text-rose-400" />
+                                      {!profileContact.trim() ? "Obrigatório" : "Formato Inválido"}
+                                    </span>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  id="profile-contact-input"
+                                  value={profileContact}
+                                  onChange={(e) => setProfileContact(formatMozambicanPhoneInput(e.target.value))}
+                                  placeholder="+258XXXXXXXXX (ex: +258841234567)"
+                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
+                                    profileContact.trim() && isMozambicanPhoneValid(profileContact)
+                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
+                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
+                                  }`}
+                                />
+                                {(!profileContact.trim() || !isMozambicanPhoneValid(profileContact)) && (
+                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
+                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
+                                    <span>
+                                      {!profileContact.trim()
+                                        ? "O contacto telefónico é obrigatório."
+                                        : "Use o formato moçambicano: +258 seguido de 9 dígitos (ex: +258841234567)."}
+                                    </span>
+                                  </p>
+                                )}
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <label htmlFor="profile-whatsapp-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                    <MessageSquare className="w-3 h-3 text-emerald-400" />
+                                    <span>WhatsApp (Pedidos)</span>
+                                  </label>
+                                  {profileWhatsapp.trim() && isMozambicanPhoneValid(profileWhatsapp) ? (
+                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                      Válido (+258)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
+                                      <AlertCircle className="w-3 h-3 text-rose-400" />
+                                      {!profileWhatsapp.trim() ? "Obrigatório" : "Formato Inválido"}
+                                    </span>
+                                  )}
+                                </div>
+                                <input
+                                  type="text"
+                                  id="profile-whatsapp-input"
+                                  value={profileWhatsapp}
+                                  onChange={(e) => setProfileWhatsapp(formatMozambicanPhoneInput(e.target.value))}
+                                  placeholder="+258XXXXXXXXX (ex: +258841234567)"
+                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
+                                    profileWhatsapp.trim() && isMozambicanPhoneValid(profileWhatsapp)
+                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
+                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
+                                  }`}
+                                />
+                                {(!profileWhatsapp.trim() || !isMozambicanPhoneValid(profileWhatsapp)) && (
+                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
+                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
+                                    <span>
+                                      {!profileWhatsapp.trim()
+                                        ? "O número de WhatsApp é obrigatório para envio de pedidos."
+                                        : "Use o formato moçambicano: +258 seguido de 9 dígitos (ex: +258841234567)."}
+                                    </span>
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Campo Logotipo da Empresa com Pré-Visualização da Imagem */}
+                              <div id="profile-logo-field-container" className="sm:col-span-2 space-y-2.5 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label htmlFor="profile-logo-input" className="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Image className="w-3.5 h-3.5 text-orange-400" />
+                                    <span>Logotipo da Empresa / Documentos (PDF)</span>
+                                  </label>
+                                  {profileLogoUrl.trim() ? (
+                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                      Logotipo Ativo
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                      Padrão do Sistema
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-col sm:flex-row items-center gap-3">
+                                  {/* Pré-visualização do Logotipo */}
+                                  <div className="w-20 h-20 shrink-0 bg-slate-900 border-2 border-dashed border-slate-700 rounded-xl flex flex-col items-center justify-center relative overflow-hidden group">
+                                    {profileLogoUrl ? (
+                                      <>
+                                        <img
+                                          src={profileLogoUrl}
+                                          alt="Pré-visualização do Logotipo"
+                                          className="w-full h-full object-contain p-1.5"
+                                          onError={(e) => {
+                                            (e.target as HTMLElement).style.display = 'none';
+                                          }}
+                                        />
+                                        <button
+                                          type="button"
+                                          onClick={() => setProfileLogoUrl("")}
+                                          className="absolute inset-0 bg-slate-900/85 text-rose-400 opacity-0 group-hover:opacity-100 transition flex items-center justify-center font-bold text-[10px] cursor-pointer"
+                                          title="Remover Logotipo"
+                                        >
+                                          Remover
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <div className="text-center p-2">
+                                        <Building className="w-6 h-6 text-slate-500 mx-auto mb-1" />
+                                        <span className="text-[8px] text-slate-500 font-bold block leading-tight">Sem Logo</span>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="flex-1 space-y-2 w-full">
+                                    <p className="text-[10px] text-slate-400 leading-tight">
+                                      Este logotipo é incluído automaticamente no cabeçalho das Ordens de Compra e ficheiros PDF para fornecedores.
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                      <input
+                                        type="text"
+                                        id="profile-logo-input"
+                                        value={profileLogoUrl}
+                                        onChange={(e) => setProfileLogoUrl(e.target.value)}
+                                        placeholder="Cole a URL do logotipo (https://...)"
+                                        className="flex-1 bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl py-2 px-3 text-xs text-white outline-none transition font-medium"
+                                      />
+                                      <input
+                                        type="file"
+                                        id="profile-logo-file-input"
+                                        accept="image/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const file = e.target.files?.[0];
+                                          if (file) {
+                                            if (file.size > 2 * 1024 * 1024) {
+                                              showToast("O ficheiro de logotipo deve ter no máximo 2MB", "error");
+                                              return;
+                                            }
+                                            const reader = new FileReader();
+                                            reader.onloadend = () => {
+                                              setProfileLogoUrl(reader.result as string);
+                                              showToast("Logotipo carregado com sucesso!", "success");
+                                            };
+                                            reader.readAsDataURL(file);
+                                          }
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => document.getElementById("profile-logo-file-input")?.click()}
+                                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
+                                        title="Carregar Ficheiro de Logotipo"
+                                      >
+                                        <Upload className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">Upload</span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
 
@@ -4494,27 +5026,125 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
                             const empName = selectedOrActiveEmp?.name?.toLowerCase() || "";
                             const empId = selectedOrActiveEmp?.id?.toLowerCase() || "";
+                            const searchLower = activitySearchText.trim().toLowerCase();
 
                             const filteredCollaboratorLogs = auditLogs
                               .filter(log => {
                                 if (!selectedOrActiveEmp) return false;
                                 const logUser = (log.user || "").toLowerCase();
                                 const logDetails = (log.details || "").toLowerCase();
-                                return logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
+                                const logAction = (log.action || "").toLowerCase();
+                                const logModule = (log.module || "").toLowerCase();
+
+                                const matchesCollaborator = logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
+                                if (!matchesCollaborator) return false;
+
+                                if (searchLower) {
+                                  const matchesText = logUser.includes(searchLower) ||
+                                                      logDetails.includes(searchLower) ||
+                                                      logAction.includes(searchLower) ||
+                                                      logModule.includes(searchLower);
+                                  if (!matchesText) return false;
+                                }
+
+                                if (log.timestamp) {
+                                  const logTime = new Date(log.timestamp).getTime();
+                                  if (activityStartDate) {
+                                    const startMs = new Date(`${activityStartDate}T00:00:00`).getTime();
+                                    if (!isNaN(startMs) && logTime < startMs) return false;
+                                  }
+                                  if (activityEndDate) {
+                                    const endMs = new Date(`${activityEndDate}T23:59:59.999`).getTime();
+                                    if (!isNaN(endMs) && logTime > endMs) return false;
+                                  }
+                                }
+
+                                return true;
                               })
-                              .slice(-10)
+                              .slice(-50)
                               .reverse();
+
+                            const hasActiveFilters = Boolean(activitySearchText || activityStartDate || activityEndDate);
 
                             return (
                               <>
-                                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl space-y-1 text-xs">
+                                {/* Search and Date Filter Controls at Top */}
+                                <div id="activity-log-filters-container" className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-bold text-orange-400 flex items-center gap-1.5">
+                                      <Filter className="w-3.5 h-3.5 text-orange-400" />
+                                      <span>Filtros de Pesquisa de Histórico</span>
+                                    </span>
+                                    {hasActiveFilters && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setActivitySearchText("");
+                                          setActivityStartDate("");
+                                          setActivityEndDate("");
+                                        }}
+                                        className="text-[10px] font-extrabold text-slate-400 hover:text-orange-400 underline transition cursor-pointer"
+                                      >
+                                        Limpar Filtros
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Campo de Texto para busca de logs */}
+                                  <div className="relative">
+                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                    <input
+                                      type="text"
+                                      id="activity-log-search-input"
+                                      value={activitySearchText}
+                                      onChange={(e) => setActivitySearchText(e.target.value)}
+                                      placeholder="Buscar por ação, detalhes, módulo ou palavra-chave..."
+                                      className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:border-orange-500 transition font-medium"
+                                    />
+                                  </div>
+
+                                  {/* Seletor de Intervalo de Datas */}
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div>
+                                      <label htmlFor="activity-log-start-date" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                                        <Calendar className="w-3 h-3 text-orange-400" />
+                                        Data Início
+                                      </label>
+                                      <input
+                                        type="date"
+                                        id="activity-log-start-date"
+                                        value={activityStartDate}
+                                        onChange={(e) => setActivityStartDate(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label htmlFor="activity-log-end-date" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                                        <Calendar className="w-3 h-3 text-orange-400" />
+                                        Data Fim
+                                      </label>
+                                      <input
+                                        type="date"
+                                        id="activity-log-end-date"
+                                        value={activityEndDate}
+                                        onChange={(e) => setActivityEndDate(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Banner de Resumo */}
+                                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-xs">
                                   <p className="font-bold text-orange-400 flex items-center justify-between">
-                                    <span>Histórico das Últimas 10 Atividades</span>
-                                    <span className="font-mono text-[10px] text-slate-400">{filteredCollaboratorLogs.length} registro(s)</span>
+                                    <span>Registos do Colaborador: <strong className="text-white">{selectedOrActiveEmp?.name}</strong></span>
+                                    <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">{filteredCollaboratorLogs.length} registro(s)</span>
                                   </p>
-                                  <p className="text-slate-400 text-[11px]">
-                                    Exibindo ações de auditoria recentes do colaborador: <strong className="text-white font-bold">{selectedOrActiveEmp?.name}</strong>.
-                                  </p>
+                                  {hasActiveFilters && (
+                                    <p className="text-[10.5px] text-slate-400 italic">
+                                      Exibindo registos filtrados por texto/intervalo de datas.
+                                    </p>
+                                  )}
                                 </div>
 
                                 {filteredCollaboratorLogs.length > 0 ? (
@@ -4543,9 +5173,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                 ) : (
                                   <div className="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-800 space-y-2">
                                     <p className="text-2xl">📜</p>
-                                    <p className="text-xs font-bold text-slate-300">Nenhum registro recente encontrado</p>
+                                    <p className="text-xs font-bold text-slate-300">Nenhum registro encontrado</p>
                                     <p className="text-[10.5px] text-slate-500">
-                                      Não foram encontradas ações no log de auditoria para {selectedOrActiveEmp?.name || "este colaborador"}.
+                                      {hasActiveFilters 
+                                        ? "Nenhuma ação corresponde aos filtros de pesquisa ou intervalo de datas definidos." 
+                                        : `Não foram encontradas ações no log de auditoria para ${selectedOrActiveEmp?.name || "este colaborador"}.`}
                                     </p>
                                   </div>
                                 )}
@@ -4557,6 +5189,86 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     </motion.div>
                   </AnimatePresence>
                 </div>
+
+                {/* Footer Componente de Observações do Colaborador */}
+                {(() => {
+                  const targetEmp = switchSelectedEmployeeId 
+                    ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+                    : activeUser;
+
+                  return (
+                    <div id="modal-employee-observacoes-section" className="px-6 py-3.5 border-t border-slate-100 dark:border-zinc-850 bg-slate-900/40 dark:bg-zinc-950/60 text-left space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <label htmlFor="modal-employee-observacoes-input" className="text-[10.5px] font-bold text-slate-300 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                          <span>Observações & Notas Extras na Ficha ({targetEmp?.name || "Colaborador"})</span>
+                        </label>
+                        <button
+                          type="button"
+                          id="save-collaborator-observacoes-btn"
+                          onClick={async () => {
+                            const targetEmpId = targetEmp?.id;
+                            if (!targetEmpId) return;
+
+                            const updatedEmployees = employees.map(emp => {
+                              if (emp.id === targetEmpId) {
+                                return { ...emp, observacoes: profileObservacoes.trim(), expirationDate: profileExpirationDate };
+                              }
+                              return emp;
+                            });
+
+                            setEmployees(updatedEmployees);
+                            await syncTable("employees", updatedEmployees);
+
+                            if (activeUser && activeUser.id === targetEmpId) {
+                              setActiveUser({
+                                ...activeUser,
+                                observacoes: profileObservacoes.trim(),
+                                expirationDate: profileExpirationDate
+                              });
+                            }
+
+                            showToast(`Observações e Data de Expiração de ${targetEmp.name} salvas na ficha com sucesso!`, "success");
+                            handleAddAuditLog(
+                              "Atualização de Observações/Expiração",
+                              "COLABORADORES",
+                              `Observações e data de expiração (${profileExpirationDate || "não definida"}) atualizadas para o colaborador ${targetEmp.name} (ID: ${targetEmp.id}).`
+                            );
+                          }}
+                          className="px-2.5 py-1 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/30 rounded-lg text-[10px] font-bold transition cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm"
+                          title="Salvar apenas as observações e data de expiração no cadastro do colaborador"
+                        >
+                          <Save className="w-3 h-3" />
+                          <span>Salvar Notas</span>
+                        </button>
+                      </div>
+
+                      <textarea
+                        id="modal-employee-observacoes-input"
+                        rows={2}
+                        value={profileObservacoes}
+                        onChange={(e) => setProfileObservacoes(e.target.value)}
+                        placeholder={`Digite observações, notas extras ou anotações na ficha de ${targetEmp?.name || "este colaborador"}...`}
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl p-2.5 text-xs text-slate-100 outline-none transition font-medium resize-none shadow-inner placeholder:text-slate-500"
+                      />
+
+                      {/* Campo de Entrada de Data 'Data de Expiração' */}
+                      <div className="pt-1.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-800/60">
+                        <label htmlFor="modal-employee-expiration-date-input" className="text-[10.5px] font-bold text-slate-300 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-orange-400 shrink-0" />
+                          <span>Data de Expiração (Contrato / Credencial)</span>
+                        </label>
+                        <input
+                          type="date"
+                          id="modal-employee-expiration-date-input"
+                          value={profileExpirationDate}
+                          onChange={(e) => setProfileExpirationDate(e.target.value)}
+                          className="bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl px-3 py-1.5 text-xs text-slate-100 outline-none transition font-medium shadow-inner cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Footer */}
                 <div className="p-6 border-t border-slate-100 dark:border-zinc-850 flex items-center justify-between gap-3 bg-slate-900/10">
@@ -4590,6 +5302,31 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     >
                       <UserX className="w-4 h-4 text-rose-500 shrink-0" />
                       Suspender Colaborador
+                    </button>
+
+                    <button
+                      type="button"
+                      id="view-full-activity-history-btn"
+                      onClick={() => setUserSwitchModalTab("activity")}
+                      className="px-3.5 py-2 text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                      title="Alternar para a aba de Histórico de Atividade"
+                    >
+                      <History className="w-4 h-4 text-amber-500 shrink-0" />
+                      <span>Ver Histórico Completo</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="clear-collaborator-observacoes-btn"
+                      onClick={() => {
+                        setProfileObservacoes("");
+                        showToast("Observações limpas com sucesso!", "info");
+                      }}
+                      className="px-3.5 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-750 text-slate-300 dark:text-slate-200 border border-slate-700 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
+                      title="Limpar o campo de notas/observações do colaborador selecionado"
+                    >
+                      <Trash2 className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span>Limpar Observações</span>
                     </button>
                   </div>
 
@@ -4663,23 +5400,27 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                           const autoLinkChecked = (document.getElementById("auto-link-email-checkbox") as HTMLInputElement)?.checked ?? true;
                           const emailToBind = auth.currentUser?.email || selectedEmp.email || "";
 
-                          let updatedEmployees = [...employees];
-                          if (autoLinkChecked && emailToBind) {
-                            updatedEmployees = employees.map(emp => {
-                              if (emp.id === switchSelectedEmployeeId) {
-                                return { ...emp, email: emailToBind.toLowerCase().trim() };
-                              }
-                              return emp;
-                            });
-                            setEmployees(updatedEmployees);
-                            await syncTable("employees", updatedEmployees);
-                          }
+                          let updatedEmployees = employees.map(emp => {
+                            if (emp.id === switchSelectedEmployeeId) {
+                              return { 
+                                ...emp, 
+                                email: autoLinkChecked && emailToBind ? emailToBind.toLowerCase().trim() : (emp.email || ""),
+                                observacoes: profileObservacoes.trim(),
+                                expirationDate: profileExpirationDate
+                              };
+                            }
+                            return emp;
+                          });
+                          setEmployees(updatedEmployees);
+                          await syncTable("employees", updatedEmployees);
 
                           // Perform active switch
                           const finalActiveUser = {
                             ...selectedEmp,
                             email: autoLinkChecked && emailToBind ? emailToBind : (selectedEmp.email || ""),
-                            fotoPerfil: selectedEmp.fotoPerfil || ""
+                            fotoPerfil: selectedEmp.fotoPerfil || "",
+                            observacoes: profileObservacoes.trim(),
+                            expirationDate: profileExpirationDate
                           };
                           setActiveUser(finalActiveUser);
 
@@ -4702,14 +5443,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                             return;
                           }
 
+                          if (profileContact.trim() && !isMozambicanPhoneValid(profileContact)) {
+                            showToast("Contacto telefónico inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
+                            return;
+                          }
+
+                          const targetEmpId = switchSelectedEmployeeId || activeUser.id;
+
                           const updatedEmployees = employees.map(emp => {
-                            if (emp.id === activeUser.id) {
+                            if (emp.id === targetEmpId) {
                               return {
                                 ...emp,
                                 name: profileName.trim(),
                                 contact: profileContact.trim(),
                                 fotoPerfil: profileFotoPerfil.trim(),
-                                twoFactorEmailEnabled: profileTwoFactorEmail
+                                twoFactorEmailEnabled: profileTwoFactorEmail,
+                                observacoes: profileObservacoes.trim(),
+                                expirationDate: profileExpirationDate
                               };
                             }
                             return emp;
@@ -4728,20 +5478,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                           await syncTable("settings", updatedSettings);
 
                           // Update active session operator
-                          setActiveUser({
-                            ...activeUser,
-                            name: profileName.trim(),
-                            contact: profileContact.trim(),
-                            fotoPerfil: profileFotoPerfil.trim(),
-                            twoFactorEmailEnabled: profileTwoFactorEmail
-                          });
+                          if (activeUser.id === targetEmpId) {
+                            setActiveUser({
+                              ...activeUser,
+                              name: profileName.trim(),
+                              contact: profileContact.trim(),
+                              fotoPerfil: profileFotoPerfil.trim(),
+                              twoFactorEmailEnabled: profileTwoFactorEmail,
+                              observacoes: profileObservacoes.trim()
+                            });
+                          }
 
-                          showToast("Perfil e configurações de 2FA atualizados com sucesso!", "success");
+                          showToast("Perfil e observações atualizados com sucesso!", "success");
 
                           handleAddAuditLog(
                             "Atualização de Perfil",
                             "SISTEMA",
-                            `Colaborador ${activeUser.name} atualizou o perfil (2FA por E-mail: ${profileTwoFactorEmail ? "Ativado" : "Desativado"}).`
+                            `Colaborador ${activeUser.name} atualizou o perfil e observações.`
                           );
 
                           setIsUserSwitchModalOpen(false);

@@ -466,8 +466,14 @@ export default function StaffModule({
   };
 
   // Audit Logs PDF Export
-  const handleDownloadAuditPDF = async () => {
+  const handleDownloadAuditPDF = async (exportAll: boolean = false) => {
     try {
+      const logsToExport = exportAll ? [...auditLogs].reverse() : filteredAuditLogs;
+      if (logsToExport.length === 0) {
+        alert("Nenhum log de auditoria disponível para exportar em PDF.");
+        return;
+      }
+
       const doc = new jsPDF();
       
       const logoData = await getBase64ImageFromUrl(settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
@@ -481,21 +487,21 @@ export default function StaffModule({
       
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
-      doc.text("ERP Modern | Relatório de Segurança", 14, 28);
+      doc.text("ERP Modern | Relatório de Segurança e Auditoria", 14, 28);
       
       doc.setFontSize(14);
       doc.setFont("helvetica", "bold");
-      doc.text("Relatório de Audit Log de Segurança", 14, 40);
+      doc.text(exportAll ? "Relatório Completo de Audit Log de Segurança" : "Relatório de Audit Log de Segurança", 14, 40);
       
       doc.setFontSize(10);
       doc.setFont("helvetica", "normal");
-      doc.text(`Período: ${startDate} até ${endDate}`, 14, 47);
-      doc.text(`Emitido em: ${new Date().toLocaleString()}`, 14, 52);
+      doc.text(`Período: ${startDate || "Todos os Registos"} até ${endDate || "Atualidade"}`, 14, 47);
+      doc.text(`Emitido em: ${new Date().toLocaleString()} por ${activeUsername || "Sistema"}`, 14, 52);
 
       // --- EXECUTIVE SECURITY SUMMARY CALCULATIONS ---
-      const totalEvents = filteredAuditLogs.length;
+      const totalEvents = logsToExport.length;
 
-      const securityEvents = filteredAuditLogs.filter(log => {
+      const securityEvents = logsToExport.filter(log => {
         const m = (log.module || "").toUpperCase();
         const a = (log.action || "").toUpperCase();
         const d = (log.details || "").toUpperCase();
@@ -504,15 +510,15 @@ export default function StaffModule({
                d.includes("SUSPEITO") || d.includes("IP INTERNACIONAL") || d.includes("INCOMPATÍVEL") || d.includes("ACESSO");
       });
 
-      const criticalSecurityEvents = filteredAuditLogs.filter(log => {
+      const criticalSecurityEvents = logsToExport.filter(log => {
         const d = (log.details || "").toUpperCase();
         const a = (log.action || "").toUpperCase();
         return d.includes("SUSPEITO") || d.includes("ALERTA DE SEGURANÇA") || d.includes("IP INTERNACIONAL") || d.includes("CRÍTICO") || a.includes("FALHA") || d.includes("FALHA DE LOGIN") || d.includes("INTRUSÃO");
       });
 
-      const uniqueUsers = Array.from(new Set(filteredAuditLogs.map(log => log.user))).filter(Boolean);
+      const uniqueUsers = Array.from(new Set(logsToExport.map(log => log.user))).filter(Boolean);
 
-      const summaryText = `Durante o período de auditoria correspondente, o sistema OST Vendas monitorou de forma contínua a integridade e os acessos ao ERP comercial. Foram auditados ${totalEvents} eventos totais de sistema, dos quais ${securityEvents.length} estão associados a fluxos de autenticação ou segurança de utilizadores. O sistema identificou ${criticalSecurityEvents.length} alertas ou acessos críticos (incluindo falhas de login sucessivas, conexões fora de horas de serviço padrão ou geolocalizações não habituais fora do território de Moçambique). Recomenda-se a verificação dos logs abaixo indicados.`;
+      const summaryText = `Durante o período de auditoria correspondente, o sistema OST Vendas monitorou de forma contínua a integridade e os acessos ao ERP comercial. Foram auditados ${totalEvents} eventos totais de sistema, dos quais ${securityEvents.length} estão associados a fluxos de autenticação ou segurança de utilizadores. O sistema identificou ${criticalSecurityEvents.length} alertas ou acessos críticos em ${uniqueUsers.length} operador(es) único(s). Este documento serve para fins de análise de segurança externa e conformidade de TI.`;
 
       // Draw Soft-colored grey card for Executive Summary
       doc.setFillColor(248, 250, 252); // slate-50
@@ -531,7 +537,7 @@ export default function StaffModule({
       doc.setFontSize(10);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(30, 41, 59); // slate-800
-      doc.text("RESUMO EXECUTIVO DO PERÍODO - AUDITORIA DE SEGURANÇA", 20, 65);
+      doc.text("RESUMO EXECUTIVO - AUDITORIA DE SEGURANÇA EXTERNA", 20, 65);
 
       // Section Content
       doc.setFontSize(8.5);
@@ -551,7 +557,7 @@ export default function StaffModule({
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139); // slate-500
-      doc.text("EVENTOS FILTRADOS", 24, 98);
+      doc.text("TOTAL DE EVENTOS", 24, 98);
       doc.setFontSize(10);
       doc.setTextColor(15, 23, 42); // slate-900
       doc.text(`${totalEvents}`, 24, 105);
@@ -563,7 +569,7 @@ export default function StaffModule({
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139); // slate-500
-      doc.text("EVENTOS AUTENTICAÇÃO", 80, 98);
+      doc.text("EVENTOS SEGURANÇA", 80, 98);
       doc.setFontSize(10);
       doc.setTextColor(30, 41, 59); // slate-800
       doc.text(`${securityEvents.length}`, 80, 105);
@@ -588,13 +594,13 @@ export default function StaffModule({
       doc.text("REGISTO DETALHADO DOS EVENTOS DE AUDITORIA", 14, 119);
 
       const head = [["DATA / HORA", "USUÁRIO", "CARGO", "ACÇÃO", "MÓDULO", "DETALHES"]];
-      const body = filteredAuditLogs.map(log => [
+      const body = logsToExport.map(log => [
         new Date(log.timestamp).toLocaleString(),
-        log.user,
-        log.userRole,
-        log.action,
-        log.module,
-        translateFirestoreMessage(log.details)
+        log.user || "Sistema",
+        log.userRole || "N/D",
+        log.action || "Ação",
+        log.module || "Geral",
+        translateFirestoreMessage(log.details || "")
       ]);
 
       autoTable(doc, {
@@ -606,12 +612,16 @@ export default function StaffModule({
         styles: { fontSize: 8, cellPadding: 3 }
       });
 
-      doc.save(`Relatorio_Auditoria_${new Date().toISOString().split('T')[0]}.pdf`);
+      const fileName = exportAll 
+        ? `Relatorio_Auditoria_Completo_${new Date().toISOString().split('T')[0]}.pdf`
+        : `Relatorio_Auditoria_${new Date().toISOString().split('T')[0]}.pdf`;
+
+      doc.save(fileName);
       
       onAddAuditLog(
         "Exportar Auditoria PDF",
         "AUDIT",
-        `Logs de auditoria exportados em PDF (${filteredAuditLogs.length} eventos).`
+        `Logs de auditoria exportados em PDF (${logsToExport.length} eventos, modo: ${exportAll ? "Completo" : "Filtrado"}).`
       );
       setIsExportAuditDropdownOpen(false);
     } catch (err) {
@@ -1365,10 +1375,22 @@ export default function StaffModule({
   // Grouping/Aggregation helper for consecutive duplicate audit logs
   // Returns collapsed logs indicating duplicate counts for sequential identical warnings/errors/info
   const groupedAuditLogs = useMemo(() => {
+    const term = auditSearch.trim().toLowerCase();
+
     const sorted = [...auditLogs].reverse().filter(log => {
-      const matchSearch = (log.user || "").toLowerCase().includes(auditSearch.toLowerCase()) || 
-                          (log.action || "").toLowerCase().includes(auditSearch.toLowerCase()) || 
-                          (log.details || "").toLowerCase().includes(auditSearch.toLowerCase());
+      const formattedDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString() : "";
+      const formattedDateTime = log.timestamp ? new Date(log.timestamp).toLocaleString() : "";
+      const rawTimestamp = log.timestamp || "";
+
+      const matchSearch = !term || 
+                          (log.user || "").toLowerCase().includes(term) || 
+                          (log.userRole || "").toLowerCase().includes(term) || 
+                          (log.module || "").toLowerCase().includes(term) || 
+                          (log.action || "").toLowerCase().includes(term) || 
+                          (log.details || "").toLowerCase().includes(term) ||
+                          formattedDate.toLowerCase().includes(term) ||
+                          formattedDateTime.toLowerCase().includes(term) ||
+                          rawTimestamp.toLowerCase().includes(term);
       
       const matchModule = auditModuleFilter === "Todos" || log.module === auditModuleFilter;
       
@@ -1415,10 +1437,23 @@ export default function StaffModule({
 
   // Traditional filtered logs count helper
   const filteredAuditLogs = useMemo(() => {
+    const term = auditSearch.trim().toLowerCase();
+
     return [...auditLogs].reverse().filter(log => {
-      const matchSearch = (log.user || "").toLowerCase().includes(auditSearch.toLowerCase()) || 
-                          (log.action || "").toLowerCase().includes(auditSearch.toLowerCase()) || 
-                          (log.details || "").toLowerCase().includes(auditSearch.toLowerCase());
+      const formattedDate = log.timestamp ? new Date(log.timestamp).toLocaleDateString() : "";
+      const formattedDateTime = log.timestamp ? new Date(log.timestamp).toLocaleString() : "";
+      const rawTimestamp = log.timestamp || "";
+
+      const matchSearch = !term || 
+                          (log.user || "").toLowerCase().includes(term) || 
+                          (log.userRole || "").toLowerCase().includes(term) || 
+                          (log.module || "").toLowerCase().includes(term) || 
+                          (log.action || "").toLowerCase().includes(term) || 
+                          (log.details || "").toLowerCase().includes(term) ||
+                          formattedDate.toLowerCase().includes(term) ||
+                          formattedDateTime.toLowerCase().includes(term) ||
+                          rawTimestamp.toLowerCase().includes(term);
+
       const matchModule = auditModuleFilter === "Todos" || log.module === auditModuleFilter;
       let matchDate = true;
       if (log.timestamp) {
@@ -1652,33 +1687,43 @@ export default function StaffModule({
             <div className="relative">
               <button
                 onClick={() => setIsExportAuditDropdownOpen(!isExportAuditDropdownOpen)}
-                className="border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold py-2 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
+                className="border border-slate-200 hover:bg-slate-50 bg-white text-slate-700 font-semibold py-2 px-3.5 rounded-xl text-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap shadow-sm"
               >
-                <Download className="w-3.5 h-3.5 text-slate-400" />
-                Exportar ▼
+                <Download className="w-3.5 h-3.5 text-slate-500" />
+                <span>Exportar Logs</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
               </button>
               {isExportAuditDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-42 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                <div className="absolute right-0 mt-2 w-52 bg-white border border-slate-200 rounded-xl shadow-lg z-50 overflow-hidden">
                   <button 
                     onClick={handleDownloadAuditCSV} 
                     className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 border-b border-slate-100"
                   >
-                    <FileText className="w-3.5 h-3.5 text-blue-500" />
-                    Ficheiro CSV
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Ficheiro CSV</span>
                   </button>
                   <button 
-                    onClick={handleDownloadAuditPDF} 
+                    id="export-audit-pdf-dropdown-btn"
+                    onClick={() => handleDownloadAuditPDF(false)} 
                     className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 border-b border-slate-100"
                   >
-                    <FileText className="w-3.5 h-3.5 text-red-500" />
-                    Relatório PDF
+                    <FileText className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Relatório PDF (Filtrado)</span>
+                  </button>
+                  <button 
+                    id="export-full-audit-pdf-dropdown-btn"
+                    onClick={() => handleDownloadAuditPDF(true)} 
+                    className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 border-b border-slate-100"
+                  >
+                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>PDF Auditoria Completa ({auditLogs.length})</span>
                   </button>
                   <button 
                     onClick={handleCopyLogs} 
                     className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium flex items-center gap-2 transition"
                   >
                     <Copy className="w-3.5 h-3.5 text-orange-500" />
-                    {copiedLogs ? "Copiado!" : "Copiar Logs"}
+                    <span>Copiar Texto</span>
                   </button>
                 </div>
               )}
@@ -2235,8 +2280,9 @@ export default function StaffModule({
             <div className="relative w-full xl:w-80">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
               <input
+                id="audit-logs-search-input"
                 type="text"
-                placeholder="Pesquisar por utente, acção ou log de erro..."
+                placeholder="Filtrar por usuário, módulo, data ou ação..."
                 value={auditSearch}
                 onChange={(e) => setAuditSearch(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-1.5 text-xs outline-none focus:ring-1 focus:ring-orange-400/50 transition font-medium"
@@ -2282,6 +2328,26 @@ export default function StaffModule({
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>Exportar CSV</span>
+              </button>
+
+              <button
+                id="export-audit-pdf-filtered-button"
+                onClick={() => handleDownloadAuditPDF(false)}
+                title="Exportar relatório PDF dos logs de auditoria filtrados"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-xs rounded-xl shadow-sm hover:shadow transition-all duration-150 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Exportar PDF</span>
+              </button>
+
+              <button
+                id="export-audit-pdf-complete-button"
+                onClick={() => handleDownloadAuditPDF(true)}
+                title="Exportar log de auditoria completo para arquivo PDF (Análise de Segurança Externa)"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-sm hover:shadow transition-all duration-150 cursor-pointer hover:scale-[1.02] active:scale-[0.98]"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Auditoria Completa (PDF)</span>
               </button>
 
               <button

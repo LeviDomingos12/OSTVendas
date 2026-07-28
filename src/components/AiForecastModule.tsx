@@ -492,9 +492,136 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
     }
   };
 
-  const handleSendQuotation = (e: React.FormEvent) => {
+  const handleGenerateQuotationPDF = async (productName: string, quantity: number, supplierName: string, costPrice?: number) => {
+    const doc = new jsPDF();
+    const companyName = settings?.companyName || "OST Vendas";
+    const storeContact = settings?.storeContact || "";
+    const storeAddress = settings?.storeAddress || "";
+    const storeNuit = settings?.nuit || settings?.companyNuit || "";
+    const storeEmail = settings?.email || settings?.storeEmail || "";
+
+    let logoData = "";
+    try {
+      const rawLogo = settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg";
+      const res = await fetch(rawLogo);
+      const blob = await res.blob();
+      logoData = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {}
+
+    // Header Background
+    doc.setFillColor(248, 250, 252);
+    doc.rect(0, 0, 210, 48, "F");
+
+    if (logoData) {
+      try {
+        doc.addImage(logoData, "JPEG", 14, 8, 30, 30);
+      } catch (e) {
+        try { doc.addImage(logoData, "PNG", 14, 8, 30, 30); } catch (e2) {}
+      }
+    }
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(30, 41, 59);
+    doc.text(companyName.toUpperCase(), 48, 16);
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    let yPos = 22;
+    if (storeNuit) { doc.text(`NUIT: ${storeNuit}`, 48, yPos); yPos += 4.5; }
+    if (storeContact) { doc.text(`Contacto: ${storeContact}`, 48, yPos); yPos += 4.5; }
+    if (storeAddress) { doc.text(`Endereço: ${storeAddress}`, 48, yPos); yPos += 4.5; }
+    if (storeEmail) { doc.text(`E-mail: ${storeEmail}`, 48, yPos); }
+
+    // Blue Badge
+    doc.setFillColor(37, 99, 235);
+    doc.rect(130, 10, 66, 30, "F");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text("PEDIDO DE COTAÇÃO", 135, 18);
+    doc.setFontSize(8);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`Data: ${new Date().toLocaleDateString("pt-MZ")}`, 135, 26);
+
+    // Supplier Box
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(14, 54, 182, 28, 2, 2, "F");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text("FORNECEDOR DESTINATÁRIO", 18, 62);
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.text(`Empresa / Fornecedor: ${supplierName}`, 18, 70);
+
+    // Table
+    autoTable(doc, {
+      startY: 88,
+      head: [["Descrição do Item", "Quantidade Pretendida", "Preço Estimado Ref.", "Total Estimado"]],
+      body: [
+        [
+          productName,
+          `${quantity} un`,
+          costPrice ? `${costPrice.toLocaleString("pt-MZ")} MT` : "A Cotar",
+          costPrice ? `${(costPrice * quantity).toLocaleString("pt-MZ")} MT` : "A Cotar"
+        ]
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold" },
+      styles: { fontSize: 8.5, cellPadding: 4 }
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 110;
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text("Solicitamos o envio da proposta comercial contendo o preço unitário final e prazo estimado de entrega.", 14, finalY + 12);
+
+    return doc;
+  };
+
+  const handleSendQuotation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProductForQuote) return;
+
+    const supplierName = selectedProductForQuote.supplier || "Fornecedor";
+    const companyName = settings?.companyName || "OST Vendas";
+    const msgText = `Prezado(a) ${supplierName},\n\nGostaríamos de solicitar uma cotação de preços para o fornecimento de ${quoteQuantity} unidades do produto:\n- ${selectedProductForQuote.name}\n\nEncontra-se em anexo/descarregado o documento de Solicitação de Cotação em PDF com o logotipo da nossa empresa.\nPor favor, envie-nos o preço unitário comercializado e o prazo estimado para entrega física.\n\nAtenciosamente,\n${companyName}`;
+
+    if (quoteChannel === "WHATSAPP") {
+      const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === supplierName.toLowerCase());
+      const suppPhone = matchSupp?.phone || "";
+      let cleanPhone = suppPhone.replace(/[^\d+]/g, "");
+      if (cleanPhone.startsWith("+")) cleanPhone = cleanPhone.substring(1);
+
+      const waUrl = cleanPhone 
+        ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msgText)}`
+        : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
+      window.open(waUrl, "_blank");
+    } else if (quoteChannel === "EMAIL") {
+      const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === supplierName.toLowerCase());
+      const suppEmail = matchSupp?.email || "";
+      const subject = `Solicitação de Cotação - ${selectedProductForQuote.name} (${companyName})`;
+      
+      // Auto-generate PDF with logo
+      try {
+        const doc = await handleGenerateQuotationPDF(selectedProductForQuote.name, quoteQuantity, supplierName, selectedProductForQuote.costPrice);
+        doc.save(`Cotacao_${selectedProductForQuote.name.replace(/\s+/g, "_")}.pdf`);
+      } catch (err) {
+        console.error("Erro ao gerar PDF da cotação:", err);
+      }
+
+      const mailtoUrl = `mailto:${encodeURIComponent(suppEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(msgText)}`;
+      window.location.href = mailtoUrl;
+    }
     
     const newQuote = {
       id: `quote-${Date.now()}`,
@@ -510,7 +637,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
     setQuotations([newQuote, ...quotations]);
     setActiveModal(null);
     onShowToast(
-      `Solicitação de cotação enviada para ${selectedProductForQuote.supplier || "Fornecedor"} via ${quoteChannel}! Nenhuma alteração de stock foi realizada para evitar conflitos.`,
+      `Solicitação de cotação aberta via ${quoteChannel} para ${selectedProductForQuote.supplier || "Fornecedor"}! Nenhuma alteração de stock foi realizada.`,
       "success",
       "Cotação Solicitada"
     );

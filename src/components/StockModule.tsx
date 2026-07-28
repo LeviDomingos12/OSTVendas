@@ -35,6 +35,9 @@ import {
   FileSpreadsheet,
   FileText,
   MessageSquare,
+  Mail,
+  Send,
+  Save,
   MapPin,
   ArrowLeftRight,
   Truck,
@@ -194,7 +197,15 @@ export default function StockModule({
   const [orderUnitCost, setOrderUnitCost] = useState<number>(0);
   const [orderPaymentStatus, setOrderPaymentStatus] = useState<"Pago" | "Crédito" | "Pendente">("Pendente");
   const [orderPaymentDueDate, setOrderPaymentDueDate] = useState("");
+  const [orderDispatchChannel, setOrderDispatchChannel] = useState<"WHATSAPP" | "EMAIL" | "NONE">("WHATSAPP");
   const [isOrderFormOpen, setIsOrderFormOpen] = useState(false);
+
+  // Email Dispatch Modal state
+  const [isOrderEmailModalOpen, setIsOrderEmailModalOpen] = useState(false);
+  const [selectedOrderForEmail, setSelectedOrderForEmail] = useState<any>(null);
+  const [orderEmailRecipient, setOrderEmailRecipient] = useState("");
+  const [orderEmailSubject, setOrderEmailSubject] = useState("");
+  const [orderEmailBody, setOrderEmailBody] = useState("");
 
   // Filtering states
   const [supplierSearchQuery, setSupplierSearchQuery] = useState("");
@@ -294,6 +305,259 @@ export default function StockModule({
     onAddAuditLog("Eliminar Fornecedor", "STOCK", `Removido fornecedor ${name}.`);
   };
 
+  const handleSendSupplierOrderWhatsApp = (order: any, supplierOverride?: any) => {
+    const currentSuppliers = settings?.suppliers || [];
+    const supp = supplierOverride || currentSuppliers.find((s: any) => s.id === order.supplierId || s.name.toLowerCase() === order.supplierName.toLowerCase());
+    const phone = supp?.phone || "";
+
+    if (!phone.trim()) {
+      onShowToast?.(`O fornecedor "${order.supplierName}" não possui contacto telefónico/WhatsApp cadastrado.`, "warning");
+      return;
+    }
+
+    let cleanPhone = phone.replace(/[^\d+]/g, "");
+    if (!cleanPhone.startsWith("+") && !cleanPhone.startsWith("258") && cleanPhone.length === 9) {
+      cleanPhone = `258${cleanPhone}`;
+    } else if (cleanPhone.startsWith("+")) {
+      cleanPhone = cleanPhone.substring(1);
+    }
+
+    const companyName = settings?.companyName || "OST Vendas";
+    const msg = 
+`*SOLICITAÇÃO DE MATERIAL / PEDIDO DE COMPRA*
+--------------------------------------------
+*Empresa:* ${companyName}
+*Para Fornecedor:* ${order.supplierName}
+*Nº do Pedido:* ${order.id}
+*Data:* ${order.requestDate || new Date().toISOString().split("T")[0]}
+
+*Item Solicitado:*
+• *Produto:* ${order.productName}
+• *Quantidade:* ${order.quantityRequested} un.
+• *Preço Unitário de Custo:* ${(order.unitCost || 0).toLocaleString("pt-MZ")} MT
+• *Valor Total:* ${(order.totalValue || 0).toLocaleString("pt-MZ")} MT
+
+*Condições de Pagamento:* ${order.paymentStatus || "Pendente"} ${order.paymentDueDate ? `(Vencimento: ${order.paymentDueDate})` : ""}
+
+Por favor, confirme a recepção deste pedido, a disponibilidade do material e a previsão de entrega.
+
+Atenciosamente,
+${companyName}`;
+
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+    window.open(waUrl, "_blank");
+    onShowToast?.(`Acessando WhatsApp para enviar pedido a ${order.supplierName}...`, "success");
+    onAddAuditLog("Enviar Pedido WhatsApp", "STOCK", `Pedido ${order.id} enviado via WhatsApp para ${order.supplierName}.`);
+  };
+
+  const handleGenerateSupplierOrderPDF = async (order: any, supplierOverride?: any) => {
+    const currentSuppliers = settings?.suppliers || [];
+    const supp = supplierOverride || currentSuppliers.find((s: any) => s.id === order.supplierId || s.name.toLowerCase() === order.supplierName.toLowerCase());
+
+    const doc = new jsPDF();
+    const companyName = settings?.companyName || "OST Vendas";
+    const storeContact = settings?.storeContact || "";
+    const storeAddress = settings?.storeAddress || "";
+    const storeNuit = settings?.nuit || settings?.companyNuit || "";
+    const storeEmail = settings?.email || settings?.storeEmail || "";
+
+    // Load Company Logo
+    let logoData = "";
+    try {
+      const rawLogo = settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg";
+      logoData = await getBase64ImageFromUrl(rawLogo);
+    } catch (err) {
+      console.error("Erro ao carregar logotipo para PDF:", err);
+    }
+
+    // Header Background
+    doc.setFillColor(248, 250, 252);
+    doc.rect(0, 0, 210, 48, "F");
+
+    // Company Logo
+    if (logoData) {
+      try {
+        doc.addImage(logoData, "JPEG", 14, 8, 30, 30);
+      } catch (e1) {
+        try {
+          doc.addImage(logoData, "PNG", 14, 8, 30, 30);
+        } catch (e2) {}
+      }
+    }
+
+    // Company Info Header
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(15);
+    doc.setTextColor(30, 41, 59);
+    doc.text(companyName.toUpperCase(), 48, 16);
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    let yPos = 22;
+    if (storeNuit) { doc.text(`NUIT: ${storeNuit}`, 48, yPos); yPos += 4.5; }
+    if (storeContact) { doc.text(`Contacto: ${storeContact}`, 48, yPos); yPos += 4.5; }
+    if (storeAddress) { doc.text(`Endereço: ${storeAddress}`, 48, yPos); yPos += 4.5; }
+    if (storeEmail) { doc.text(`E-mail: ${storeEmail}`, 48, yPos); }
+
+    // Orange Badge Document Box
+    doc.setFillColor(234, 88, 12);
+    doc.rect(130, 10, 66, 30, "F");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(10.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text("ORDEM DE COMPRA", 135, 18);
+    doc.setFontSize(8);
+    doc.setFont("Helvetica", "normal");
+    doc.text(`Ref: ${order.id}`, 135, 25);
+    doc.text(`Data: ${order.requestDate || new Date().toISOString().split("T")[0]}`, 135, 31);
+
+    // Supplier Box
+    doc.setFillColor(241, 245, 249);
+    doc.roundedRect(14, 54, 182, 32, 2, 2, "F");
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text("DADOS DO FORNECEDOR / DESTINATÁRIO", 18, 62);
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(51, 65, 85);
+    doc.text(`Empresa / Nome: ${supp?.name || order.supplierName}`, 18, 70);
+    doc.text(`E-mail: ${supp?.email || orderEmailRecipient || "Não informado"}`, 18, 77);
+    doc.text(`Telefone: ${supp?.phone || supp?.contact || "Não informado"}`, 115, 70);
+    doc.text(`Endereço: ${supp?.address || "Não informado"}`, 115, 77);
+
+    // Item Table
+    autoTable(doc, {
+      startY: 92,
+      head: [["Ref / Código", "Descrição do Item Solicitado", "Qtd Solicitada", "Preço Unit. (MT)", "Valor Total (MT)"]],
+      body: [
+        [
+          order.productId || "-",
+          order.productName || "Produto Solicitado",
+          `${order.quantityRequested} un`,
+          `${(order.unitCost || 0).toLocaleString("pt-MZ")} MT`,
+          `${(order.totalValue || 0).toLocaleString("pt-MZ")} MT`
+        ]
+      ],
+      theme: "grid",
+      headStyles: { fillColor: [234, 88, 12], textColor: 255, fontStyle: "bold" },
+      styles: { fontSize: 8.5, cellPadding: 3.5 },
+      columnStyles: {
+        0: { cellWidth: 32 },
+        1: { cellWidth: 68 },
+        2: { cellWidth: 25, halign: "center" },
+        3: { cellWidth: 28, halign: "right" },
+        4: { cellWidth: 29, halign: "right" }
+      }
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 120;
+
+    // Total Summary Box
+    doc.setFillColor(254, 243, 199);
+    doc.setDrawColor(245, 158, 11);
+    doc.roundedRect(120, finalY + 8, 76, 22, 2, 2, "FD");
+
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(180, 83, 9);
+    doc.text("TOTAL DO PEDIDO:", 124, finalY + 18);
+    doc.setFontSize(11.5);
+    doc.text(`${(order.totalValue || 0).toLocaleString("pt-MZ")} MT`, 192, finalY + 18, { align: "right" });
+
+    // Payment Conditions & Notes
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(30, 41, 59);
+    doc.text("CONDIÇÕES DE FORNECIMENTO & PAGAMENTO:", 14, finalY + 15);
+
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`• Status de Pagamento Acordado: ${order.paymentStatus || "Pendente"}`, 14, finalY + 21);
+    if (order.paymentDueDate) {
+      doc.text(`• Data de Vencimento do Pagamento: ${order.paymentDueDate}`, 14, finalY + 26);
+    }
+    doc.text(`• Solicitamos a gentileza de confirmar a recepção e informar a previsão de entrega.`, 14, finalY + 31);
+
+    // Signatures / Stamps
+    const sigY = finalY + 52;
+    doc.setDrawColor(203, 213, 225);
+    doc.line(20, sigY, 90, sigY);
+    doc.line(120, sigY, 190, sigY);
+
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Aprovação - Gestão de Stock / OST Vendas", 55, sigY + 5, { align: "center" });
+    doc.text("Assinatura e Carimbo do Fornecedor", 155, sigY + 5, { align: "center" });
+
+    return doc;
+  };
+
+  const handleSendSupplierOrderEmail = async (order: any, supplierOverride?: any) => {
+    const currentSuppliers = settings?.suppliers || [];
+    const supp = supplierOverride || currentSuppliers.find((s: any) => s.id === order.supplierId || s.name.toLowerCase() === order.supplierName.toLowerCase());
+    const email = supp?.email || order.supplierEmail || "";
+
+    setSelectedOrderForEmail(order);
+    setOrderEmailRecipient(email);
+
+    const companyName = settings?.companyName || "OST Vendas";
+    const subject = `Solicitação de Material / Ordem de Compra - ${companyName} (Ref: ${order.id})`;
+    const body = 
+`Prezado(a) ${order.supplierName},
+
+Pela presente, a empresa ${companyName} formaliza a solicitação de fornecimento do seguinte material/produto:
+
+DETALHES DO PEDIDO:
+--------------------------------------------
+- Código da Solicitação: ${order.id}
+- Data de Emissão: ${order.requestDate || new Date().toISOString().split("T")[0]}
+- Produto Solicitado: ${order.productName}
+- Quantidade Requerida: ${order.quantityRequested} unidades
+- Preço Unitário de Custo: ${(order.unitCost || 0).toLocaleString("pt-MZ")} MT
+- Valor Total Estimado: ${(order.totalValue || 0).toLocaleString("pt-MZ")} MT
+- Condição de Pagamento: ${order.paymentStatus || "Pendente"} ${order.paymentDueDate ? `(Vencimento: ${order.paymentDueDate})` : ""}
+
+Encontra-se disponível o documento oficial da Ordem de Compra em formato PDF com o logotipo da empresa para formalização. Solicitamos a gentileza de confirmar a recepção e informar a previsão de entrega física.
+
+Atenciosamente,
+${companyName}
+${settings?.storeAddress ? `Endereço: ${settings.storeAddress}` : ""}
+${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
+
+    setOrderEmailSubject(subject);
+    setOrderEmailBody(body);
+    setIsOrderEmailModalOpen(true);
+
+    // Automatically trigger PDF download with company logo!
+    try {
+      const doc = await handleGenerateSupplierOrderPDF(order, supp);
+      doc.save(`Ordem_de_Compra_${order.id}_${(order.supplierName || "Fornecedor").replace(/\s+/g, "_")}.pdf`);
+      onShowToast?.(`Documento PDF da Ordem de Compra gerado e descarregado com logotipo!`, "success");
+    } catch (err) {
+      console.error("Erro ao gerar PDF:", err);
+    }
+  };
+
+  const handleConfirmSendEmail = () => {
+    if (!orderEmailRecipient.trim()) {
+      onShowToast?.("Insira o e-mail do fornecedor.", "warning");
+      return;
+    }
+
+    const mailtoUrl = `mailto:${encodeURIComponent(orderEmailRecipient.trim())}?subject=${encodeURIComponent(orderEmailSubject)}&body=${encodeURIComponent(orderEmailBody)}`;
+    window.location.href = mailtoUrl;
+
+    onShowToast?.(`Cliente de e-mail ativado para enviar ao destinatário ${orderEmailRecipient}!`, "success");
+    if (onAddAuditLog && selectedOrderForEmail) {
+      onAddAuditLog("Enviar Pedido E-mail", "STOCK", `Pedido ${selectedOrderForEmail.id} enviado via E-mail para ${selectedOrderForEmail.supplierName} (${orderEmailRecipient}).`);
+    }
+    setIsOrderEmailModalOpen(false);
+  };
+
   const handleSaveOrder = (e: React.FormEvent) => {
     e.preventDefault();
     if (!orderSupplierId) {
@@ -342,8 +606,15 @@ export default function StockModule({
 
     const updated = [newOrder, ...currentOrders];
     onUpdateSettings?.({ supplierOrders: updated });
-    onShowToast?.("Solicitação de stock enviada com sucesso!", "success");
+    onShowToast?.("Solicitação de material/stock gravada com sucesso!", "success");
     onAddAuditLog("Solicitação de Stock", "STOCK", `Solicitado ${orderQtyRequested} un de ${chosenProduct.name} ao fornecedor ${chosenSupplier.name}.`);
+
+    // Automatic dispatch if selected
+    if (orderDispatchChannel === "WHATSAPP") {
+      handleSendSupplierOrderWhatsApp(newOrder, chosenSupplier);
+    } else if (orderDispatchChannel === "EMAIL") {
+      handleSendSupplierOrderEmail(newOrder, chosenSupplier);
+    }
 
     // Reset Form
     setOrderSupplierId("");
@@ -4544,26 +4815,59 @@ export default function StockModule({
 
                                 {/* Actions */}
                                 <td className="p-3.5 text-center">
-                                  {order.status === "Pendente" ? (
-                                    <div className="flex gap-1.5 justify-center">
-                                      <button
-                                        onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
-                                        className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
-                                      >
-                                        Receber
-                                      </button>
-                                      <button
-                                        onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
-                                        className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                                      >
-                                        Cancelar
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-400 italic">
-                                      {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1.5 justify-center flex-wrap">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendSupplierOrderWhatsApp(order)}
+                                      className="px-2 py-1 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white rounded-lg transition font-bold text-[9px] flex items-center gap-1 cursor-pointer"
+                                      title={`Enviar pedido de ${order.productName} via WhatsApp para ${order.supplierName}`}
+                                    >
+                                      <MessageSquare className="w-3 h-3" />
+                                      <span>WhatsApp</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSendSupplierOrderEmail(order)}
+                                      className="px-2 py-1 bg-blue-500/15 text-blue-700 dark:text-blue-400 hover:bg-blue-500 hover:text-white rounded-lg transition font-bold text-[9px] flex items-center gap-1 cursor-pointer"
+                                      title={`Enviar pedido de ${order.productName} via E-mail para ${order.supplierName}`}
+                                    >
+                                      <Mail className="w-3 h-3" />
+                                      <span>E-mail</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const doc = await handleGenerateSupplierOrderPDF(order);
+                                        doc.save(`Ordem_de_Compra_${order.id}_${(order.supplierName || "Fornecedor").replace(/\s+/g, "_")}.pdf`);
+                                        onShowToast?.("Documento PDF da Ordem de Compra baixado com logotipo!", "success");
+                                      }}
+                                      className="px-2 py-1 bg-amber-500/15 text-amber-700 dark:text-amber-400 hover:bg-amber-500 hover:text-white rounded-lg transition font-bold text-[9px] flex items-center gap-1 cursor-pointer"
+                                      title={`Baixar Ordem de Compra oficial em PDF com logotipo`}
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                      <span>PDF (Logo)</span>
+                                    </button>
+                                    {order.status === "Pendente" ? (
+                                      <>
+                                        <button
+                                          onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
+                                          className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
+                                        >
+                                          Receber
+                                        </button>
+                                        <button
+                                          onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
+                                          className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-[10px] text-slate-400 italic">
+                                        {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                               );
@@ -5359,6 +5663,50 @@ export default function StockModule({
                 </div>
               )}
 
+              <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-zinc-800">
+                <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                  Canal de Envio ao Fornecedor:
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOrderDispatchChannel("WHATSAPP")}
+                    className={`py-2 px-2 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      orderDispatchChannel === "WHATSAPP"
+                        ? "bg-emerald-500 text-white border-emerald-600 shadow-sm"
+                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5" />
+                    <span>WhatsApp</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderDispatchChannel("EMAIL")}
+                    className={`py-2 px-2 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      orderDispatchChannel === "EMAIL"
+                        ? "bg-blue-600 text-white border-blue-700 shadow-sm"
+                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>E-mail</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOrderDispatchChannel("NONE")}
+                    className={`py-2 px-2 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      orderDispatchChannel === "NONE"
+                        ? "bg-slate-700 text-white border-slate-800 shadow-sm"
+                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-300"
+                    }`}
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Só Salvar</span>
+                  </button>
+                </div>
+              </div>
+
               {orderQtyRequested > 0 && orderUnitCost > 0 && (
                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-bold text-orange-850 flex justify-between items-center">
                   <span>Valor Estimado do Pedido:</span>
@@ -5370,21 +5718,171 @@ export default function StockModule({
                 <button
                   type="button"
                   onClick={() => setIsOrderFormOpen(false)}
-                  className="w-1/2 py-2.5 border border-slate-200 bg-white text-slate-750 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-350"
+                  className="w-1/3 py-2.5 border border-slate-200 bg-white text-slate-750 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-350"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="w-1/2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-md shadow-orange-500/10"
+                  className={`w-2/3 py-2.5 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-md flex items-center justify-center gap-1.5 ${
+                    orderDispatchChannel === "WHATSAPP"
+                      ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/10"
+                      : orderDispatchChannel === "EMAIL"
+                      ? "bg-blue-600 hover:bg-blue-700 shadow-blue-600/10"
+                      : "bg-orange-500 hover:bg-orange-600 shadow-orange-500/10"
+                  }`}
                 >
-                  Confirmar Pedido
+                  {orderDispatchChannel === "WHATSAPP" ? (
+                    <>
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Gravar & Enviar WhatsApp</span>
+                    </>
+                  ) : orderDispatchChannel === "EMAIL" ? (
+                    <>
+                      <Mail className="w-3.5 h-3.5" />
+                      <span>Gravar & Enviar E-mail</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Apenas Gravar Pedido</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+      {/* Supplier Order Email Modal Overlay */}
+      {isOrderEmailModalOpen && selectedOrderForEmail && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            <div className="bg-gradient-to-r from-blue-900 to-indigo-950 text-white p-5 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-sm flex items-center gap-2">
+                  <Mail className="w-5 h-5 text-blue-400" />
+                  Enviar Pedido ao Fornecedor por E-mail
+                </h3>
+                <p className="text-[10px] text-blue-200 mt-0.5">
+                  Ref do Pedido: <span className="font-mono font-bold text-white">{selectedOrderForEmail.id}</span> • {selectedOrderForEmail.supplierName}
+                </p>
+              </div>
+              <button
+                onClick={() => setIsOrderEmailModalOpen(false)}
+                className="p-1.5 bg-blue-900/60 hover:bg-blue-800 text-blue-200 rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* PDF Document Status Badge */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 dark:bg-emerald-950/30 dark:border-emerald-800/40">
+                <div className="p-2 bg-emerald-500 text-white rounded-lg shrink-0">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                    PDF com Logotipo Gerado
+                  </h4>
+                  <p className="text-[10px] text-emerald-700 dark:text-emerald-400 leading-tight">
+                    O documento oficial da Ordem de Compra foi descarregado com o logotipo da sua empresa. Anexe este ficheiro ao enviar o e-mail.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const doc = await handleGenerateSupplierOrderPDF(selectedOrderForEmail);
+                    doc.save(`Ordem_de_Compra_${selectedOrderForEmail.id}_${(selectedOrderForEmail.supplierName || "Fornecedor").replace(/\s+/g, "_")}.pdf`);
+                    onShowToast?.("PDF baixado novamente com logotipo!", "success");
+                  }}
+                  className="px-2.5 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 rounded-lg text-[10px] font-bold cursor-pointer transition shrink-0 dark:bg-zinc-800 dark:border-emerald-700 dark:text-emerald-300"
+                  title="Descarregar PDF do pedido novamente"
+                >
+                  Re-descarregar
+                </button>
+              </div>
+
+              {/* Recipient Email Input */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center justify-between">
+                  <span>E-mail do Fornecedor (Destinatário) *</span>
+                  {!orderEmailRecipient.trim() && (
+                    <span className="text-rose-500 text-[10px] font-normal">Insira o e-mail de destino</span>
+                  )}
+                </label>
+                <div className="relative">
+                  <input
+                    type="email"
+                    required
+                    value={orderEmailRecipient}
+                    onChange={(e) => setOrderEmailRecipient(e.target.value)}
+                    placeholder="ex: fornecedor@empresa.co.mz"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 pl-8 text-xs font-medium text-slate-800 outline-none focus:border-blue-500 dark:bg-zinc-950 dark:border-zinc-800 dark:text-white"
+                  />
+                  <Mail className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+                </div>
+              </div>
+
+              {/* Email Subject */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Assunto do E-mail</label>
+                <input
+                  type="text"
+                  value={orderEmailSubject}
+                  onChange={(e) => setOrderEmailSubject(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-medium text-slate-800 outline-none focus:border-blue-500 dark:bg-zinc-950 dark:border-zinc-800 dark:text-white"
+                />
+              </div>
+
+              {/* Email Body Text */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Conteúdo da Mensagem</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(orderEmailBody);
+                      onShowToast?.("Texto do pedido copiado para a área de transferência!", "info");
+                    }}
+                    className="text-[10px] text-blue-600 hover:underline flex items-center gap-1 font-bold dark:text-blue-400 cursor-pointer"
+                  >
+                    <Copy className="w-3 h-3" /> Copiar Texto
+                  </button>
+                </div>
+                <textarea
+                  rows={6}
+                  value={orderEmailBody}
+                  onChange={(e) => setOrderEmailBody(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono text-slate-800 outline-none focus:border-blue-500 dark:bg-zinc-950 dark:border-zinc-800 dark:text-zinc-200"
+                />
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setIsOrderEmailModalOpen(false)}
+                  className="w-1/3 py-2.5 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmSendEmail}
+                  className="w-2/3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs cursor-pointer transition shadow-md shadow-blue-600/20 flex items-center justify-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Abrir Cliente de E-mail (Enviar)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {flyerProduct && (
         <PromoFlyerGenerator
           product={flyerProduct}
