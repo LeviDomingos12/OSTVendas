@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as d3 from "d3";
 import { 
   initialProducts, 
   initialCustomers, 
@@ -20,7 +21,8 @@ import {
   Employee, 
   AuditLog, 
   SystemSettings, 
-  UserRole 
+  UserRole,
+  SubscriptionPlan
 } from "./types";
 
 // Import modules
@@ -35,6 +37,9 @@ import ReportsModule from "./components/ReportsModule";
 import TrainingModule from "./components/TrainingModule";
 import SettingsModule from "./components/SettingsModule";
 import GatewayModule from "./components/GatewayModule";
+import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
+import PlanLockScreen from "./components/PlanLockScreen";
+import { canAccessModule } from "./lib/planPermissions";
 import LoginModule from "./components/LoginModule";
 import AiForecastModule from "./components/AiForecastModule";
 import StockReplenishModal from "./components/StockReplenishModal";
@@ -113,12 +118,20 @@ import {
   Video,
   Upload,
   Save,
+  Download,
   History,
   Trash2,
   CheckCircle2,
   Mail,
   Image,
-  Building
+  Building,
+  MessageSquare,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  MoveLeft,
+  MoveRight,
+  Maximize2
 } from "lucide-react";
 
 interface Toast {
@@ -236,6 +249,532 @@ const safeLocalStorageSetItem = (key: string, value: string): boolean => {
   }
 };
 
+function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [timeRange, setTimeRange] = useState<number>(14); // 7, 14, 30, 60, 90 days
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [hoveredDay, setHoveredDay] = useState<{
+    label: string;
+    dateStr: string;
+    count: number;
+    xPos: number;
+    yPos: number;
+  } | null>(null);
+  
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Zoom Control Handlers
+  const handleZoomIn = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 1.4);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 0.714);
+    }
+  };
+
+  const handlePanLeft = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(250)
+        .call(zoomRef.current.translateBy, 90, 0);
+    }
+  };
+
+  const handlePanRight = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(250)
+        .call(zoomRef.current.translateBy, -90, 0);
+    }
+  };
+
+  const handleResetZoom = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(400)
+        .call(zoomRef.current.transform, d3.zoomIdentity);
+      setIsZoomed(false);
+      setZoomScale(1);
+    }
+  };
+
+  // Switch time range and reset zoom
+  const handleTimeRangeChange = (daysCount: number) => {
+    setTimeRange(daysCount);
+    handleResetZoom();
+  };
+
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    // Generate daily log data points based on selected timeRange
+    const days: { dateStr: string; label: string; count: number }[] = [];
+    const now = new Date();
+    
+    for (let i = timeRange - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      
+      // Label formatting adapted to time range
+      const dayLabel = timeRange <= 14 
+        ? d.toLocaleDateString("pt-MZ", { weekday: "short", day: "2-digit" })
+        : d.toLocaleDateString("pt-MZ", { day: "2-digit", month: "2-digit" });
+      
+      const count = (logs || []).filter(log => {
+        if (!log.timestamp) return false;
+        try {
+          const logDateStr = new Date(log.timestamp).toISOString().slice(0, 10);
+          return logDateStr === dateStr;
+        } catch {
+          return false;
+        }
+      }).length;
+
+      days.push({ dateStr, label: dayLabel, count });
+    }
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const width = 480;
+    const height = 125;
+    const margin = { top: 18, right: 12, bottom: 22, left: 24 };
+
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
+    const x = d3.scaleBand()
+      .domain(days.map(d => d.label))
+      .range([0, innerWidth])
+      .padding(timeRange > 30 ? 0.2 : 0.32);
+
+    const maxCount = Math.max(d3.max(days, d => d.count) || 1, 3);
+    const y = d3.scaleLinear()
+      .domain([0, maxCount])
+      .nice()
+      .range([innerHeight, 0]);
+
+    // Clip path to keep bars & elements strictly within bounds during zoom/pan
+    const defs = svg.append("defs");
+    defs.append("clipPath")
+      .attr("id", "audit-chart-clip")
+      .append("rect")
+      .attr("x", 0)
+      .attr("y", -15)
+      .attr("width", innerWidth)
+      .attr("height", innerHeight + 20);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Background overlay for pan/drag events (behind content)
+    const bgOverlay = g.append("rect")
+      .attr("width", innerWidth)
+      .attr("height", innerHeight)
+      .attr("fill", "transparent")
+      .attr("cursor", "grab");
+
+    // Gridlines (fixed background)
+    const yTicks = y.ticks(3);
+    g.append("g")
+      .attr("class", "grid")
+      .selectAll("line")
+      .data(yTicks)
+      .enter()
+      .append("line")
+      .attr("x1", 0)
+      .attr("x2", innerWidth)
+      .attr("y1", d => y(d))
+      .attr("y2", d => y(d))
+      .attr("stroke", "#334155")
+      .attr("stroke-dasharray", "2,2")
+      .attr("stroke-opacity", 0.5);
+
+    // Content group with clip-path
+    const chartContent = g.append("g")
+      .attr("clip-path", "url(#audit-chart-clip)");
+
+    // Bars - initial zero-height state at x-axis
+    const bars = chartContent.selectAll(".bar")
+      .data(days)
+      .enter()
+      .append("rect")
+      .attr("class", "bar")
+      .attr("x", d => x(d.label) || 0)
+      .attr("y", innerHeight)
+      .attr("width", Math.max(1, x.bandwidth()))
+      .attr("height", 0)
+      .attr("fill", "#f97316")
+      .attr("rx", Math.min(3, Math.max(1, x.bandwidth() / 3)))
+      .attr("ry", Math.min(3, Math.max(1, x.bandwidth() / 3)))
+      .attr("opacity", d => d.count > 0 ? 0.95 : 0.25)
+      .attr("cursor", "pointer");
+
+    // D3 Transition: Smooth growth from x-axis
+    bars.transition()
+      .duration(500)
+      .delay((_, i) => Math.min(i * 20, 400))
+      .ease(d3.easeCubicOut)
+      .attr("y", d => y(d.count))
+      .attr("height", d => innerHeight - y(d.count));
+
+    // Hover tooltip events on bars
+    bars
+      .on("pointerover", function(event, d) {
+        d3.select(this)
+          .transition()
+          .duration(120)
+          .attr("fill", "#fb923c")
+          .attr("stroke", "#ffffff")
+          .attr("stroke-width", 1.5)
+          .attr("opacity", 1);
+
+        if (svgRef.current) {
+          const rect = svgRef.current.getBoundingClientRect();
+          const xPos = event.clientX - rect.left;
+          const yPos = event.clientY - rect.top;
+          setHoveredDay({
+            label: d.label,
+            dateStr: d.dateStr,
+            count: d.count,
+            xPos,
+            yPos
+          });
+        }
+      })
+      .on("pointermove", function(event, d) {
+        if (svgRef.current) {
+          const rect = svgRef.current.getBoundingClientRect();
+          const xPos = event.clientX - rect.left;
+          const yPos = event.clientY - rect.top;
+          setHoveredDay({
+            label: d.label,
+            dateStr: d.dateStr,
+            count: d.count,
+            xPos,
+            yPos
+          });
+        }
+      })
+      .on("pointerout", function(event, d) {
+        d3.select(this)
+          .transition()
+          .duration(150)
+          .attr("fill", "#f97316")
+          .attr("stroke", "none")
+          .attr("opacity", d.count > 0 ? 0.95 : 0.25);
+
+        setHoveredDay(null);
+      });
+
+    // Value Labels above bars
+    const labels = chartContent.selectAll(".label")
+      .data(days)
+      .enter()
+      .append("text")
+      .attr("class", "bar-label")
+      .attr("x", d => (x(d.label) || 0) + x.bandwidth() / 2)
+      .attr("y", innerHeight - 2)
+      .attr("text-anchor", "middle")
+      .attr("fill", d => d.count > 0 ? "#fb923c" : "#64748b")
+      .attr("font-size", "8.5px")
+      .attr("font-weight", "bold")
+      .attr("pointer-events", "none")
+      .attr("opacity", 0)
+      .text(d => d.count);
+
+    labels.transition()
+      .duration(500)
+      .delay((_, i) => Math.min(i * 20, 400))
+      .ease(d3.easeCubicOut)
+      .attr("y", d => y(d.count) - 3)
+      .attr("opacity", x.bandwidth() >= 8 ? 1 : 0);
+
+    // Calculate Moving Average
+    const totalCount = days.reduce((sum, d) => sum + d.count, 0);
+    const avgCount = days.length > 0 ? totalCount / days.length : 0;
+    const yAvg = y(avgCount);
+
+    // Dotted horizontal line representing average volume
+    chartContent.append("line")
+      .attr("class", "avg-line")
+      .attr("x1", 0)
+      .attr("x2", innerWidth)
+      .attr("y1", yAvg)
+      .attr("y2", yAvg)
+      .attr("stroke", "#38bdf8")
+      .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", "4,3")
+      .attr("pointer-events", "none");
+
+    // Moving average label on the line
+    chartContent.append("text")
+      .attr("x", innerWidth - 4)
+      .attr("y", yAvg > 12 ? yAvg - 4 : yAvg + 11)
+      .attr("text-anchor", "end")
+      .attr("fill", "#38bdf8")
+      .attr("font-size", "8.5px")
+      .attr("font-weight", "bold")
+      .attr("pointer-events", "none")
+      .text(`Média: ${avgCount.toFixed(1)}/dia`);
+
+    // X Axis Setup
+    const xAxisGroup = g.append("g")
+      .attr("class", "x-axis")
+      .attr("transform", `translate(0,${innerHeight})`);
+
+    const renderXAxis = (scaleToUse: d3.ScaleBand<string>) => {
+      const axis = d3.axisBottom(scaleToUse).tickSize(0);
+      
+      // Filter tick labels if bandwidth is narrow to prevent overlapping
+      const currentBandwidth = scaleToUse.bandwidth();
+      if (currentBandwidth < 14) {
+        const step = Math.ceil(18 / Math.max(1, currentBandwidth));
+        axis.tickValues(scaleToUse.domain().filter((_, idx) => idx % step === 0));
+      }
+
+      xAxisGroup.call(axis);
+      xAxisGroup.select(".domain").attr("stroke", "#475569");
+      xAxisGroup.selectAll("text")
+        .attr("fill", "#94a3b8")
+        .attr("font-size", "8.5px")
+        .attr("dy", "8px");
+    };
+
+    renderXAxis(x);
+
+    // Y Axis Setup
+    const yAxis = d3.axisLeft(y).ticks(3).tickSize(0);
+    const yAxisGroup = g.append("g").call(yAxis);
+    yAxisGroup.select(".domain").remove();
+    yAxisGroup.selectAll("text")
+      .attr("fill", "#64748b")
+      .attr("font-size", "8.5px");
+
+    // D3 Zoom & Pan Behavior Definition
+    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, 10])
+      .translateExtent([[ -innerWidth * 2, 0 ], [ innerWidth * 3, innerHeight ]])
+      .extent([[0, 0], [innerWidth, innerHeight]])
+      .on("zoom", (event) => {
+        const transform = event.transform;
+        
+        setZoomScale(transform.k);
+        const isActive = transform.k > 1.02 || Math.abs(transform.x) > 2;
+        setIsZoomed(isActive);
+
+        if (isActive) {
+          bgOverlay.attr("cursor", "grabbing");
+        } else {
+          bgOverlay.attr("cursor", "grab");
+        }
+
+        // Rescale x scale band range based on current zoom/pan transformation
+        const xRescaled = x.copy().range([0, innerWidth].map(d => transform.applyX(d)));
+
+        // Update bars positioning and bandwidth
+        bars
+          .attr("x", d => xRescaled(d.label) || 0)
+          .attr("width", Math.max(0.5, xRescaled.bandwidth()));
+
+        // Update bar value labels
+        labels
+          .attr("x", d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
+          .attr("opacity", xRescaled.bandwidth() >= 7 ? 1 : 0);
+
+        // Update X Axis ticks & labels dynamically
+        renderXAxis(xRescaled);
+      });
+
+    zoomRef.current = zoomBehavior;
+    svg.call(zoomBehavior as any);
+
+  }, [logs, timeRange]);
+
+  return (
+    <div id="activity-log-d3-chart-container" className="p-3 bg-slate-950/90 border border-slate-800/80 rounded-xl space-y-2 cursor-pointer relative group shadow-xl transition-all">
+      {/* Header with Title, Period Selector & Action Badges */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-300 px-0.5">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+          <span className="text-slate-200">Volume de Activity Logs (D3 Zoom & Pan)</span>
+          {isZoomed && (
+            <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse">
+              Zoom {(zoomScale * 100).toFixed(0)}%
+            </span>
+          )}
+        </div>
+
+        {/* Time Period Filter Selector */}
+        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+          <span className="text-[9.5px] text-slate-400 font-mono px-1 flex items-center gap-1">
+            <Calendar className="w-3 h-3 text-slate-400" />
+            <span className="hidden sm:inline">Período:</span>
+          </span>
+          {[7, 14, 30, 60, 90].map((daysCount) => (
+            <button
+              key={daysCount}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleTimeRangeChange(daysCount);
+              }}
+              className={`text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+                timeRange === daysCount
+                  ? "bg-orange-500 text-white font-extrabold shadow-sm"
+                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+              }`}
+            >
+              {daysCount}D
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Controls Bar for Zoom & Pan Navigation */}
+      <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/60 text-[10px]">
+        {/* Pan Navigation Buttons */}
+        <div className="flex items-center gap-1">
+          <span className="text-slate-400 text-[9px] font-mono hidden sm:inline mr-1">Pan Timeline:</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePanLeft();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
+            title="Pan para a esquerda (Navegar no tempo)"
+          >
+            <MoveLeft className="w-3 h-3 text-orange-400" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePanRight();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
+            title="Pan para a direita (Navegar no tempo)"
+          >
+            <MoveRight className="w-3 h-3 text-orange-400" />
+          </button>
+        </div>
+
+        {/* Zoom Controls */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleZoomOut();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+            title="Reduzir Zoom (-)"
+          >
+            <ZoomOut className="w-3 h-3 text-sky-400" />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleZoomIn();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+            title="Ampliar Zoom (+)"
+          >
+            <ZoomIn className="w-3 h-3 text-sky-400" />
+          </button>
+
+          {isZoomed && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleResetZoom();
+              }}
+              className="text-[9.5px] text-orange-400 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 px-2 py-0.5 rounded transition flex items-center gap-1 font-mono cursor-pointer ml-1"
+              title="Restaurar visualização original"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset</span>
+            </button>
+          )}
+        </div>
+
+        {/* Info Badges */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-sky-400 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+            <span className="w-2 h-0 border-b-2 border-dashed border-sky-400" />
+            <span>Média</span>
+          </span>
+          <span className="text-[9.5px] text-orange-400 font-mono bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
+            {(logs || []).length} logs total
+          </span>
+        </div>
+      </div>
+
+      {/* SVG Canvas Area with Zoom and Pan Interaction */}
+      <div className="w-full relative touch-pan-x">
+        <svg ref={svgRef} className="w-full h-[125px] overflow-visible select-none" />
+
+        {/* Active Hover Tooltip */}
+        {hoveredDay && (
+          <div
+            className="absolute z-30 pointer-events-none bg-slate-900/95 text-slate-100 text-[10.5px] py-1.5 px-3 rounded-lg border border-orange-500/50 shadow-2xl backdrop-blur-md transition-all duration-100 transform -translate-x-1/2 -translate-y-full font-mono flex flex-col gap-1 min-w-[130px]"
+            style={{
+              left: `${Math.max(65, Math.min(hoveredDay.xPos, 420))}px`,
+              top: `${Math.max(12, hoveredDay.yPos - 10)}px`,
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
+              <span className="font-bold text-orange-400 capitalize">{hoveredDay.label}</span>
+              <span className="text-[9px] text-slate-400 font-sans">{hoveredDay.dateStr}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-slate-300">Volume de Logs:</span>
+              <span className="font-extrabold text-white bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-500/30">
+                {hoveredDay.count} {hoveredDay.count === 1 ? "log" : "logs"}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Footer Instructions / Interaction Hint */}
+      <div className="flex flex-wrap items-center justify-between px-1 text-[9.5px] text-slate-400 font-mono pt-0.5 border-t border-slate-900">
+        <span className="flex items-center gap-1.5">
+          <span className="text-orange-400">↔</span>
+          <span>Arraste ou Scroll para Zoom e Pan no tempo ({timeRange} Dias)</span>
+        </span>
+        {isZoomed ? (
+          <span className="text-orange-400 font-bold animate-pulse">Modo Zoom & Pan Ativo</span>
+        ) : (
+          <span className="text-slate-500">Duplo-clique para ampliar</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   
   // SHARED STATES
@@ -304,6 +843,7 @@ export default function App() {
   const [profileWhatsapp, setProfileWhatsapp] = useState("");
   const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
   const [profileLogoUrl, setProfileLogoUrl] = useState(settings?.logoUrl || "");
+  const [profileRole, setProfileRole] = useState("Operador");
   const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
   const [profileObservacoes, setProfileObservacoes] = useState("");
   const [profileExpirationDate, setProfileExpirationDate] = useState("");
@@ -354,6 +894,7 @@ export default function App() {
         setProfileWhatsapp(targetEmp.whatsapp || targetEmp.contact || "");
         setProfileFotoPerfil(targetEmp.fotoPerfil || "");
         setProfileLogoUrl(settings.logoUrl || targetEmp.logoUrl || "");
+        setProfileRole(targetEmp.role || "Operador");
         setTestPinInput(targetEmp.pin || "");
         setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
         setProfileObservacoes(targetEmp.observacoes || "");
@@ -614,6 +1155,7 @@ export default function App() {
           whatsapp: profileWhatsapp.trim(),
           fotoPerfil: profileFotoPerfil.trim(),
           logoUrl: profileLogoUrl.trim(),
+          role: profileRole.trim() || "Operador",
           twoFactorEmailEnabled: profileTwoFactorEmail,
           observacoes: profileObservacoes.trim(),
           expirationDate: profileExpirationDate
@@ -634,19 +1176,50 @@ export default function App() {
         whatsapp: profileWhatsapp.trim(),
         fotoPerfil: profileFotoPerfil.trim(),
         logoUrl: profileLogoUrl.trim(),
+        role: profileRole.trim() || "Operador",
         twoFactorEmailEnabled: profileTwoFactorEmail,
         observacoes: profileObservacoes.trim(),
         expirationDate: profileExpirationDate
       });
     }
 
-    showToast("Perfil e Logotipo salvos no Firestore com sucesso!", "success");
+    showToast("Perfil e Categoria salvos no Firestore com sucesso!", "success");
 
     handleAddAuditLog(
       "Atualização de Perfil",
       "COLABORADORES",
-      `Perfil do colaborador ${profileName.trim()} (ID: ${targetEmpId}) atualizado (E-mail: ${profileEmail.trim() || "N/A"}, Contacto: ${profileContact.trim() || "N/A"}, WhatsApp: ${profileWhatsapp.trim() || "N/A"}).`
+      `Perfil do colaborador ${profileName.trim()} (ID: ${targetEmpId}) atualizado (Categoria: ${profileRole.trim()}, E-mail: ${profileEmail.trim() || "N/A"}, Contacto: ${profileContact.trim() || "N/A"}).`
     );
+  };
+
+  const handleExportAuditLogsCSV = (logsToExport: AuditLog[]) => {
+    if (!logsToExport || logsToExport.length === 0) {
+      showToast("Nenhum log de auditoria encontrado para exportar.", "warning");
+      return;
+    }
+
+    const headers = ["ID", "Data/Hora", "Usuário/Operador", "Módulo", "Ação", "Detalhes"];
+    const rows = logsToExport.map(log => [
+      `"${(log.id || "").replace(/"/g, '""')}"`,
+      `"${(log.timestamp ? new Date(log.timestamp).toLocaleString("pt-MZ") : "").replace(/"/g, '""')}"`,
+      `"${(log.user || "").replace(/"/g, '""')}"`,
+      `"${(log.module || "").replace(/"/g, '""')}"`,
+      `"${(log.action || "").replace(/"/g, '""')}"`,
+      `"${(log.details || "").replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `logs_auditoria_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exportados ${logsToExport.length} logs com sucesso!`, "success");
   };
 
   const handleExportCollaboratorPdf = () => {
@@ -793,6 +1366,20 @@ export default function App() {
     showToast(`Colaborador ${activeUser.name} foi suspenso com sucesso.`, "error");
 
     setIsUserSwitchModalOpen(false);
+  };
+
+  const handleUpdateUserPlan = async (employeeId: string, newPlan: SubscriptionPlan) => {
+    const updatedEmployees = employees.map(emp => 
+      emp.id === employeeId ? { ...emp, subscriptionPlan: newPlan } : emp
+    );
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+    handleAddAuditLog("Plano de Usuário Alterado", "ASSINATURAS", `Plano do utilizador (ID: ${employeeId}) alterado para ${newPlan}`);
+  };
+
+  const handleUpdateSystemPlan = (newPlan: SubscriptionPlan) => {
+    setSettings(prev => ({ ...prev, subscriptionPlan: newPlan }));
+    handleAddAuditLog("Plano do Sistema Alterado", "ASSINATURAS", `Plano geral do sistema alterado para ${newPlan}`);
   };
 
   // Premium AI predictions state
@@ -1601,7 +2188,7 @@ export default function App() {
             const diffTime = now.getTime() - createdAt.getTime();
             const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-            const isPinTemporary = mappedEmployee.pinChanged === false || mappedEmployee.pinChanged === undefined;
+            const isPinTemporary = mappedEmployee.pinChanged === false;
 
             if (isPinTemporary && diffDays > 3) {
               const updatedEmployees = currentEmployees.map(emp => {
@@ -1814,7 +2401,7 @@ export default function App() {
     const diffTime = now.getTime() - createdAt.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-    const isPinTemporary = targetEmp.pinChanged === false || targetEmp.pinChanged === undefined;
+    const isPinTemporary = targetEmp.pinChanged === false;
 
     // If password is temporary (first login) OR has expired (older than 60 days)
     if (isPinTemporary) {
@@ -2870,7 +3457,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     const diffTime = now.getTime() - createdAt.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-    const isPinTemporary = user.pinChanged === false || user.pinChanged === undefined;
+    const isPinTemporary = user.pinChanged === false;
 
     // 3. Force Password change if temporary (first login)
     if (isPinTemporary) {
@@ -3115,16 +3702,124 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
   if (!isAuthenticated || !activeUser) {
     return (
-      <LoginModule
-        employees={employees}
-        companyName={settings.companyName}
-        logoUrl={settings.logoUrl}
-        branches={settings.branches || []}
-        onLoginSuccess={handleLoginSuccess}
-        onShowToast={showToast}
-        onAddAuditLog={handleAddAuditLog}
-        settings={settings}
-      />
+      <>
+        <LoginModule
+          employees={employees}
+          companyName={settings.companyName}
+          logoUrl={settings.logoUrl}
+          branches={settings.branches || []}
+          onLoginSuccess={handleLoginSuccess}
+          onShowToast={showToast}
+          onAddAuditLog={handleAddAuditLog}
+          settings={settings}
+        />
+        {forcePinChangeOpen && forcePinTargetEmployee && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
+                theme === "night"
+                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
+                  : "bg-white text-slate-800 border-slate-100"
+              }`}
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center shadow-inner">
+                    <ShieldAlert className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Atualização de Segurança Obrigatória</h3>
+                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir Senha Definitiva de Acesso</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4 text-left">
+                <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl space-y-1 text-xs">
+                  <p className="font-bold text-amber-800">Olá {forcePinTargetEmployee.name},</p>
+                  <p className="text-amber-700 leading-relaxed text-[11px]">
+                    De acordo com a política de segurança, a sua senha inicial é temporária ou expirou. Defina uma senha de acesso forte de pelo menos 6 caracteres.
+                  </p>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Nova Senha de Acesso</label>
+                    <input
+                      type="password"
+                      maxLength={32}
+                      placeholder="Mínimo 6 caracteres"
+                      value={newPin}
+                      onChange={(e) => {
+                        setNewPin(e.target.value);
+                        if (forcePinError) setForcePinError("");
+                      }}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
+                        theme === "night"
+                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
+                      }`}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Nova Senha</label>
+                    <input
+                      type="password"
+                      maxLength={32}
+                      placeholder="Repita a nova senha de acesso"
+                      value={confirmNewPin}
+                      onChange={(e) => {
+                        setConfirmNewPin(e.target.value);
+                        if (forcePinError) setForcePinError("");
+                      }}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
+                        theme === "night"
+                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
+                      }`}
+                    />
+                  </div>
+
+                  {forcePinError && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold flex items-center gap-1.5 animate-pulse">
+                      <span>⚠️</span>
+                      <span>{forcePinError}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-100 dark:border-zinc-850 flex justify-end gap-3 bg-slate-50 dark:bg-zinc-900">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForcePinChangeOpen(false);
+                    setForcePinTargetEmployee(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleForcePinChangeSubmit}
+                  disabled={newPin.length < 6 || confirmNewPin.length < 6}
+                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
+                    newPin.length >= 6 && confirmNewPin.length >= 6
+                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
+                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  Ativar Conta & Aceder
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -3149,6 +3844,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           isOpen={isSidebarOpen}
           onClose={() => setIsSidebarOpen(false)}
           activeUser={activeUser}
+          subscriptionPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
           onSwitchUser={() => {
             setIsUserSwitchModalOpen(true);
             if (activeUser) {
@@ -3498,19 +4194,29 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <StockModule
-                  products={products}
-                  transactions={filteredTransactions}
-                  onAddProduct={handleAddProduct}
-                  onUpdateProduct={handleUpdateProduct}
-                  onDeleteProduct={handleDeleteProduct}
-                  onAddAuditLog={handleAddAuditLog}
-                  currentRole={simplifiedRole}
-                  currency={currency}
-                  settings={settings}
-                  onShowToast={showToast}
-                  onUpdateSettings={handleUpdateSettings}
-                />
+                {!canAccessModule("stock", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                  <PlanLockScreen
+                    moduleName="Gestão Avançada de Stock"
+                    requiredPlan="PRATA"
+                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                    description="O Plano Bronze inclui apenas vendas rápidas POS e catálogo básico. Atualize para o Plano Prata ou Ouro para gerir lotes, datas de expiração e reabastecimentos."
+                    onUpgradeClick={() => setActiveTab("PLANS")}
+                  />
+                ) : (
+                  <StockModule
+                    products={products}
+                    transactions={filteredTransactions}
+                    onAddProduct={handleAddProduct}
+                    onUpdateProduct={handleUpdateProduct}
+                    onDeleteProduct={handleDeleteProduct}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    currency={currency}
+                    settings={settings}
+                    onShowToast={showToast}
+                    onUpdateSettings={handleUpdateSettings}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -3557,17 +4263,27 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <StaffModule
-                  employees={employees}
-                  auditLogs={auditLogs}
-                  onAddEmployee={handleAddEmployee}
-                  onUpdateEmployees={handleUpdateEmployees}
-                  activeUsername={activeUser.name}
-                  onAddAuditLog={handleAddAuditLog}
-                  currentRole={simplifiedRole}
-                  currency={currency}
-                  settings={settings}
-                />
+                {!canAccessModule("staff", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                  <PlanLockScreen
+                    moduleName="Equipa & Auditoria D3"
+                    requiredPlan="PRATA"
+                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                    description="A gestão avançada de utilizadores e auditoria D3 está disponível nos Planos Prata e Ouro."
+                    onUpgradeClick={() => setActiveTab("PLANS")}
+                  />
+                ) : (
+                  <StaffModule
+                    employees={employees}
+                    auditLogs={auditLogs}
+                    onAddEmployee={handleAddEmployee}
+                    onUpdateEmployees={handleUpdateEmployees}
+                    activeUsername={activeUser.name}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    currency={currency}
+                    settings={settings}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -3581,15 +4297,25 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <AiForecastModule
-                  products={products}
-                  transactions={filteredTransactions}
-                  settings={settings}
-                  theme={theme}
-                  currency={currency}
-                  onShowToast={showToast}
-                  onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                />
+                {!canAccessModule("ai", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                  <PlanLockScreen
+                    moduleName="Previsão AI Premium"
+                    requiredPlan="OURO"
+                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                    description="Modelos preditivos avançados com Inteligência Artificial e o Gerador de Flyers Promocionais são exclusivos do Plano Ouro (VIP)."
+                    onUpgradeClick={() => setActiveTab("PLANS")}
+                  />
+                ) : (
+                  <AiForecastModule
+                    products={products}
+                    transactions={filteredTransactions}
+                    settings={settings}
+                    theme={theme}
+                    currency={currency}
+                    onShowToast={showToast}
+                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -3768,14 +4494,47 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <GatewayModule
+                {!canAccessModule("gateway", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                  <PlanLockScreen
+                    moduleName="Integração Mobile Money"
+                    requiredPlan="PRATA"
+                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                    description="O recebimento automático via M-Pesa e e-Mola (Paga Fácil) está disponível a partir do Plano Prata."
+                    onUpgradeClick={() => setActiveTab("PLANS")}
+                  />
+                ) : (
+                  <GatewayModule
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    onShowToast={showToast}
+                    products={products}
+                    customers={customers}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* PLANS & SUBSCRIPTIONS PANEL */}
+            {activeTab === "PLANS" && (
+              <motion.div
+                key="PLANS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                <SubscriptionPlansModule
+                  currentPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                  activeUser={activeUser}
+                  employees={employees}
                   settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
-                  onAddAuditLog={handleAddAuditLog}
-                  currentRole={simplifiedRole}
+                  onUpdateUserPlan={handleUpdateUserPlan}
+                  onUpdateSystemPlan={handleUpdateSystemPlan}
                   onShowToast={showToast}
-                  products={products}
-                  customers={customers}
+                  onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
                 />
               </motion.div>
             )}
@@ -4759,6 +5518,32 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                 )}
                               </div>
 
+                              {/* Campo Categoria de Perfil (Admin, Operador, Auditor) */}
+                              <div id="profile-role-field-container" className="sm:col-span-2 space-y-2.5 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
+                                <div className="flex items-center justify-between gap-2">
+                                  <label htmlFor="profile-role-select" className="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                                    <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
+                                    <span>Categoria de Perfil (Role / Permissões)</span>
+                                  </label>
+                                  <span className="text-[10px] text-orange-400 font-bold px-2 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded-md">
+                                    {profileRole}
+                                  </span>
+                                </div>
+                                <select
+                                  id="profile-role-select"
+                                  value={profileRole}
+                                  onChange={(e) => setProfileRole(e.target.value)}
+                                  className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
+                                >
+                                  <option value="Admin">Admin (Acesso Total / Gestão Global)</option>
+                                  <option value="Operador">Operador (Vendas, Ponto de Venda e Caixa)</option>
+                                  <option value="Auditor">Auditor (Acesso Restrito a Leitura e Relatórios)</option>
+                                </select>
+                                <p className="text-[10px] text-slate-400 font-medium leading-tight">
+                                  Atualiza a função e o nível de acesso do colaborador no Firestore ao guardar as alterações.
+                                </p>
+                              </div>
+
                               {/* Campo Logotipo da Empresa com Pré-Visualização da Imagem */}
                               <div id="profile-logo-field-container" className="sm:col-span-2 space-y-2.5 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
                                 <div className="flex items-center justify-between gap-2">
@@ -5090,17 +5875,68 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                     )}
                                   </div>
 
-                                  {/* Campo de Texto para busca de logs */}
-                                  <div className="relative">
-                                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                                    <input
-                                      type="text"
-                                      id="activity-log-search-input"
-                                      value={activitySearchText}
-                                      onChange={(e) => setActivitySearchText(e.target.value)}
-                                      placeholder="Buscar por ação, detalhes, módulo ou palavra-chave..."
-                                      className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:border-orange-500 transition font-medium"
-                                    />
+                                  {/* Campo de Texto para busca de logs com Botão de Exportação CSV */}
+                                  <div className="space-y-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="relative flex-1">
+                                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                                        <input
+                                          type="text"
+                                          id="activity-log-search-input"
+                                          value={activitySearchText}
+                                          onChange={(e) => setActivitySearchText(e.target.value)}
+                                          placeholder="Buscar por ação, detalhes, módulo ou palavra-chave..."
+                                          className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:border-orange-500 transition font-medium"
+                                        />
+                                      </div>
+                                      <button
+                                        type="button"
+                                        id="activity-log-export-csv-btn"
+                                        onClick={() => handleExportAuditLogsCSV(filteredCollaboratorLogs)}
+                                        className="px-3.5 py-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
+                                        title="Exportar lista atual de logs filtrados em CSV"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline">Exportar Logs (CSV)</span>
+                                        <span className="sm:hidden">CSV</span>
+                                      </button>
+                                    </div>
+
+                                    {/* Botões de atalho rápidos (chips) */}
+                                    <div id="activity-log-quick-chips" className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Filtro rápido:</span>
+                                      {[
+                                        { label: "Vendas", query: "Vendas", icon: "🛒" },
+                                        { label: "Segurança", query: "Segurança", icon: "🛡️" },
+                                        { label: "Configurações", query: "Configurações", icon: "⚙️" }
+                                      ].map((chip) => {
+                                        const isActive = activitySearchText.trim().toLowerCase() === chip.query.toLowerCase();
+                                        return (
+                                          <button
+                                            key={chip.label}
+                                            type="button"
+                                            onClick={() => {
+                                              if (isActive) {
+                                                setActivitySearchText("");
+                                              } else {
+                                                setActivitySearchText(chip.query);
+                                              }
+                                            }}
+                                            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                              isActive
+                                                ? "bg-orange-500 text-white border-orange-400 shadow-sm"
+                                                : "bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white hover:bg-slate-900"
+                                            }`}
+                                          >
+                                            <span className="text-xs">{chip.icon}</span>
+                                            <span>{chip.label}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+
+                                    {/* Gráfico D3 de Volume Diário de Logs nos últimos 7 dias */}
+                                    <AuditLogsD3BarChart logs={filteredCollaboratorLogs} />
                                   </div>
 
                                   {/* Seletor de Intervalo de Datas */}
@@ -5374,7 +6210,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                           const diffTime = now.getTime() - createdAt.getTime();
                           const diffDays = diffTime / (1000 * 60 * 60 * 24);
 
-                          const isPinTemporary = selectedEmp.pinChanged === false || selectedEmp.pinChanged === undefined;
+                          const isPinTemporary = selectedEmp.pinChanged === false;
 
                           // If password is temporary (first login) OR has expired (older than 60 days)
                           if (isPinTemporary) {
@@ -5437,66 +6273,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
                           setIsUserSwitchModalOpen(false);
                         } else {
-                          if (!activeUser) return;
-                          if (!profileName.trim()) {
-                            showToast("O nome do perfil não pode estar vazio.", "warning");
-                            return;
-                          }
-
-                          if (profileContact.trim() && !isMozambicanPhoneValid(profileContact)) {
-                            showToast("Contacto telefónico inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
-                            return;
-                          }
-
-                          const targetEmpId = switchSelectedEmployeeId || activeUser.id;
-
-                          const updatedEmployees = employees.map(emp => {
-                            if (emp.id === targetEmpId) {
-                              return {
-                                ...emp,
-                                name: profileName.trim(),
-                                contact: profileContact.trim(),
-                                fotoPerfil: profileFotoPerfil.trim(),
-                                twoFactorEmailEnabled: profileTwoFactorEmail,
-                                observacoes: profileObservacoes.trim(),
-                                expirationDate: profileExpirationDate
-                              };
-                            }
-                            return emp;
-                          });
-
-                          setEmployees(updatedEmployees);
-                          await syncTable("employees", updatedEmployees);
-
-                          // Sync setting to System Settings
-                          const updatedSettings = {
-                            ...settings,
-                            twoFactorEmailEnabled: profileTwoFactorEmail,
-                            twoFactorNewLocationEmail: profileTwoFactorEmail
-                          };
-                          setSettings(updatedSettings);
-                          await syncTable("settings", updatedSettings);
-
-                          // Update active session operator
-                          if (activeUser.id === targetEmpId) {
-                            setActiveUser({
-                              ...activeUser,
-                              name: profileName.trim(),
-                              contact: profileContact.trim(),
-                              fotoPerfil: profileFotoPerfil.trim(),
-                              twoFactorEmailEnabled: profileTwoFactorEmail,
-                              observacoes: profileObservacoes.trim()
-                            });
-                          }
-
-                          showToast("Perfil e observações atualizados com sucesso!", "success");
-
-                          handleAddAuditLog(
-                            "Atualização de Perfil",
-                            "SISTEMA",
-                            `Colaborador ${activeUser.name} atualizou o perfil e observações.`
-                          );
-
+                          await handleSaveProfileChanges();
                           setIsUserSwitchModalOpen(false);
                         }
                       }}

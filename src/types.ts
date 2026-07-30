@@ -1,4 +1,13 @@
 export type UserRole = "ADMIN" | "SUPERVISOR" | "CASHIER";
+export type SubscriptionPlan = "BRONZE" | "PRATA" | "OURO";
+
+export interface PlanFeature {
+  name: string;
+  bronze: boolean;
+  prata: boolean;
+  ouro: boolean;
+  description: string;
+}
 
 export interface UserProfile {
   id: string;
@@ -128,12 +137,17 @@ export interface Employee {
   observacoes?: string;
   expirationDate?: string;
   logoUrl?: string;
+  subscriptionPlan?: SubscriptionPlan;
+  planGrantedBy?: string;
 }
 
 export interface SystemSettings {
   companyName: string;
   companyAddress: string;
   companyNuit: string;
+  nuit?: string;
+  email?: string;
+  storeEmail?: string;
   vatDefaultRate: number;
   currency: string; // e.g. MT, Meticais
   logoUrl?: string;
@@ -222,6 +236,7 @@ export interface SystemSettings {
   suppliers?: Supplier[];
   supplierOrders?: SupplierOrder[];
   supplierOverdueToleranceDays?: number;
+  subscriptionPlan?: SubscriptionPlan;
 }
 
 export interface Supplier {

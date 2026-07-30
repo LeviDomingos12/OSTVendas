@@ -12,10 +12,12 @@ import {
   Lock,
   ChevronDown,
   Smartphone,
+  Crown,
   LogOut,
   X
 } from "lucide-react";
-import { UserRole, UserProfile, Employee } from "../types";
+import { UserRole, UserProfile, Employee, SubscriptionPlan } from "../types";
+import { canAccessModule } from "../lib/planPermissions";
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -30,6 +32,7 @@ interface SidebarProps {
   onClose?: () => void;
   activeUser?: Employee | null;
   onSwitchUser?: () => void;
+  subscriptionPlan?: SubscriptionPlan;
 }
 
 export default function Sidebar({
@@ -44,8 +47,10 @@ export default function Sidebar({
   isOpen,
   onClose,
   activeUser,
-  onSwitchUser
+  onSwitchUser,
+  subscriptionPlan = "OURO"
 }: SidebarProps) {
+  const effectivePlan: SubscriptionPlan = activeUser?.subscriptionPlan || subscriptionPlan || "OURO";
   
   const profiles: UserProfile[] = [
     { id: "p-admin", name: "Levi Domingos", role: "ADMIN", avatar: "👨‍💼" },
@@ -67,6 +72,7 @@ export default function Sidebar({
     { id: "training", label: "Centro de Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
     { id: "settings", label: "Configurações Gerais", icon: Settings, roles: ["ADMIN"] },
     { id: "gateway", label: "Integração Mobile Money", icon: Smartphone, roles: ["ADMIN"] },
+    { id: "plans", label: "Planos & Subscrições", icon: Crown, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
   ];
 
   const getRoleLabel = (role: UserRole) => {
@@ -161,13 +167,24 @@ export default function Sidebar({
             <h4 className={`text-xs font-black truncate leading-none ${
               isNight ? "text-slate-200" : "text-slate-800"
             }`}>{activeUser ? activeUser.name : currentProfile.name}</h4>
-            <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full mt-1.5 inline-block border transition-colors ${
-              isNight 
-                ? "bg-zinc-950 text-slate-400 border-zinc-850" 
-                : "bg-orange-100 text-orange-700 border-orange-200/30"
-            }`}>
-              {activeUser ? activeUser.role : getRoleLabel(currentRole)}
-            </span>
+            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full inline-block border transition-colors ${
+                isNight 
+                  ? "bg-zinc-950 text-slate-400 border-zinc-850" 
+                  : "bg-orange-100 text-orange-700 border-orange-200/30"
+              }`}>
+                {activeUser ? activeUser.role : getRoleLabel(currentRole)}
+              </span>
+              <span className={`text-[9px] font-mono font-black px-2 py-0.5 rounded-full border shadow-sm ${
+                effectivePlan === "OURO"
+                  ? "bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 border-amber-400"
+                  : effectivePlan === "PRATA"
+                    ? "bg-slate-300 text-slate-900 border-slate-200"
+                    : "bg-amber-800 text-amber-100 border-amber-700"
+              }`}>
+                Plano {effectivePlan}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -178,7 +195,7 @@ export default function Sidebar({
             className={`w-full mt-3.5 flex items-center justify-center gap-2 py-2 px-3 rounded-xl border text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${
               isNight
                 ? "bg-zinc-950 border-zinc-850 text-orange-400 hover:text-orange-350 hover:bg-zinc-900"
-                : "bg-white border-orange-150 text-orange-600 hover:bg-orange-500/5 hover:text-orange-700 shadow-[0_2px_8px_rgba(249,115,22,0.04)]"
+                : "bg-white border-orange-150 text-orange-600 hover:bg-orange-50/5 hover:text-orange-700 shadow-[0_2px_8px_rgba(249,115,22,0.04)]"
             }`}
             title="Alterar Operador / Vincular Conta"
           >
@@ -197,22 +214,23 @@ export default function Sidebar({
         </p>
         
         {menuItems.map((item) => {
-          const authorized = hasAccess(item.roles);
+          const roleAuthorized = hasAccess(item.roles);
+          const planCheck = canAccessModule(item.id, effectivePlan);
+          const authorized = roleAuthorized && planCheck.allowed;
           const active = activeModule === item.id;
           
           return (
             <button
               key={item.id}
-              onClick={() => authorized && onChangeModule(item.id)}
-              disabled={!authorized && currentRole !== "ADMIN"} // Lock visual simulation
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all group relative ${
+              onClick={() => onChangeModule(item.id)}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold transition-all group relative cursor-pointer ${
                 active 
                   ? "bg-orange-500 text-white shadow-md shadow-orange-500/20" 
                   : authorized 
                     ? isNight 
                       ? "text-slate-400 hover:text-slate-200 hover:bg-zinc-900" 
                       : "text-slate-600 hover:text-orange-600 hover:bg-orange-50/60"
-                    : "opacity-45 cursor-not-allowed text-slate-400"
+                    : "opacity-70 text-slate-400 hover:bg-slate-800/20"
               }`}
             >
               <div className="flex items-center gap-2.5">
@@ -223,14 +241,19 @@ export default function Sidebar({
                       ? isNight 
                         ? "text-slate-500 group-hover:text-slate-300" 
                         : "text-slate-400 group-hover:text-orange-500"
-                      : "text-slate-400"
+                      : "text-amber-500/80"
                 }`} />
                 <span>{item.label}</span>
               </div>
               
-              {!authorized && (
+              {!roleAuthorized ? (
                 <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              )}
+              ) : !planCheck.allowed ? (
+                <span className="text-[9px] font-mono font-bold bg-amber-500/15 text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0 flex items-center gap-1">
+                  <Lock className="w-2.5 h-2.5" />
+                  {planCheck.requiredPlan}
+                </span>
+              ) : null}
             </button>
           );
         })}

@@ -87,6 +87,13 @@ export const googleSignIn = async (withScopes: boolean = false): Promise<{ user:
     console.error('Sign in error:', error);
     if (
       error &&
+      (error.code === 'auth/operation-not-allowed' ||
+       (error.message && error.message.includes('operation-not-allowed')))
+    ) {
+      throw new Error('O método de autenticação Google não está ativado no Console do Firebase (Authentication > Sign-in method). Pode alternar para o login por E-mail e Palavra-passe.');
+    }
+    if (
+      error &&
       (error.code === 'auth/popup-closed-by-user' ||
        error.code === 'auth/cancelled-popup-request' ||
        (error.message && (error.message.includes('popup-closed-by-user') || error.message.includes('cancelled-popup-request'))))
@@ -316,6 +323,7 @@ export interface UsuarioDoc {
   pinCreatedAt?: string;
   pinChanged?: boolean;
   password?: string;
+  subscriptionPlan?: string;
 }
 
 // Custom Helper to get partitioned collection path for dynamic data isolation (Multi-tenant structure)
@@ -351,7 +359,7 @@ export function getPartitionPath(collectionName: string, adminUidOverride?: stri
 }
 
 // Map Firestore doc to native Employee type
-export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string }): any {
+export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string; subscriptionPlan?: string }): any {
   return {
     id: usuario.uid,
     name: usuario.nomeCompleto,
@@ -366,7 +374,8 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string
     pinCreatedAt: usuario.pinCreatedAt || "",
     pinChanged: usuario.pinChanged !== undefined ? usuario.pinChanged : true,
     password: usuario.password || "",
-    adminEmail: usuario.adminEmail || usuario.email || "" // Map the partition key
+    adminEmail: usuario.adminEmail || usuario.email || "", // Map the partition key
+    subscriptionPlan: (usuario as any).subscriptionPlan || "OURO"
   };
 }
 
@@ -394,13 +403,14 @@ export const signUpWithEmail = async (
   password: string,
   nomeCompleto: string,
   empresa: string,
-  perfil: string = "Administrador"
+  perfil: string = "Administrador",
+  subscriptionPlan: string = "OURO"
 ): Promise<any> => {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    const userProfile: UsuarioDoc & { adminEmail?: string } = {
+    const userProfile: UsuarioDoc & { adminEmail?: string; subscriptionPlan?: string } = {
       uid: user.uid,
       nomeCompleto,
       email,
@@ -412,7 +422,10 @@ export const signUpWithEmail = async (
       telefone: "",
       ultimoLogin: new Date().toISOString(), // Use local ISO string to avoid serverTimestamp quota write errors if possible
       dataCriacao: new Date().toISOString(),
-      adminEmail: email // Set tenant's adminEmail to their own email
+      adminEmail: email, // Set tenant's adminEmail to their own email
+      subscriptionPlan,
+      pinChanged: true,
+      pinCreatedAt: new Date().toISOString()
     };
 
     // Save profile to Firestore usuarios collection
@@ -506,8 +519,9 @@ export const signUpWithEmail = async (
         email: email,
         username: finalUsername,
         pinCreatedAt: new Date().toISOString(),
-        pinChanged: false, // Force them to change PIN upon first login
-        password: password // Store the password for local/simulated email logins
+        pinChanged: true, // User chose password during signup
+        password: password, // Store the password for local/simulated email logins
+        subscriptionPlan: subscriptionPlan || "OURO"
       };
 
       // 4. Save the updated employees list to the server/local database file
@@ -676,6 +690,18 @@ export const signInWithEmail = async (email: string, password: string): Promise<
 
         return { employee: matchedEmployee, branch: "OST Comércio Geral" };
       }
+
+      // 3. Check if email exists but password was incorrect
+      const emailExists = employees.some(
+        emp => emp.email?.toLowerCase() === email.toLowerCase()
+      );
+      if (emailExists) {
+        throw new Error("Palavra-passe incorreta. Por favor, verifique os seus dados de acesso.");
+      }
+
+      if (isOperationNotAllowed) {
+        throw new Error("Conta não encontrada com este e-mail. Se ainda não se registou, por favor crie uma nova conta no separador 'Criar Conta'.");
+      }
     }
 
     console.error("Sign in error:", error);
@@ -729,7 +755,7 @@ export const recoverPassword = async (email: string): Promise<void> => {
 };
 
 // Google sign-in and profile synchronization
-export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio Geral", employeesList: any[] = []): Promise<any> => {
+export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio Geral", employeesList: any[] = [], selectedPlan: string = "OURO"): Promise<any> => {
   try {
     const signInResult = await googleSignIn();
     if (!signInResult) return null;
@@ -867,7 +893,8 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
         username: googleEmail.split("@")[0],
         pin: "1234",
         pinCreatedAt: new Date().toISOString(),
-        pinChanged: true
+        pinChanged: true,
+        subscriptionPlan: selectedPlan || "OURO"
       };
       profile.adminEmail = googleEmail;
 

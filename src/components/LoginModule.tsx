@@ -19,9 +19,12 @@ import {
   Mail,
   UserPlus,
   ArrowLeft,
-  Chrome
+  Chrome,
+  Crown,
+  Zap,
+  Award
 } from "lucide-react";
-import { Employee, SystemSettings } from "../types";
+import { Employee, SystemSettings, SubscriptionPlan } from "../types";
 import { 
   signUpWithEmail, 
   signInWithEmail, 
@@ -69,6 +72,7 @@ export default function LoginModule({
   const [signupConfirmPassword, setSignupConfirmPassword] = useState("");
   const [signupBranch, setSignupBranch] = useState("OST Comércio Geral");
   const [signupRole, setSignupRole] = useState("Administrador");
+  const [signupPlan, setSignupPlan] = useState<SubscriptionPlan>("OURO");
   const [showSignupPassword, setShowSignupPassword] = useState(false);
 
   // Recovery Form State
@@ -256,7 +260,8 @@ export default function LoginModule({
         signupPassword,
         signupName.trim(),
         signupBranch,
-        signupRole
+        signupRole,
+        signupPlan
       );
 
       setLoadingState("IDLE");
@@ -444,6 +449,57 @@ export default function LoginModule({
       
       setErrorMessage(friendlyError);
       onShowToast(isGoogleBlocked ? "Acesso Google Restrito ou Fechado." : (err.message || "Não foi possível autenticar com o Google."), "error");
+    }
+  };
+
+  // 4b. Real Firebase Auth - Google Sign-Up Handler
+  const handleGoogleSignUp = async () => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      setLoadingState("AUTHENTICATING");
+      setLoadingProgress(15);
+      
+      const result = await googleSignInAndSync(signupBranch || "OST Comércio Geral", employees, signupPlan);
+      if (result && result.employee) {
+        setAuthenticatedUser(result.employee);
+        setSelectedBranch(result.branch);
+        
+        setTimeout(() => {
+          setLoadingState("CONNECTING");
+          setLoadingProgress(55);
+        }, 500);
+
+        setTimeout(() => {
+          setLoadingState("LOADING_PERMISSIONS");
+          setLoadingProgress(90);
+        }, 1000);
+
+        setTimeout(() => {
+          setLoadingProgress(100);
+          onShowToast(`Conta criada e autenticada com sucesso via Gmail / Google (${signupPlan})!`, "success");
+          onLoginSuccess(result.employee, result.branch);
+        }, 1500);
+      } else {
+        setLoadingState("IDLE");
+      }
+    } catch (err: any) {
+      setLoadingState("IDLE");
+      setLoadingProgress(0);
+      
+      const isGoogleBlocked = err.message?.includes("access_denied") || 
+                              err.message?.includes("popup-closed-by-user") || 
+                              err.message?.includes("cancelled-popup-request") ||
+                              err.message?.includes("não concluiu o processo") ||
+                              err.message?.includes("403");
+                               
+      let friendlyError = `❌ Erro Google Sign-Up: ${err.message}`;
+      if (isGoogleBlocked) {
+        friendlyError = `❌ O popup do Google foi fechado ou restrito. Se preferir, preencha o formulário abaixo para registar a sua conta com e-mail e palavra-passe.`;
+      }
+      
+      setErrorMessage(friendlyError);
+      onShowToast(isGoogleBlocked ? "Autenticação Google cancelada." : (err.message || "Erro ao criar conta via Google."), "error");
     }
   };
 
@@ -804,6 +860,25 @@ export default function LoginModule({
             {view === "SIGNUP" && (
               <form onSubmit={handleRealSignUp} className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
                 
+                {/* Google Sign-Up / Gmail Option */}
+                <div className="space-y-2 pb-1">
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignUp}
+                    disabled={loadingState !== "IDLE"}
+                    className="w-full py-3 px-4 bg-slate-900 border border-slate-700 hover:border-orange-500/60 hover:bg-slate-850 rounded-xl text-white font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg group"
+                  >
+                    <Chrome className="w-4.5 h-4.5 text-orange-400 group-hover:scale-110 transition-transform shrink-0" />
+                    <span>Registar Nova Conta com Gmail (Google)</span>
+                  </button>
+
+                  <div className="relative flex py-1.5 items-center">
+                    <div className="flex-grow border-t border-slate-800"></div>
+                    <span className="flex-shrink mx-3 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">ou registar com formulário</span>
+                    <div className="flex-grow border-t border-slate-800"></div>
+                  </div>
+                </div>
+                
                 {/* Full Name */}
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Nome Completo</label>
@@ -852,6 +927,82 @@ export default function LoginModule({
                       <option key={r.value} value={r.value}>{r.label}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Plano de Subscrição Selection */}
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-[11px] font-bold text-slate-300 flex items-center justify-between uppercase tracking-wider">
+                    <span>Plano de Subscrição</span>
+                    <span className="text-[10px] font-mono text-orange-400 font-normal lowercase">recursos da conta</span>
+                  </label>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* BRONZE */}
+                    <button
+                      type="button"
+                      onClick={() => setSignupPlan("BRONZE")}
+                      className={`p-2.5 rounded-xl border text-left transition-all relative cursor-pointer ${
+                        signupPlan === "BRONZE"
+                          ? "bg-amber-950/50 border-amber-600 text-amber-200 ring-1 ring-amber-500/50 shadow-md"
+                          : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold flex items-center gap-1 font-mono">
+                          <Award className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          Bronze
+                        </span>
+                        {signupPlan === "BRONZE" && <Check className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                      </div>
+                      <p className="text-[9px] text-slate-400 mt-1 leading-tight">
+                        POS & Relatórios Básicos
+                      </p>
+                    </button>
+
+                    {/* PRATA */}
+                    <button
+                      type="button"
+                      onClick={() => setSignupPlan("PRATA")}
+                      className={`p-2.5 rounded-xl border text-left transition-all relative cursor-pointer ${
+                        signupPlan === "PRATA"
+                          ? "bg-slate-800/90 border-slate-400 text-slate-100 ring-1 ring-slate-400/50 shadow-md"
+                          : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold flex items-center gap-1 font-mono">
+                          <Zap className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                          Prata
+                        </span>
+                        {signupPlan === "PRATA" && <Check className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
+                      </div>
+                      <p className="text-[9px] text-slate-400 mt-1 leading-tight">
+                        + Stock Avançado, M-Pesa & Auditoria
+                      </p>
+                    </button>
+
+                    {/* OURO */}
+                    <button
+                      type="button"
+                      onClick={() => setSignupPlan("OURO")}
+                      className={`p-2.5 rounded-xl border text-left transition-all relative cursor-pointer ${
+                        signupPlan === "OURO"
+                          ? "bg-gradient-to-b from-amber-950/70 to-yellow-950/50 border-amber-400 text-amber-200 ring-1 ring-amber-400/60 shadow-lg shadow-amber-500/10"
+                          : "bg-slate-900/80 border-slate-800 text-slate-400 hover:border-slate-700"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-extrabold flex items-center gap-1 font-mono text-amber-400">
+                          <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                          Ouro
+                        </span>
+                        {signupPlan === "OURO" && <Check className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
+                      </div>
+                      <p className="text-[9px] text-amber-300/80 mt-1 leading-tight">
+                        Acesso Total VIP + Previsão AI Premium
+                      </p>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Password Fields */}
