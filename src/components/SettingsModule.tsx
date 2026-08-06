@@ -4,11 +4,9 @@ import autoTable from "jspdf-autotable";
 import { 
   Settings, 
   Building, 
-  CreditCard, 
   Database, 
   CheckCircle, 
   Shield, 
-  HelpCircle, 
   Lock,
   Download,
   Upload,
@@ -34,7 +32,6 @@ import {
   Tag,
   Camera,
   Sparkles,
-  Image,
   Layers,
   Bell,
   ChevronDown,
@@ -75,7 +72,7 @@ export default function SettingsModule({
   onUpdateSettings,
   onAddAuditLog,
   currentRole,
-  currency,
+  currency: _currency,
   onShowToast,
   activeUser,
   activeColorTheme,
@@ -257,7 +254,6 @@ export default function SettingsModule({
 
     const checkBackupStatus = () => {
       const lastBackupStr = localStorage.getItem("lastBackupDate");
-      const todayStr = new Date().toISOString().split("T")[0];
       
       if (!lastBackupStr) {
         if (onShowToast) onShowToast("Nenhum backup em nuvem encontrado. Realize um backup urgente!", "warning", "Atenção: Risco de Perda de Dados");
@@ -2105,7 +2101,7 @@ export default function SettingsModule({
     }
   };
 
-  const generateOfflineLogoPNG = (compName: string, promptText: string): string => {
+  const generateOfflineLogoPNG = (compName: string, _promptText: string): string => {
     const canvas = document.createElement("canvas");
     canvas.width = 200;
     canvas.height = 200;
@@ -3251,22 +3247,28 @@ export default function SettingsModule({
             </form>
           </div>
 
-          {/* Alertas SMS Card */}
+          {/* Configuração da API do Provedor de SMS (Códigos 2FA & Alertas) */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-orange-600">
-              <Smartphone className="w-4.5 h-4.5" />
-              <h3 className="font-bold text-slate-850 text-sm">Alertas SMS</h3>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-orange-600">
+                <Smartphone className="w-4.5 h-4.5" />
+                <h3 className="font-bold text-slate-850 text-sm">Configuração da API de SMS (2FA & Alertas)</h3>
+              </div>
+              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                Suporta 2FA & Alertas
+              </span>
             </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Integre um gateway de SMS (Twilio ou personalizado) para enviar avisos automáticos e imediatos ao telefone do gestor sempre que o estoque de algum item atingir um nível crítico.
+            
+            <p className="text-[11px] text-slate-500 leading-normal">
+              Insira as credenciais do seu provedor de SMS (Twilio Sid/Token ou Endpoint HTTP Customizado) para permitir que o sistema envie <strong>códigos de verificação 2FA por SMS</strong> para os colaboradores e alertas automáticos ao gestor.
             </p>
 
             <form onSubmit={handleSaveSmsAlertsConfig} className="space-y-4">
               {/* Enable Switch */}
-              <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-150 rounded-xl">
+              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
                 <div className="space-y-0.5">
-                  <span className="text-[11px] font-bold text-slate-700 uppercase block">Ativar Alertas de Stock Baixo</span>
-                  <span className="text-[10px] text-slate-400 block">Envia SMS automático ao atingir o nível crítico</span>
+                  <span className="text-[11px] font-bold text-slate-800 uppercase block">Ativar Envio de SMS no Sistema</span>
+                  <span className="text-[10px] text-slate-500 block">Habilita envio de códigos de verificação 2FA e notificações via SMS</span>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -3284,76 +3286,84 @@ export default function SettingsModule({
                 <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
                   {/* SMS Provider Selection */}
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Provedor de Gateway SMS</label>
+                    <label className="text-[10px] font-bold text-slate-600 uppercase block">Provedor de Gateway / API SMS</label>
                     <select
                       disabled={!canEdit}
                       value={smsProviderType}
                       onChange={(e) => setSmsProviderType(e.target.value as "TWILIO" | "CUSTOM_HTTP")}
                       className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 text-xs"
                     >
-                      <option value="TWILIO">Twilio API (EUA / Global)</option>
-                      <option value="CUSTOM_HTTP">Gateway Customizado HTTP (Moçambique / Outro)</option>
+                      <option value="TWILIO">Twilio API (Account SID + Auth Token - Global)</option>
+                      <option value="CUSTOM_HTTP">Gateway Customizado HTTP REST (Moçambique / Local)</option>
                     </select>
                   </div>
 
                   {smsProviderType === "TWILIO" ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-150">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-150 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
                       <div className="space-y-1 md:col-span-2">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Account SID (Twilio)</label>
+                        <label className="text-[10px] font-bold text-slate-600 uppercase block flex items-center justify-between">
+                          <span>Account SID (Twilio)</span>
+                          <span className="text-[9px] text-slate-400 font-mono">ex: ACa1b2c3d4e5f6...</span>
+                        </label>
                         <input
                           type="text"
                           required
                           disabled={!canEdit}
                           value={smsTwilioSid}
                           onChange={(e) => setSmsTwilioSid(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs"
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
                           placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Auth Token (Twilio)</label>
+                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Auth Token (Twilio)</label>
                         <input
                           type="password"
                           required
                           disabled={!canEdit}
                           value={smsTwilioToken}
                           onChange={(e) => setSmsTwilioToken(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs"
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
                           placeholder="••••••••••••••••••••••••••••••••"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Número de Origem (From)</label>
+                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Número de Origem / From Number</label>
                         <input
                           type="text"
                           required
                           disabled={!canEdit}
                           value={smsTwilioFrom}
                           onChange={(e) => setSmsTwilioFrom(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs"
-                          placeholder="+1XXXXXXXXXX"
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
+                          placeholder="+18885550123 ou SenderID"
                         />
                       </div>
                     </div>
                   ) : (
-                    <div className="space-y-1 animate-in fade-in duration-150">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block">Endpoint URL do Gateway (POST / GET)</label>
-                      <input
-                        type="url"
-                        required
-                        disabled={!canEdit}
-                        value={smsCustomUrl}
-                        onChange={(e) => setSmsCustomUrl(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs"
-                        placeholder="http://api.sms-mozambique.co.mz/v1/send?api_key=xyz..."
-                      />
+                    <div className="space-y-2.5 animate-in fade-in duration-150 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Endpoint URL do Gateway Customizado (POST / GET)</label>
+                        <input
+                          type="url"
+                          required
+                          disabled={!canEdit}
+                          value={smsCustomUrl}
+                          onChange={(e) => setSmsCustomUrl(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
+                          placeholder="https://api.sms-mozambique.co.mz/v1/send?api_key=xyz&to={phone}&message={message}"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-500 font-mono">
+                        Dica de Variáveis: As tags <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;phone&#125;</code>, <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;to&#125;</code> e <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;message&#125;</code> serão substituídas dinamicamente ao enviar o código 2FA.
+                      </p>
                     </div>
                   )}
 
                   {/* Manager phone and Threshold triggers */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block">Contacto do Gestor (Destinatário)</label>
+                      <label className="text-[10px] font-bold text-slate-600 uppercase block">Telefone de Testes / Contacto Administrador</label>
                       <input
                         type="text"
                         required
@@ -3366,7 +3376,7 @@ export default function SettingsModule({
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase block">Gatilho de Qtd. Mínima (Trigger)</label>
+                      <label className="text-[10px] font-bold text-slate-600 uppercase block">Gatilho de Qtd. Mínima (Alertas Stock)</label>
                       <input
                         type="number"
                         required
@@ -3386,9 +3396,10 @@ export default function SettingsModule({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
                   <button
                     type="submit"
-                    className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15 text-center"
+                    className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15 text-center flex items-center justify-center gap-1.5"
                   >
-                    Salvar Alertas SMS
+                    <Smartphone className="w-3.5 h-3.5" />
+                    <span>Salvar Credenciais SMS</span>
                   </button>
                   <button
                     type="button"
@@ -3403,15 +3414,15 @@ export default function SettingsModule({
                       </>
                     ) : (
                       <>
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        Testar Envio SMS
+                        <MessageSquare className="w-3.5 h-3.5 text-orange-500" />
+                        <span>Testar Envio SMS 2FA</span>
                       </>
                     )}
                   </button>
                 </div>
               ) : (
                 <div className="text-[11px] text-slate-400 text-center py-2 bg-slate-50 border border-slate-100 rounded-xl">
-                  Apenas administradores podem gerir os alertas por SMS.
+                  Apenas administradores podem gerir os alertas e credenciais do servidor SMS.
                 </div>
               )}
             </form>

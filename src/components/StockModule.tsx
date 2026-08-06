@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { 
-  Package, 
   Plus, 
   Edit3, 
   AlertTriangle, 
@@ -8,7 +7,6 @@ import {
   Upload, 
   Trash2, 
   CheckCircle,
-  HelpCircle,
   Search,
   Calendar,
   MoreVertical,
@@ -23,8 +21,6 @@ import {
   Eye,
   PlusCircle,
   MinusCircle,
-  ArrowUpRight,
-  ArrowDownRight,
   Sparkles,
   Layers,
   DollarSign,
@@ -45,7 +41,6 @@ import {
   ShoppingCart,
   Printer,
   CreditCard,
-  Settings,
   Sliders
 } from "lucide-react";
 import { 
@@ -1014,7 +1009,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
   // Action Dropdowns open state (stores productId of open dropdown)
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
-  const [sendingProductAlertId, setSendingProductAlertId] = useState<string | null>(null);
+  const [_sendingProductAlertId, setSendingProductAlertId] = useState<string | null>(null);
 
   // New replenishment order system states
   const [isReplenishmentModalOpen, setIsReplenishmentModalOpen] = useState(false);
@@ -5205,7 +5200,6 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                     );
 
                     const sOrders = supplierOrders.filter((o: any) => o.supplierId === supp.id && o.status !== "Cancelado");
-                    const totalPurchased = sOrders.reduce((sum: number, o: any) => sum + o.totalValue, 0);
                     const paidAmount = sOrders.filter((o: any) => o.paymentStatus === "Pago").reduce((sum: number, o: any) => sum + o.totalValue, 0);
                     const creditDebt = sOrders.filter((o: any) => o.paymentStatus === "Crédito").reduce((sum: number, o: any) => sum + o.totalValue, 0);
                     const pendingPayment = sOrders.filter((o: any) => o.paymentStatus === "Pendente").reduce((sum: number, o: any) => sum + o.totalValue, 0);

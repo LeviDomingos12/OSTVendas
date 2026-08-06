@@ -28,7 +28,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip as RechartsTooltip,
-  Legend,
   ResponsiveContainer
 } from "recharts";
 import { Transaction, SystemSettings, AuditLog } from "../types";
@@ -111,7 +110,6 @@ export default function ReportsModule({
 
   // Send test email stats
   const [testSendStatus, setTestSendStatus] = useState<"idle" | "sending" | "sent">("idle");
-  const [testSentMessage, setTestSentMessage] = useState("");
 
   // Individual Email Send States
   const [sendingInvoiceId, setSendingInvoiceId] = useState<string | null>(null);
@@ -407,7 +405,6 @@ export default function ReportsModule({
   // Test Dispatch simulated emails via Express Server `/api/email/send-report`
   const handleTriggerTestEmail = async () => {
     setTestSendStatus("sending");
-    setTestSentMessage("");
 
     try {
       const response = await fetch("/api/email/send-report", {
@@ -427,7 +424,6 @@ export default function ReportsModule({
       
       if (response.ok && data.success) {
         setTestSendStatus("sent");
-        setTestSentMessage(data.message);
         onAddAuditLog(
           "Forçar Disparo de Relatório Piloto por Email",
           "RELATÓRIOS",
@@ -442,7 +438,6 @@ export default function ReportsModule({
     } catch (err: any) {
       setTestSendStatus("idle");
       const errMsg = err.message || "Erro desconhecido ao despachar correio.";
-      setTestSentMessage(`Erro: ${errMsg}`);
       if (onShowToast) {
         onShowToast(errMsg, "error", "Falha de Envio");
       }

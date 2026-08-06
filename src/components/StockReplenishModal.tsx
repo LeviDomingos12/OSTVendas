@@ -7,10 +7,7 @@ import {
   Minus, 
   Check, 
   AlertTriangle, 
-  TrendingUp, 
   History, 
-  ArrowLeft,
-  X,
   Layers,
   Sparkles
 } from "lucide-react";

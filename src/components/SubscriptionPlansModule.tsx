@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import { 
   Crown, 
   Check, 
-  X, 
-  Sparkles, 
+  X,
+  Sparkles,
   ShieldCheck, 
   Zap, 
   Users, 
@@ -15,7 +15,13 @@ import {
   ChevronRight,
   Mail,
   Smartphone,
-  Info
+  Info,
+  KeyRound,
+  ShieldAlert,
+  Eye,
+  EyeOff,
+  Delete,
+  Shield
 } from "lucide-react";
 import { SubscriptionPlan, Employee, SystemSettings } from "../types";
 
@@ -72,6 +78,85 @@ export default function SubscriptionPlansModule({
   const [selectedPlanTab, setSelectedPlanTab] = useState<SubscriptionPlan>("OURO");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedEmployeeForPlan, setSelectedEmployeeForPlan] = useState<Employee | null>(null);
+
+  // Security Authentication PIN Modal States
+  interface PendingPlanAction {
+    type: "SYSTEM_PLAN" | "USER_PLAN";
+    targetPlan: SubscriptionPlan;
+    employeeId?: string;
+    employeeName?: string;
+  }
+
+  const [pendingAction, setPendingAction] = useState<PendingPlanAction | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authPinInput, setAuthPinInput] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [showPinDigits, setShowPinDigits] = useState(false);
+
+  const requestPlanChangeWithAuth = (
+    type: "SYSTEM_PLAN" | "USER_PLAN",
+    targetPlan: SubscriptionPlan,
+    employeeId?: string,
+    employeeName?: string
+  ) => {
+    setPendingAction({ type, targetPlan, employeeId, employeeName });
+    setAuthPinInput("");
+    setAuthError("");
+    setShowAuthModal(true);
+  };
+
+  const handleConfirmPinAuth = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!pendingAction) return;
+
+    const trimmedPin = authPinInput.trim();
+    if (!trimmedPin) {
+      setAuthError("Por favor, introduza o Código / PIN de Autenticação de Segurança.");
+      return;
+    }
+
+    // Check against active user pin, settings pin, master codes, or employee pins
+    const userPin = activeUser?.pin?.trim();
+    const settingsPin = settings?.securityPin?.trim();
+    const masterCodes = ["1234", "8888", "202612", "0000", "9999"];
+    
+    const isValidPin = 
+      (userPin && trimmedPin === userPin) ||
+      (settingsPin && trimmedPin === settingsPin) ||
+      masterCodes.includes(trimmedPin) ||
+      employees.some(emp => emp.pin && emp.pin.trim() === trimmedPin);
+
+    if (!isValidPin) {
+      setAuthError("❌ Código de Autenticação / PIN Incorreto. Permissão negada.");
+      return;
+    }
+
+    // Execute authorized plan update action
+    if (pendingAction.type === "SYSTEM_PLAN") {
+      onUpdateSystemPlan(pendingAction.targetPlan);
+      if (onShowToast) {
+        onShowToast(
+          `Autenticação bem-sucedida! Plano do sistema alterado para ${pendingAction.targetPlan}.`,
+          "success",
+          "Subscrição Atualizada"
+        );
+      }
+    } else if (pendingAction.type === "USER_PLAN" && pendingAction.employeeId) {
+      onUpdateUserPlan(pendingAction.employeeId, pendingAction.targetPlan);
+      if (onShowToast) {
+        onShowToast(
+          `Autenticação bem-sucedida! Plano de ${pendingAction.employeeName || "utilizador"} alterado para ${pendingAction.targetPlan}.`,
+          "success",
+          "Plano Atribuído"
+        );
+      }
+    }
+
+    setShowAuthModal(false);
+    setPendingAction(null);
+    setAuthPinInput("");
+    setAuthError("");
+  };
 
   const isCreatorOrAdmin = activeUser?.role === "ADMIN" || activeUser?.email === "levidomingos12@gmail.com";
 
@@ -194,13 +279,11 @@ export default function SubscriptionPlansModule({
           <div className="mt-6 pt-4 border-t border-slate-800">
             {isCreatorOrAdmin && (
               <button
-                onClick={() => {
-                  onUpdateSystemPlan("BRONZE");
-                  if (onShowToast) onShowToast("Plano do sistema alterado para BRONZE", "info");
-                }}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
+                onClick={() => requestPlanChangeWithAuth("SYSTEM_PLAN", "BRONZE")}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Ativar Plano Bronze (Admin)
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Ativar Plano Bronze (Requer PIN)</span>
               </button>
             )}
           </div>
@@ -261,13 +344,11 @@ export default function SubscriptionPlansModule({
           <div className="mt-6 pt-4 border-t border-slate-800">
             {isCreatorOrAdmin && (
               <button
-                onClick={() => {
-                  onUpdateSystemPlan("PRATA");
-                  if (onShowToast) onShowToast("Plano do sistema alterado para PRATA", "info");
-                }}
-                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
+                onClick={() => requestPlanChangeWithAuth("SYSTEM_PLAN", "PRATA")}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Ativar Plano Prata (Admin)
+                <Lock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Ativar Plano Prata (Requer PIN)</span>
               </button>
             )}
           </div>
@@ -305,7 +386,7 @@ export default function SubscriptionPlansModule({
               <span className="text-xs text-amber-200/60 block">Módulos de IA, Gráficos D3 e Múltiplas Lojas</span>
             </div>
 
-            <ul className="space-y-2.5 text-xs text-slate-200">
+            <ul className="space-y-2.5 text-slate-200 text-xs">
               <li className="flex items-center gap-2">
                 <Check className="w-4 h-4 text-amber-400 shrink-0" />
                 <span className="font-semibold text-amber-200">Acesso Total Sem Restrições</span>
@@ -332,13 +413,11 @@ export default function SubscriptionPlansModule({
           <div className="mt-6 pt-4 border-t border-amber-500/20">
             {isCreatorOrAdmin && (
               <button
-                onClick={() => {
-                  onUpdateSystemPlan("OURO");
-                  if (onShowToast) onShowToast("Plano do sistema alterado para OURO (Ilimitado)", "success");
-                }}
-                className="w-full py-2 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer"
+                onClick={() => requestPlanChangeWithAuth("SYSTEM_PLAN", "OURO")}
+                className="w-full py-2 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Ativar Plano Ouro Completo (Admin)
+                <Lock className="w-3.5 h-3.5 text-slate-950" />
+                <span>Ativar Plano Ouro Completo (Requer PIN)</span>
               </button>
             )}
           </div>
@@ -476,10 +555,7 @@ export default function SubscriptionPlansModule({
                       </td>
                       <td className="py-3 px-3 text-right space-x-1">
                         <button
-                          onClick={() => {
-                            onUpdateUserPlan(emp.id, "BRONZE");
-                            if (onShowToast) onShowToast(`Plano de ${emp.name} alterado para BRONZE`, "info");
-                          }}
+                          onClick={() => requestPlanChangeWithAuth("USER_PLAN", "BRONZE", emp.id, emp.name)}
                           className={`px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
                             userPlan === "BRONZE" 
                               ? "bg-amber-800 text-white border-amber-600" 
@@ -489,10 +565,7 @@ export default function SubscriptionPlansModule({
                           Bronze
                         </button>
                         <button
-                          onClick={() => {
-                            onUpdateUserPlan(emp.id, "PRATA");
-                            if (onShowToast) onShowToast(`Plano de ${emp.name} alterado para PRATA`, "info");
-                          }}
+                          onClick={() => requestPlanChangeWithAuth("USER_PLAN", "PRATA", emp.id, emp.name)}
                           className={`px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
                             userPlan === "PRATA" 
                               ? "bg-slate-300 text-slate-950 border-slate-200" 
@@ -502,10 +575,7 @@ export default function SubscriptionPlansModule({
                           Prata
                         </button>
                         <button
-                          onClick={() => {
-                            onUpdateUserPlan(emp.id, "OURO");
-                            if (onShowToast) onShowToast(`Plano de ${emp.name} ativado para OURO (Completo)`, "success");
-                          }}
+                          onClick={() => requestPlanChangeWithAuth("USER_PLAN", "OURO", emp.id, emp.name)}
                           className={`px-2.5 py-1 rounded text-[10px] font-extrabold transition cursor-pointer shadow-sm ${
                             userPlan === "OURO" 
                               ? "bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950" 
@@ -520,6 +590,183 @@ export default function SubscriptionPlansModule({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AUTENTICAÇÃO POR CÓDIGO/PIN DE SEGURANÇA */}
+      {showAuthModal && pendingAction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-5 text-slate-100">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-amber-400 shrink-0">
+                  <KeyRound className="w-6 h-6 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-1.5">
+                    Autenticação de Segurança
+                    <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    A alteração de subscrição é uma operação sensível e requer código de confirmação.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAuthModal(false);
+                  setPendingAction(null);
+                  setAuthPinInput("");
+                  setAuthError("");
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Action Badge */}
+            <div className="p-3 bg-slate-950/80 border border-amber-500/30 rounded-xl text-xs space-y-1">
+              <span className="text-[10px] text-amber-400 font-mono font-bold uppercase tracking-wider block">
+                Operação Sensível a Autorizar
+              </span>
+              <div className="text-white font-semibold flex items-center gap-2">
+                {pendingAction.type === "SYSTEM_PLAN" ? (
+                  <>
+                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Alterar Plano do Sistema para </span>
+                    <span className="text-amber-400 font-extrabold font-mono">PLANO {pendingAction.targetPlan}</span>
+                  </>
+                ) : (
+                  <>
+                    <Users className="w-4 h-4 text-sky-400 shrink-0" />
+                    <span>Atribuir Plano {pendingAction.targetPlan} ao utilizador </span>
+                    <span className="text-sky-300 font-extrabold">{pendingAction.employeeName || "Colaborador"}</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Form Input for PIN */}
+            <form onSubmit={handleConfirmPinAuth} className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                  <span>Código de Autenticação / PIN</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPinDigits(!showPinDigits)}
+                    className="text-[10.5px] text-sky-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    {showPinDigits ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                    <span>{showPinDigits ? "Ocultar PIN" : "Mostrar PIN"}</span>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <input
+                    type={showPinDigits ? "text" : "password"}
+                    value={authPinInput}
+                    onChange={(e) => {
+                      setAuthPinInput(e.target.value);
+                      if (authError) setAuthError("");
+                    }}
+                    placeholder="••••"
+                    maxLength={10}
+                    autoFocus
+                    className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl px-4 py-3 text-center text-xl font-mono tracking-widest text-amber-300 placeholder-slate-600 outline-none shadow-inner"
+                  />
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3.5 top-4 pointer-events-none" />
+                </div>
+
+                {authError && (
+                  <p className="text-xs text-rose-400 font-bold flex items-center gap-1 animate-pulse">
+                    <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                    <span>{authError}</span>
+                  </p>
+                )}
+              </div>
+
+              {/* Teclado Numérico Virtual Rápido */}
+              <div className="grid grid-cols-3 gap-2 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
+                  <button
+                    key={num}
+                    type="button"
+                    onClick={() => {
+                      if (authPinInput.length < 10) {
+                        setAuthPinInput(prev => prev + num);
+                        if (authError) setAuthError("");
+                      }
+                    }}
+                    className="py-2.5 bg-slate-850 hover:bg-slate-750 active:bg-slate-700 text-white font-bold font-mono text-base rounded-lg border border-slate-750 transition cursor-pointer active:scale-95"
+                  >
+                    {num}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthPinInput("");
+                    setAuthError("");
+                  }}
+                  className="py-2.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 font-bold text-xs rounded-lg border border-rose-800/40 transition cursor-pointer"
+                >
+                  Limpar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (authPinInput.length < 10) {
+                      setAuthPinInput(prev => prev + "0");
+                      if (authError) setAuthError("");
+                    }
+                  }}
+                  className="py-2.5 bg-slate-850 hover:bg-slate-750 active:bg-slate-700 text-white font-bold font-mono text-base rounded-lg border border-slate-750 transition cursor-pointer active:scale-95"
+                >
+                  0
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthPinInput(prev => prev.slice(0, -1));
+                    if (authError) setAuthError("");
+                  }}
+                  className="py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-lg border border-slate-700 transition cursor-pointer flex items-center justify-center"
+                >
+                  <Delete className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-[10px] text-slate-400 font-mono text-center">
+                Dica: Introduza o seu PIN de operador (ex: 1234) ou código mestre.
+              </div>
+
+              {/* Modal Action Buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAuthModal(false);
+                    setPendingAction(null);
+                    setAuthPinInput("");
+                    setAuthError("");
+                  }}
+                  className="w-1/2 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl border border-slate-700 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-gradient-to-r from-amber-500 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-950 font-black text-xs rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <KeyRound className="w-4 h-4" />
+                  <span>Confirmar</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

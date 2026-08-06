@@ -10,11 +10,8 @@ import {
   ShieldCheck, 
   Clock, 
   DollarSign, 
-  Tag,
-  Briefcase,
   Download,
   FileText,
-  User,
   List,
   Grid,
   Table as TableIcon,
@@ -24,7 +21,6 @@ import {
   KeyRound,
   ChevronRight,
   ChevronDown,
-  X,
   CheckCircle2,
   AlertTriangle,
   Info,
@@ -218,7 +214,7 @@ export default function StaffModule({
 
   // Recovery Requests tracking
   const [recoveryRequests, setRecoveryRequests] = useState<any[]>([]);
-  const [isLoadingRecovery, setIsLoadingRecovery] = useState(false);
+  const [_isLoadingRecovery, setIsLoadingRecovery] = useState(false);
   const [pendingRecoveryId, setPendingRecoveryId] = useState<string | null>(null);
 
   // Form states for employee addition & modification
@@ -228,7 +224,6 @@ export default function StaffModule({
   const [contact, setContact] = useState("");
   const [salary, setSalary] = useState<number>(18000);
   const [employeeStatus, setEmployeeStatus] = useState<"ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED">("ACTIVE");
-  const [avatarUrl, setAvatarUrl] = useState("");
   const [localError, setLocalError] = useState("");
   const [pin, setPin] = useState("");
   const [email, setEmail] = useState("");
@@ -1142,10 +1137,15 @@ export default function StaffModule({
     }
   };
 
-  // List of distinct modules for Audit logs
+  // List of distinct modules for Audit logs with standard default categories
   const modules = useMemo(() => {
-    const list = new Set(auditLogs.map(l => l.module));
-    return ["Todos", ...Array.from(list)];
+    const standardModules = ["Vendas", "Stock", "Segurança", "Caixa", "Clientes", "Funcionários", "Relatórios", "Sistema", "Assinaturas"];
+    const set = new Set<string>();
+    standardModules.forEach(m => set.add(m));
+    auditLogs.forEach(l => {
+      if (l.module) set.add(l.module);
+    });
+    return ["Todos", ...Array.from(set)];
   }, [auditLogs]);
 
   // Distinct modules list for collaborator accesses (excluding system errors)
@@ -1255,7 +1255,7 @@ export default function StaffModule({
 
   // Insights, ranking and distributions for accesses
   const accessInsights = useMemo(() => {
-    const { points, activeEmployees, totalAccesses } = accessChartData;
+    const { points, totalAccesses } = accessChartData;
     const { startStr, endStr } = computedAccessDates;
 
     const empCounts: { [username: string]: number } = {};
@@ -1372,6 +1372,27 @@ export default function StaffModule({
     };
   }, [employees]);
 
+  // Helper for flexible module category matching
+  const checkLogModuleMatch = (logModule: string, filter: string) => {
+    if (!filter || filter === "Todos") return true;
+    if (logModule === filter) return true;
+    const filterUpper = filter.toUpperCase();
+    const logUpper = (logModule || "").toUpperCase();
+    if (logUpper === filterUpper) return true;
+
+    if (filterUpper === "VENDAS") return logUpper.includes("VENDA") || logUpper.includes("POS");
+    if (filterUpper === "STOCK" || filterUpper === "ESTOQUE") return logUpper.includes("STOCK") || logUpper.includes("ESTOQUE") || logUpper.includes("PRODUTO");
+    if (filterUpper === "SEGURANÇA" || filterUpper === "SEGURANCA") return logUpper.includes("SEGURA") || logUpper.includes("AUTENTIC") || logUpper.includes("LOGIN") || logUpper.includes("AUDIT");
+    if (filterUpper === "CAIXA") return logUpper.includes("CAIXA") || logUpper.includes("CASH");
+    if (filterUpper === "CLIENTES") return logUpper.includes("CLIENTE");
+    if (filterUpper === "FUNCIONÁRIOS" || filterUpper === "FUNCIONARIOS" || filterUpper === "EQUIPA") return logUpper.includes("FUNC") || logUpper.includes("STAFF") || logUpper.includes("RH") || logUpper.includes("EQUIP");
+    if (filterUpper === "RELATÓRIOS" || filterUpper === "RELATORIOS") return logUpper.includes("RELAT") || logUpper.includes("REPORT");
+    if (filterUpper === "SISTEMA") return logUpper.includes("SISTEMA") || logUpper.includes("CONFIG");
+    if (filterUpper === "ASSINATURAS") return logUpper.includes("ASSINATURA") || logUpper.includes("PLANO");
+
+    return false;
+  };
+
   // Grouping/Aggregation helper for consecutive duplicate audit logs
   // Returns collapsed logs indicating duplicate counts for sequential identical warnings/errors/info
   const groupedAuditLogs = useMemo(() => {
@@ -1392,7 +1413,7 @@ export default function StaffModule({
                           formattedDateTime.toLowerCase().includes(term) ||
                           rawTimestamp.toLowerCase().includes(term);
       
-      const matchModule = auditModuleFilter === "Todos" || log.module === auditModuleFilter;
+      const matchModule = checkLogModuleMatch(log.module || "", auditModuleFilter);
       
       let matchDate = true;
       if (log.timestamp) {
@@ -1454,7 +1475,7 @@ export default function StaffModule({
                           formattedDateTime.toLowerCase().includes(term) ||
                           rawTimestamp.toLowerCase().includes(term);
 
-      const matchModule = auditModuleFilter === "Todos" || log.module === auditModuleFilter;
+      const matchModule = checkLogModuleMatch(log.module || "", auditModuleFilter);
       let matchDate = true;
       if (log.timestamp) {
         const logDate = log.timestamp.split("T")[0];

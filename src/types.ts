@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "SUPERVISOR" | "CASHIER";
+export type UserRole = "ADMIN" | "SUPERVISOR" | "CASHIER" | "AUDITOR" | "RH" | "FINANCEIRO";
 export type SubscriptionPlan = "BRONZE" | "PRATA" | "OURO";
 
 export interface PlanFeature {
@@ -14,9 +14,19 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   avatar: string;
+  companyId?: string;
 }
 
-export interface Product {
+export interface MultiTenantMetadata {
+  ownerId?: string;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  companyId?: string;
+  role?: string;
+}
+
+export interface Product extends MultiTenantMetadata {
   id: string;
   name: string;
   code: string;
@@ -46,7 +56,7 @@ export interface CartItem {
   vatRate: number;
 }
 
-export interface Customer {
+export interface Customer extends MultiTenantMetadata {
   id: string;
   name: string;
   phone: string;
@@ -64,7 +74,7 @@ export interface Customer {
   settlements?: { id: string, date: string, amount: number, method: string }[];
 }
 
-export interface Transaction {
+export interface Transaction extends MultiTenantMetadata {
   id: string;
   invoiceNumber: string;
   timestamp: string;
@@ -95,7 +105,7 @@ export interface Transaction {
   fiscalCertified?: boolean; // Certified indicator
 }
 
-export interface CashFlowEntry {
+export interface CashFlowEntry extends MultiTenantMetadata {
   id: string;
   timestamp: string;
   type: "INPUT" | "REINFORCEMENT" | "EXPENSE" | "QUEBRA";
@@ -104,7 +114,7 @@ export interface CashFlowEntry {
   responsibleUser: string;
 }
 
-export interface AuditLog {
+export interface AuditLog extends MultiTenantMetadata {
   id: string;
   timestamp: string;
   user: string;
@@ -116,7 +126,7 @@ export interface AuditLog {
   device?: string;
 }
 
-export interface Employee {
+export interface Employee extends MultiTenantMetadata {
   id: string;
   name: string;
   role: string;
@@ -133,6 +143,8 @@ export interface Employee {
   fotoPerfil?: string;
   theme?: string;
   twoFactorEmailEnabled?: boolean;
+  twoFactorSmsEnabled?: boolean;
+  isPhoneValidated?: boolean;
   whatsapp?: string;
   observacoes?: string;
   expirationDate?: string;
@@ -141,10 +153,11 @@ export interface Employee {
   planGrantedBy?: string;
 }
 
-export interface SystemSettings {
+export interface SystemSettings extends MultiTenantMetadata {
   companyName: string;
   companyAddress: string;
   companyNuit: string;
+  securityPin?: string;
   nuit?: string;
   email?: string;
   storeEmail?: string;

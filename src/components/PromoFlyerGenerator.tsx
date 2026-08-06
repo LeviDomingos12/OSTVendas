@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  X, Printer, Share2, Copy, Sparkles, Image as ImageIcon, 
-  Download, MessageSquare, Check, RefreshCw, Palette, HelpCircle, Plus, Trash2, Search
+  Printer, Copy, Sparkles, 
+  Download, MessageSquare, Check, RefreshCw, Palette, Trash2, Search
 } from "lucide-react";
 import { Product } from "../types";
 
@@ -1119,7 +1119,7 @@ export function PromoFlyerGenerator({
 
                     <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
                       {selectedProducts.map((p, index) => {
-                        const { promoPrice, originalPrice, discount } = getProductPricesAndDiscount(p);
+                        const { promoPrice, originalPrice } = getProductPricesAndDiscount(p);
                         return (
                           <div key={p.id} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm flex flex-col space-y-2 dark:bg-zinc-900 dark:border-zinc-800">
                             <div className="flex items-center justify-between">

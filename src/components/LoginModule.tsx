@@ -255,12 +255,12 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(30);
 
-      const newEmployee = await signUpWithEmail(
+      await signUpWithEmail(
         signupEmail.trim(),
         signupPassword,
         signupName.trim(),
         signupBranch,
-        signupRole,
+        "Administrador",
         signupPlan
       );
 
@@ -915,18 +915,34 @@ export default function LoginModule({
                   </div>
                 </div>
 
-                {/* Função / Perfil Selection */}
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Função / Perfil</label>
-                  <select
-                    value={signupRole}
-                    onChange={(e) => setSignupRole(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                  >
-                    {roles.map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                  </select>
+                {/* Função / Perfil Fixed to Administrador */}
+                <div className="space-y-2 pt-0.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Função / Perfil</label>
+                    <span className="text-[9.5px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">PERFIL ADMINISTRATIVO</span>
+                  </div>
+
+                  <div className="p-3 bg-slate-900/90 border border-amber-500/30 rounded-xl flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-2.5">
+                      <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg border border-amber-500/30">
+                        <Crown className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                          <span>Administrador do Sistema</span>
+                        </p>
+                        <p className="text-[10px] text-slate-400">Acesso completo à gestão da loja e relatórios</p>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-slate-300 bg-slate-800 px-2.5 py-1 rounded-md border border-slate-700">Fixo</span>
+                  </div>
+
+                  <div className="p-2.5 bg-slate-900/70 border border-slate-800 rounded-xl text-[10.5px] text-slate-400 leading-relaxed flex items-start gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Nota de Segurança:</strong> O registo direto no portal de entrada cria exclusivamente contas de <strong>Administrador</strong>. A criação de outros perfis (Caixa, Vendedor, Supervisor, Gerente) é realizada pelo Administrador dentro do módulo <strong>Funcionário e Auditoria</strong>.
+                    </span>
+                  </div>
                 </div>
 
                 {/* Plano de Subscrição Selection */}

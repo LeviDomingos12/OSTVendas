@@ -10,7 +10,6 @@ import {
   TrendingUp, 
   Settings, 
   Lock,
-  ChevronDown,
   Smartphone,
   Crown,
   LogOut,
@@ -37,7 +36,7 @@ interface SidebarProps {
 
 export default function Sidebar({
   currentRole,
-  onChangeRole,
+  onChangeRole: _onChangeRole,
   activeModule,
   onChangeModule,
   companyName,
@@ -61,18 +60,18 @@ export default function Sidebar({
   const currentProfile = profiles.find(p => p.role === currentRole) || profiles[0];
 
   const menuItems = [
-    { id: "dashboard", label: "Dashboard Inteligente", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR"] },
+    { id: "dashboard", label: "Dashboard Inteligente", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
     { id: "pos", label: "Vendas (POS)", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
     { id: "stock", label: "Gestão de Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-    { id: "cash", label: "Gestão de Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+    { id: "cash", label: "Gestão de Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
     { id: "customers", label: "Gestão de Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-    { id: "staff", label: "Funcionários & Auditoria", icon: UserCheck, roles: ["ADMIN"] },
+    { id: "staff", label: "Funcionários & Auditoria", icon: UserCheck, roles: ["ADMIN", "AUDITOR", "RH"] },
     { id: "ai", label: "Previsão AI (Premium)", icon: TrendingUp, roles: ["ADMIN", "SUPERVISOR"] },
-    { id: "reports", label: "Relatórios & Faturação", icon: FileText, roles: ["ADMIN", "SUPERVISOR"] },
-    { id: "training", label: "Centro de Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+    { id: "reports", label: "Relatórios & Faturação", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+    { id: "training", label: "Centro de Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
     { id: "settings", label: "Configurações Gerais", icon: Settings, roles: ["ADMIN"] },
-    { id: "gateway", label: "Integração Mobile Money", icon: Smartphone, roles: ["ADMIN"] },
-    { id: "plans", label: "Planos & Subscrições", icon: Crown, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+    { id: "gateway", label: "Integração Mobile Money", icon: Smartphone, roles: ["ADMIN", "FINANCEIRO"] },
+    { id: "plans", label: "Planos & Subscrições", icon: Crown, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
   ];
 
   const getRoleLabel = (role: UserRole) => {
@@ -80,6 +79,10 @@ export default function Sidebar({
       case "ADMIN": return "Administrador";
       case "SUPERVISOR": return "Supervisor";
       case "CASHIER": return "Vendedor / Caixa";
+      case "AUDITOR": return "Auditor";
+      case "RH": return "Recursos Humanos";
+      case "FINANCEIRO": return "Financeiro";
+      default: return role;
     }
   };
 

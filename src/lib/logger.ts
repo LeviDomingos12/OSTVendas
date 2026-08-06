@@ -1,5 +1,3 @@
-import { AuditLog, UserRole } from "../types";
-
 type LogCallback = (action: string, module: string, details: string) => void;
 
 let logCallback: LogCallback | null = null;

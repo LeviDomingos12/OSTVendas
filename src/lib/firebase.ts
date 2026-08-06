@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
-import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, collection, getDocs, onSnapshot, disableNetwork, writeBatch } from "firebase/firestore";
+import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, disableNetwork, writeBatch } from "firebase/firestore";
 import { getStorage, ref, uploadString, getDownloadURL, listAll, deleteObject, getMetadata } from "firebase/storage";
 import firebaseConfig from "../../firebase-applet-config.json";
 
@@ -119,10 +119,50 @@ export const getAccessToken = async (): Promise<string | null> => {
 };
 
 export const logout = async () => {
-  await auth.signOut();
+  try {
+    await auth.signOut();
+  } catch (e) {
+    console.warn("Auth signout warning:", e);
+  }
   cachedAccessToken = null;
   localStorage.removeItem("google_access_token");
+  localStorage.removeItem("erp_simulated_logged_in_user");
+  // Clean all session/profile cache keys
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith("cached_profile_") || key.startsWith("tenant_") || key.includes("session"))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (e) {}
 };
+
+// Helper to attach multi-tenant metadata (ownerId, createdBy, createdAt, updatedAt, companyId, role)
+export function attachMultiTenantMetadata<T extends Record<string, any>>(payload: T, activeUser?: any): T {
+  const currentUser = auth.currentUser;
+  let simulated: any = null;
+  try {
+    const s = localStorage.getItem("erp_simulated_logged_in_user");
+    if (s) simulated = JSON.parse(s);
+  } catch (e) {}
+
+  const ownerId = currentUser?.uid || simulated?.uid || simulated?.id || payload.ownerId || "default_tenant";
+  const createdBy = currentUser?.uid || activeUser?.id || simulated?.id || payload.createdBy || ownerId;
+  const companyId = activeUser?.branch || simulated?.branch || payload.companyId || "OST Comércio Geral";
+  const role = activeUser?.role || simulated?.role || payload.role || "Administrador";
+  const now = new Date().toISOString();
+
+  return {
+    ...payload,
+    ownerId,
+    createdBy,
+    createdAt: payload.createdAt || now,
+    updatedAt: now,
+    companyId,
+    role
+  };
+}
 
 // Recursive helper to sanitize objects by removing 'undefined' values before sending to Firestore
 export function sanitizeForFirestore<T>(data: T): T {
@@ -298,8 +338,10 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error("Firestore Error: ", JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn("Firestore Operation Notice:", JSON.stringify(errInfo));
+  if (operationType === OperationType.WRITE || operationType === OperationType.DELETE) {
+    throw new Error(errorMsg);
+  }
 }
 
 // ----------------------------------------------------
@@ -327,6 +369,27 @@ export interface UsuarioDoc {
 }
 
 // Custom Helper to get partitioned collection path for dynamic data isolation (Multi-tenant structure)
+export function getActiveTenantContext(): { ownerId: string; companyId?: string } {
+  const firebaseUser = auth.currentUser;
+  let ownerId = firebaseUser?.uid || "";
+  let companyId: string | undefined = undefined;
+
+  const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+  if (storedSimulated) {
+    try {
+      const parsed = JSON.parse(storedSimulated);
+      if (!ownerId) ownerId = parsed.ownerId || parsed.uid || parsed.id || "";
+      companyId = parsed.companyId || parsed.branch || parsed.empresa;
+    } catch (e) {}
+  }
+
+  if (!ownerId) {
+    ownerId = "emp-master-admin-001";
+  }
+
+  return { ownerId, companyId };
+}
+
 export function getPartitionPath(collectionName: string, adminUidOverride?: string): string {
   let adminUid: string | null = adminUidOverride || null;
 
@@ -382,12 +445,21 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string
 // Fetch all registered users from Firestore to synchronize with local staff list
 export const getUsuariosFromFirestore = async (): Promise<any[]> => {
   try {
+    const { ownerId, companyId } = getActiveTenantContext();
     const querySnapshot = await getDocs(collection(db, "usuarios"));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as UsuarioDoc;
+      const data = docSnap.data() as UsuarioDoc & { ownerId?: string; companyId?: string; empresa?: string };
       if (data && data.uid) {
-        list.push(mapUsuarioToEmployee(data));
+        const docOwner = data.ownerId || data.uid;
+        const docCompany = data.companyId || data.empresa;
+        if (
+          !ownerId || ownerId === "emp-master-admin-001" ||
+          docOwner === ownerId ||
+          (companyId && docCompany === companyId)
+        ) {
+          list.push(mapUsuarioToEmployee(data));
+        }
       }
     });
     return list;
@@ -943,12 +1015,15 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
 // Fetch all products from Firestore
 export const getProdutosFromFirestore = async (): Promise<any[]> => {
   const collPath = getPartitionPath("produtos");
+  const { ownerId, companyId } = getActiveTenantContext();
   try {
     const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      list.push({ ...data, id: docSnap.id });
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
     });
     return list;
   } catch (error) {
@@ -965,7 +1040,8 @@ export const addProdutoToFirestore = async (product: any): Promise<void> => {
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await setDoc(doc(db, collPath, product.id), sanitizeForFirestore(product));
+    const enriched = attachMultiTenantMetadata(product);
+    await setDoc(doc(db, collPath, product.id), sanitizeForFirestore(enriched));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -986,7 +1062,8 @@ export const addProdutosToFirestoreBatch = async (products: any[]): Promise<void
       const batch = writeBatch(db);
       for (const prod of chunk) {
         const docRef = doc(db, collPath, String(prod.id));
-        batch.set(docRef, sanitizeForFirestore(prod));
+        const enriched = attachMultiTenantMetadata(prod);
+        batch.set(docRef, sanitizeForFirestore(enriched));
       }
       await batch.commit();
     }
@@ -1003,7 +1080,8 @@ export const updateProdutoInFirestore = async (productId: string, updatedFields:
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await updateDoc(doc(db, collPath, productId), sanitizeForFirestore(updatedFields));
+    const enriched = attachMultiTenantMetadata(updatedFields);
+    await updateDoc(doc(db, collPath, productId), sanitizeForFirestore(enriched));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -1028,12 +1106,15 @@ export const deleteProdutoFromFirestore = async (productId: string): Promise<voi
 // Fetch all transactions from Firestore
 export const getTransacoesFromFirestore = async (): Promise<any[]> => {
   const collPath = getPartitionPath("transacoes");
+  const { ownerId, companyId } = getActiveTenantContext();
   try {
     const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      list.push({ ...data, id: docSnap.id });
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
     });
     return list;
   } catch (error) {
@@ -1050,7 +1131,8 @@ export const addTransacaoToFirestore = async (transaction: any): Promise<void> =
     throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
   }
   try {
-    await setDoc(doc(db, collPath, transaction.id), sanitizeForFirestore(transaction));
+    const enriched = attachMultiTenantMetadata(transaction);
+    await setDoc(doc(db, collPath, transaction.id), sanitizeForFirestore(enriched));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -1071,7 +1153,8 @@ export const addTransacoesToFirestoreBatch = async (transactions: any[]): Promis
       const batch = writeBatch(db);
       for (const tx of chunk) {
         const docRef = doc(db, collPath, String(tx.id));
-        batch.set(docRef, sanitizeForFirestore(tx));
+        const enriched = attachMultiTenantMetadata(tx);
+        batch.set(docRef, sanitizeForFirestore(enriched));
       }
       await batch.commit();
     }
@@ -1087,12 +1170,16 @@ export const subscribeToProdutos = (
   onError: (error: any) => void
 ) => {
   const collPath = getPartitionPath("produtos");
+  const { ownerId, companyId } = getActiveTenantContext();
   return onSnapshot(
     collection(db, collPath),
     (snapshot) => {
       const list: any[] = [];
       snapshot.forEach((docSnap) => {
-        list.push({ ...docSnap.data(), id: docSnap.id });
+        const data = docSnap.data();
+        if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+          list.push({ ...data, id: docSnap.id });
+        }
       });
       onUpdate(list);
     },
@@ -1359,12 +1446,15 @@ export const addAuditLogToCloudSQL = async (log: any): Promise<boolean> => {
  */
 export const getLogsFromFirestore = async (): Promise<any[]> => {
   const collPath = getPartitionPath("logs");
+  const { ownerId, companyId } = getActiveTenantContext();
   try {
     const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      list.push({ ...data, id: docSnap.id });
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
     });
     // Sort by timestamp descending
     list.sort((a, b) => {
@@ -1391,7 +1481,7 @@ export const createRecoveryRequest = async (request: {
   const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
     const requestId = `recov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    await setDoc(doc(db, collPath, requestId), sanitizeForFirestore({
+    const enriched = attachMultiTenantMetadata({
       id: requestId,
       email: request.email || "",
       employeeId: request.employeeId || "",
@@ -1399,7 +1489,8 @@ export const createRecoveryRequest = async (request: {
       type: request.type,
       status: "PENDENTE",
       timestamp: new Date().toISOString()
-    }));
+    });
+    await setDoc(doc(db, collPath, requestId), sanitizeForFirestore(enriched));
   } catch (error) {
     console.error("Failed to create recovery request:", error);
     throw error;
@@ -1411,12 +1502,15 @@ export const createRecoveryRequest = async (request: {
  */
 export const getRecoveryRequests = async (): Promise<any[]> => {
   const collPath = getPartitionPath("solicitacoes_recuperacao");
+  const { ownerId, companyId } = getActiveTenantContext();
   try {
     const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
       const data = docSnap.data();
-      list.push({ ...data, id: docSnap.id });
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
     });
     // Sort by timestamp descending
     list.sort((a, b) => {

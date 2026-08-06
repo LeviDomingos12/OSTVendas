@@ -47,7 +47,7 @@ export const getDb = () => {
 
 // Export db as a proxy or getter compatibility layer if accessed directly
 export const db = new Proxy({} as any, {
-  get(target, prop) {
+  get(_target, prop) {
     return getDb()[prop];
   }
 });

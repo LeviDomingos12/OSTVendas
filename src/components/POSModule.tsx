@@ -6,26 +6,17 @@ import {
   Trash2, 
   Plus, 
   Minus, 
-  Tag, 
-  Percent, 
   Receipt, 
   UserPlus, 
-  CreditCard,
   CheckCircle2,
-  Phone,
   Mail,
   Printer,
   Smartphone,
-  ChevronRight,
   ShoppingCart,
-  Clock,
   Wifi,
-  Sparkles,
   Camera,
-  RotateCcw,
   AlertTriangle,
   History,
-  UserCheck,
   Check,
   Maximize2,
   Minimize2,
@@ -230,7 +221,6 @@ export default function POSModule({
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappMessage, setWhatsappMessage] = useState("");
   const [whatsappPhone, setWhatsappPhone] = useState("");
-  const [whatsappDirectUrl, setWhatsappDirectUrl] = useState("");
   const [isSimulatingPrint, setIsSimulatingPrint] = useState(false);
   const [printMode, setPrintMode] = useState<"receipt" | "invoice">("receipt");
   const [noReceiptSuccess, setNoReceiptSuccess] = useState(false);
@@ -256,7 +246,6 @@ export default function POSModule({
   const [scannerModalOpen, setScannerModalOpen] = useState(false);
   const [manualBarcodeScan, setManualBarcodeScan] = useState("");
   const [scannerTab, setScannerTab] = useState<"camera" | "simulation">("camera");
-  const lastAlertTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>("");
   const lastScannedTimeRef = useRef<number>(0);
   const [continuousScan, setContinuousScan] = useState<boolean>(false);
@@ -1324,7 +1313,6 @@ export default function POSModule({
     const defaultPhone = cleanPhone.length === 9 && (cleanPhone.startsWith("84") || cleanPhone.startsWith("85") || cleanPhone.startsWith("82") || cleanPhone.startsWith("87") || cleanPhone.startsWith("86"))
       ? `258${cleanPhone}`
       : cleanPhone;
-    setWhatsappDirectUrl(`https://api.whatsapp.com/send?phone=${defaultPhone}&text=${encodeURIComponent(text)}`);
     setSendWhatsAppStatus("idle");
     setWhatsappModalOpen(true);
   };
@@ -3135,7 +3123,7 @@ export default function POSModule({
 
                   {/* HTML5 QrReader Component */}
                   <QrReader
-                    onResult={(result, error) => {
+                    onResult={(result, _error) => {
                       if (result) {
                         const textValue = result.text || result.getText?.() || String(result);
                         if (textValue) {

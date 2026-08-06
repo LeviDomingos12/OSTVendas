@@ -1,5 +1,5 @@
 import React from "react";
-import { Lock, Crown, ShieldAlert, Sparkles, ArrowRight, Zap } from "lucide-react";
+import { Lock, Crown, Sparkles, ArrowRight } from "lucide-react";
 import { SubscriptionPlan } from "../types";
 
 interface PlanLockScreenProps {
@@ -17,17 +17,6 @@ export default function PlanLockScreen({
   description,
   onUpgradeClick
 }: PlanLockScreenProps) {
-  const getPlanGradient = (plan: SubscriptionPlan) => {
-    switch (plan) {
-      case "OURO":
-        return "from-amber-500 to-yellow-400 text-slate-950";
-      case "PRATA":
-        return "from-slate-300 to-slate-400 text-slate-950";
-      case "BRONZE":
-        return "from-amber-700 to-amber-800 text-white";
-    }
-  };
-
   return (
     <div className="min-h-[70vh] flex items-center justify-center p-4">
       <div className="max-w-xl w-full bg-slate-900/90 border border-amber-500/30 rounded-2xl p-8 text-center space-y-6 shadow-2xl relative overflow-hidden backdrop-blur-md">

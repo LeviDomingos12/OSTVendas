@@ -48,6 +48,7 @@ import {
   testConnection, 
   auth, 
   db, 
+  logout,
   getUsuariosFromFirestore, 
   mapUsuarioToEmployee,
   getProdutosFromFirestore,
@@ -78,6 +79,7 @@ import {
   RefreshCw, 
   Sun, 
   Moon,
+  Check,
   CheckCircle,
   XCircle,
   AlertCircle,
@@ -845,6 +847,8 @@ export default function App() {
   const [profileLogoUrl, setProfileLogoUrl] = useState(settings?.logoUrl || "");
   const [profileRole, setProfileRole] = useState("Operador");
   const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
+  const [profileTwoFactorSms, setProfileTwoFactorSms] = useState<boolean>(false);
+  const [profilePhoneValidated, setProfilePhoneValidated] = useState<boolean>(false);
   const [profileObservacoes, setProfileObservacoes] = useState("");
   const [profileExpirationDate, setProfileExpirationDate] = useState("");
   const [testPinInput, setTestPinInput] = useState<string>("");
@@ -857,6 +861,7 @@ export default function App() {
 
   // Activity Log Tab Filters State
   const [activitySearchText, setActivitySearchText] = useState("");
+  const [activityModuleFilter, setActivityModuleFilter] = useState("Todos");
   const [activityStartDate, setActivityStartDate] = useState("");
   const [activityEndDate, setActivityEndDate] = useState("");
 
@@ -897,6 +902,8 @@ export default function App() {
         setProfileRole(targetEmp.role || "Operador");
         setTestPinInput(targetEmp.pin || "");
         setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
+        setProfileTwoFactorSms(targetEmp.twoFactorSmsEnabled ?? false);
+        setProfilePhoneValidated(targetEmp.isPhoneValidated ?? Boolean(targetEmp.contact && targetEmp.contact.trim().length >= 8));
         setProfileObservacoes(targetEmp.observacoes || "");
         setProfileExpirationDate(targetEmp.expirationDate || "");
       }
@@ -1157,6 +1164,8 @@ export default function App() {
           logoUrl: profileLogoUrl.trim(),
           role: profileRole.trim() || "Operador",
           twoFactorEmailEnabled: profileTwoFactorEmail,
+          twoFactorSmsEnabled: profileTwoFactorSms,
+          isPhoneValidated: profilePhoneValidated,
           observacoes: profileObservacoes.trim(),
           expirationDate: profileExpirationDate
         };
@@ -1178,6 +1187,8 @@ export default function App() {
         logoUrl: profileLogoUrl.trim(),
         role: profileRole.trim() || "Operador",
         twoFactorEmailEnabled: profileTwoFactorEmail,
+        twoFactorSmsEnabled: profileTwoFactorSms,
+        isPhoneValidated: profilePhoneValidated,
         observacoes: profileObservacoes.trim(),
         expirationDate: profileExpirationDate
       });
@@ -3669,16 +3680,30 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           `Operador ${activeUser.name} encerrou a sessão.`
         );
       }
-      localStorage.removeItem("erp_simulated_logged_in_user");
-      await auth.signOut();
+      await logout();
       setActiveUser(null);
       setIsAuthenticated(false);
+      // Clean memory state to prevent cross-user data lingering
+      setProducts([]);
+      setCustomers([]);
+      setTransactions([]);
+      setCashFlow([]);
+      setEmployees([]);
+      setAuditLogs([]);
+      setSettings(defaultSettings);
       showToast("Sessão terminada com sucesso.", "info");
     } catch (err: any) {
-      console.error("Erro ao efetuar logout do Firebase:", err);
-      localStorage.removeItem("erp_simulated_logged_in_user");
+      console.error("Erro ao efetuar logout:", err);
+      await logout();
       setActiveUser(null);
       setIsAuthenticated(false);
+      setProducts([]);
+      setCustomers([]);
+      setTransactions([]);
+      setCashFlow([]);
+      setEmployees([]);
+      setAuditLogs([]);
+      setSettings(defaultSettings);
       showToast("Sessão terminada com sucesso.", "info");
     }
   };
@@ -5801,6 +5826,146 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                               </p>
                             </div>
                           </div>
+
+                          {/* 2FA Verification via SMS Card */}
+                          <div id="profile-2fa-sms-setting-card" className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3.5 shadow-md">
+                            {/* Header & Status Counter Badge Bar */}
+                            <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                                  Autenticação por SMS
+                                </span>
+                              </div>
+                              {/* Status Counter & Badges */}
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
+                                  profilePhoneValidated 
+                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" 
+                                    : "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${profilePhoneValidated ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+                                  <span>Validação: {profilePhoneValidated ? "1/1 Confirmado" : "0/1 Pendente"}</span>
+                                </span>
+
+                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
+                                  profileTwoFactorSms && profilePhoneValidated
+                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10"
+                                    : "bg-slate-800 text-slate-400 border-slate-700"
+                                }`}>
+                                  <span>2FA SMS: {profileTwoFactorSms && profilePhoneValidated ? "Ativo (1/1)" : "Inativo (0/1)"}</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
+                                  profileTwoFactorSms && profilePhoneValidated 
+                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-lg shadow-emerald-500/10" 
+                                    : "bg-slate-800/80 text-slate-400 border border-slate-700/80"
+                                }`}>
+                                  <Smartphone className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                                    <span>Verificação em Dois Passos (2FA) via SMS</span>
+                                    <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border ${
+                                      !profilePhoneValidated 
+                                        ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                        : profileTwoFactorSms 
+                                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
+                                        : "bg-slate-800 text-slate-400 border-slate-700"
+                                    }`}>
+                                      {!profilePhoneValidated ? "REQUER VALIDAÇÃO DE NÚMERO" : profileTwoFactorSms ? "ATIVADO" : "DESATIVADO"}
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10.5px] text-slate-400 mt-0.5">
+                                    Receber código de verificação por mensagem de texto SMS no telemóvel cadastrado
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Enhanced Visually Attractive Toggle Switch */}
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={profileTwoFactorSms}
+                                onClick={() => {
+                                  const hasValidContact = profileContact && profileContact.trim().length >= 8;
+                                  if (!profilePhoneValidated && !hasValidContact) {
+                                    showToast("Insira e valide o seu número de contacto telefónico para ativar 2FA via SMS.", "warning", "Validação Necessária");
+                                    return;
+                                  }
+
+                                  const newValue = !profileTwoFactorSms;
+                                  if (newValue && !profilePhoneValidated && hasValidContact) {
+                                    setProfilePhoneValidated(true);
+                                  }
+
+                                  setProfileTwoFactorSms(newValue);
+                                  showToast(
+                                    newValue 
+                                      ? "2FA via SMS ativado com sucesso para o número " + profileContact + "!" 
+                                      : "2FA via SMS desativado.",
+                                    newValue ? "success" : "info"
+                                  );
+                                }}
+                                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                                  profileTwoFactorSms && profilePhoneValidated 
+                                    ? "bg-emerald-500 border-emerald-400 shadow-md shadow-emerald-500/30" 
+                                    : "bg-slate-800 border-slate-700 hover:border-slate-600"
+                                }`}
+                                title="Ativar/Desativar Verificação em Dois Passos por SMS"
+                              >
+                                <span className="sr-only">Habilitar Verificação por SMS</span>
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out mt-0.5 ${
+                                    profileTwoFactorSms && profilePhoneValidated 
+                                      ? "translate-x-5 bg-white shadow-emerald-900/50" 
+                                      : "translate-x-0.5 bg-slate-300"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            {/* Contact Number & Validation Section */}
+                            <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-850 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
+                              <div className="flex items-center gap-2">
+                                <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div>
+                                  <span className="text-slate-400 block text-[9.5px]">Número de Telemóvel / Contacto:</span>
+                                  <span className="text-slate-100 font-mono font-bold">
+                                    {profileContact || "Nenhum contacto cadastrado"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {profilePhoneValidated ? (
+                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20 font-bold">
+                                    <Check className="w-3 h-3" />
+                                    <span>Contacto Validado (1/1)</span>
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!profileContact || profileContact.trim().length < 8) {
+                                        showToast("Por favor insira um número de contacto válido no formulário acima antes de validar.", "warning");
+                                        return;
+                                      }
+                                      setProfilePhoneValidated(true);
+                                      showToast(`Número ${profileContact} validado com sucesso para envio de SMS!`, "success", "Número Confirmado");
+                                    }}
+                                    className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md transition text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                  >
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                    <span>Validar Contacto para SMS</span>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -5823,6 +5988,24 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
                                 const matchesCollaborator = logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
                                 if (!matchesCollaborator) return false;
+
+                                if (activityModuleFilter && activityModuleFilter !== "Todos") {
+                                  const filterUpper = activityModuleFilter.toUpperCase();
+                                  const logUpper = logModule.toUpperCase();
+                                  let matchMod = logUpper === filterUpper;
+                                  if (!matchMod) {
+                                    if (filterUpper === "VENDAS") matchMod = logUpper.includes("VENDA") || logUpper.includes("POS");
+                                    else if (filterUpper === "STOCK" || filterUpper === "ESTOQUE") matchMod = logUpper.includes("STOCK") || logUpper.includes("ESTOQUE") || logUpper.includes("PRODUTO");
+                                    else if (filterUpper === "SEGURANÇA" || filterUpper === "SEGURANCA") matchMod = logUpper.includes("SEGURA") || logUpper.includes("AUTENTIC") || logUpper.includes("LOGIN") || logUpper.includes("AUDIT");
+                                    else if (filterUpper === "CAIXA") matchMod = logUpper.includes("CAIXA") || logUpper.includes("CASH");
+                                    else if (filterUpper === "CLIENTES") matchMod = logUpper.includes("CLIENTE");
+                                    else if (filterUpper === "FUNCIONÁRIOS" || filterUpper === "EQUIPA") matchMod = logUpper.includes("FUNC") || logUpper.includes("STAFF") || logUpper.includes("RH") || logUpper.includes("EQUIP");
+                                    else if (filterUpper === "RELATÓRIOS") matchMod = logUpper.includes("RELAT") || logUpper.includes("REPORT");
+                                    else if (filterUpper === "CONFIGURAÇÕES") matchMod = logUpper.includes("CONFIG") || logUpper.includes("SISTEMA");
+                                    else if (filterUpper === "ASSINATURAS") matchMod = logUpper.includes("ASSINATURA") || logUpper.includes("PLANO");
+                                  }
+                                  if (!matchMod) return false;
+                                }
 
                                 if (searchLower) {
                                   const matchesText = logUser.includes(searchLower) ||
@@ -5849,7 +6032,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                               .slice(-50)
                               .reverse();
 
-                            const hasActiveFilters = Boolean(activitySearchText || activityStartDate || activityEndDate);
+                            const hasActiveFilters = Boolean(activitySearchText || (activityModuleFilter && activityModuleFilter !== "Todos") || activityStartDate || activityEndDate);
 
                             return (
                               <>
@@ -5865,6 +6048,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                         type="button"
                                         onClick={() => {
                                           setActivitySearchText("");
+                                          setActivityModuleFilter("Todos");
                                           setActivityStartDate("");
                                           setActivityEndDate("");
                                         }}
@@ -5906,21 +6090,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                     <div id="activity-log-quick-chips" className="flex items-center gap-1.5 flex-wrap pt-0.5">
                                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Filtro rápido:</span>
                                       {[
+                                        { label: "Todos Módulos", query: "Todos", icon: "📋" },
                                         { label: "Vendas", query: "Vendas", icon: "🛒" },
+                                        { label: "Stock", query: "Stock", icon: "📦" },
                                         { label: "Segurança", query: "Segurança", icon: "🛡️" },
                                         { label: "Configurações", query: "Configurações", icon: "⚙️" }
                                       ].map((chip) => {
-                                        const isActive = activitySearchText.trim().toLowerCase() === chip.query.toLowerCase();
+                                        const isActive = activityModuleFilter === chip.query || (chip.query === "Todos" && activityModuleFilter === "Todos");
                                         return (
                                           <button
                                             key={chip.label}
                                             type="button"
                                             onClick={() => {
-                                              if (isActive) {
-                                                setActivitySearchText("");
-                                              } else {
-                                                setActivitySearchText(chip.query);
-                                              }
+                                              setActivityModuleFilter(chip.query);
                                             }}
                                             className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
                                               isActive
@@ -5939,8 +6121,31 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                                     <AuditLogsD3BarChart logs={filteredCollaboratorLogs} />
                                   </div>
 
-                                  {/* Seletor de Intervalo de Datas */}
-                                  <div className="grid grid-cols-2 gap-2">
+                                  {/* Seletor de Módulo e Intervalo de Datas */}
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                    <div>
+                                      <label htmlFor="activity-log-module-select" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
+                                        <Filter className="w-3 h-3 text-orange-400" />
+                                        Filtrar por Módulo
+                                      </label>
+                                      <select
+                                        id="activity-log-module-select"
+                                        value={activityModuleFilter}
+                                        onChange={(e) => setActivityModuleFilter(e.target.value)}
+                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition font-medium cursor-pointer"
+                                      >
+                                        <option value="Todos">Todos os Módulos</option>
+                                        <option value="Vendas">Vendas / POS</option>
+                                        <option value="Stock">Stock & Inventário</option>
+                                        <option value="Segurança">Segurança & Autenticação</option>
+                                        <option value="Caixa">Caixa & Movimentos</option>
+                                        <option value="Clientes">Clientes & Fidelização</option>
+                                        <option value="Funcionários">Funcionários & RH</option>
+                                        <option value="Relatórios">Relatórios & Análise</option>
+                                        <option value="Configurações">Configurações do Sistema</option>
+                                        <option value="Assinaturas">Assinaturas & Planos</option>
+                                      </select>
+                                    </div>
                                     <div>
                                       <label htmlFor="activity-log-start-date" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
                                         <Calendar className="w-3 h-3 text-orange-400" />

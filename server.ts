@@ -1289,6 +1289,176 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
+  // POST: Full System Reset with mandatory backup and master admin initialization
+  app.post("/api/system/reset", async (req, res) => {
+    try {
+      console.log("[SYSTEM RESET] Iniciando procedimento de reset completo do sistema OST Vendas...");
+
+      // 1. Mandatory Backup
+      const backupResult = await performDbBackup("pre_reset_mandatory");
+      const backupFilePath = path.join(DB_DIR, "backups", backupResult.filename);
+      if (!fs.existsSync(backupFilePath) || fs.statSync(backupFilePath).size === 0) {
+        throw new Error("FALHA CRÍTICA NO BACKUP: O ficheiro de cópia de segurança não foi criado ou está vazio. Cancelando reset.");
+      }
+
+      // Read current statistics before clearing
+      const countsBefore: Record<string, number> = {};
+      const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs"];
+      for (const t of tables) {
+        const filePath = path.join(DB_DIR, `${t}.json`);
+        if (fs.existsSync(filePath)) {
+          try {
+            const content = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+            countsBefore[t] = Array.isArray(content) ? content.length : 0;
+          } catch (e) {
+            countsBefore[t] = 0;
+          }
+        } else {
+          countsBefore[t] = 0;
+        }
+      }
+
+      // 2. Define Master Initial Administrator
+      const masterAdmin = {
+        id: "emp-master-admin-001",
+        name: "Administrador do Sistema",
+        role: "Administrador",
+        email: "admin@ostvendas.co.mz",
+        contact: "+258 84 000 0000",
+        salary: 0,
+        admissionDate: new Date().toISOString().split("T")[0],
+        status: "ACTIVE",
+        pin: "123456",
+        pinChanged: true,
+        isSystemAdmin: true,
+        mustChangePassword: true,
+        branch: "Sede Principal",
+        subscriptionPlan: "OURO",
+        ownerId: "emp-master-admin-001",
+        createdBy: "SYSTEM",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        companyId: "OST Comércio Geral"
+      };
+
+      const initialResetAuditLog = {
+        id: `log-reset-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        user: "Sistema / Administrador",
+        action: "RESET COMPLETO DO SISTEMA",
+        details: `Backup executado com sucesso (${backupResult.filename}, ${(backupResult.size / 1024).toFixed(2)} KB). Todos os dados de teste foram eliminados. Conta de Administrador Mestre ativa.`,
+        device: "Servidor Cloud Run",
+        ownerId: masterAdmin.id,
+        companyId: masterAdmin.companyId,
+        createdBy: "SYSTEM",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // 3. Clean local JSON files
+      fs.writeFileSync(path.join(DB_DIR, "products.json"), JSON.stringify([], null, 2), "utf-8");
+      fs.writeFileSync(path.join(DB_DIR, "customers.json"), JSON.stringify([], null, 2), "utf-8");
+      fs.writeFileSync(path.join(DB_DIR, "transactions.json"), JSON.stringify([], null, 2), "utf-8");
+      fs.writeFileSync(path.join(DB_DIR, "cashflow.json"), JSON.stringify([], null, 2), "utf-8");
+      fs.writeFileSync(path.join(DB_DIR, "employees.json"), JSON.stringify([masterAdmin], null, 2), "utf-8");
+      fs.writeFileSync(path.join(DB_DIR, "auditlogs.json"), JSON.stringify([initialResetAuditLog], null, 2), "utf-8");
+
+      // Reset clean default settings
+      let settings: any = {
+        companyName: "OST Comércio Geral, Lda",
+        companyAddress: "Av. Eduardo Mondlane, Nº 1234, Maputo - Moçambique",
+        companyNuit: "400123987",
+        companyPhone: "+258 84 000 0000",
+        companyEmail: "contacto@ostvendas.co.mz",
+        receiptFooterMessage: "Obrigado pela sua preferência! Processado por computador.",
+        enableVat: true,
+        vatPercentage: 16,
+        currency: "MT",
+        lowStockThreshold: 5,
+        defaultPrinter: "thermal_80mm",
+        cloudBackupEnabled: true,
+        backupFrequency: "daily",
+        backupTime: "18:00",
+        backupExportToCloud: true,
+        backupExportToEmail: true,
+        ownerId: masterAdmin.id,
+        companyId: masterAdmin.companyId
+      };
+      if (fs.existsSync(path.join(DB_DIR, "settings.json"))) {
+        try {
+          const currentSet = JSON.parse(fs.readFileSync(path.join(DB_DIR, "settings.json"), "utf-8"));
+          settings = { ...settings, ...currentSet, ownerId: masterAdmin.id, companyId: masterAdmin.companyId };
+        } catch (e) {}
+      }
+      fs.writeFileSync(path.join(DB_DIR, "settings.json"), JSON.stringify(settings, null, 2), "utf-8");
+
+      // 4. Clean Firestore collections if connected
+      if (firebaseDb) {
+        console.log("[SYSTEM RESET] Sincronizando eliminação e reinicialização no Firebase Firestore...");
+        try {
+          const collectionsToClear = ["products", "customers", "transactions", "cashflow", "auditlogs", "employees", "usuarios"];
+          for (const collName of collectionsToClear) {
+            const snapshot = await firebaseDb.collection(collName).get();
+            if (!snapshot.empty) {
+              const batch = firebaseDb.batch();
+              snapshot.forEach((docSnap: any) => {
+                batch.delete(docSnap.ref);
+              });
+              await batch.commit();
+            }
+          }
+
+          // Write master admin and initial reset audit log to Firestore
+          await firebaseDb.collection("employees").doc(masterAdmin.id).set(sanitizeForFirestore(masterAdmin));
+          await firebaseDb.collection("usuarios").doc(masterAdmin.id).set(sanitizeForFirestore(masterAdmin));
+          await firebaseDb.collection("auditlogs").doc(initialResetAuditLog.id).set(sanitizeForFirestore(initialResetAuditLog));
+          await firebaseDb.collection("settings").doc("config").set(sanitizeForFirestore(settings));
+
+          console.log("[SYSTEM RESET] Firestore limpo e reinicializado com conta Mestre de Administrador.");
+        } catch (fsErr: any) {
+          console.error("[SYSTEM RESET WARNING] Erro ao limpar Firestore:", fsErr);
+        }
+      }
+
+      const deletedTotal = countsBefore.products + countsBefore.customers + countsBefore.transactions + countsBefore.cashflow + Math.max(0, countsBefore.employees - 1) + Math.max(0, countsBefore.auditlogs - 1);
+
+      res.json({
+        success: true,
+        message: "Reset completo do sistema executado com sucesso!",
+        report: {
+          timestamp: new Date().toISOString(),
+          backup: {
+            created: true,
+            filename: backupResult.filename,
+            sizeKb: (backupResult.size / 1024).toFixed(2),
+            location: `/db_store/backups/${backupResult.filename}`
+          },
+          deletedSummary: {
+            accountsDeleted: Math.max(0, countsBefore.employees - 1),
+            productsDeleted: countsBefore.products,
+            customersDeleted: countsBefore.customers,
+            transactionsDeleted: countsBefore.transactions,
+            cashflowEntriesDeleted: countsBefore.cashflow,
+            auditLogsCleared: countsBefore.auditlogs,
+            totalDocumentsDeleted: deletedTotal
+          },
+          masterAccount: {
+            id: masterAdmin.id,
+            name: masterAdmin.name,
+            role: masterAdmin.role,
+            email: masterAdmin.email,
+            status: masterAdmin.status,
+            mustChangePassword: masterAdmin.mustChangePassword
+          },
+          status: "SYSTEM_READY_FOR_PRODUCTION"
+        }
+      });
+    } catch (err: any) {
+      console.error("[SYSTEM RESET ERROR]:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET: Load all existing stateful tables
   app.get("/api/db/load", async (req, res) => {
     try {
