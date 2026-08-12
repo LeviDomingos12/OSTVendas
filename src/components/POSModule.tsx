@@ -28,7 +28,7 @@ import {
   Zap
 } from "lucide-react";
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
-import { QrReader } from "react-qr-reader";
+import QrCodeScannerComponent from "./QrCodeScannerComponent";
 import { sendEmail } from "../lib/gmail";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -3122,10 +3122,10 @@ export default function POSModule({
                   <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-orange-500 z-10" />
 
                   {/* HTML5 QrReader Component */}
-                  <QrReader
+                  <QrCodeScannerComponent
                     onResult={(result, _error) => {
                       if (result) {
-                        const textValue = result.text || result.getText?.() || String(result);
+                        const textValue = result.text || String(result);
                         if (textValue) {
                           const trimmed = textValue.trim();
                           const now = Date.now();
@@ -3155,10 +3155,8 @@ export default function POSModule({
                         }
                       }
                     }}
-                    constraints={{ facingMode: "environment" }}
+                    facingMode="environment"
                     scanDelay={400}
-                    containerStyle={{ width: "100%", height: "100%" }}
-                    videoStyle={{ objectFit: "cover", width: "100%", height: "100%" }}
                   />
                 </div>
 
