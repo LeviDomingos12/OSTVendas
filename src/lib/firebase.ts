@@ -513,7 +513,7 @@ export const signUpWithEmail = async (
     // Log user creation
     if (!isCircuitBroken()) {
       try {
-        const logId = `log-register-${Date.now()}`;
+        const logId = `log-register-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const logsCollPath = getPartitionPath("logs", user.uid);
         await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,
@@ -710,7 +710,7 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     // Log login success
     if (!isCircuitBroken()) {
       try {
-        const logId = `log-login-${Date.now()}`;
+        const logId = `log-login-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
           id: logId,
           userId: user.uid,
@@ -781,7 +781,7 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     // Log login failure
     if (!isCircuitBroken()) {
       try {
-        const logId = `log-fail-${Date.now()}`;
+        const logId = `log-fail-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
           id: logId,
           action: "Falha de Login",
@@ -806,7 +806,7 @@ export const recoverPassword = async (email: string): Promise<void> => {
     // Log password recovery trigger
     if (!isCircuitBroken()) {
       try {
-        const logId = `log-recovery-${Date.now()}`;
+        const logId = `log-recovery-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
           id: logId,
           action: "Recuperação de Senha",
@@ -985,7 +985,7 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
     // Log login success
     if (!isCircuitBroken()) {
       try {
-        const logId = `log-glogin-${Date.now()}`;
+        const logId = `log-glogin-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         const logsCollPath = getPartitionPath("logs", profile.uid);
         await setDoc(doc(db, logsCollPath, logId), sanitizeForFirestore({
           id: logId,

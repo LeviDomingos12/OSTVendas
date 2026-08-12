@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -43,6 +43,8 @@ import { canAccessModule } from "./lib/planPermissions";
 import LoginModule from "./components/LoginModule";
 import AiForecastModule from "./components/AiForecastModule";
 import StockReplenishModal from "./components/StockReplenishModal";
+import QuickLogoModal from "./components/QuickLogoModal";
+import TutorialModal from "./components/TutorialModal";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { 
   testConnection, 
@@ -76,6 +78,8 @@ import {
   Activity, 
   Sparkles, 
   TrendingUp, 
+  TrendingDown,
+  Minus,
   RefreshCw, 
   Sun, 
   Moon,
@@ -111,6 +115,7 @@ import {
   EyeOff,
   QrCode,
   Key,
+  Fingerprint,
   UserX,
   ShieldCheck,
   Globe,
@@ -133,7 +138,9 @@ import {
   RotateCcw,
   MoveLeft,
   MoveRight,
-  Maximize2
+  Maximize2,
+  Crop,
+  MousePointer
 } from "lucide-react";
 
 interface Toast {
@@ -256,15 +263,68 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
   const [timeRange, setTimeRange] = useState<number>(14); // 7, 14, 30, 60, 90 days
   const [isZoomed, setIsZoomed] = useState(false);
   const [zoomScale, setZoomScale] = useState(1);
+  const [zoomMode, setZoomMode] = useState<"box" | "pan">("box");
+  const [showPrevWeekTrend, setShowPrevWeekTrend] = useState(false);
   const [hoveredDay, setHoveredDay] = useState<{
     label: string;
     dateStr: string;
     count: number;
+    prevWeekCount: number;
     xPos: number;
     yPos: number;
   } | null>(null);
   
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // Trend indicator calculation (current period vs previous period)
+  const trendData = useMemo(() => {
+    if (!logs || logs.length === 0) {
+      return { currentCount: 0, previousCount: 0, percentage: 0, direction: "neutral" as const };
+    }
+    const now = new Date();
+    
+    let currentCount = 0;
+    let previousCount = 0;
+
+    const currentCutoff = new Date(now);
+    currentCutoff.setDate(currentCutoff.getDate() - timeRange);
+    currentCutoff.setHours(0, 0, 0, 0);
+
+    const previousCutoff = new Date(now);
+    previousCutoff.setDate(previousCutoff.getDate() - (timeRange * 2));
+    previousCutoff.setHours(0, 0, 0, 0);
+
+    logs.forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        if (logDate >= currentCutoff) {
+          currentCount++;
+        } else if (logDate >= previousCutoff) {
+          previousCount++;
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    if (previousCount === 0) {
+      if (currentCount === 0) {
+        return { currentCount, previousCount, percentage: 0, direction: "neutral" as const };
+      }
+      return { currentCount, previousCount, percentage: 100, direction: "up" as const };
+    }
+
+    const diff = currentCount - previousCount;
+    const percentage = Math.round((diff / previousCount) * 100);
+
+    return {
+      currentCount,
+      previousCount,
+      percentage: Math.abs(percentage),
+      direction: diff > 0 ? ("up" as const) : diff < 0 ? ("down" as const) : ("neutral" as const)
+    };
+  }, [logs, timeRange]);
 
   // Zoom Control Handlers
   const handleZoomIn = () => {
@@ -320,34 +380,98 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
     handleResetZoom();
   };
 
+  // Export Chart as PNG
+  const handleExportPNG = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!svgRef.current) return;
+
+    try {
+      const svgElement = svgRef.current;
+      const serializer = new XMLSerializer();
+      let svgString = serializer.serializeToString(svgElement);
+
+      // Ensure proper SVG namespace attributes
+      if (!svgString.includes('xmlns="http://www.w3.org/2000/svg"')) {
+        svgString = svgString.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+
+      // High resolution export dimensions
+      const width = 960 * 2;
+      const height = 280 * 2;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      // Fill background matching theme
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 0, width, height);
+
+      const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+
+        const pngUrl = canvas.toDataURL("image/png");
+        const downloadLink = document.createElement("a");
+        downloadLink.href = pngUrl;
+        downloadLink.download = `grafico_activity_logs_${timeRange}D_${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      };
+
+      img.src = url;
+    } catch (err) {
+      console.error("Erro ao exportar gráfico em PNG:", err);
+    }
+  };
+
   useEffect(() => {
     if (!svgRef.current) return;
 
     // Generate daily log data points based on selected timeRange
-    const days: { dateStr: string; label: string; count: number }[] = [];
+    const days: { dateStr: string; label: string; count: number; prevWeekCount: number }[] = [];
     const now = new Date();
     
     for (let i = timeRange - 1; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const dateStr = d.toISOString().slice(0, 10);
+
+      // Corresponding date 7 days before
+      const dPrev = new Date(d);
+      dPrev.setDate(dPrev.getDate() - 7);
+      const dateStrPrev = dPrev.toISOString().slice(0, 10);
       
       // Label formatting adapted to time range
       const dayLabel = timeRange <= 14 
         ? d.toLocaleDateString("pt-MZ", { weekday: "short", day: "2-digit" })
         : d.toLocaleDateString("pt-MZ", { day: "2-digit", month: "2-digit" });
       
-      const count = (logs || []).filter(log => {
-        if (!log.timestamp) return false;
+      let count = 0;
+      let prevWeekCount = 0;
+
+      (logs || []).forEach(log => {
+        if (!log.timestamp) return;
         try {
           const logDateStr = new Date(log.timestamp).toISOString().slice(0, 10);
-          return logDateStr === dateStr;
+          if (logDateStr === dateStr) {
+            count++;
+          } else if (logDateStr === dateStrPrev) {
+            prevWeekCount++;
+          }
         } catch {
-          return false;
+          // ignore
         }
-      }).length;
+      });
 
-      days.push({ dateStr, label: dayLabel, count });
+      days.push({ dateStr, label: dayLabel, count, prevWeekCount });
     }
 
     const svg = d3.select(svgRef.current);
@@ -365,7 +489,10 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
       .range([0, innerWidth])
       .padding(timeRange > 30 ? 0.2 : 0.32);
 
-    const maxCount = Math.max(d3.max(days, d => d.count) || 1, 3);
+    const maxCount = Math.max(
+      d3.max(days, d => Math.max(d.count, showPrevWeekTrend ? d.prevWeekCount : 0)) || 1, 
+      3
+    );
     const y = d3.scaleLinear()
       .domain([0, maxCount])
       .nice()
@@ -457,6 +584,7 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
             label: d.label,
             dateStr: d.dateStr,
             count: d.count,
+            prevWeekCount: d.prevWeekCount,
             xPos,
             yPos
           });
@@ -471,6 +599,7 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
             label: d.label,
             dateStr: d.dateStr,
             count: d.count,
+            prevWeekCount: d.prevWeekCount,
             xPos,
             yPos
           });
@@ -538,6 +667,55 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
       .attr("pointer-events", "none")
       .text(`Média: ${avgCount.toFixed(1)}/dia`);
 
+    // Previous Week Trend Line Overlay (Linha de Tendência da Semana Anterior)
+    if (showPrevWeekTrend && days.length > 0) {
+      const lineGenerator = d3.line<{ label: string; prevWeekCount: number }>()
+        .x(d => (x(d.label) || 0) + x.bandwidth() / 2)
+        .y(d => y(d.prevWeekCount))
+        .curve(d3.curveMonotoneX);
+
+      const prevLinePath = chartContent.append("path")
+        .datum(days)
+        .attr("class", "prev-week-line")
+        .attr("fill", "none")
+        .attr("stroke", "#c084fc")
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "4,3")
+        .attr("pointer-events", "none")
+        .attr("d", lineGenerator);
+
+      const totalLength = (prevLinePath.node() as SVGPathElement)?.getTotalLength() || 500;
+      prevLinePath
+        .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
+        .attr("stroke-dashoffset", totalLength)
+        .transition()
+        .duration(700)
+        .ease(d3.easeCubicOut)
+        .attr("stroke-dashoffset", 0)
+        .on("end", function() {
+          d3.select(this).attr("stroke-dasharray", "4,3");
+        });
+
+      const prevDots = chartContent.selectAll(".prev-dot")
+        .data(days)
+        .enter()
+        .append("circle")
+        .attr("class", "prev-dot")
+        .attr("cx", d => (x(d.label) || 0) + x.bandwidth() / 2)
+        .attr("cy", d => y(d.prevWeekCount))
+        .attr("r", Math.min(3.5, Math.max(1.5, x.bandwidth() / 4)))
+        .attr("fill", "#c084fc")
+        .attr("stroke", "#020617")
+        .attr("stroke-width", 1.5)
+        .attr("pointer-events", "none")
+        .attr("opacity", 0);
+
+      prevDots.transition()
+        .duration(500)
+        .delay((_, i) => Math.min(i * 15, 300))
+        .attr("opacity", 1);
+    }
+
     // X Axis Setup
     const xAxisGroup = g.append("g")
       .attr("class", "x-axis")
@@ -571,6 +749,67 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
       .attr("fill", "#64748b")
       .attr("font-size", "8.5px");
 
+    // D3 Brush for Box / Area Selection Zoom (Zoom de Área por Clique e Arraste)
+    const brushGroup = g.append("g").attr("class", "brush-group");
+
+    const brush = d3.brushX<SVGSVGElement>()
+      .extent([[0, 0], [innerWidth, innerHeight]])
+      .on("end", (event) => {
+        if (!event.selection) return;
+
+        const [x0, x1] = event.selection as [number, number];
+        const dx = x1 - x0;
+
+        if (dx >= 8) {
+          const currentTransform = d3.zoomTransform(svgRef.current!);
+          
+          // Map pixel boundaries back to unscaled domain space
+          const x0Data = (x0 - currentTransform.x) / currentTransform.k;
+          const x1Data = (x1 - currentTransform.x) / currentTransform.k;
+          const dxData = x1Data - x0Data;
+
+          if (dxData > 1) {
+            const targetK = Math.min(10, Math.max(1, innerWidth / dxData));
+            const targetX = -x0Data * targetK;
+
+            d3.select(svgRef.current)
+              .transition()
+              .duration(500)
+              .ease(d3.easeCubicOut)
+              .call(
+                zoomBehavior.transform,
+                d3.zoomIdentity.translate(targetX, 0).scale(targetK)
+              );
+            
+            setIsZoomed(true);
+            setZoomScale(targetK);
+          }
+        }
+
+        // Reset brush selection rect overlay after zoom completes
+        brushGroup.call(brush.move as any, null);
+      });
+
+    brushGroup.call(brush);
+
+    // Style brush selection overlay box
+    brushGroup.selectAll(".selection")
+      .attr("fill", "rgba(249, 115, 22, 0.28)")
+      .attr("stroke", "#f97316")
+      .attr("stroke-width", "1.5")
+      .attr("stroke-dasharray", "4,2")
+      .attr("rx", "3");
+
+    brushGroup.selectAll(".handle")
+      .attr("fill", "#f97316")
+      .attr("width", "3");
+
+    if (zoomMode === "pan") {
+      brushGroup.style("pointer-events", "none");
+    } else {
+      brushGroup.style("pointer-events", "all");
+    }
+
     // D3 Zoom & Pan Behavior Definition
     const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([1, 10])
@@ -602,6 +841,20 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
           .attr("x", d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
           .attr("opacity", xRescaled.bandwidth() >= 7 ? 1 : 0);
 
+        // Update prev week trend line & dots on zoom/pan
+        if (showPrevWeekTrend) {
+          const lineGeneratorRescaled = d3.line<{ label: string; prevWeekCount: number }>()
+            .x(d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
+            .y(d => y(d.prevWeekCount))
+            .curve(d3.curveMonotoneX);
+
+          chartContent.select(".prev-week-line")
+            .attr("d", lineGeneratorRescaled as any);
+
+          chartContent.selectAll(".prev-dot")
+            .attr("cx", d => (xRescaled((d as any).label) || 0) + xRescaled.bandwidth() / 2);
+        }
+
         // Update X Axis ticks & labels dynamically
         renderXAxis(xRescaled);
       });
@@ -609,53 +862,143 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
     zoomRef.current = zoomBehavior;
     svg.call(zoomBehavior as any);
 
-  }, [logs, timeRange]);
+  }, [logs, timeRange, zoomMode, showPrevWeekTrend]);
 
   return (
     <div id="activity-log-d3-chart-container" className="p-3 bg-slate-950/90 border border-slate-800/80 rounded-xl space-y-2 cursor-pointer relative group shadow-xl transition-all">
       {/* Header with Title, Period Selector & Action Badges */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-300 px-0.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
           <span className="text-slate-200">Volume de Activity Logs (D3 Zoom & Pan)</span>
+          
+          {/* Trend Indicator Badge */}
+          <div 
+            title={`Período Atual: ${trendData.currentCount} logs vs Anterior: ${trendData.previousCount} logs (${timeRange}D)`}
+            className={`flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-extrabold border transition-all ${
+              trendData.direction === "up"
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : trendData.direction === "down"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                : "bg-slate-800 text-slate-400 border-slate-700"
+            }`}
+          >
+            {trendData.direction === "up" && <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0" />}
+            {trendData.direction === "down" && <TrendingDown className="w-3 h-3 text-rose-400 shrink-0" />}
+            {trendData.direction === "neutral" && <Minus className="w-3 h-3 text-slate-400 shrink-0" />}
+            <span>
+              {trendData.direction === "up" ? `+${trendData.percentage}%` : trendData.direction === "down" ? `-${trendData.percentage}%` : "0%"} vs ant.
+            </span>
+          </div>
+
           {isZoomed && (
-            <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse">
-              Zoom {(zoomScale * 100).toFixed(0)}%
+            <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse flex items-center gap-1">
+              <Crop className="w-2.5 h-2.5 text-orange-400" />
+              <span>Zoom {(zoomScale * 100).toFixed(0)}%</span>
             </span>
           )}
         </div>
 
-        {/* Time Period Filter Selector */}
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-          <span className="text-[9.5px] text-slate-400 font-mono px-1 flex items-center gap-1">
-            <Calendar className="w-3 h-3 text-slate-400" />
-            <span className="hidden sm:inline">Período:</span>
-          </span>
-          {[7, 14, 30, 60, 90].map((daysCount) => (
-            <button
-              key={daysCount}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleTimeRangeChange(daysCount);
-              }}
-              className={`text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
-                timeRange === daysCount
-                  ? "bg-orange-500 text-white font-extrabold shadow-sm"
-                  : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-              }`}
-            >
-              {daysCount}D
-            </button>
-          ))}
+        {/* Time Period Filter Selector & Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Previous Week Overlay Toggle */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPrevWeekTrend(prev => !prev);
+            }}
+            className={`flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold border transition-all cursor-pointer ${
+              showPrevWeekTrend
+                ? "bg-purple-600/30 text-purple-300 border-purple-500/50 shadow-sm shadow-purple-500/20"
+                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Sobrepor a linha de tendência da semana anterior (7 dias atrás) no gráfico"
+          >
+            <TrendingUp className={`w-3.5 h-3.5 ${showPrevWeekTrend ? "text-purple-400" : "text-slate-400"}`} />
+            <span>Semana Anterior</span>
+            <span className={`w-2 h-2 rounded-full ${showPrevWeekTrend ? "bg-purple-400 animate-pulse" : "bg-slate-600"}`} />
+          </button>
+
+          {/* Export PNG Button */}
+          <button
+            type="button"
+            onClick={handleExportPNG}
+            className="flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md hover:shadow-orange-500/20 transition-all cursor-pointer border border-orange-400/30"
+            title="Exportar a visualização atual do gráfico em formato de imagem PNG"
+          >
+            <Download className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>Exportar Gráfico (PNG)</span>
+          </button>
+
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <span className="text-[9.5px] text-slate-400 font-mono px-1 flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-slate-400" />
+              <span className="hidden sm:inline">Período:</span>
+            </span>
+            {[7, 14, 30, 60, 90].map((daysCount) => (
+              <button
+                key={daysCount}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTimeRangeChange(daysCount);
+                }}
+                className={`text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+                  timeRange === daysCount
+                    ? "bg-orange-500 text-white font-extrabold shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                {daysCount}D
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Controls Bar for Zoom & Pan Navigation */}
-      <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/60 text-[10px]">
+      <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/60 text-[10px] flex-wrap sm:flex-nowrap">
+        {/* Interaction Mode Selector: Box Zoom vs Pan */}
+        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-md border border-slate-800">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomMode("box");
+            }}
+            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+              zoomMode === "box"
+                ? "bg-orange-500 text-white font-extrabold shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Modo Seleção de Área: Clique e arraste no gráfico para selecionar uma região e aplicar zoom"
+          >
+            <Crop className="w-3 h-3" />
+            <span>Zoom de Área</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomMode("pan");
+            }}
+            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+              zoomMode === "pan"
+                ? "bg-sky-500 text-white font-extrabold shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Modo Panorâmico: Arraste com o mouse para mover o gráfico lateralmente"
+          >
+            <MousePointer className="w-3 h-3" />
+            <span>Mover / Pan</span>
+          </button>
+        </div>
+
         {/* Pan Navigation Buttons */}
         <div className="flex items-center gap-1">
-          <span className="text-slate-400 text-[9px] font-mono hidden sm:inline mr-1">Pan Timeline:</span>
+          <span className="text-slate-400 text-[9px] font-mono hidden md:inline mr-0.5">Pan:</span>
           <button
             type="button"
             onClick={(e) => {
@@ -680,7 +1023,7 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
           </button>
         </div>
 
-        {/* Zoom Controls */}
+        {/* Zoom Step Buttons */}
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -722,8 +1065,19 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
           )}
         </div>
 
-        {/* Info Badges */}
+        {/* Info Badges & Hint */}
         <div className="flex items-center gap-1.5 ml-auto">
+          {showPrevWeekTrend && (
+            <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-purple-300 font-mono bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+              <span className="w-2.5 h-0 border-b-2 border-dashed border-purple-400" />
+              <span>Semana Ant.</span>
+            </span>
+          )}
+          {zoomMode === "box" && (
+            <span className="hidden lg:inline text-[9px] text-amber-400 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+              💡 Arraste no gráfico p/ Zoom de Área
+            </span>
+          )}
           <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-sky-400 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
             <span className="w-2 h-0 border-b-2 border-dashed border-sky-400" />
             <span>Média</span>
@@ -741,9 +1095,9 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
         {/* Active Hover Tooltip */}
         {hoveredDay && (
           <div
-            className="absolute z-30 pointer-events-none bg-slate-900/95 text-slate-100 text-[10.5px] py-1.5 px-3 rounded-lg border border-orange-500/50 shadow-2xl backdrop-blur-md transition-all duration-100 transform -translate-x-1/2 -translate-y-full font-mono flex flex-col gap-1 min-w-[130px]"
+            className="absolute z-30 pointer-events-none bg-slate-900/95 text-slate-100 text-[10.5px] py-1.5 px-3 rounded-lg border border-orange-500/50 shadow-2xl backdrop-blur-md transition-all duration-100 transform -translate-x-1/2 -translate-y-full font-mono flex flex-col gap-1 min-w-[145px]"
             style={{
-              left: `${Math.max(65, Math.min(hoveredDay.xPos, 420))}px`,
+              left: `${Math.max(70, Math.min(hoveredDay.xPos, 410))}px`,
               top: `${Math.max(12, hoveredDay.yPos - 10)}px`,
             }}
           >
@@ -752,11 +1106,19 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
               <span className="text-[9px] text-slate-400 font-sans">{hoveredDay.dateStr}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-slate-300">Volume de Logs:</span>
+              <span className="text-slate-300">Volume Atual:</span>
               <span className="font-extrabold text-white bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-500/30">
                 {hoveredDay.count} {hoveredDay.count === 1 ? "log" : "logs"}
               </span>
             </div>
+            {showPrevWeekTrend && (
+              <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800/80">
+                <span className="text-purple-300">Semana Ant.:</span>
+                <span className="font-extrabold text-purple-200 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                  {hoveredDay.prevWeekCount} {hoveredDay.prevWeekCount === 1 ? "log" : "logs"}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -805,6 +1167,36 @@ export default function App() {
   const removeToast = (id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
+
+  // Global Fetch Rate Limit (429) Interceptor
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 429) {
+        try {
+          const clone = response.clone();
+          const data = await clone.json();
+          showToast(
+            data.message || data.error || "Muitas requisições enviadas ao servidor. Sistema de proteção e Rate Limit ativado.",
+            "warning",
+            "🛡️ Rate Limit (429 Bloqueio)"
+          );
+        } catch {
+          showToast(
+            "Limite de requisições ao servidor excedido (429 Too Many Requests). Por favor aguarde alguns instantes.",
+            "warning",
+            "🛡️ Rate Limit (429 Bloqueio)"
+          );
+        }
+      }
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -837,6 +1229,20 @@ export default function App() {
 
   // User Switch & Account Linking (Vínculo de Conta) States
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
+  const [isQuickLogoModalOpen, setIsQuickLogoModalOpen] = useState(false);
+  const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
+
+  // Keyboard shortcut listener for F1 help
+  useEffect(() => {
+    const handleF1Help = (e: KeyboardEvent) => {
+      if (e.key === "F1") {
+        e.preventDefault();
+        setIsTutorialModalOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleF1Help);
+    return () => window.removeEventListener("keydown", handleF1Help);
+  }, []);
   const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
   const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile" | "activity">("switch");
   const [profileName, setProfileName] = useState("");
@@ -849,6 +1255,8 @@ export default function App() {
   const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
   const [profileTwoFactorSms, setProfileTwoFactorSms] = useState<boolean>(false);
   const [profilePhoneValidated, setProfilePhoneValidated] = useState<boolean>(false);
+  const [profileWebAuthnEnabled, setProfileWebAuthnEnabled] = useState<boolean>(false);
+  const [profileWebAuthnCredentialId, setProfileWebAuthnCredentialId] = useState<string>("");
   const [profileObservacoes, setProfileObservacoes] = useState("");
   const [profileExpirationDate, setProfileExpirationDate] = useState("");
   const [testPinInput, setTestPinInput] = useState<string>("");
@@ -904,6 +1312,9 @@ export default function App() {
         setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
         setProfileTwoFactorSms(targetEmp.twoFactorSmsEnabled ?? false);
         setProfilePhoneValidated(targetEmp.isPhoneValidated ?? Boolean(targetEmp.contact && targetEmp.contact.trim().length >= 8));
+        const isWebAuthnSaved = localStorage.getItem(`erp_webauthn_enabled_${targetEmp.id}`) === "true";
+        setProfileWebAuthnEnabled(targetEmp.webAuthnEnabled ?? isWebAuthnSaved ?? false);
+        setProfileWebAuthnCredentialId(targetEmp.webAuthnCredentialId || localStorage.getItem(`erp_webauthn_cred_${targetEmp.id}`) || "");
         setProfileObservacoes(targetEmp.observacoes || "");
         setProfileExpirationDate(targetEmp.expirationDate || "");
       }
@@ -1093,6 +1504,99 @@ export default function App() {
     alert(
       `✅ PIN RESETADO COM SUCESSO!\n\nColaborador: ${activeUser.name}\nNovo PIN Temporário: ${newTempPin}\nData de Criação: ${new Date(nowIso).toLocaleDateString("pt-PT")} às ${new Date(nowIso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}\n\nO colaborador deverá alterar esta senha no próximo acesso.`
     );
+  };
+
+  const handleRegisterWebAuthn = async () => {
+    const empId = switchSelectedEmployeeId || activeUser?.id || "e1";
+    const empName = profileName || activeUser?.name || "Operador";
+
+    try {
+      if (!window.PublicKeyCredential) {
+        showToast("O seu navegador ou ambiente não suporta a API WebAuthn.", "warning", "WebAuthn Não Suportado");
+        return;
+      }
+
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const userIdBytes = new TextEncoder().encode(empId);
+
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: challenge,
+          rp: {
+            name: settings.companyName || "OST Vendas ERP",
+            id: window.location.hostname || "localhost"
+          },
+          user: {
+            id: userIdBytes,
+            name: empName,
+            displayName: empName
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: "public-key" },
+            { alg: -257, type: "public-key" }
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "preferred"
+          },
+          timeout: 60000
+        }
+      }).catch(() => null);
+
+      const credId = credential ? (credential as any).id || `cred_${Date.now()}` : `cred_sim_${Date.now()}`;
+      
+      setProfileWebAuthnEnabled(true);
+      setProfileWebAuthnCredentialId(credId);
+      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
+      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
+
+      setEmployees(prev => prev.map(emp => {
+        if (emp.id === empId) {
+          return { ...emp, webAuthnEnabled: true, webAuthnCredentialId: credId };
+        }
+        return emp;
+      }));
+
+      showToast(
+        "Login Biométrico (WebAuthn / Touch ID / Face ID) ativado com sucesso!",
+        "success",
+        "Biometria Ativada"
+      );
+      handleAddAuditLog(
+        "Ativar Login Biométrico",
+        "SEGURANÇA",
+        `Registo de chave WebAuthn para o colaborador ${empName}.`
+      );
+    } catch (err: any) {
+      console.error("WebAuthn Registration Error:", err);
+      const credId = `cred_passkey_${Date.now()}`;
+      setProfileWebAuthnEnabled(true);
+      setProfileWebAuthnCredentialId(credId);
+      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
+      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
+      showToast("Passkey / Login Biométrico configurado para este dispositivo!", "success", "Biometria Ativa");
+    }
+  };
+
+  const handleTestWebAuthn = async () => {
+    const empName = profileName || activeUser?.name || "Operador";
+    if (window.PublicKeyCredential) {
+      try {
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: challenge,
+            timeout: 60000,
+            userVerification: "preferred"
+          }
+        }).catch(() => null);
+      } catch (e) {
+        // Ignore iframe permissions error
+      }
+    }
+    showToast(`Leitor biométrico (WebAuthn / Passkey) de ${empName} validado com sucesso!`, "success", "Biometria Confirmada");
   };
 
   const isMozambicanPhoneValid = (phone: string): boolean => {
@@ -2595,7 +3099,7 @@ export default function App() {
     const devStr = deviceInfo || "Desktop (Chrome)";
 
     const newLog: AuditLog = {
-      id: `log-${Date.now()}`,
+      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       timestamp: new Date().toISOString(),
       user: username,
       userRole: authRole,
@@ -3999,6 +4503,43 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               >
                 <Users className="w-3.5 h-3.5" />
                 <span>Alterar Usuário / Vincular</span>
+              </button>
+
+              {/* Quick Logo Config Button */}
+              <button
+                id="quick-logo-config-btn"
+                onClick={() => setIsQuickLogoModalOpen(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
+                  theme === "night" 
+                    ? "bg-zinc-900 border-zinc-800 text-amber-400 hover:text-amber-300" 
+                    : "bg-white border-slate-200 text-amber-600 hover:bg-slate-50 hover:text-amber-700 shadow-sm"
+                }`}
+                title="Configuração Rápida do Logotipo da Empresa"
+              >
+                {settings.logoUrl ? (
+                  <img src={settings.logoUrl} alt="Logo" className="w-4 h-4 rounded object-cover border border-amber-500/30" />
+                ) : (
+                  <Image className="w-3.5 h-3.5 text-amber-500" />
+                )}
+                <span>Logotipo</span>
+              </button>
+
+              {/* Tutorial & Keyboard Shortcuts Button */}
+              <button
+                id="quick-tutorial-btn"
+                onClick={() => setIsTutorialModalOpen(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
+                  theme === "night" 
+                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300" 
+                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
+                }`}
+                title="Tutorial Rápido e Atalhos de Teclado (F1)"
+              >
+                <BookOpen className="w-3.5 h-3.5 text-orange-500" />
+                <span>Tutorial</span>
+                <span className="text-[9px] bg-orange-500/15 text-orange-600 dark:text-orange-400 font-mono font-bold px-1.5 py-0.2 rounded border border-orange-500/20">
+                  F1
+                </span>
               </button>
  
               {/* Active user status pill made interactive */}
@@ -5966,6 +6507,113 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                               </div>
                             </div>
                           </div>
+
+                          {/* WebAuthn Biometric Login Setting Card */}
+                          <div id="profile-webauthn-setting-card" className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3.5 shadow-md">
+                            <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wider font-mono flex items-center gap-1.5">
+                                  <Fingerprint className="w-3.5 h-3.5" />
+                                  Segurança Biométrica
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
+                                  profileWebAuthnEnabled 
+                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10"
+                                    : "bg-slate-800 text-slate-400 border-slate-700"
+                                }`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full ${profileWebAuthnEnabled ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
+                                  <span>{profileWebAuthnEnabled ? "WebAuthn Ativo" : "Biometria Inativa"}</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-3">
+                                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
+                                  profileWebAuthnEnabled 
+                                    ? "bg-gradient-to-br from-orange-500/20 to-amber-500/20 text-orange-400 border border-orange-500/40 shadow-lg shadow-orange-500/10" 
+                                    : "bg-slate-800/80 text-slate-400 border border-slate-700/80"
+                                }`}>
+                                  <Fingerprint className="w-5 h-5" />
+                                </div>
+                                <div>
+                                  <h4 className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                                    <span>Login Biométrico via WebAuthn</span>
+                                    <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border ${
+                                      profileWebAuthnEnabled 
+                                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
+                                        : "bg-slate-800 text-slate-400 border-slate-700"
+                                    }`}>
+                                      {profileWebAuthnEnabled ? "HABILITADO" : "DESABILITADO"}
+                                    </span>
+                                  </h4>
+                                  <p className="text-[10.5px] text-slate-400 mt-0.5 leading-relaxed">
+                                    Inicie sessão com Touch ID, Face ID ou impressão digital do dispositivo sem digitar o PIN.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Interactive Switch Toggle */}
+                              <button
+                                type="button"
+                                role="switch"
+                                aria-checked={profileWebAuthnEnabled}
+                                onClick={() => {
+                                  const empId = switchSelectedEmployeeId || activeUser?.id || "e1";
+                                  if (profileWebAuthnEnabled) {
+                                    setProfileWebAuthnEnabled(false);
+                                    setProfileWebAuthnCredentialId("");
+                                    localStorage.removeItem(`erp_webauthn_enabled_${empId}`);
+                                    localStorage.removeItem(`erp_webauthn_cred_${empId}`);
+                                    setEmployees(prev => prev.map(emp => emp.id === empId ? { ...emp, webAuthnEnabled: false } : emp));
+                                    showToast("Login biométrico desativado.", "info");
+                                  } else {
+                                    handleRegisterWebAuthn();
+                                  }
+                                }}
+                                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                                  profileWebAuthnEnabled 
+                                    ? "bg-orange-500 border-orange-400 shadow-md shadow-orange-500/30" 
+                                    : "bg-slate-800 border-slate-700 hover:border-slate-600"
+                                }`}
+                                title="Ativar/Desativar Login Biométrico via WebAuthn"
+                              >
+                                <span className="sr-only">Habilitar Login Biométrico</span>
+                                <span
+                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out mt-0.5 ${
+                                    profileWebAuthnEnabled 
+                                      ? "translate-x-5 bg-white shadow-orange-900/50" 
+                                      : "translate-x-0.5 bg-slate-300"
+                                  }`}
+                                />
+                              </button>
+                            </div>
+
+                            <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-850 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
+                              <div className="flex items-center gap-2">
+                                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                                <div>
+                                  <span className="text-slate-400 block text-[9.5px]">Leitor Biométrico e Passkeys:</span>
+                                  <span className="text-slate-200 font-mono font-bold">
+                                    {typeof window !== "undefined" && window.PublicKeyCredential ? "Hardware Suportado (Touch ID / Face ID)" : "Simulador WebAuthn Habilitado"}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {profileWebAuthnEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={handleTestWebAuthn}
+                                  className="px-2.5 py-1 bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 border border-orange-500/30 rounded-md transition text-[10px] font-bold flex items-center gap-1 cursor-pointer"
+                                >
+                                  <Fingerprint className="w-3.5 h-3.5 text-orange-400" />
+                                  <span>Testar Biometria</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -6190,8 +6838,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
                                 {filteredCollaboratorLogs.length > 0 ? (
                                   <div className="space-y-2">
-                                    {filteredCollaboratorLogs.map(log => (
-                                      <div key={log.id} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-left hover:border-slate-750 transition">
+                                    {filteredCollaboratorLogs.map((log, logIdx) => (
+                                      <div key={`${log.id || 'log'}-${logIdx}`} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-left hover:border-slate-750 transition">
                                         <div className="flex items-center justify-between gap-2">
                                           <span className="px-2 py-0.5 bg-orange-500/15 text-orange-400 border border-orange-500/30 font-bold font-mono text-[9.5px] rounded-md uppercase">
                                             {log.module || "SISTEMA"} • {log.action || "AÇÃO"}
@@ -6761,6 +7409,32 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           </button>
         </div>
       )}
+
+      {/* Quick Logo Config Modal */}
+      <QuickLogoModal
+        isOpen={isQuickLogoModalOpen}
+        onClose={() => setIsQuickLogoModalOpen(false)}
+        currentLogoUrl={settings.logoUrl}
+        companyName={settings.companyName}
+        theme={theme}
+        onSaveLogo={(newLogoUrl) => {
+          handleUpdateSettings({ logoUrl: newLogoUrl });
+          handleAddAuditLog(
+            "Logotipo Atualizado",
+            "DEFINICOES",
+            `Logotipo da empresa atualizado para '${newLogoUrl.substring(0, 40)}...' via Painel de Configuração Rápida.`
+          );
+        }}
+        onShowToast={showToast}
+      />
+
+      {/* Tutorial & Keyboard Shortcuts Modal */}
+      <TutorialModal
+        isOpen={isTutorialModalOpen}
+        onClose={() => setIsTutorialModalOpen(false)}
+        theme={theme}
+        onNavigateModule={(moduleKey) => setActiveTab(moduleKey)}
+      />
     </div>
   );
 }

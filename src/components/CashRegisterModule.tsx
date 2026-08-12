@@ -72,9 +72,24 @@ export default function CashRegisterModule({
   // Tabs: "active" (Painel Analítico) | "closures" (Histórico de Fechamento)
   const [activeModuleTab, setActiveModuleTab] = useState<"active" | "closures">("active");
 
+  // Shift management state (Abertura / Fechamento)
+  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("OPEN");
+  const [openingBalance, setOpeningBalance] = useState<number>(5000);
+  const [showOpeningModal, setShowOpeningModal] = useState<boolean>(false);
+  const [openingOperator, setOpeningOperator] = useState(activeUsername);
+  const [openingSupervisor, setOpeningSupervisor] = useState("Inácio Macamo");
+  const [openingObs, setOpeningObs] = useState("");
+
+  // Sangria Rápida modal state
+  const [showSangriaModal, setShowSangriaModal] = useState<boolean>(false);
+  const [sangriaAmount, setSangriaAmount] = useState<number>(0);
+  const [sangriaDestination, setSangriaDestination] = useState("Cofre Central");
+  const [sangriaReason, setSangriaReason] = useState("");
+  const [sangriaSupervisor, setSangriaSupervisor] = useState("Inácio Macamo");
+
   // Local state for registering new cash activity
   const [showAddForm, setShowAddForm] = useState(false);
-  const [entryType, setEntryType] = useState<"REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "INPUT">("REINFORCEMENT");
+  const [entryType, setEntryType] = useState<"REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "INPUT" | "SANGRIA" | "DEVOLUTION">("REINFORCEMENT");
   const [entryAmount, setEntryAmount] = useState<number>(0);
   const [entryReason, setEntryReason] = useState("");
   const [entryResponsible, setEntryResponsible] = useState(activeUsername);
@@ -134,29 +149,41 @@ export default function CashRegisterModule({
     {
       id: "close-1",
       timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // Yesterday
-      reinforcements: 5000,
+      openingValue: 5000,
       cashSales: 132450,
+      digitalSales: 45000,
+      totalSales: 177450,
+      reinforcements: 5000,
       inputs: 1500,
+      sangrias: 10000,
       expenses: 2450,
+      devolutions: 0,
       quebras: 150,
-      theoreticalBalance: 136350,
-      physicalBalance: 136200,
+      theoreticalBalance: 131350,
+      physicalBalance: 131200,
       difference: -150,
+      status: "SHORTAGE",
       operator: "Levi Domingos",
       authorizedSupervisor: "Inácio Macamo",
-      observations: "Diferença pontual por quebra física de moedas."
+      observations: "Diferença pontual por falta de trocos físicos em moedas."
     },
     {
       id: "close-2",
       timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), // Day before yesterday
-      reinforcements: 5000,
+      openingValue: 5000,
       cashSales: 122350,
+      digitalSales: 38000,
+      totalSales: 160350,
+      reinforcements: 5000,
       inputs: 500,
+      sangrias: 20000,
       expenses: 450,
+      devolutions: 0,
       quebras: 0,
-      theoreticalBalance: 127400,
-      physicalBalance: 127400,
+      theoreticalBalance: 112400,
+      physicalBalance: 112400,
       difference: 0,
+      status: "CORRECT",
       operator: "Marta Ubisse",
       authorizedSupervisor: "Inácio Macamo",
       observations: "Balanço 100% correto de fechamento."
@@ -174,7 +201,7 @@ export default function CashRegisterModule({
   });
 
   // Timeline list state for quick filters & search
-  const [filterChip, setFilterChip] = useState<"TODOS" | "ENTRADAS" | "SAIDAS" | "REFORCOS" | "QUEBRAS" | "SANGRIAS">("TODOS");
+  const [filterChip, setFilterChip] = useState<"TODOS" | "ENTRADAS" | "SAIDAS" | "REFORCOS" | "SANGRIAS" | "DESPESAS" | "DEVOLUCOES" | "QUEBRAS">("TODOS");
   const [timelineSearch, setTimelineSearch] = useState("");
 
   // Memoized filtered cashflow entries & transactions
@@ -194,50 +221,123 @@ export default function CashRegisterModule({
     });
   }, [transactions, startDate, endDate]);
 
-  // Calculations for cashier metrics
+  // Breakdown by payment method (Dinheiro, M-Pesa, E-Mola, POS/Cartão, Transferência)
+  const paymentMethodBreakdown = useMemo(() => {
+    let cash = 0;
+    let mpesa = 0;
+    let emola = 0;
+    let card = 0;
+    let transfer = 0;
+
+    filteredTransactions.forEach(t => {
+      const amt = t.grandTotal || 0;
+      if (t.paymentMethod === "CASH") cash += amt;
+      else if (t.paymentMethod === "MPESA") mpesa += amt;
+      else if (t.paymentMethod === "EMOLA") emola += amt;
+      else if (t.paymentMethod === "CARD") card += amt;
+      else if (t.paymentMethod === "TRANSFER") transfer += amt;
+    });
+
+    const totalSales = cash + mpesa + emola + card + transfer;
+
+    return { cash, mpesa, emola, card, transfer, totalSales };
+  }, [filteredTransactions]);
+
+  // Calculations for cashier metrics according to exact formula:
+  // Saldo Teórico = Fundo de Abertura + Vendas em Dinheiro + Reforços + Recebimentos − Sangrias − Despesas − Devoluções
   const cashCalculation = useMemo(() => {
+    // 1. Vendas em Dinheiro Físico
+    const cashSalesAmount = filteredTransactions
+      .filter(t => t.paymentMethod === "CASH" && (t.status as string) !== "CANCELLED")
+      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+
+    // 2. Pagamentos Digitais (Entram no faturamento, mas NÃO no caixa físico)
+    const mpesaSalesAmount = filteredTransactions
+      .filter(t => t.paymentMethod === "MPESA" && (t.status as string) !== "CANCELLED")
+      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+
+    const emolaSalesAmount = filteredTransactions
+      .filter(t => t.paymentMethod === "EMOLA" && (t.status as string) !== "CANCELLED")
+      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+
+    const cardSalesAmount = filteredTransactions
+      .filter(t => t.paymentMethod === "CARD" && (t.status as string) !== "CANCELLED")
+      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+
+    const transferSalesAmount = filteredTransactions
+      .filter(t => t.paymentMethod === "TRANSFER" && (t.status as string) !== "CANCELLED")
+      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+
+    const digitalSalesAmount = mpesaSalesAmount + emolaSalesAmount + cardSalesAmount + transferSalesAmount;
+    
+    // Vendas Totais / Faturamento Total
+    const totalSalesAmount = cashSalesAmount + digitalSalesAmount;
+
+    // 3. Reforços de Caixa
     const reinforcements = filteredCashFlow
       .filter(f => f.type === "REINFORCEMENT")
-      .reduce((s, f) => s + f.amount, 0);
+      .reduce((s, f) => s + (f.amount || 0), 0);
 
+    // 4. Recebimentos / Entradas Diversas
     const inputs = filteredCashFlow
       .filter(f => f.type === "INPUT")
-      .reduce((s, f) => s + f.amount, 0);
+      .reduce((s, f) => s + (f.amount || 0), 0);
 
-    const cashSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "CASH")
-      .reduce((s, t) => s + t.grandTotal, 0);
+    // 5. Sangrias
+    const sangrias = filteredCashFlow
+      .filter(f => f.type === "SANGRIA" || (f.type === "EXPENSE" && ((f.reason || "").toLowerCase().includes("sangria") || (f.reason || "").toLowerCase().includes("retirada"))))
+      .reduce((s, f) => s + (f.amount || 0), 0);
 
+    // 6. Despesas Operacionais em Dinheiro
     const expenses = filteredCashFlow
-      .filter(f => f.type === "EXPENSE")
-      .reduce((s, f) => s + f.amount, 0);
+      .filter(f => f.type === "EXPENSE" && !((f.reason || "").toLowerCase().includes("sangria") || (f.reason || "").toLowerCase().includes("retirada")))
+      .reduce((s, f) => s + (f.amount || 0), 0);
 
+    // 7. Devoluções / Reembolsos a Clientes
+    const devolutions = filteredCashFlow
+      .filter(f => f.type === "DEVOLUTION" || ((f.reason || "").toLowerCase().includes("devolução") || (f.reason || "").toLowerCase().includes("devolucao") || (f.reason || "").toLowerCase().includes("reembolso")))
+      .reduce((s, f) => s + (f.amount || 0), 0);
+
+    // 8. Quebras de Caixa
     const quebras = filteredCashFlow
       .filter(f => f.type === "QUEBRA")
-      .reduce((s, f) => s + f.amount, 0);
+      .reduce((s, f) => s + (f.amount || 0), 0);
 
-    // Initial base value assumed (e.g. 5,000 MT opening + reinforcements)
-    const openingValue = 5000;
-    const totalEntradas = reinforcements + inputs + cashSalesAmount;
-    const totalSaidas = expenses;
-    const theoreticalTotal = openingValue + totalEntradas - totalSaidas - quebras;
+    // 9. Fundo de Abertura (Trocos base - contabilizado apenas uma vez, NÃO é faturamento nem venda)
+    const openingValue = shiftStatus === "OPEN" ? openingBalance : 0;
+
+    // 10. Totais de Entradas e Saídas em Dinheiro
+    const totalEntradas = cashSalesAmount + reinforcements + inputs;
+    const totalSaidas = sangrias + expenses + devolutions;
+
+    // FORMULA OFICIAL
+    // Saldo Teórico = Fundo de Abertura + Vendas em Dinheiro + Reforços + Recebimentos − Sangrias − Despesas − Devoluções
+    const theoreticalTotal = openingValue + cashSalesAmount + reinforcements + inputs - sangrias - expenses - devolutions - quebras;
 
     // Active Movements Count
-    const movementsCount = filteredTransactions.filter(t => t.paymentMethod === "CASH").length + filteredCashFlow.length;
+    const movementsCount = filteredTransactions.length + filteredCashFlow.length;
 
     return {
       openingValue,
+      cashSalesAmount,
+      mpesaSalesAmount,
+      emolaSalesAmount,
+      cardSalesAmount,
+      transferSalesAmount,
+      digitalSalesAmount,
+      totalSalesAmount,
       reinforcements,
       inputs,
-      cashSalesAmount,
+      sangrias,
       expenses,
+      devolutions,
       quebras,
-      theoreticalTotal,
       totalEntradas,
       totalSaidas,
+      theoreticalTotal,
       movementsCount
     };
-  }, [filteredCashFlow, filteredTransactions]);
+  }, [filteredCashFlow, filteredTransactions, openingBalance, shiftStatus]);
 
   // Active Discrepancy Status
   const lastDiscrepancy = useMemo(() => {
@@ -246,6 +346,13 @@ export default function CashRegisterModule({
   }, [closuresHistory]);
 
   const registerStateBadge = useMemo(() => {
+    if (shiftStatus === "CLOSED") {
+      return {
+        label: "Turno Encerrado (Caixa Fechado)",
+        color: "bg-slate-100 text-slate-700 border border-slate-300 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700",
+        bullet: "🔒"
+      };
+    }
     if (lastDiscrepancy !== 0) {
       return {
         label: "Caixa com Divergência",
@@ -256,46 +363,49 @@ export default function CashRegisterModule({
     const totalCurrentCash = cashCalculation.theoreticalTotal;
     if (totalCurrentCash > 15000) {
       return {
-        label: "Excesso de Caixa",
+        label: "Excesso de Caixa (Recomendado Sangria)",
         color: "bg-amber-50 text-amber-650 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/40",
         bullet: "⚠️"
       };
     }
     return {
-      label: "Caixa Aberto & Equilibrado",
+      label: "Turno Ativo & Equilibrado",
       color: "bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/40",
       bullet: "🟢"
     };
-  }, [lastDiscrepancy, cashCalculation.theoreticalTotal]);
+  }, [shiftStatus, lastDiscrepancy, cashCalculation.theoreticalTotal]);
 
   // Compile unified chronology timeline (Item 13)
   const unifiedTimeline = useMemo(() => {
     const items: any[] = [];
 
-    // Add cash transactions (sales)
+    // Add all transactions (sales)
     filteredTransactions.forEach(t => {
-      if (t.paymentMethod === "CASH") {
-        items.push({
-          id: `tx-${t.id}`,
-          timestamp: t.timestamp,
-          type: "SALE",
-          amount: t.grandTotal,
-          reason: `Venda Comercial #${t.invoiceNumber}`,
-          responsibleUser: t.cashierName,
-          supplier: t.customerName || "Consumidor Final",
-          isInput: true,
-          badgeColor: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-900/30",
-          iconText: "🛒"
-        });
-      }
+      const isCash = t.paymentMethod === "CASH";
+      items.push({
+        id: `tx-${t.id}`,
+        timestamp: t.timestamp,
+        type: isCash ? "SALE" : "DIGITAL_SALE",
+        paymentMethod: t.paymentMethod,
+        amount: t.grandTotal,
+        reason: isCash ? `Venda Dinheiro #${t.invoiceNumber}` : `Venda Digital (${t.paymentMethod}) #${t.invoiceNumber}`,
+        responsibleUser: t.cashierName || activeUsername,
+        supplier: t.customerName || "Consumidor Final",
+        isInput: true,
+        badgeColor: isCash 
+          ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-900/30"
+          : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:border-blue-900/30",
+        iconText: isCash ? "💵" : "📲"
+      });
     });
 
     // Add cashflow entries
     filteredCashFlow.forEach(f => {
       const reasonStr = f.reason || "";
       const isInput = f.type === "REINFORCEMENT" || f.type === "INPUT";
-      const isSangria = f.type === "EXPENSE" && (reasonStr.toLowerCase().includes("sangria") || reasonStr.toLowerCase().includes("retirada"));
-      
+      const isSangria = f.type === "SANGRIA" || (f.type === "EXPENSE" && (reasonStr.toLowerCase().includes("sangria") || reasonStr.toLowerCase().includes("retirada")));
+      const isDevolution = f.type === "DEVOLUTION" || reasonStr.toLowerCase().includes("devolução") || reasonStr.toLowerCase().includes("devolucao") || reasonStr.toLowerCase().includes("reembolso");
+
       let badgeColor = "";
       let iconText = "";
 
@@ -306,8 +416,11 @@ export default function CashRegisterModule({
         badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-900/30";
         iconText = "💰";
       } else if (isSangria) {
+        badgeColor = "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/25 dark:text-amber-400 dark:border-amber-900/30";
+        iconText = "⚡";
+      } else if (isDevolution) {
         badgeColor = "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/25 dark:text-orange-400 dark:border-orange-900/30";
-        iconText = "💸";
+        iconText = "🔄";
       } else if (f.type === "EXPENSE") {
         badgeColor = "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/25 dark:text-rose-400 dark:border-rose-900/30";
         iconText = "❌";
@@ -319,12 +432,12 @@ export default function CashRegisterModule({
       items.push({
         id: f.id,
         timestamp: f.timestamp,
-        type: f.type,
+        type: isSangria ? "SANGRIA" : isDevolution ? "DEVOLUTION" : f.type,
         amount: f.amount,
         reason: reasonStr,
         responsibleUser: f.responsibleUser,
         supplier: reasonStr.toLowerCase().includes("papel") ? "Papelaria Central" : 
-                  reasonStr.toLowerCase().includes("limpeza") ? "Serviços Limpeza" : "Cofre Central",
+                  reasonStr.toLowerCase().includes("limpeza") ? "Serviços Limpeza" : "Boca de Caixa",
         isInput,
         badgeColor,
         iconText
@@ -334,7 +447,7 @@ export default function CashRegisterModule({
     // Sort descending chronologically
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
-  }, [filteredTransactions, filteredCashFlow]);
+  }, [filteredTransactions, filteredCashFlow, activeUsername]);
 
   // Filtered timeline items based on search and chip selector
   const filteredTimeline = useMemo(() => {
@@ -355,13 +468,17 @@ export default function CashRegisterModule({
     if (filterChip === "ENTRADAS") {
       result = result.filter(item => item.isInput);
     } else if (filterChip === "SAIDAS") {
-      result = result.filter(item => !item.isInput && item.type === "EXPENSE" && !(item.reason || "").toLowerCase().includes("sangria"));
+      result = result.filter(item => !item.isInput);
     } else if (filterChip === "REFORCOS") {
       result = result.filter(item => item.type === "REINFORCEMENT");
+    } else if (filterChip === "SANGRIAS") {
+      result = result.filter(item => item.type === "SANGRIA" || (item.reason || "").toLowerCase().includes("sangria"));
+    } else if (filterChip === "DESPESAS") {
+      result = result.filter(item => item.type === "EXPENSE");
+    } else if (filterChip === "DEVOLUCOES") {
+      result = result.filter(item => item.type === "DEVOLUTION" || (item.reason || "").toLowerCase().includes("devolução"));
     } else if (filterChip === "QUEBRAS") {
       result = result.filter(item => item.type === "QUEBRA");
-    } else if (filterChip === "SANGRIAS") {
-      result = result.filter(item => (item.reason || "").toLowerCase().includes("sangria") || (item.reason || "").toLowerCase().includes("retirada"));
     }
 
     return result;
@@ -444,21 +561,183 @@ export default function CashRegisterModule({
     })).sort((a, b) => b.value - a.value);
   }, [filteredTransactions, filteredCashFlow]);
 
-  // Active alerts list (Item 16)
+  // Active alerts list for quebras, excessos, sangrias elevadas e limite de caixa
   const activeAlerts = useMemo(() => {
-    const alerts: string[] = [];
+    const alerts: { type: "QUEBRA" | "EXCESSO" | "SANGRIA_ELEVADA" | "DESPESA_ELEVADA" | "TURNO"; title: string; message: string; color: string; icon: string }[] = [];
+
+    // 1. Alerta de Quebra / Excesso do último fechamento
+    if (lastDiscrepancy < 0) {
+      alerts.push({
+        type: "QUEBRA",
+        title: "🔴 ALERTA DE QUEBRA DE CAIXA REGISTADA",
+        message: `Identificada falta de dinheiro de ${Math.abs(lastDiscrepancy).toLocaleString()} ${currency} no último fechamento. Requer homologação do supervisor.`,
+        color: "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-900/40 dark:text-rose-300",
+        icon: "🔴"
+      });
+    } else if (lastDiscrepancy > 0) {
+      alerts.push({
+        type: "EXCESSO",
+        title: "🟠 ALERTA DE EXCESSO DE CAIXA REGISTADO",
+        message: `Identificado excesso de dinheiro de +${lastDiscrepancy.toLocaleString()} ${currency} acima do saldo teórico no último fechamento.`,
+        color: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300",
+        icon: "🟠"
+      });
+    }
+
+    // 2. Alerta de Excesso de Dinheiro Físico na Gaveta (Sangria Recomendada)
     if (cashCalculation.theoreticalTotal > 15000) {
-      alerts.push("Sangria recomendada! O saldo em boca de caixa excedeu o limite máximo operacional de 15.000 MT.");
+      alerts.push({
+        type: "SANGRIA_ELEVADA",
+        title: "⚡ SANGRIA DE SEGURANÇA RECOMENDADA",
+        message: `O saldo físico em gaveta (${cashCalculation.theoreticalTotal.toLocaleString()} ${currency}) ultrapassou o limite operacional de 15.000 ${currency}. Realize uma Sangria Rápida para o cofre.`,
+        color: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300",
+        icon: "⚡"
+      });
     }
-    if (lastDiscrepancy !== 0) {
-      alerts.push(`Diferença ativa! O último fechamento de turno acusou um desvio de ${lastDiscrepancy} MT.`);
+
+    // 3. Alerta de Despesas Elevadas em Dinheiro
+    if (cashCalculation.expenses > 3000) {
+      alerts.push({
+        type: "DESPESA_ELEVADA",
+        title: "⚠️ DESPESAS ELEVADAS EM DINHEIRO",
+        message: `Total de despesas operacionais pagas em dinheiro atingiu ${cashCalculation.expenses.toLocaleString()} ${currency}. Verifique os recibos/comprovantes.`,
+        color: "bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-950/30 dark:border-purple-900/40 dark:text-purple-300",
+        icon: "⚠️"
+      });
     }
-    const currentHr = new Date().getHours();
-    if (currentHr >= 18) {
-      alerts.push("Fechamento atrasado! O turno de atendimento está ativo há mais de 8 horas e deve ser fechado.");
+
+    // 4. Quebras Registradas no Turno Atual
+    if (cashCalculation.quebras > 0) {
+      alerts.push({
+        type: "QUEBRA",
+        title: "🔴 QUEBRAS REGISTADAS NO TURNO ATUAL",
+        message: `Foram registados ${cashCalculation.quebras.toLocaleString()} ${currency} em quebras/perdas no turno ativo.`,
+        color: "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-900/40 dark:text-rose-300",
+        icon: "🔴"
+      });
     }
+
     return alerts;
-  }, [cashCalculation, lastDiscrepancy]);
+  }, [cashCalculation, lastDiscrepancy, currency]);
+
+  // Handle Open Shift Action
+  const handleOpenShiftSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setShiftStatus("OPEN");
+    setShowOpeningModal(false);
+
+    onAddAuditLog(
+      "Abertura Turno Caixa",
+      "CAIXA",
+      `Caixa aberto por ${openingOperator || activeUsername} com Fundo de Maneio de ${openingBalance} ${currency}. Supervisor responsável: ${openingSupervisor}.`
+    );
+  };
+
+  // Handle Quick Sangria Action
+  const handlePerformQuickSangria = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (sangriaAmount <= 0) {
+      alert("Por favor, introduza um valor positivo para a sangria.");
+      return;
+    }
+
+    const sangriaEntry: CashFlowEntry = {
+      id: `flow-sangria-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: "EXPENSE",
+      amount: sangriaAmount,
+      reason: `Sangria Rápida: Destino [${sangriaDestination}] - ${sangriaReason || "Fundo excedente recolhido ao cofre"}`,
+      responsibleUser: activeUsername
+    };
+
+    onAddCashFlowEntry(sangriaEntry);
+    onAddAuditLog(
+      "Sangria de Caixa",
+      "CAIXA",
+      `Sangria Rápida de ${sangriaAmount} ${currency} efetuada por ${activeUsername}. Destino: ${sangriaDestination}. Autorizado por: ${sangriaSupervisor}`
+    );
+
+    setShowSangriaModal(false);
+    setSangriaAmount(0);
+    setSangriaReason("");
+  };
+
+  // Print 80mm Thermal Receipt
+  const handlePrintThermalReceipt = (closure: any) => {
+    const printWindow = window.open("", "_blank", "width=380,height=600");
+    if (!printWindow) return;
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Talão de Fecho - 80mm</title>
+          <style>
+            body {
+              font-family: 'Courier New', Courier, monospace;
+              width: 72mm;
+              margin: 0 auto;
+              padding: 5px;
+              font-size: 11px;
+              color: #000;
+            }
+            .text-center { text-align: center; }
+            .bold { font-weight: bold; }
+            .line { border-top: 1px dashed #000; margin: 6px 0; }
+            .flex { display: flex; justify-content: space-between; }
+            .title { font-size: 13px; font-weight: bold; text-transform: uppercase; }
+          </style>
+        </head>
+        <body>
+          <div class="text-center">
+            <div class="title">${settings?.companyName || "OST COMÉRCIO CENTRAL"}</div>
+            <div>NUIT: ${settings?.companyNuit || "400293112"}</div>
+            <div>${settings?.storeAddress || "Av. Marginal, Maputo"}</div>
+            <div class="line"></div>
+            <div class="bold">COMPROVANTE DE FECHO DE CAIXA</div>
+            <div>ID: ${closure.id}</div>
+            <div>${new Date(closure.timestamp).toLocaleString("pt-MZ")}</div>
+          </div>
+
+          <div class="line"></div>
+          <div>OPERADOR: ${closure.operator || activeUsername}</div>
+          <div>SUPERVISOR: ${closure.authorizedSupervisor || "Inácio Macamo"}</div>
+          
+          <div class="line"></div>
+          <div class="flex"><span>FUNDO ABERTURA:</span><span class="bold">${(closure.reinforcements || 0).toLocaleString()} MT</span></div>
+          <div class="flex"><span>VENDAS EM DINHEIRO:</span><span class="bold">+${(closure.cashSales || 0).toLocaleString()} MT</span></div>
+          <div class="flex"><span>OUTRAS ENTRADAS:</span><span class="bold">+${(closure.inputs || 0).toLocaleString()} MT</span></div>
+          <div class="flex"><span>SAÍDAS / SANGRIAS:</span><span class="bold">-${((closure.expenses || 0) + (closure.quebras || 0)).toLocaleString()} MT</span></div>
+          
+          <div class="line"></div>
+          <div class="flex bold"><span>SALDO TEÓRICO:</span><span>${(closure.theoreticalBalance || 0).toLocaleString()} MT</span></div>
+          <div class="flex bold"><span>SALDO FÍSICO:</span><span>${(closure.physicalBalance || 0).toLocaleString()} MT</span></div>
+          <div class="flex bold"><span>DIFERENÇA:</span><span>${(closure.difference || 0).toLocaleString()} MT</span></div>
+
+          <div class="line"></div>
+          <div style="font-size: 10px; font-style: italic;">Obs: ${closure.observations || "Sem observações."}</div>
+
+          <div style="margin-top: 25px;" class="text-center">
+            __________________________<br/>
+            Assinatura do Operador
+          </div>
+          <div style="margin-top: 20px;" class="text-center">
+            __________________________<br/>
+            Visto do Supervisor
+          </div>
+          <div class="line"></div>
+          <div class="text-center" style="font-size: 9px; margin-top: 8px;">OST VENDAS - Sistema Comercial Certificado</div>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
+  };
 
   // Create individual cash-flow launching
   const handleSubmitEntry = (e: React.FormEvent) => {
@@ -523,6 +802,7 @@ export default function CashRegisterModule({
     };
 
     setClosuresHistory(prev => [newClosure, ...prev]);
+    setShiftStatus("CLOSED");
 
     onAddAuditLog(
       "Fechamento Turno Caixa",
@@ -751,8 +1031,40 @@ export default function CashRegisterModule({
           </p>
         </div>
 
-        {/* Export Buttons bar */}
-        <div className="flex items-center gap-2">
+        {/* Export & Quick Actions Bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setShowSangriaModal(true)}
+            className="px-3 py-1.5 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+            title="Efetuar Sangria Rápida de Segurança"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>⚡ Sangria Rápida</span>
+          </button>
+
+          {shiftStatus === "CLOSED" ? (
+            <button
+              onClick={() => setShowOpeningModal(true)}
+              className="px-3 py-1.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              <span>🔓 Abrir Caixa</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setPhysicalCount(cashCalculation.theoreticalTotal);
+                setIsOpenClosingPanel(true);
+              }}
+              className="px-3 py-1.5 text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              <span>🔒 Fechar Caixa</span>
+            </button>
+          )}
+
+          <div className="h-4 w-[1px] bg-slate-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
+
           <button
             onClick={handleExportPDF}
             className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center gap-1 cursor-pointer dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 transition"
@@ -828,66 +1140,108 @@ export default function CashRegisterModule({
 
       </div>
 
-      {/* KPI Indicators Superior (Item 14 & 15) */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      {/* ACTIVE SYSTEM ALERTS BANNER */}
+      {activeAlerts.length > 0 && (
+        <div className="space-y-2">
+          {activeAlerts.map((alert, idx) => (
+            <div 
+              key={idx} 
+              className={`p-3.5 rounded-2xl border flex items-start justify-between gap-3 shadow-sm ${alert.color}`}
+            >
+              <div className="flex items-start gap-2.5 text-xs">
+                <span className="text-base shrink-0 mt-0.5">{alert.icon}</span>
+                <div>
+                  <h4 className="font-extrabold tracking-tight uppercase text-[11px]">{alert.title}</h4>
+                  <p className="text-xs mt-0.5 opacity-90 leading-relaxed font-medium">{alert.message}</p>
+                </div>
+              </div>
+              {alert.type === "SANGRIA_ELEVADA" && (
+                <button
+                  type="button"
+                  onClick={() => setShowSangriaModal(true)}
+                  className="shrink-0 px-3 py-1.5 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow cursor-pointer transition"
+                >
+                  Fazer Sangria
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* KPI INDICATORS SUPERIOR - SEPARATED METRICS */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         
-        {/* Caixa Atual */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Caixa Atual</span>
-          <h4 className="text-sm font-black font-mono text-slate-800 dark:text-zinc-200 mt-1">
+        {/* Saldo Teórico Físico */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Saldo Teórico</span>
+          <h4 className="text-sm font-black font-mono text-orange-600 dark:text-orange-400 mt-1">
             {cashCalculation.theoreticalTotal.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          
-          {/* Comparison pill (Item 15) */}
-          <div className="mt-2 text-[9px] text-slate-450 flex items-center gap-1 font-mono">
-            <span className="text-emerald-500 font-bold">↑ +11%</span>
-            <span>vs ontem</span>
-          </div>
+          <span className="text-[9px] text-slate-400 block mt-1">Dinheiro em gaveta</span>
         </div>
 
-        {/* Entradas */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Entradas</span>
+        {/* Vendas Totais / Faturamento */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Totais</span>
           <h4 className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
-            {cashCalculation.totalEntradas.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
+            {cashCalculation.totalSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          <span className="text-[9px] text-slate-400 block mt-2">Vendas + Reforços</span>
+          <span className="text-[9px] text-slate-400 block mt-1">Faturamento total</span>
         </div>
 
-        {/* Saídas */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Saídas</span>
-          <h4 className="text-sm font-black font-mono text-rose-600 dark:text-rose-400 mt-1">
-            {cashCalculation.totalSaidas.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
+        {/* Vendas em Dinheiro */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Dinheiro</span>
+          <h4 className="text-sm font-black font-mono text-emerald-700 dark:text-emerald-300 mt-1">
+            {cashCalculation.cashSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          <span className="text-[9px] text-slate-400 block mt-2">Despesas e Sangrias</span>
+          <span className="text-[9px] text-slate-400 block mt-1">Entra na gaveta</span>
         </div>
 
-        {/* Trocos / Abertura */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Trocos / Abertura</span>
+        {/* Pagamentos Digitais */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Digitais</span>
           <h4 className="text-sm font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
+            {cashCalculation.digitalSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
+          </h4>
+          <span className="text-[9px] text-blue-500/80 block mt-1">M-Pesa/e-Mola/POS</span>
+        </div>
+
+        {/* Fundo de Abertura */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Fundo Abertura</span>
+          <h4 className="text-sm font-black font-mono text-slate-800 dark:text-zinc-200 mt-1">
             {cashCalculation.openingValue.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          <span className="text-[9px] text-slate-400 block mt-2">Fundo Base Inicial</span>
+          <span className="text-[9px] text-slate-400 block mt-1">Trocos (1x)</span>
         </div>
 
-        {/* Quebras */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Quebras</span>
-          <h4 className="text-sm font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
-            {cashCalculation.quebras.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
+        {/* Reforços & Recebimentos */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Reforços/Entradas</span>
+          <h4 className="text-sm font-black font-mono text-teal-600 dark:text-teal-400 mt-1">
+            +{(cashCalculation.reinforcements + cashCalculation.inputs).toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          <span className="text-[9px] text-slate-400 block mt-2">Desvios de Gaveta</span>
+          <span className="text-[9px] text-slate-400 block mt-1">Ref: {cashCalculation.reinforcements} MT</span>
         </div>
 
-        {/* Movimentos (Qtd) */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 dark:bg-zinc-900 dark:border-zinc-800">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block">Movimentos</span>
-          <h4 className="text-sm font-black font-mono text-slate-800 dark:text-zinc-200 mt-1">
-            {cashCalculation.movementsCount} <span className="text-[10px] font-normal">reg.</span>
+        {/* Sangrias */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Sangrias</span>
+          <h4 className="text-sm font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
+            -{cashCalculation.sangrias.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
           </h4>
-          <span className="text-[9px] text-slate-400 block mt-2">No período filtrado</span>
+          <span className="text-[9px] text-slate-400 block mt-1">Retiradas para cofre</span>
+        </div>
+
+        {/* Despesas & Devoluções */}
+        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
+          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Despesas/Devol.</span>
+          <h4 className="text-sm font-black font-mono text-rose-600 dark:text-rose-400 mt-1">
+            -{(cashCalculation.expenses + cashCalculation.devolutions).toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
+          </h4>
+          <span className="text-[9px] text-slate-400 block mt-1">Desp: {cashCalculation.expenses} | Dev: {cashCalculation.devolutions}</span>
         </div>
 
       </div>
@@ -901,43 +1255,55 @@ export default function CashRegisterModule({
             {/* LEFT 2 COLUMNS: Main detail cards, Hour graph, Timeline */}
             <div className="lg:col-span-2 space-y-6">
               
-              {/* O Cartão Principal de Boca de Caixa (Item 1 & Item 2) */}
+              {/* CARTÃO PRINCIPAL BOCA DE CAIXA */}
               <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
                 
-                <div className="flex justify-between items-start border-b border-slate-800 pb-4 mb-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-800 pb-4 mb-4 gap-4">
                   <div>
-                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-mono">Boca de Caixa</span>
-                    <h2 className="text-3xl font-extrabold font-mono text-orange-400 mt-1">
+                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-mono block">Boca de Caixa (Dinheiro Físico Esperado)</span>
+                    <h2 className="text-3xl font-black font-mono text-orange-400 mt-1">
                       {cashCalculation.theoreticalTotal.toLocaleString()} <span className="text-sm font-mono font-medium text-slate-300">{currency}</span>
                     </h2>
+                    <p className="text-[11px] text-slate-400 mt-1 font-sans leading-relaxed">
+                      Fundo Abertura ({cashCalculation.openingValue.toLocaleString()}) + Vendas Dinheiro ({cashCalculation.cashSalesAmount.toLocaleString()}) + Reforços ({cashCalculation.reinforcements.toLocaleString()}) + Recebimentos ({cashCalculation.inputs.toLocaleString()}) − Sangrias ({cashCalculation.sangrias.toLocaleString()}) − Despesas ({cashCalculation.expenses.toLocaleString()}) − Devoluções ({cashCalculation.devolutions.toLocaleString()})
+                    </p>
                   </div>
-                  <div className="text-right text-xs text-slate-400 font-mono space-y-0.5">
+                  <div className="text-right text-xs text-slate-400 font-mono space-y-0.5 shrink-0">
                     <p><span className="text-slate-500">Operador:</span> {activeUsername}</p>
-                    <p><span className="text-slate-500">Caixa:</span> Caixa Principal 01</p>
+                    <p><span className="text-slate-500">Estado:</span> <span className={shiftStatus === "OPEN" ? "text-emerald-400 font-bold" : "text-slate-400 font-bold"}>{shiftStatus === "OPEN" ? "Turno Aberto 🟢" : "Caixa Fechado 🔒"}</span></p>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 font-mono text-xs leading-relaxed">
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
-                    <p className="text-[10px] text-slate-450 uppercase font-sans font-bold">Abertura</p>
-                    <p className="font-bold text-slate-200 mt-1">{cashCalculation.openingValue.toLocaleString()} MT</p>
+                {/* Formula Breakdown Badges */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 font-mono text-xs leading-relaxed">
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-slate-400 uppercase font-sans font-bold">1. Abertura</p>
+                    <p className="font-bold text-slate-200 mt-0.5">{cashCalculation.openingValue.toLocaleString()} MT</p>
                   </div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
-                    <p className="text-[10px] text-emerald-450 uppercase font-sans font-bold">Entradas</p>
-                    <p className="font-bold text-emerald-400 mt-1">+{cashCalculation.totalEntradas.toLocaleString()} MT</p>
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-emerald-400 uppercase font-sans font-bold">2. Dinheiro</p>
+                    <p className="font-bold text-emerald-400 mt-0.5">+{cashCalculation.cashSalesAmount.toLocaleString()} MT</p>
                   </div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
-                    <p className="text-[10px] text-rose-450 uppercase font-sans font-bold">Saídas</p>
-                    <p className="font-bold text-rose-400 mt-1">-{cashCalculation.totalSaidas.toLocaleString()} MT</p>
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-blue-400 uppercase font-sans font-bold">3. Reforços</p>
+                    <p className="font-bold text-blue-400 mt-0.5">+{cashCalculation.reinforcements.toLocaleString()} MT</p>
                   </div>
-                  <div className="bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60">
-                    <p className="text-[10px] text-purple-450 uppercase font-sans font-bold">Quebras</p>
-                    <p className="font-bold text-purple-400 mt-1">-{cashCalculation.quebras.toLocaleString()} MT</p>
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-teal-400 uppercase font-sans font-bold">4. Recebimentos</p>
+                    <p className="font-bold text-teal-400 mt-0.5">+{cashCalculation.inputs.toLocaleString()} MT</p>
                   </div>
-                  <div className="bg-orange-950/20 p-2.5 rounded-xl border border-orange-900/30 col-span-2 sm:col-span-1">
-                    <p className="text-[10px] text-orange-400 uppercase font-sans font-bold">Saldo Final</p>
-                    <p className="font-bold text-orange-400 mt-1">{cashCalculation.theoreticalTotal.toLocaleString()} MT</p>
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-amber-400 uppercase font-sans font-bold">5. Sangrias</p>
+                    <p className="font-bold text-amber-400 mt-0.5">-{cashCalculation.sangrias.toLocaleString()} MT</p>
+                  </div>
+                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                    <p className="text-[9px] text-rose-400 uppercase font-sans font-bold">6. Desp. / Dev.</p>
+                    <p className="font-bold text-rose-400 mt-0.5">-{(cashCalculation.expenses + cashCalculation.devolutions).toLocaleString()} MT</p>
+                  </div>
+                  <div className="bg-orange-950/50 p-2.5 rounded-xl border border-orange-900/60 col-span-2 sm:col-span-1">
+                    <p className="text-[9px] text-orange-400 uppercase font-sans font-bold">7. Saldo Teórico</p>
+                    <p className="font-bold text-orange-400 mt-0.5">{cashCalculation.theoreticalTotal.toLocaleString()} MT</p>
                   </div>
                 </div>
 
@@ -988,9 +1354,10 @@ export default function CashRegisterModule({
 
                 {/* Quick Filters row (Item 6) */}
                 <div className="flex flex-wrap gap-1.5 mb-4 border-b border-slate-100 pb-3 dark:border-zinc-850">
-                  {(["TODOS", "ENTRADAS", "SAIDAS", "REFORCOS", "QUEBRAS", "SANGRIAS"] as const).map(chip => (
+                  {(["TODOS", "ENTRADAS", "SAIDAS", "REFORCOS", "SANGRIAS", "DESPESAS", "DEVOLUCOES", "QUEBRAS"] as const).map(chip => (
                     <button
                       key={chip}
+                      type="button"
                       onClick={() => setFilterChip(chip)}
                       className={`px-3 py-1 text-[10px] font-bold rounded-lg cursor-pointer transition ${
                         filterChip === chip
@@ -1072,8 +1439,115 @@ export default function CashRegisterModule({
 
             </div>
 
-            {/* RIGHT COLUMN: Entry launcher form, Small denomination counter, Operator lists, alerts */}
+            {/* RIGHT COLUMN: Multimeios card, Entry launcher form, Small denomination counter, Operator lists, alerts */}
             <div className="space-y-6">
+              
+              {/* Conciliação Multimeios de Pagamento Card */}
+              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-zinc-850">
+                  <div className="flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-orange-500" />
+                    <span className="text-xs font-extrabold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">
+                      Conciliação Multimeios
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold text-slate-400">
+                    Total: {paymentMethodBreakdown.totalSales.toLocaleString()} {currency}
+                  </span>
+                </div>
+
+                <div className="space-y-2.5 text-xs font-mono">
+                  {/* Dinheiro */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
+                        💵 Dinheiro Físico:
+                      </span>
+                      <span className="font-bold text-slate-800 dark:text-zinc-200">
+                        {paymentMethodBreakdown.cash.toLocaleString()} {currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.cash / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* M-Pesa */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
+                        📱 M-Pesa (Vodacom):
+                      </span>
+                      <span className="font-bold text-slate-800 dark:text-zinc-200">
+                        {paymentMethodBreakdown.mpesa.toLocaleString()} {currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-red-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.mpesa / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* E-Mola */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
+                        📲 E-Mola (Movitel):
+                      </span>
+                      <span className="font-bold text-slate-800 dark:text-zinc-200">
+                        {paymentMethodBreakdown.emola.toLocaleString()} {currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-orange-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.emola / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Cartão POS */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
+                        💳 POS / Cartão Bancário:
+                      </span>
+                      <span className="font-bold text-slate-800 dark:text-zinc-200">
+                        {paymentMethodBreakdown.card.toLocaleString()} {currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-blue-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.card / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Transferência */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
+                        🏦 Transferência Bancária:
+                      </span>
+                      <span className="font-bold text-slate-800 dark:text-zinc-200">
+                        {paymentMethodBreakdown.transfer.toLocaleString()} {currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-purple-500 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.transfer / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
               
               {/* Launcher Form Trigger or Box */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
@@ -1286,16 +1760,22 @@ export default function CashRegisterModule({
 
               {/* Important active alerts sidebar list (Item 16) */}
               {activeAlerts.length > 0 && (
-                <div className="bg-rose-50 border border-rose-200 p-5 rounded-2xl dark:bg-rose-950/20 dark:border-rose-900/40 space-y-3">
-                  <div className="flex items-center gap-1.5 text-rose-700 dark:text-rose-450 font-bold text-xs uppercase tracking-wider">
+                <div className="bg-amber-50/80 border border-amber-200/80 p-5 rounded-2xl dark:bg-amber-950/20 dark:border-amber-900/40 space-y-3">
+                  <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-400 font-bold text-xs uppercase tracking-wider">
                     <AlertTriangle className="w-4 h-4" />
-                    Alertas do Painel
+                    Alertas e Auditoria do Caixa
                   </div>
-                  <ul className="space-y-2 text-xs text-rose-600 dark:text-rose-400 leading-relaxed list-disc pl-4">
+                  <div className="space-y-2.5">
                     {activeAlerts.map((alert, idx) => (
-                      <li key={idx}>{alert}</li>
+                      <div key={idx} className="text-xs space-y-0.5">
+                        <span className="font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1">
+                          <span>{alert.icon}</span>
+                          <span>{alert.title}</span>
+                        </span>
+                        <p className="text-[11px] text-slate-600 dark:text-zinc-400 pl-5">{alert.message}</p>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 </div>
               )}
 
@@ -1362,15 +1842,24 @@ export default function CashRegisterModule({
                       <td className="p-3.5 text-slate-500 italic font-medium max-w-[200px] truncate">
                         {hist.observations}
                       </td>
-                      <td className="p-3.5 text-center">
+                      <td className="p-3.5 text-center flex items-center justify-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => handleExportSingleClosurePDF(hist)}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/20 dark:hover:bg-orange-900/30 dark:text-orange-400 rounded-lg flex items-center gap-1 mx-auto transition cursor-pointer"
+                          className="px-2.5 py-1 text-[10px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/20 dark:hover:bg-orange-900/30 dark:text-orange-400 rounded-lg flex items-center gap-1 transition cursor-pointer"
                           title="Exportar Comprovante de Fecho PDF"
                         >
                           <Download className="w-3 h-3" />
                           <span>PDF</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handlePrintThermalReceipt(hist)}
+                          className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          title="Imprimir Talão Térmico 80mm"
+                        >
+                          <Printer className="w-3 h-3" />
+                          <span>Talão</span>
                         </button>
                       </td>
                     </tr>
@@ -1382,6 +1871,192 @@ export default function CashRegisterModule({
 
         </div>
 
+      )}
+
+      {/* ABERTURA DE CAIXA MODAL */}
+      {showOpeningModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-3xl max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            <div className="flex items-center justify-between border-b border-slate-150 pb-3 dark:border-zinc-850">
+              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 dark:text-zinc-100">
+                <Calculator className="w-5 h-5 text-emerald-500" />
+                Abertura de Turno de Caixa
+              </h3>
+              <button 
+                onClick={() => setShowOpeningModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleOpenShiftSubmit} className="space-y-4 text-xs">
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl dark:bg-emerald-950/20 dark:border-emerald-900/40 text-emerald-800 dark:text-emerald-400">
+                <p className="font-bold text-[11px]">Início de Atendimento Comercial</p>
+                <p className="text-[10px] mt-0.5">Informe o Fundo de Maneio de Abertura (Trocos) para habilitar a emissão de vendas em dinheiro.</p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Fundo de Maneio / Trocos ({currency})
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  value={openingBalance}
+                  onChange={(e) => setOpeningBalance(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100 rounded-xl p-3 text-sm font-mono font-black outline-none focus:border-emerald-500"
+                  placeholder="Ex: 5000"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Operador do Caixa
+                </label>
+                <input
+                  type="text"
+                  value={openingOperator}
+                  onChange={(e) => setOpeningOperator(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Supervisor Responsável
+                </label>
+                <select
+                  value={openingSupervisor}
+                  onChange={(e) => setOpeningSupervisor(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
+                >
+                  <option value="Inácio Macamo">Inácio Macamo</option>
+                  <option value="Levi Domingos">Levi Domingos</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-850">
+                <button
+                  type="button"
+                  onClick={() => setShowOpeningModal(false)}
+                  className="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer dark:bg-zinc-800 dark:text-zinc-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-md"
+                >
+                  Confirmar Abertura
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SANGRIA RÁPIDA MODAL */}
+      {showSangriaModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-3xl max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            <div className="flex items-center justify-between border-b border-slate-150 pb-3 dark:border-zinc-850">
+              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 dark:text-zinc-100">
+                <ShieldCheck className="w-5 h-5 text-amber-500" />
+                Sangria Rápida de Segurança
+              </h3>
+              <button 
+                onClick={() => setShowSangriaModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handlePerformQuickSangria} className="space-y-4 text-xs">
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl dark:bg-amber-950/20 dark:border-amber-900/40 text-amber-800 dark:text-amber-400">
+                <p className="font-bold text-[11px]">Recolha de Excesso de Trocos / Valores</p>
+                <p className="text-[10px] mt-0.5">Saldo Atual em Gaveta: <strong>{cashCalculation.theoreticalTotal.toLocaleString()} {currency}</strong></p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Valor a Retirar ({currency})
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  max={cashCalculation.theoreticalTotal}
+                  value={sangriaAmount || ""}
+                  onChange={(e) => setSangriaAmount(Number(e.target.value))}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100 rounded-xl p-3 text-sm font-mono font-black outline-none focus:border-amber-500"
+                  placeholder="Ex: 10000"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Destino dos Valores
+                </label>
+                <select
+                  value={sangriaDestination}
+                  onChange={(e) => setSangriaDestination(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
+                >
+                  <option value="Cofre Central">Cofre Central da Loja</option>
+                  <option value="Depósito Bancário">Depósito Bancário Directo</option>
+                  <option value="Pagamento Urgente Fornecedor">Pagamento Urgente a Fornecedor</option>
+                  <option value="Transferência para Gerência">Transferência para Gerência</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Motivo / Observação
+                </label>
+                <input
+                  type="text"
+                  value={sangriaReason}
+                  onChange={(e) => setSangriaReason(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold"
+                  placeholder="Ex: Excesso de notas de 1000 MT na gaveta"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
+                  Supervisor Autorizador
+                </label>
+                <select
+                  value={sangriaSupervisor}
+                  onChange={(e) => setSangriaSupervisor(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
+                >
+                  <option value="Inácio Macamo">Inácio Macamo</option>
+                  <option value="Levi Domingos">Levi Domingos</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-850">
+                <button
+                  type="button"
+                  onClick={() => setShowSangriaModal(false)}
+                  className="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer dark:bg-zinc-800 dark:text-zinc-300"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-md"
+                >
+                  Emitir Sangria
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
       {/* SHIFT CLOSE WORKFLOW OVERLAY POPUP (Item 11) */}

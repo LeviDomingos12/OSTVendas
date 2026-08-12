@@ -1941,48 +1941,210 @@ export default function ReportsModule({
     }
   };
 
+  const handleExportActivityLogsPDF = async () => {
+    setIsExporting(true);
+    setExportMessage("");
+    if (onShowToast) {
+      onShowToast("Gerando Relatório de Auditoria e Atividade com Logotipo...", "info", "Aguarde");
+    }
+
+    setTimeout(async () => {
+      try {
+        const { jsPDF } = await import("jspdf");
+        const { default: autoTable } = await import("jspdf-autotable");
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: "a4"
+        });
+
+        const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
+        const rgbArray = activeTheme.rgb.split(",").map(Number);
+
+        // Header band
+        doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+        doc.rect(0, 0, 210, 8, "F");
+
+        // Company Logo
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 12, 30, 30);
+        }
+
+        // Header Section
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`NUIT: ${settings.companyNuit || "400293112"} | Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 28);
+        doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"} | E-mail: ${settings.smtpUser || "suporte@ost.co.mz"}`, 14, 33);
+
+        doc.setDrawColor(226, 232, 240);
+        doc.line(14, 38, 196, 38);
+
+        // Title
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text("RELATÓRIO DE AUDITORIA E ATIVIDADES DO SISTEMA", 14, 46);
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(71, 85, 105);
+        doc.text(`Período de Análise: ${new Date(startDate).toLocaleDateString()} até ${new Date(endDate).toLocaleDateString()}`, 14, 52);
+        doc.text(`Emitido em: ${new Date().toLocaleString()} | Total de Registros: ${filteredLogs.length}`, 14, 57);
+
+        // KPI Summary Table
+        const kpiHead = [["MÉTRICA DE AUDITORIA", "VALOR / DETALHE"]];
+        const kpiBody = [
+          ["Total de Ações Registradas", `${filteredLogs.length} ações`],
+          ["Módulo Mais Ativo", activityAnalytics.mostActiveModule || "N/A"],
+          ["Operador Mais Ativo", `${activityAnalytics.mostActiveUser || "N/D"} (${activityAnalytics.mostActiveUserLogsCount} ações)`],
+          ["Pico de Atividade Registrado", `${activityAnalytics.peakActivityValue} ações em ${activityAnalytics.peakActivityDate || "N/D"}`]
+        ];
+
+        autoTable(doc, {
+          startY: 64,
+          head: kpiHead,
+          body: kpiBody,
+          theme: "grid",
+          headStyles: { fillColor: [rgbArray[0], rgbArray[1], rgbArray[2]] as [number, number, number], textColor: [255, 255, 255] },
+          styles: { fontSize: 8.5, cellPadding: 3 },
+          columnStyles: {
+            1: { fontStyle: "bold" }
+          }
+        });
+
+        let nextY = (doc as any).lastAutoTable.finalY + 10;
+
+        doc.setFontSize(10);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text("REGISTRO OPERACIONAL DE AUDITORIA", 14, nextY);
+
+        const logsHead = [["DATA/HORA", "OPERADOR", "MÓDULO", "AÇÃO", "DETALHES"]];
+        const logsBody = [...filteredLogs].reverse().slice(0, 40).map(log => [
+          new Date(log.timestamp).toLocaleString("pt-MZ"),
+          log.user || "Sistema",
+          log.module,
+          log.action,
+          log.details || "-"
+        ]);
+
+        autoTable(doc, {
+          startY: nextY + 4,
+          head: logsHead,
+          body: logsBody,
+          theme: "striped",
+          headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255] },
+          styles: { fontSize: 7.5, cellPadding: 2 },
+          columnStyles: {
+            0: { cellWidth: 35 },
+            1: { fontStyle: "bold", cellWidth: 30 },
+            2: { cellWidth: 25 },
+            3: { fontStyle: "bold", cellWidth: 35 }
+          }
+        });
+
+        doc.save(`Relatorio_Auditoria_${startDate}_a_${endDate}.pdf`);
+        setExportMessage(`Relatório de Auditoria PDF compilado com sucesso!`);
+        onAddAuditLog("Exportar Relatório Auditoria PDF", "RELATÓRIOS", `Relatório de auditoria exportado com ${filteredLogs.length} logs.`);
+
+        if (onShowToast) {
+          onShowToast("Relatório de Auditoria em PDF gerado com sucesso!", "success", "PDF Exportado");
+        }
+      } catch (err: any) {
+        console.error("Erro ao gerar PDF de Auditoria:", err);
+        setExportMessage(`Erro ao gerar PDF: ${err.message}`);
+        if (onShowToast) {
+          onShowToast(`Erro ao gerar PDF: ${err.message}`, "error", "Falha de Exportação");
+        }
+      } finally {
+        setIsExporting(false);
+      }
+    }, 800);
+  };
+
+  const handleExportCurrentViewPDF = async () => {
+    if (activeSubTab === "iva") {
+      await handleExportIvaPdf();
+    } else if (activeSubTab === "activity") {
+      await handleExportActivityLogsPDF();
+    } else {
+      if (reportType === "VAT") {
+        await handleExportIvaPdf();
+      } else if (reportType === "FINANCE") {
+        await handleExportDailyFinancialSummaryPDF();
+      } else {
+        await handleExportSalesSummaryPDF();
+      }
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Subtab Navigation inside ReportsModule */}
-      <div className="flex border-b border-slate-200 gap-1 bg-white p-2 rounded-2xl border flex-wrap">
+      <div className="flex border-b border-slate-200 gap-2 bg-white p-2.5 rounded-2xl border flex-wrap items-center justify-between shadow-sm">
+        <div className="flex items-center gap-1.5 flex-wrap flex-1">
+          <button
+            id="btn-subtab-reports-general"
+            type="button"
+            onClick={() => setActiveSubTab("general")}
+            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+              activeSubTab === "general"
+                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            Relatórios Gerais & Agendamentos
+          </button>
+          <button
+            id="btn-subtab-reports-iva"
+            type="button"
+            onClick={() => setActiveSubTab("iva")}
+            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+              activeSubTab === "iva"
+                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            }`}
+          >
+            <Percent className="w-4 h-4" />
+            Calculadora & Declaração de IVA
+          </button>
+          <button
+            id="btn-subtab-reports-activity"
+            type="button"
+            onClick={() => setActiveSubTab("activity")}
+            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+              activeSubTab === "activity"
+                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
+                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+            }`}
+          >
+            <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
+            Atividade & Auditoria (Gráfico)
+          </button>
+        </div>
+
+        {/* Master PDF Export Button with Logo */}
         <button
-          id="btn-subtab-reports-general"
           type="button"
-          onClick={() => setActiveSubTab("general")}
-          className={`flex-1 md:flex-none px-6 py-3 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === "general"
-              ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-              : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+          id="btn-export-current-view-pdf"
+          onClick={handleExportCurrentViewPDF}
+          disabled={isExporting}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-extrabold text-xs cursor-pointer bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 hover:from-orange-600 hover:to-amber-600 text-white shadow-md shadow-orange-500/20 transition-all ${
+            isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-95 hover:scale-[1.02]"
           }`}
+          title="Exportar a vista atual como relatório PDF formatado com o logotipo da empresa"
         >
-          <FileText className="w-4 h-4" />
-          Relatórios Gerais & Agendamentos
-        </button>
-        <button
-          id="btn-subtab-reports-iva"
-          type="button"
-          onClick={() => setActiveSubTab("iva")}
-          className={`flex-1 md:flex-none px-6 py-3 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === "iva"
-              ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-              : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-          }`}
-        >
-          <Percent className="w-4 h-4" />
-          Calculadora & Declaração de IVA
-        </button>
-        <button
-          id="btn-subtab-reports-activity"
-          type="button"
-          onClick={() => setActiveSubTab("activity")}
-          className={`flex-1 md:flex-none px-6 py-3 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
-            activeSubTab === "activity"
-              ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-              : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-          }`}
-        >
-          <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
-          Atividade & Auditoria (Gráfico)
+          <Printer className="w-4 h-4 text-amber-100 shrink-0" />
+          <span>{isExporting ? "Compilando PDF..." : "Exportar Vista Atual em PDF (com Logotipo)"}</span>
         </button>
       </div>
 
@@ -2886,7 +3048,7 @@ export default function ReportsModule({
       {activeSubTab === "activity" && (
         <div className="space-y-6 animate-in fade-in duration-200">
           {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
+          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
                 <Activity className="w-5 h-5 animate-pulse" />
@@ -2898,6 +3060,17 @@ export default function ReportsModule({
                 </p>
               </div>
             </div>
+
+            <button
+              type="button"
+              id="btn-export-activity-pdf-header"
+              onClick={handleExportActivityLogsPDF}
+              disabled={isExporting}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer shrink-0 active:scale-95"
+            >
+              <Printer className="w-4 h-4 text-slate-950 shrink-0" />
+              <span>Exportar Auditoria (PDF com Logotipo)</span>
+            </button>
           </div>
 
           {/* KPI Row */}
@@ -3031,8 +3204,8 @@ export default function ReportsModule({
                       <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Nenhum registro encontrado.</td>
                     </tr>
                   ) : (
-                    [...filteredLogs].reverse().slice(0, 15).map(log => (
-                      <tr key={log.id} className="hover:bg-slate-50/50 transition">
+                    [...filteredLogs].reverse().slice(0, 15).map((log, idx) => (
+                      <tr key={`${log.id || 'log'}-${idx}`} className="hover:bg-slate-50/50 transition">
                         <td className="p-3 text-slate-500 font-mono text-[10px] whitespace-nowrap">
                           {new Date(log.timestamp).toLocaleString("pt-MZ")}
                         </td>

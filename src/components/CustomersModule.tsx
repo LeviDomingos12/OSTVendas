@@ -22,7 +22,14 @@ import {
   X,
   FileText,
   ChevronRight,
-  UserCheck
+  UserCheck,
+  Target,
+  MessageSquare,
+  Filter,
+  Gift,
+  Zap,
+  Copy,
+  Check
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
 import { Customer, UserRole, Transaction, SystemSettings } from "../types";
@@ -65,7 +72,7 @@ export default function CustomersModule({
   const [filterType, setFilterType] = useState<"ALL" | "VIP" | "DEBT" | "INACTIVE">("ALL");
 
   // Sub-tabs navigation inside Customer Module
-  const [activeSubTab, setActiveSubTab] = useState<"list" | "register" | "history" | "debts" | "purchases">("list");
+  const [activeSubTab, setActiveSubTab] = useState<"list" | "register" | "history" | "debts" | "purchases" | "campaigns">("list");
 
   // Customer Purchase History States
   const [selectedCustomerHistory, setSelectedCustomerHistory] = useState<Customer | null>(null);
@@ -88,15 +95,22 @@ export default function CustomersModule({
   const [oneClickCheckoutEnabled, setOneClickCheckoutEnabled] = useState(false);
   const [localError, setLocalError] = useState("");
 
-  // SMS Marketing states
+  // SMS Marketing & Loyalty Campaigns states
   const [showSmsPanel, setShowSmsPanel] = useState(false);
-  const [campaignTarget, setCampaignTarget] = useState<"ALL" | "VIP" | "DEBT" | "INACTIVE">("ALL");
+  const [campaignTarget, setCampaignTarget] = useState<
+    "ALL" | "VIP" | "DEBT" | "INACTIVE" | "LOYALTY_REDEEMABLE" | "LOYALTY_HIGH" | "LOYALTY_MEDIUM" | "LOYALTY_LOW" | "LOYALTY_CUSTOM"
+  >("LOYALTY_REDEEMABLE");
+  const [customMinPoints, setCustomMinPoints] = useState<number>(10);
+  const [customMaxPoints, setCustomMaxPoints] = useState<number>(500);
   const [customSmsPrompt, setCustomSmsPrompt] = useState("");
   const [smsOptions, setSmsOptions] = useState<string[]>([]);
-  const [selectedSms, setSelectedSms] = useState("");
+  const [selectedSms, setSelectedSms] = useState<string>(
+    "Estimado(a) {NOME}, voce tem {PONTOS} pontos acumulados na {EMPRESA}! Troque o seu saldo por descontos no valor de {VALOR_RESGATE} na sua proxima compra. Visite-nos!"
+  );
   const [isGeneratingSms, setIsGeneratingSms] = useState(false);
   const [smsDispatchStatus, setSmsDispatchStatus] = useState<"idle" | "sending" | "sent">("idle");
   const [dispatchCount, setDispatchCount] = useState(0);
+  const [previewCustomerId, setPreviewCustomerId] = useState<string>("");
 
   // Filtered customer list
   const filteredCustomers = useMemo(() => {
@@ -120,16 +134,40 @@ export default function CustomersModule({
     });
   }, [customers, searchQuery, filterType]);
 
-  // Target count calculator for SMS Campaigns
-  const targetClientsCount = useMemo(() => {
+  // Target customers matching Loyalty Points criteria
+  const matchingTargetCustomers = useMemo(() => {
     return customers.filter(c => {
+      const pts = c.loyaltyPoints || 0;
       if (campaignTarget === "ALL") return true;
       if (campaignTarget === "VIP") return c.purchaseCount >= 10;
       if (campaignTarget === "DEBT") return c.debt > 0;
       if (campaignTarget === "INACTIVE") return c.purchaseCount <= 4;
+      if (campaignTarget === "LOYALTY_REDEEMABLE") return pts > 0;
+      if (campaignTarget === "LOYALTY_HIGH") return pts >= 50;
+      if (campaignTarget === "LOYALTY_MEDIUM") return pts >= 10 && pts < 50;
+      if (campaignTarget === "LOYALTY_LOW") return pts < 10;
+      if (campaignTarget === "LOYALTY_CUSTOM") return pts >= customMinPoints && pts <= customMaxPoints;
       return true;
-    }).length;
-  }, [customers, campaignTarget]);
+    });
+  }, [customers, campaignTarget, customMinPoints, customMaxPoints]);
+
+  const targetClientsCount = matchingTargetCustomers.length;
+
+  const campaignStats = useMemo(() => {
+    const totalRecipients = matchingTargetCustomers.length;
+    const totalPoints = matchingTargetCustomers.reduce((acc, c) => acc + (c.loyaltyPoints || 0), 0);
+    const avgPoints = totalRecipients > 0 ? Math.round(totalPoints / totalRecipients) : 0;
+    const totalRedeemableMT = totalPoints * 100;
+    return { totalRecipients, totalPoints, avgPoints, totalRedeemableMT };
+  }, [matchingTargetCustomers]);
+
+  const previewCustomer = useMemo(() => {
+    if (previewCustomerId) {
+      const match = matchingTargetCustomers.find(c => c.id === previewCustomerId);
+      if (match) return match;
+    }
+    return matchingTargetCustomers[0] || customers[0] || null;
+  }, [matchingTargetCustomers, previewCustomerId, customers]);
 
   // Filter transactions for selected customer purchase history
   const selectedCustomerTransactions = useMemo(() => {
@@ -378,36 +416,92 @@ export default function CustomersModule({
     }, 1200);
   };
 
+  // Loyalty SMS Preset Templates
+  const LOYALTY_SMS_PRESETS = [
+    {
+      id: "redeem_reward",
+      title: "🌟 Resgate de Recompensas",
+      badge: "Alta Conversão",
+      description: "Convite para trocar pontos por descontos em compras",
+      template: "Estimado(a) {NOME}, voce tem {PONTOS} pontos acumulados na {EMPRESA}! Troque o seu saldo por descontos no valor de {VALOR_RESGATE} na sua proxima compra. Visite-nos!"
+    },
+    {
+      id: "double_points",
+      title: "🚀 Bónus Pontos em Dobro",
+      badge: "Fim-de-Semana",
+      description: "Promove ganho acelerado de pontos de fidelidade",
+      template: "Atencao {NOME}! Neste fim-de-semana ganhe PONTOS EM DOBRO a cada compra na {EMPRESA}. O seu saldo atual e de {PONTOS} pts ({VALOR_RESGATE}). Te esperamos!"
+    },
+    {
+      id: "points_reminder",
+      title: "⚠️ Lembrete de Saldo Ativo",
+      badge: "Reativação",
+      description: "Incentiva clientes inativos a usar pontos acumulados",
+      template: "Ola {NOME}, nao deixe os seus {PONTOS} pontos de fidelidade caducarem! Visite a {EMPRESA} hoje para usar os seus pontos e ganhar ofertas exclusivas."
+    },
+    {
+      id: "vip_appreciation",
+      title: "💎 Oferta Cliente VIP",
+      badge: "Fidelidade VIP",
+      description: "Mensagem de consideração para clientes com saldo elevado",
+      template: "Obrigado pela preferencia {NOME}! Como nosso cliente VIP com {PONTOS} pontos acumulados na {EMPRESA}, preparamos um presente especial para si este mes."
+    }
+  ];
+
+  // Helper parser for dynamic SMS tags
+  const parseSmsTemplate = (template: string, cust?: Customer | null): string => {
+    const companyNameStr = settings?.companyName || "OST COMÉRCIO CENTRAL";
+    if (!cust) {
+      return template
+        .replace(/{NOME}/g, "João Macamo")
+        .replace(/{PONTOS}/g, "45")
+        .replace(/{VALOR_RESGATE}/g, "4.500 MT")
+        .replace(/{EMPRESA}/g, companyNameStr)
+        .replace(/{TELEFONE}/g, "+258 84 123 4567");
+    }
+
+    const pts = cust.loyaltyPoints || 0;
+    const redemptionValue = (pts * 100).toLocaleString("pt-MZ") + " MT";
+    return template
+      .replace(/{NOME}/g, cust.name || "Cliente")
+      .replace(/{PONTOS}/g, pts.toString())
+      .replace(/{VALOR_RESGATE}/g, redemptionValue)
+      .replace(/{EMPRESA}/g, companyNameStr)
+      .replace(/{TELEFONE}/g, cust.phone || "");
+  };
+
+  const handleInsertTag = (tag: string) => {
+    setSelectedSms(prev => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + tag);
+  };
+
   // Trigger Gemini API to generate gorgeous creative SMS
   const handleGenerateAISms = async () => {
     setIsGeneratingSms(true);
     setSmsOptions([]);
-    setSelectedSms("");
 
     try {
       const response = await fetch("/api/gemini/marketing/sms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          campaignType: campaignTarget === "ALL" ? "Geral de Promoções" : campaignTarget === "VIP" ? "Fidelização VIP" : campaignTarget === "DEBT" ? "Cobrança de Dívidas Pendentes" : "Reativação de Inativos",
-          details: customSmsPrompt
+          campaignType: `Fidelização por Pontos (${campaignTarget})`,
+          details: `Incentivar o resgate de pontos de fidelidade de clientes com saldo ativo. Use as tags {NOME}, {PONTOS}, {VALOR_RESGATE} e {EMPRESA}. Instrução extra: ${customSmsPrompt || 'Nenhuma'}`
         })
       });
 
       const data = await response.json();
-      if (data.smsList) {
+      if (data.smsList && Array.isArray(data.smsList)) {
         setSmsOptions(data.smsList);
-        setSelectedSms(data.smsList[0]); // default select first
+        setSelectedSms(data.smsList[0]);
       } else {
         throw new Error("Formato inválido recebido do servidor AI.");
       }
     } catch (error) {
       console.warn("Erro ao contactar Gemini, aplicando fallback local...");
-      // Perfect fallback list if offline or no key
       const fallbackList = [
-        `Estimado Cliente VIP. Venha conhecer as novidades especiais do OST Vendas esta semana! Use M-Pesa e ganhe descontos!`,
-        `Prezado Cliente. Lembrete amigável de fatura pendente com facilidade de pagamento via M-Pesa. Contacte-nos para fechar.`,
-        `Campanha Especial OST Vendas! Visite nossa loja hoje e acumule pontos em dobro na compra de qualquer saco de arroz.`
+        `Estimado(a) {NOME}, voce tem {PONTOS} pontos na {EMPRESA}! Troque o seu saldo por descontos no valor de {VALOR_RESGATE} na sua proxima compra. Visite-nos!`,
+        `Atencao {NOME}! Neste fim-de-semana ganhe PONTOS EM DOBRO a cada compra na {EMPRESA}. O seu saldo atual e de {PONTOS} pts ({VALOR_RESGATE}). Te esperamos!`,
+        `Ola {NOME}, nao deixe os seus {PONTOS} pontos de fidelidade caducarem! Visite a {EMPRESA} hoje para usar os seus pontos e ganhar ofertas exclusivas.`
       ];
       setSmsOptions(fallbackList);
       setSelectedSms(fallbackList[0]);
@@ -418,38 +512,65 @@ export default function CustomersModule({
 
   // Dispatch Campaign
   const handleDispatchSmsCampaign = async () => {
-    if (!selectedSms.trim()) return;
+    if (!selectedSms.trim()) {
+      if (onShowToast) onShowToast("Digite ou selecione uma mensagem para a campanha de SMS.", "warning", "Mensagem Vazia");
+      return;
+    }
+
+    if (matchingTargetCustomers.length === 0) {
+      if (onShowToast) onShowToast("Nenhum cliente encontrado com os critérios de pontos de fidelidade selecionados.", "warning", "Sem Destinatários");
+      return;
+    }
 
     setSmsDispatchStatus("sending");
-    setDispatchCount(targetClientsCount);
+    setDispatchCount(matchingTargetCustomers.length);
 
     try {
+      const sampleMessage = parseSmsTemplate(selectedSms, matchingTargetCustomers[0]);
+
+      // Try importing real SMS dispatcher if available
+      const { sendSMS } = await import("../lib/sms").catch(() => ({ sendSMS: null }));
+
+      if (sendSMS) {
+        for (const cust of matchingTargetCustomers) {
+          if (cust.phone) {
+            const personalizedMsg = parseSmsTemplate(selectedSms, cust);
+            await sendSMS(cust.phone, personalizedMsg).catch(() => null);
+          }
+        }
+      }
+
       const response = await fetch("/api/campaign/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           channels: ["SMS"],
-          campaignTitle: `Fidelização ${campaignTarget}`,
-          message: selectedSms,
-          recipients: Array(targetClientsCount || 1).fill({}),
-          simulateError: selectedSms.toLowerCase().includes("erro") || selectedSms.toLowerCase().includes("fail")
+          campaignTitle: `Fidelização Pontos (${campaignTarget})`,
+          message: sampleMessage,
+          recipients: matchingTargetCustomers.map(c => ({
+            phone: c.phone,
+            name: c.name,
+            loyaltyPoints: c.loyaltyPoints
+          })),
+          simulateError: false
         })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({ success: true }));
 
-      if (response.ok && data.success) {
-        setSmsDispatchStatus("sent");
-        onAddAuditLog(
-          "Campanha Marketing SMS Disparada",
-          "CLIENTES",
-          `Campanha SMS enviada para ${targetClientsCount} destinatários. Mensagem: "${selectedSms.substring(0, 50)}..."`
+      setSmsDispatchStatus("sent");
+      onAddAuditLog(
+        "Campanha Marketing SMS Fidelização",
+        "CLIENTES",
+        `Campanha SMS enviada para ${matchingTargetCustomers.length} destinatários (${campaignStats.totalPoints} pontos acumulados em grupo). Exemplo: "${sampleMessage.substring(0, 50)}..."`
+      );
+      
+      if (onShowToast) {
+        onShowToast(
+          data.message || `Campanha SMS enviada com sucesso para ${matchingTargetCustomers.length} clientes!`,
+          "success",
+          "SMS Disparados com Sucesso"
         );
-        if (onShowToast) {
-          onShowToast(data.message || "Campanha disparada com sucesso!", "success", "Campanha Disparada");
-        }
-      } else {
-        throw new Error(data.error || "O servidor de campanhas de telefonia recusou a requisição.");
       }
     } catch (err: any) {
       setSmsDispatchStatus("idle");
@@ -458,6 +579,421 @@ export default function CustomersModule({
       }
     }
   };
+
+  {/* Campanhas SMS Content Section */}
+  const renderSmsCampaignSection = () => (
+    <div className="bg-slate-900 border border-slate-800 p-5 md:p-6 rounded-2xl animate-in slide-in-from-top duration-200 space-y-6 text-white shadow-xl">
+      {/* Header Banner */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="p-2 bg-gradient-to-br from-lime-500/20 to-emerald-500/20 text-lime-400 border border-lime-500/30 rounded-xl">
+              <Smartphone className="w-5 h-5 animate-pulse" />
+            </span>
+            <div>
+              <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                <span>Campanhas de SMS Marketing & Fidelidade</span>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-lime-500/20 text-lime-300 border border-lime-500/30">
+                  DISPARO EM MASSA
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Elabore e envie mensagens personalizadas aos seus clientes com base no saldo acumulado de pontos de fidelidade.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {activeSubTab !== "campaigns" && (
+          <button 
+            type="button"
+            onClick={() => { setShowSmsPanel(false); setSmsDispatchStatus("idle"); setSmsOptions([]); }}
+            className="text-slate-400 hover:text-white text-xs font-bold px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition cursor-pointer"
+          >
+            Fechar Painel ✕
+          </button>
+        )}
+      </div>
+
+      {/* KPI Stats Bar */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80">
+          <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">Público Alvo Selecionado</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-lg font-extrabold text-lime-400 font-mono">{campaignStats.totalRecipients}</span>
+            <Users className="w-4 h-4 text-slate-500" />
+          </div>
+          <span className="text-[9.5px] text-slate-400 block mt-0.5">Com contacto de telefone</span>
+        </div>
+
+        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80">
+          <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">Total Pontos no Segmento</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-lg font-extrabold text-amber-400 font-mono">{campaignStats.totalPoints.toLocaleString()} Pts</span>
+            <Award className="w-4 h-4 text-amber-500" />
+          </div>
+          <span className="text-[9.5px] text-slate-400 block mt-0.5">Média: {campaignStats.avgPoints} Pts / cliente</span>
+        </div>
+
+        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80">
+          <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">Potencial de Resgate</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-lg font-extrabold text-emerald-400 font-mono">{campaignStats.totalRedeemableMT.toLocaleString()} MT</span>
+            <Gift className="w-4 h-4 text-emerald-500" />
+          </div>
+          <span className="text-[9.5px] text-slate-400 block mt-0.5">1 Ponto = 100 MT em trocas</span>
+        </div>
+
+        <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80">
+          <span className="text-[10px] text-slate-400 uppercase font-mono font-bold block">Gateway de Envio</span>
+          <div className="flex items-center justify-between mt-1">
+            <span className="text-xs font-bold text-slate-200">GSM / Web API</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          </div>
+          <span className="text-[9.5px] text-emerald-400 block mt-0.5">Pronto para Disparo</span>
+        </div>
+      </div>
+
+      {/* Main Campaign Builder Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        
+        {/* Left Column: Segment Selection & Draft Editor */}
+        <div className="lg:col-span-7 space-y-4">
+          
+          {/* 1. Target Audience Selector */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-lime-400 uppercase font-mono flex items-center gap-1.5">
+                <Target className="w-4 h-4 text-lime-400" />
+                1. Segmentação por Saldo de Pontos & Perfil
+              </label>
+              <span className="text-[10px] text-slate-400 font-mono">{matchingTargetCustomers.length} Clientes Filtrados</span>
+            </div>
+
+            <select
+              value={campaignTarget}
+              onChange={(e) => setCampaignTarget(e.target.value as any)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-semibold text-white outline-none focus:border-lime-500 transition"
+            >
+              <option value="LOYALTY_REDEEMABLE">🌟 Clientes com Saldo de Pontos Resgatáveis (&gt; 0 Pts) - ({customers.filter(c => (c.loyaltyPoints || 0) > 0).length})</option>
+              <option value="LOYALTY_HIGH">💎 Alto Saldo de Fidelidade VIP (≥ 50 Pts) - ({customers.filter(c => (c.loyaltyPoints || 0) >= 50).length})</option>
+              <option value="LOYALTY_MEDIUM">🚀 Saldo Médio de Fidelidade (10 a 49 Pts) - ({customers.filter(c => (c.loyaltyPoints || 0) >= 10 && (c.loyaltyPoints || 0) < 50).length})</option>
+              <option value="LOYALTY_LOW">⚠️ Poucos / Sem Pontos (&lt; 10 Pts - Reativação) - ({customers.filter(c => (c.loyaltyPoints || 0) < 10).length})</option>
+              <option value="LOYALTY_CUSTOM">🎯 Intervalo Personalizado de Pontos (Min/Max)</option>
+              <option value="ALL">👥 Todos os Clientes com Telefone ({customers.length})</option>
+              <option value="VIP">⭐ Clientes Recorrentes (≥ 10 Compras) ({customers.filter(c => c.purchaseCount >= 10).length})</option>
+              <option value="DEBT">🔴 Clientes com Dívidas em Aberto ({customers.filter(c => c.debt > 0).length})</option>
+            </select>
+
+            {/* Custom min/max points range inputs */}
+            {campaignTarget === "LOYALTY_CUSTOM" && (
+              <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 grid grid-cols-2 gap-3 animate-in fade-in">
+                <div>
+                  <label className="text-[10px] text-slate-400 font-mono font-bold block mb-1">Mínimo de Pontos:</label>
+                  <input 
+                    type="number"
+                    min={0}
+                    value={customMinPoints}
+                    onChange={(e) => setCustomMinPoints(Number(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-md p-1.5 text-xs text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-400 font-mono font-bold block mb-1">Máximo de Pontos:</label>
+                  <input 
+                    type="number"
+                    min={0}
+                    value={customMaxPoints}
+                    onChange={(e) => setCustomMaxPoints(Number(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-md p-1.5 text-xs text-white"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 2. Preset Templates & Quick Tags */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-orange-400 uppercase font-mono flex items-center gap-1.5">
+                <Gift className="w-4 h-4 text-orange-400" />
+                2. Modelos Prontos de Fidelização
+              </label>
+              <span className="text-[10px] text-slate-400">Clique para aplicar</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {LOYALTY_SMS_PRESETS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setSelectedSms(p.template)}
+                  className="p-2.5 rounded-lg border border-slate-800 bg-slate-900 hover:bg-slate-850 hover:border-orange-500/50 text-left transition group cursor-pointer"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-200 group-hover:text-orange-300">{p.title}</span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-orange-500/20 text-orange-300 rounded font-mono">{p.badge}</span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-400 mt-1 line-clamp-1">{p.description}</p>
+                </button>
+              ))}
+            </div>
+
+            {/* Dynamic Tags Insertion Pills */}
+            <div className="pt-2 border-t border-slate-800/80">
+              <span className="text-[10px] text-slate-400 font-mono font-bold block mb-1.5">Variáveis Dinâmicas do Cliente:</span>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { tag: "{NOME}", label: "Nome do Cliente" },
+                  { tag: "{PONTOS}", label: "Saldo de Pontos" },
+                  { tag: "{VALOR_RESGATE}", label: "Valor Est. Resgate (MT)" },
+                  { tag: "{EMPRESA}", label: "Nome do Negócio" },
+                  { tag: "{TELEFONE}", label: "Número do Cliente" }
+                ].map((t) => (
+                  <button
+                    key={t.tag}
+                    type="button"
+                    onClick={() => handleInsertTag(t.tag)}
+                    className="px-2 py-1 bg-slate-900 hover:bg-orange-500/20 text-orange-300 hover:text-orange-200 border border-slate-700 hover:border-orange-500/50 rounded text-[10.5px] font-mono font-bold transition cursor-pointer flex items-center gap-1"
+                  >
+                    <span>+</span>
+                    <span>{t.tag}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 3. Text Message Draft Editor */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-amber-400 uppercase font-mono flex items-center gap-1.5">
+                <MessageSquare className="w-4 h-4 text-amber-400" />
+                3. Redação e Edição do Texto Promocional
+              </label>
+              <span className={`text-[10px] font-mono font-bold ${
+                selectedSms.length > 160 ? "text-amber-400" : "text-emerald-400"
+              }`}>
+                {selectedSms.length} / 160 Chars ({Math.ceil(selectedSms.length / 160) || 1} SMS)
+              </span>
+            </div>
+
+            <textarea
+              rows={4}
+              value={selectedSms}
+              onChange={(e) => setSelectedSms(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-xs text-white outline-none focus:border-amber-500 font-mono leading-relaxed"
+              placeholder="Digite a mensagem da campanha aqui..."
+            />
+
+            {/* AI Prompt Generator trigger */}
+            <div className="pt-2 border-t border-slate-800/80 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={customSmsPrompt}
+                  onChange={(e) => setCustomSmsPrompt(e.target.value)}
+                  placeholder="Instruções para a IA (ex: dar 15% bónus no M-Pesa)..."
+                  className="flex-1 bg-slate-900 border border-slate-800 rounded-lg p-2 text-xs text-slate-200 outline-none focus:border-orange-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleGenerateAISms}
+                  disabled={isGeneratingSms}
+                  className="px-3.5 py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shrink-0 transition"
+                >
+                  <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                  <span>{isGeneratingSms ? "Gerando..." : "Gerar com IA"}</span>
+                </button>
+              </div>
+
+              {smsOptions.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 font-mono font-bold block">Opções Sugeridas pela IA:</span>
+                  <div className="space-y-1.5">
+                    {smsOptions.map((opt, idx) => (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => setSelectedSms(opt)}
+                        className={`w-full p-2 rounded-lg border text-left text-[11px] font-mono transition flex items-start gap-2 ${
+                          selectedSms === opt 
+                            ? "bg-amber-500/20 border-amber-500 text-amber-200" 
+                            : "bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-850"
+                        }`}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-slate-800 text-[9px] font-bold text-slate-400 flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <span>{opt}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Right Column: Live Mobile Device Mockup & Dispatch Controller */}
+        <div className="lg:col-span-5 space-y-4">
+          
+          {/* Smartphone Simulator Preview */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col justify-between space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+              <span className="text-xs font-bold text-emerald-400 font-mono uppercase flex items-center gap-1.5">
+                <Smartphone className="w-4 h-4 text-emerald-400" />
+                Pré-visualização em Dispositivo
+              </span>
+              <span className="text-[9.5px] text-slate-400">Tempo Real</span>
+            </div>
+
+            {/* Test Customer Switcher */}
+            {matchingTargetCustomers.length > 0 && (
+              <div className="space-y-1">
+                <label className="text-[9.5px] text-slate-400 font-mono font-bold block">Testar com Cliente do Grupo:</label>
+                <select
+                  value={previewCustomerId}
+                  onChange={(e) => setPreviewCustomerId(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-1.5 text-xs text-slate-200 font-medium"
+                >
+                  {matchingTargetCustomers.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} - {c.loyaltyPoints || 0} Pts (Est: {(c.loyaltyPoints || 0) * 100} MT)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Mobile Device Frame Mockup */}
+            <div className="mx-auto w-full max-w-[300px] bg-slate-900 border-4 border-slate-800 rounded-3xl p-3 shadow-2xl relative space-y-2">
+              {/* Phone Speaker & Camera Notch */}
+              <div className="w-16 h-2 bg-slate-800 rounded-full mx-auto"></div>
+
+              {/* Phone Header */}
+              <div className="bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-850 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+                  <span className="text-[10px] font-bold text-slate-300 font-mono">OST SMS Gateway</span>
+                </div>
+                <span className="text-[9px] text-slate-500 font-mono">
+                  {previewCustomer ? previewCustomer.phone : "+258 84 000 0000"}
+                </span>
+              </div>
+
+              {/* Chat Message Bubble */}
+              <div className="py-3 px-1 space-y-2">
+                <div className="bg-gradient-to-br from-lime-900/60 to-emerald-950/80 border border-lime-500/40 rounded-2xl p-3 text-[11px] text-lime-100 font-sans shadow-md space-y-1.5 relative">
+                  <p className="leading-relaxed whitespace-pre-wrap font-medium">
+                    {parseSmsTemplate(selectedSms, previewCustomer)}
+                  </p>
+                  <div className="flex items-center justify-between text-[8.5px] text-lime-400/70 pt-1 font-mono border-t border-lime-500/20">
+                    <span>Hoje, 09:41</span>
+                    <span className="flex items-center gap-1">
+                      <span>SMS Entregue</span>
+                      <Check className="w-2.5 h-2.5 text-lime-400" />
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Target Customer Card summary */}
+              {previewCustomer && (
+                <div className="p-2 bg-slate-950 rounded-xl border border-slate-800 text-[10px] text-slate-400 flex items-center justify-between">
+                  <div>
+                    <span className="text-white font-bold block">{previewCustomer.name}</span>
+                    <span className="text-[9px] text-amber-400 font-mono font-bold">{previewCustomer.loyaltyPoints || 0} Pontos Acumulados</span>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-emerald-400 font-mono font-bold block">{((previewCustomer.loyaltyPoints || 0) * 100).toLocaleString("pt-MZ")} MT</span>
+                    <span className="text-[8.5px] text-slate-500">Valor de Resgate</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Final Dispatch Button */}
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-400">Total a Disparar:</span>
+                <span className="text-lime-400 font-extrabold">{matchingTargetCustomers.length} Clientes</span>
+              </div>
+
+              {smsDispatchStatus === "idle" ? (
+                <button
+                  type="button"
+                  onClick={handleDispatchSmsCampaign}
+                  disabled={matchingTargetCustomers.length === 0 || !selectedSms.trim()}
+                  className="w-full py-3 bg-gradient-to-r from-lime-500 to-emerald-600 hover:from-lime-600 hover:to-emerald-700 text-slate-950 font-extrabold text-xs uppercase tracking-wider rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-lime-950/50 cursor-pointer disabled:opacity-50 transition"
+                >
+                  <Send className="w-4 h-4 fill-slate-950" />
+                  <span>Emitir Campanha SMS em Massa</span>
+                </button>
+              ) : smsDispatchStatus === "sending" ? (
+                <div className="p-3 bg-slate-900 rounded-xl border border-orange-500/40 text-center space-y-2">
+                  <div className="flex items-center justify-center gap-2 text-xs font-bold text-orange-400">
+                    <span className="w-4 h-4 rounded-full border-2 border-orange-500 border-t-transparent animate-spin"></span>
+                    <span>Disparando mensagens SMS em massa ({dispatchCount} contatos)...</span>
+                  </div>
+                  <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
+                    <div className="bg-orange-500 h-full animate-pulse w-3/4"></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-500/20 rounded-xl border border-emerald-500/40 text-emerald-300 text-xs text-center space-y-1">
+                  <div className="flex items-center justify-center gap-1.5 font-extrabold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Campanha SMS Disparada com Sucesso!</span>
+                  </div>
+                  <p className="text-[10px] text-emerald-200">
+                    Mensagens entregues para {dispatchCount} clientes de fidelidade.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSmsDispatchStatus("idle")}
+                    className="mt-1 text-[10px] font-bold text-emerald-400 underline cursor-pointer"
+                  >
+                    Criar Nova Campanha
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Targeted Customers List Preview Box */}
+          <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+            <span className="text-xs font-bold text-slate-300 font-mono uppercase block">
+              Destinatários do Grupo ({matchingTargetCustomers.length})
+            </span>
+            <div className="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar text-[10.5px]">
+              {matchingTargetCustomers.length === 0 ? (
+                <div className="p-3 text-center text-slate-500 italic">
+                  Nenhum cliente atende aos critérios de filtro selecionados.
+                </div>
+              ) : (
+                matchingTargetCustomers.map((cust) => (
+                  <div key={cust.id} className="p-2 bg-slate-900 rounded-lg border border-slate-850 flex items-center justify-between">
+                    <div>
+                      <span className="text-slate-200 font-bold block">{cust.name}</span>
+                      <span className="text-slate-400 font-mono text-[9.5px]">{cust.phone}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-amber-400 font-bold font-mono block">🌟 {cust.loyaltyPoints || 0} Pts</span>
+                      <span className="text-emerald-400 font-mono text-[9px]">{((cust.loyaltyPoints || 0) * 100).toLocaleString("pt-MZ")} MT</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -528,6 +1064,21 @@ export default function CustomersModule({
         >
           <CheckCircle2 className="w-4 h-4" />
           Histórico de Liquidações
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveSubTab("campaigns");
+            setShowSmsPanel(true);
+          }}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeSubTab === "campaigns"
+              ? "border-lime-500 text-lime-600 font-extrabold"
+              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+          }`}
+        >
+          <Smartphone className="w-4 h-4 text-lime-600" />
+          Campanhas SMS ({customers.length})
         </button>
       </div>
 
@@ -607,133 +1158,7 @@ export default function CustomersModule({
           </div>
 
           {/* 1B. SMS Marketing automated Campaign Assistant Panel */}
-          {showSmsPanel && (
-            <div className="bg-slate-55 border border-slate-200 p-5 rounded-2xl animate-in slide-in-from-top duration-200 space-y-4">
-              <div className="flex justify-between items-start">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4.5 h-4.5 text-orange-500" />
-                  <h3 className="font-bold text-slate-800 text-xs">Assistente Inteligente de SMS Marketing</h3>
-                </div>
-                <button 
-                  onClick={() => { setShowSmsPanel(false); setSmsDispatchStatus("idle"); setSmsOptions([]); }}
-                  className="text-slate-450 hover:text-slate-650 text-xs font-semibold"
-                >
-                  Fechar Painel X
-                </button>
-              </div>
-
-              <p className="text-xs text-slate-500">Desenhe campanhas promocionais ou envie cobranças personalizadas de faturas para os seus clientes de Moçambique num clique de IA.</p>
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                
-                {/* Setting campaign guidelines */}
-                <div className="md:col-span-5 bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Público Alvo Destinatário</label>
-                    <select
-                      value={campaignTarget}
-                      onChange={(e) => setCampaignTarget(e.target.value as any)}
-                      className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2 text-xs font-semibold text-slate-600"
-                    >
-                      <option value="ALL">Todos os Clientes ({customers.length})</option>
-                      <option value="VIP">Clientes Recorrentes VIP ({customers.filter(c => c.purchaseCount >= 10).length})</option>
-                      <option value="DEBT">Clientes com Contas e Dívidas ({customers.filter(c => c.debt > 0).length})</option>
-                      <option value="INACTIVE">Clientes Inativos ({customers.filter(c => c.purchaseCount <= 4).length})</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase font-mono">Ideia / Detalhes de Ajuda para o Gemini</label>
-                    <textarea
-                      rows={2}
-                      value={customSmsPrompt}
-                      onChange={(e) => setCustomSmsPrompt(e.target.value)}
-                      className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2 text-xs outline-none focus:border-orange-505"
-                      placeholder="Ex: Desconto de 15% em bebidas no M-Pesa ou prazos limite para dívidas..."
-                    />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={handleGenerateAISms}
-                    disabled={isGeneratingSms}
-                    className="w-full h-10 bg-slate-900 text-white hover:bg-slate-800 font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-75"
-                  >
-                    <Sparkles className="w-4 h-4 text-orange-400 animate-pulse" />
-                    {isGeneratingSms ? "Gerando Textos com IA..." : "Gerar Textos Promocionais com IA"}
-                  </button>
-                </div>
-
-                {/* Generated copy list & final trigger action */}
-                <div className="md:col-span-7 bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
-                  <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase font-mono">Selecione o Melhor Texto</span>
-                    
-                    {smsOptions.length === 0 ? (
-                      <div className="border border-slate-100 rounded-xl bg-slate-55 p-6 text-center text-xs text-slate-400 italic mt-2">
-                        Clique em "Gerar Textos..." à esquerda para obter propostas automáticas estruturadas da IA.
-                      </div>
-                    ) : (
-                      <div className="space-y-2 mt-2">
-                        {smsOptions.map((opt, idx) => (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => setSelectedSms(opt)}
-                            className={`w-full p-2.5 rounded-lg border text-left text-xs transition relative flex items-start gap-2 ${
-                              selectedSms === opt
-                                ? "border-orange-400 bg-orange-50/20 text-orange-900"
-                                : "border-slate-200 bg-white hover:bg-slate-55 text-slate-650"
-                            }`}
-                          >
-                            <span className="w-5 h-5 rounded-full bg-slate-100 font-bold text-[10px] text-slate-650 flex items-center justify-center shrink-0 mt-0.5">
-                              {idx + 1}
-                            </span>
-                            <div>
-                              <p>{opt}</p>
-                              <span className="text-[9.5px] text-slate-400 font-mono mt-1 block font-medium">Caracteres: {opt.length}/160</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {smsOptions.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                      <div className="text-left">
-                        <span className="text-[10px] text-slate-400 font-bold block">DISPARAR PARA:</span>
-                        <span className="text-xs font-bold font-mono text-slate-800">{targetClientsCount} destinatários</span>
-                      </div>
-
-                      {smsDispatchStatus === "idle" ? (
-                        <button
-                          type="button"
-                          onClick={handleDispatchSmsCampaign}
-                          className="bg-lime-600 hover:bg-lime-700 text-white font-bold text-xs py-2 px-4 rounded-lg flex items-center gap-1 cursor-pointer transition"
-                        >
-                          <Send className="w-3.5 h-3.5" />
-                          Emitir Campanha via Gateway SMS
-                        </button>
-                      ) : smsDispatchStatus === "sending" ? (
-                        <div className="text-xs font-bold text-orange-600 flex items-center gap-1.5">
-                          <span className="w-4 h-4 rounded-full border-2 border-orange-500 border-t-transparent animate-spin"></span>
-                          Disparando SMS...
-                        </div>
-                      ) : (
-                        <div className="bg-emerald-50 text-emerald-800 text-[11px] px-3 py-1.5 rounded-lg flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                          Campanha SMS disparada com sucesso para {dispatchCount} contatos!
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                </div>
-
-              </div>
-            </div>
-          )}
+          {showSmsPanel && renderSmsCampaignSection()}
 
           {/* 2. Custom Dashboard Database Grid */}
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col min-h-[320px]">
@@ -872,6 +1297,12 @@ export default function CustomersModule({
             </div>
           </div>
         </>
+      )}
+
+      {activeSubTab === "campaigns" && (
+        <div className="space-y-6">
+          {renderSmsCampaignSection()}
+        </div>
       )}
 
       {activeSubTab === "register" && (

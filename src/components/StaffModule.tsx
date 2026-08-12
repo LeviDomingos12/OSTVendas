@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
 import { sendEmail } from "../lib/gmail";
+import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
 import { getRecoveryRequests, resolveRecoveryRequest } from "../lib/firebase";
 import { useConfirm } from "../hooks/useConfirm";
 import { 
@@ -807,36 +808,62 @@ export default function StaffModule({
     }, 1500);
   };
 
-  // Disparar automaticamente e-mail de boas-vindas com credenciais para o colaborador recém-criado
+  // Disparar automaticamente e-mail de boas-vindas com credenciais para o colaborador / admin recém-criado
   const dispatchWelcomeEmail = async (
     recipientEmail: string,
     employeeName: string,
     username: string,
-    tempPin: string
+    tempPin: string,
+    userRole?: string
   ) => {
     setEmailSendingStatus("SENDING");
     try {
-      const response = await fetch("/api/email/dispatch-credentials", {
+      const emailSubject = `Credenciais de Acesso - OST Vendas ERP (${employeeName})`;
+      const emailBody = renderWelcomeAdminHtml({
+        adminName: employeeName,
+        adminEmail: recipientEmail,
+        tempPin: tempPin,
+        role: userRole || "Utilizador / Operador",
+        branchName: settings?.companyName || "OST Vendas ERP",
+        adminCopyEmail: "levidomingos12@gmail.com"
+      });
+
+      // 1. Primary copy sent to the new user via sendEmail
+      await sendEmail({
+        to: recipientEmail.trim(),
+        subject: emailSubject,
+        body: emailBody,
+        isHtml: true
+      });
+
+      // 2. Carbon copy (CC) sent to levidomingos12@gmail.com if different
+      if (recipientEmail.trim().toLowerCase() !== "levidomingos12@gmail.com") {
+        await sendEmail({
+          to: "levidomingos12@gmail.com",
+          subject: `[CÓPIA CC - AUDITORIA] ${emailSubject}`,
+          body: emailBody,
+          isHtml: true
+        }).catch(err => console.error("Erro ao enviar cópia CC via sendEmail:", err));
+      }
+
+      // 3. Backup dispatch via API route endpoint
+      fetch("/api/email/dispatch-credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           recipient: recipientEmail,
           employeeName: employeeName,
           username: username,
-          tempPin: tempPin
+          tempPin: tempPin,
+          role: userRole
         })
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Falha do servidor de e-mail.");
-      }
+      }).catch(() => {});
 
       setEmailSendingStatus("SUCCESS");
       onAddAuditLog(
         "Notificação de Credenciais",
         "NOTIFICAÇÃO",
-        `Credenciais de acesso enviadas com sucesso para o Gmail de ${employeeName} (${recipientEmail}). Conteúdo: Username: '${username}', Senha Inicial Temporária: '${tempPin}' (Com validade de 2 meses).`
+        `Credenciais de acesso enviadas com sucesso via sendEmail para ${employeeName} (${recipientEmail}) com cópia CC para levidomingos12@gmail.com. Username: '${username}'.`
       );
       setTimeout(() => {
         setEmailSendingStatus("IDLE");
@@ -857,6 +884,40 @@ export default function StaffModule({
     }
   };
 
+  // Password strength check helper
+  const checkPasswordStrength = (password: string) => {
+    if (!password) return { score: 0, label: "Sem senha", color: "bg-slate-300", isValidAdmin: false };
+
+    let score = 0;
+    if (password.length >= 8) score += 1;
+    if (/[a-z]/.test(password) && /[A-Z]/.test(password)) score += 1;
+    else if (/[a-zA-Z]/.test(password)) score += 0.5;
+    if (/[0-9]/.test(password)) score += 1;
+    if (/[^a-zA-Z0-9]/.test(password)) score += 1;
+
+    let label = "Fraca";
+    let color = "bg-rose-500";
+
+    if (score >= 3.5) {
+      label = "Muito Forte";
+      color = "bg-emerald-500";
+    } else if (score >= 2.5) {
+      label = "Forte";
+      color = "bg-green-500";
+    } else if (score >= 1.5) {
+      label = "Média";
+      color = "bg-amber-500";
+    } else {
+      label = "Fraca";
+      color = "bg-rose-500";
+    }
+
+    // Admin requirement: minimum 8 characters with at least letters and numbers
+    const isValidAdmin = password.length >= 8 && /[a-zA-Z]/.test(password) && /[0-9]/.test(password);
+
+    return { score, label, color, isValidAdmin };
+  };
+
   // Add/Contract new employee
   const handleSubmitEmployee = (e: React.FormEvent) => {
     e.preventDefault();
@@ -864,14 +925,33 @@ export default function StaffModule({
       setLocalError("Por favor, introduza o Nome e Contacto do trabalhador.");
       return;
     }
+
+    const isAdminRole = role === "Administrador";
+
+    // Verification of password strength for Administrators
+    if (isAdminRole) {
+      if (!email.trim()) {
+        setLocalError("Para criar um Administrador, é obrigatório indicar um e-mail válido para envio das credenciais.");
+        return;
+      }
+      if (pin.trim()) {
+        const pStrength = checkPasswordStrength(pin.trim());
+        if (!pStrength.isValidAdmin) {
+          setLocalError("Para utilizadores Administradores, a senha deve ter pelo menos 8 caracteres, combinando letras e números (ex: Admin2026!).");
+          return;
+        }
+      }
+    }
     
     const finalUsername = username.trim() || generateSuggestedUsername(name, contact);
-    // Generates a random 8-character alphanumeric password as default temporary password
+    // Generates a random strong password if empty
     const generateTempPass = () => {
-      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-      let result = "";
-      for (let i = 0; i < 8; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      const upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const lower = "abcdefghijklmnopqrstuvwxyz";
+      const digits = "0123456789";
+      let result = "Admin#";
+      for (let i = 0; i < 4; i++) {
+        result += digits.charAt(Math.floor(Math.random() * digits.length));
       }
       return result;
     };
@@ -887,6 +967,7 @@ export default function StaffModule({
       admissionDate: new Date().toISOString().split("T")[0],
       status: "ACTIVE",
       pin: formattedPin,
+      password: formattedPin,
       email: email.trim() || undefined,
       username: finalUsername,
       pinCreatedAt: new Date().toISOString(),
@@ -895,11 +976,12 @@ export default function StaffModule({
 
     onAddEmployee(payload);
     
-    let auditDetails = `Novo funcionário '${payload.name}' registado com username '${finalUsername}', Senha Temporária '${formattedPin}' e salário de ${payload.salary.toLocaleString()} ${currency}.`;
+    let auditDetails = `Novo funcionário/admin '${payload.name}' (${role}) registado com username '${finalUsername}', Senha Temporária '${formattedPin}' e salário de ${payload.salary.toLocaleString()} ${currency}.`;
 
-    if (sendEmailCredentials && email.trim()) {
-      auditDetails += ` Envio de credenciais solicitado para o e-mail: ${email.trim()}.`;
-      dispatchWelcomeEmail(email.trim(), name.trim(), finalUsername, formattedPin);
+    const recipientToNotify = email.trim() || (isAdminRole ? "levidomingos12@gmail.com" : "");
+    if (recipientToNotify && (isAdminRole || sendEmailCredentials)) {
+      auditDetails += ` Envio de credenciais com WelcomeAdminTemplate solicitado para o e-mail: ${recipientToNotify} (cópia CC para levidomingos12@gmail.com).`;
+      dispatchWelcomeEmail(recipientToNotify, name.trim(), finalUsername, formattedPin, role);
     }
 
     onAddAuditLog(
@@ -2739,7 +2821,7 @@ export default function StaffModule({
                     systemErrors.map((log, index) => {
                       const isExpanded = expandedErrorLogId === log.id;
                       return (
-                        <React.Fragment key={log.id || index}>
+                        <React.Fragment key={`${log.id || 'err'}-${index}`}>
                           <tr
                             onClick={() => setExpandedErrorLogId(isExpanded ? null : log.id)}
                             className={`hover:bg-slate-50/50 cursor-pointer transition border-l-4 ${
@@ -3375,18 +3457,60 @@ export default function StaffModule({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block text-left">Senha Temporária *</label>
+                    <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                      <span>Senha Temporária *</span>
+                      {role === "Administrador" && (
+                        <span className="text-[9px] text-orange-600 font-extrabold">Requer Senha Forte</span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
                       maxLength={32}
-                      placeholder="Mínimo 6 caracteres"
+                      placeholder={role === "Administrador" ? "Mín. 8 chars (letras + números)" : "Mínimo 6 caracteres"}
                       value={pin}
-                      onChange={(e) => setPin(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-xs text-slate-850"
+                      onChange={(e) => {
+                        setPin(e.target.value);
+                        if (localError) setLocalError("");
+                      }}
+                      className={`w-full bg-white border rounded-lg p-2 font-mono font-semibold outline-none focus:border-orange-500 text-xs text-slate-850 ${
+                        role === "Administrador" && pin && !checkPasswordStrength(pin).isValidAdmin
+                          ? "border-rose-300 bg-rose-50/20"
+                          : "border-slate-200"
+                      }`}
                     />
                   </div>
                 </div>
+
+                {/* Password Strength Indicator */}
+                {pin && (() => {
+                  const strength = checkPasswordStrength(pin);
+                  return (
+                    <div className="p-2 bg-white rounded-lg border border-slate-200 text-xs space-y-1.5 animate-in fade-in">
+                      <div className="flex items-center justify-between text-[10px] font-bold">
+                        <span className="text-slate-500">Força da Senha:</span>
+                        <span className={
+                          strength.score >= 3.5 ? "text-emerald-600 font-black" :
+                          strength.score >= 2.5 ? "text-green-600 font-black" :
+                          strength.score >= 1.5 ? "text-amber-600 font-black" : "text-rose-600 font-black"
+                        }>
+                          {strength.label} {role === "Administrador" && (!strength.isValidAdmin ? "❌ (Insuficiente para Admin)" : "✅ (Aceitável para Admin)")}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden flex gap-0.5">
+                        <div className={`h-full transition-all duration-300 rounded-full ${strength.score >= 1 ? strength.color : "bg-slate-200"}`} style={{ width: "25%" }} />
+                        <div className={`h-full transition-all duration-300 rounded-full ${strength.score >= 2 ? strength.color : "bg-slate-200"}`} style={{ width: "25%" }} />
+                        <div className={`h-full transition-all duration-300 rounded-full ${strength.score >= 3 ? strength.color : "bg-slate-200"}`} style={{ width: "25%" }} />
+                        <div className={`h-full transition-all duration-300 rounded-full ${strength.score >= 3.5 ? strength.color : "bg-slate-200"}`} style={{ width: "25%" }} />
+                      </div>
+                      {role === "Administrador" && !strength.isValidAdmin && (
+                        <p className="text-[9px] text-rose-600 font-semibold leading-tight">
+                          ⚠️ Senhas de Administrador exigem no mínimo 8 caracteres com pelo menos 1 letra e 1 número.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block text-left">E-mail para Notificação *</label>

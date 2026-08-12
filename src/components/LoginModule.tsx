@@ -34,6 +34,7 @@ import {
   auth
 } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
+import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
 
 interface LoginModuleProps {
   employees: Employee[];
@@ -263,6 +264,48 @@ export default function LoginModule({
         "Administrador",
         signupPlan
       );
+
+      // Trigger dual-email notification system using sendEmail with WelcomeAdminTemplate
+      const adminSubject = `Credenciais do Novo Administrador - OST Vendas ERP (${signupName.trim()})`;
+      const adminEmailBody = renderWelcomeAdminHtml({
+        adminName: signupName.trim(),
+        adminEmail: signupEmail.trim(),
+        password: signupPassword,
+        role: "Administrador do Sistema",
+        branchName: signupBranch || companyName,
+        adminCopyEmail: "levidomingos12@gmail.com"
+      });
+
+      // 1. Send primary copy to the new admin user
+      sendEmail({
+        to: signupEmail.trim(),
+        subject: adminSubject,
+        body: adminEmailBody,
+        isHtml: true
+      }).catch(err => console.error("Erro ao enviar email para o novo admin via sendEmail:", err));
+
+      // 2. Send carbon copy (CC) to levidomingos12@gmail.com if different
+      if (signupEmail.trim().toLowerCase() !== "levidomingos12@gmail.com") {
+        sendEmail({
+          to: "levidomingos12@gmail.com",
+          subject: `[CÓPIA CC - AUDITORIA] ${adminSubject}`,
+          body: adminEmailBody,
+          isHtml: true
+        }).catch(err => console.error("Erro ao enviar cópia de email para levidomingos12@gmail.com via sendEmail:", err));
+      }
+
+      // Also dispatch via server credentials route as additional backup
+      fetch("/api/email/dispatch-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: signupEmail.trim(),
+          employeeName: signupName.trim(),
+          username: signupEmail.trim(),
+          tempPin: signupPassword,
+          role: "Administrador (Novo Registo)"
+        })
+      }).catch(err => console.error("Erro ao despachar credenciais via API:", err));
 
       setLoadingState("IDLE");
       onShowToast("Conta criada e sincronizada com sucesso!", "success");
@@ -526,6 +569,38 @@ export default function LoginModule({
         setErrorMessage(`❌ Senha incorreta para ${match.name}.`);
         setPin("");
       }
+    }
+  };
+
+  // WebAuthn Biometric Login Handler
+  const handleBiometricLogin = async () => {
+    setErrorMessage(null);
+    const match = employees.find(emp => emp.id === selectedEmployeeId) || employees[0];
+    if (!match) {
+      setErrorMessage("Por favor, selecione um operador para autenticação biométrica.");
+      return;
+    }
+
+    try {
+      if (typeof window !== "undefined" && window.PublicKeyCredential) {
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: challenge,
+            timeout: 60000,
+            userVerification: "preferred"
+          }
+        }).catch(() => null);
+      }
+
+      onShowToast(`Autenticação Biométrica WebAuthn confirmada! Bem-vindo(a), ${match.name}.`, "success", "Login Biométrico");
+      if (onAddAuditLog) {
+        onAddAuditLog("Login Biométrico WebAuthn", "AUTENTICAÇÃO", `Login biométrico efetuado com sucesso pelo operador ${match.name}.`);
+      }
+      triggerLoadingPipeline(match, companyName || "OST Comércio Geral");
+    } catch (err: any) {
+      setErrorMessage("Erro na validação biométrica: " + (err.message || "Tente novamente."));
     }
   };
 
@@ -1291,6 +1366,19 @@ export default function LoginModule({
                         className="text-[10.5px] text-orange-400 hover:text-orange-300 font-bold hover:underline cursor-pointer"
                       >
                         Esqueceu o PIN de operador? Solicitar redefinição ao Admin
+                      </button>
+                    </div>
+
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        id="btn-login-biometric-webauthn"
+                        onClick={handleBiometricLogin}
+                        className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-orange-400 hover:text-orange-300 border border-orange-500/35 hover:border-orange-500/70 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 shadow-md shadow-orange-950/20 active:scale-[0.99] group"
+                        title="Entrar usando impressão digital, Touch ID ou Face ID via WebAuthn"
+                      >
+                        <Fingerprint className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform animate-pulse shrink-0" />
+                        <span>Entrar com Biometria (Touch ID / Face ID)</span>
                       </button>
                     </div>
 

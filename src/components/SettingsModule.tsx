@@ -39,7 +39,14 @@ import {
   Phone,
   Plus,
   Edit,
-  Sliders
+  Sliders,
+  Fingerprint,
+  RotateCcw,
+  ShieldAlert,
+  AlertOctagon,
+  Filter,
+  XCircle,
+  CheckCircle2
 } from "lucide-react";
 import { SystemSettings, UserRole, Employee, Branch, AuditLog } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
@@ -197,6 +204,295 @@ export default function SettingsModule({
   // AI Settings States
   const [aiAutoMonitoring, setAiAutoMonitoring] = useState(settings.aiAutoMonitoring ?? true);
   const [aiHealthSensitivity, setAiHealthSensitivity] = useState(settings.aiHealthSensitivity ?? 80);
+
+  // Rate Limit & Security System States
+  const [rateLimitEnabled, setRateLimitEnabled] = useState(true);
+  const [rateLimitProfile, setRateLimitProfile] = useState<"strict" | "balanced" | "tolerant" | "custom">("balanced");
+  const [rateLimitGeneralMax, setRateLimitGeneralMax] = useState(120);
+  const [rateLimitAiMax, setRateLimitAiMax] = useState(20);
+  const [rateLimitEmailMax, setRateLimitEmailMax] = useState(10);
+  const [rateLimitDbMax, setRateLimitDbMax] = useState(15);
+  const [rateLimitStats, setRateLimitStats] = useState<{
+    totalRequestsProcessed: number;
+    totalBlocked429: number;
+    recentViolationsCount: number;
+    lastViolationTimestamp: string | null;
+  }>({
+    totalRequestsProcessed: 0,
+    totalBlocked429: 0,
+    recentViolationsCount: 0,
+    lastViolationTimestamp: null
+  });
+  const [rateLimitViolations, setRateLimitViolations] = useState<any[]>([]);
+  const [isLoadingRateLimit, setIsLoadingRateLimit] = useState(false);
+  const [isSavingRateLimit, setIsSavingRateLimit] = useState(false);
+  const [isTestingRateLimit, setIsTestingRateLimit] = useState(false);
+
+  // Firewall & Advanced Security States
+  const [firewallEnabled, setFirewallEnabled] = useState(true);
+  const [securityHeadersEnabled, setSecurityHeadersEnabled] = useState(true);
+  const [sanitizerEnabled, setSanitizerEnabled] = useState(true);
+  const [bruteForceEnabled, setBruteForceEnabled] = useState(true);
+  const [whitelistOnlyMode, setWhitelistOnlyMode] = useState(false);
+  const [blacklistedIps, setBlacklistedIps] = useState<string[]>([]);
+  const [whitelistedIps, setWhitelistedIps] = useState<string[]>([]);
+  const [activeLockouts, setActiveLockouts] = useState<any[]>([]);
+  const [storageHealth, setStorageHealth] = useState<any>(null);
+  const [newIpInput, setNewIpInput] = useState("");
+  const [newIpType, setNewIpType] = useState<"blacklist" | "whitelist">("blacklist");
+  const [isLoadingSecurityData, setIsLoadingSecurityData] = useState(false);
+
+  const fetchSecurityAndFirewallStatus = async () => {
+    try {
+      setIsLoadingSecurityData(true);
+      const [fwRes, healthRes] = await Promise.all([
+        fetch("/api/security/firewall-status"),
+        fetch("/api/security/storage-health")
+      ]);
+      const fwData = await fwRes.json();
+      const healthData = await healthRes.json();
+
+      if (fwData.config) {
+        setFirewallEnabled(fwData.config.enabled !== false);
+        setSecurityHeadersEnabled(fwData.config.securityHeadersEnabled !== false);
+        setSanitizerEnabled(fwData.config.sanitizerEnabled !== false);
+        setBruteForceEnabled(fwData.config.bruteForceProtectionEnabled !== false);
+        setWhitelistOnlyMode(fwData.config.whitelistOnlyMode === true);
+        setBlacklistedIps(fwData.config.blacklistedIps || []);
+        setWhitelistedIps(fwData.config.whitelistedIps || []);
+      }
+      if (fwData.activeLockouts) {
+        setActiveLockouts(fwData.activeLockouts);
+      }
+      if (healthData.status) {
+        setStorageHealth(healthData);
+      }
+    } catch (e) {
+      console.error("Erro ao carregar dados de firewall e integridade:", e);
+    } finally {
+      setIsLoadingSecurityData(false);
+    }
+  };
+
+  const handleSaveFirewallPolicies = async () => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch("/api/security/firewall-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: firewallEnabled,
+          securityHeadersEnabled,
+          sanitizerEnabled,
+          bruteForceProtectionEnabled: bruteForceEnabled,
+          whitelistOnlyMode
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast("Políticas de Firewall e Segurança atualizadas com sucesso!", "success", "Firewall Atualizado");
+        await fetchSecurityAndFirewallStatus();
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const handleAddIpRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newIpInput || !newIpInput.trim() || !canEdit) return;
+    try {
+      const res = await fetch("/api/security/ip-rules/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip: newIpInput.trim(), listType: newIpType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(data.message, "success");
+        setNewIpInput("");
+        await fetchSecurityAndFirewallStatus();
+      } else {
+        if (onShowToast) onShowToast(data.error || "Erro ao adicionar IP.", "error");
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const handleRemoveIpRule = async (ip: string, listType: "blacklist" | "whitelist") => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch("/api/security/ip-rules/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip, listType })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(data.message, "info");
+        await fetchSecurityAndFirewallStatus();
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const handleUnlockIp = async (ip: string) => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch("/api/security/unlock-ip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(`IP ${ip} desbloqueado com sucesso!`, "success");
+        await fetchSecurityAndFirewallStatus();
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const handleUndoLastRestore = async () => {
+    if (!canEdit) return;
+    if (!confirm("Tem a certeza que deseja anular a última restauração e reverter a base de dados para o ponto pré-restauro?")) return;
+    try {
+      const res = await fetch("/api/security/backups/undo-last-restore", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(data.message, "success", "Restauração Anulada");
+        await fetchSecurityAndFirewallStatus();
+      } else {
+        if (onShowToast) onShowToast(data.error || "Nenhum ponto de pré-restauro encontrado.", "warning");
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const fetchRateLimitStatus = async () => {
+    try {
+      setIsLoadingRateLimit(true);
+      const res = await fetch("/api/security/rate-limit-status");
+      const data = await res.json();
+      if (data.config) {
+        setRateLimitEnabled(data.enabled !== false);
+        setRateLimitProfile(data.profile || "balanced");
+        if (data.config.generalMax) setRateLimitGeneralMax(data.config.generalMax);
+        if (data.config.aiMax) setRateLimitAiMax(data.config.aiMax);
+        if (data.config.emailMax) setRateLimitEmailMax(data.config.emailMax);
+        if (data.config.dbMax) setRateLimitDbMax(data.config.dbMax);
+      }
+      if (data.stats) {
+        setRateLimitStats(data.stats);
+      }
+      if (data.recentViolations) {
+        setRateLimitViolations(data.recentViolations);
+      }
+    } catch (e) {
+      console.error("Erro ao obter status do Rate Limit:", e);
+    } finally {
+      setIsLoadingRateLimit(false);
+    }
+  };
+
+  const handleSaveRateLimitConfig = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!canEdit) {
+      if (onShowToast) onShowToast("Apenas administradores podem alterar as regras de segurança e Rate Limit.", "error");
+      return;
+    }
+    setIsSavingRateLimit(true);
+    try {
+      const res = await fetch("/api/security/rate-limit-config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: rateLimitEnabled,
+          profile: rateLimitProfile,
+          generalMax: Number(rateLimitGeneralMax),
+          aiMax: Number(rateLimitAiMax),
+          emailMax: Number(rateLimitEmailMax),
+          dbMax: Number(rateLimitDbMax)
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast(data.message || "Configurações de Rate Limit salvas com sucesso!", "success", "Segurança Atualizada");
+        await fetchRateLimitStatus();
+      } else {
+        throw new Error(data.error || "Erro ao salvar rate limit.");
+      }
+    } catch (err: any) {
+      if (onShowToast) onShowToast(err.message, "error");
+    } finally {
+      setIsSavingRateLimit(false);
+    }
+  };
+
+  const handleClearRateLimitLogs = async () => {
+    if (!canEdit) return;
+    try {
+      const res = await fetch("/api/security/clear-rate-limit-logs", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        if (onShowToast) onShowToast("Histórico de bloqueios de Rate Limit limpo.", "info");
+        await fetchRateLimitStatus();
+      }
+    } catch (e: any) {
+      if (onShowToast) onShowToast(e.message, "error");
+    }
+  };
+
+  const handleTestBurstRateLimit = async () => {
+    setIsTestingRateLimit(true);
+    if (onShowToast) onShowToast("Disparando bateria de requisições de teste para validar o bloqueio 429...", "info", "Teste de Estresse");
+    
+    let blockedCount = 0;
+    let allowedCount = 0;
+
+    for (let i = 0; i < 35; i++) {
+      try {
+        const res = await fetch("/api/security/test-rate-limit", { method: "POST" });
+        if (res.status === 429) {
+          blockedCount++;
+        } else if (res.ok) {
+          allowedCount++;
+        }
+      } catch (e) {
+        console.error("Erro na requisição de teste:", e);
+      }
+    }
+
+    setIsTestingRateLimit(false);
+    await fetchRateLimitStatus();
+
+    if (blockedCount > 0) {
+      if (onShowToast) {
+        onShowToast(
+          `🛡️ Teste de Segurança Concluído! ${allowedCount} requisições processadas e ${blockedCount} requisições BLOQUEADAS (HTTP 429 Rate Limit)!`,
+          "warning",
+          "Bloqueio Ativo"
+        );
+      }
+    } else {
+      if (onShowToast) {
+        onShowToast(
+          `Todas as ${allowedCount} requisições foram aceitas sem atingir o limite atual (${rateLimitGeneralMax}/15m). Altere para o perfil 'Restritivo' para testar o limite rígido!`,
+          "success",
+          "Teste Concluído"
+        );
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchRateLimitStatus();
+    fetchSecurityAndFirewallStatus();
+  }, []);
 
   // Gmail OAuth States
   const [gmailUser, setGmailUser] = useState<any>(null);
@@ -2951,6 +3247,722 @@ export default function SettingsModule({
         </form>
       </div>
 
+      {/* SEÇÃO DE SEGURANÇA ROBUSTA & RATE LIMITING */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5 text-indigo-600">
+            <Shield className="w-5 h-5 text-indigo-600" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-850 text-sm">Sistema de Proteção & Rate Limit (Segurança Robustez)</h3>
+                <span className={`text-[9.5px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                  rateLimitEnabled 
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                    : "bg-amber-50 text-amber-700 border-amber-200"
+                }`}>
+                  {rateLimitEnabled ? "● Proteção Ativa" : "○ Proteção Pausada"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Limitação de taxa de requisições por IP e categoria de rota (Express Rate Limit + Bloqueio HTTP 429) para proteger o sistema contra ataques DoS, botnets e consumo excessivo de APIs.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fetchRateLimitStatus}
+              disabled={isLoadingRateLimit}
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition text-xs font-bold cursor-pointer flex items-center gap-1"
+              title="Atualizar estatísticas"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRateLimit ? "animate-spin text-indigo-600" : ""}`} />
+              <span className="hidden sm:inline">Atualizar</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleTestBurstRateLimit}
+              disabled={isTestingRateLimit}
+              className="px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-extrabold text-xs transition shadow-sm shadow-indigo-500/20 active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+            >
+              <Play className={`w-3.5 h-3.5 ${isTestingRateLimit ? "animate-spin" : ""}`} />
+              <span>Simular Estresse (Teste 429)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* METRICS DASHBOARD CARDS */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+          <div className="p-3.5 rounded-xl bg-indigo-50/50 border border-indigo-100/80 space-y-1">
+            <span className="text-[10px] font-extrabold uppercase text-indigo-500 tracking-wider">Requisições Processadas</span>
+            <div className="text-lg font-black text-slate-800 font-mono">
+              {rateLimitStats.totalRequestsProcessed.toLocaleString("pt-MZ")}
+            </div>
+            <span className="text-[9.5px] text-slate-400">Total desde o início do servidor</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-rose-50/50 border border-rose-100/80 space-y-1">
+            <span className="text-[10px] font-extrabold uppercase text-rose-500 tracking-wider">Acessos Bloqueados (HTTP 429)</span>
+            <div className="text-lg font-black text-rose-600 font-mono">
+              {rateLimitStats.totalBlocked429}
+            </div>
+            <span className="text-[9.5px] text-slate-400">Tentativas que excederam o limite</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+            <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Perfil Atual</span>
+            <div className="text-sm font-black text-slate-800 uppercase tracking-wide">
+              {rateLimitProfile === "strict" ? "🔒 Restritivo" : rateLimitProfile === "balanced" ? "🛡️ Balanceado" : rateLimitProfile === "tolerant" ? "⚡ Tolerante" : "⚙️ Personalizado"}
+            </div>
+            <span className="text-[9.5px] text-slate-400">Política de segurança</span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
+            <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Última Ocorrência</span>
+            <div className="text-xs font-bold text-slate-700 font-mono truncate">
+              {rateLimitStats.lastViolationTimestamp 
+                ? new Date(rateLimitStats.lastViolationTimestamp).toLocaleTimeString("pt-MZ") 
+                : "Sem ocorrências"}
+            </div>
+            <span className="text-[9.5px] text-slate-400">Horário do último bloqueio</span>
+          </div>
+        </div>
+
+        {/* PROFILE PRESETS & CONFIGURATION FORM */}
+        <form onSubmit={handleSaveRateLimitConfig} className="space-y-4 text-xs">
+          <div className="space-y-2">
+            <label className="text-[10px] font-extrabold uppercase text-slate-500">Selecionar Perfil de Segurança e Limites</label>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setRateLimitProfile("strict");
+                  setRateLimitGeneralMax(60);
+                  setRateLimitAiMax(10);
+                  setRateLimitEmailMax(5);
+                  setRateLimitDbMax(10);
+                }}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
+                  rateLimitProfile === "strict"
+                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
+                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">🔒 Restritivo</span>
+                  {rateLimitProfile === "strict" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                </div>
+                <p className="text-[10px] text-slate-500">Segurança Máxima. 60 req/15m Geral, 10 req/1m IA, 5 req/5m Email.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRateLimitProfile("balanced");
+                  setRateLimitGeneralMax(120);
+                  setRateLimitAiMax(20);
+                  setRateLimitEmailMax(10);
+                  setRateLimitDbMax(15);
+                }}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
+                  rateLimitProfile === "balanced"
+                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
+                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">🛡️ Balanceado</span>
+                  {rateLimitProfile === "balanced" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                </div>
+                <p className="text-[10px] text-slate-500">Recomendado. 120 req/15m Geral, 20 req/1m IA, 10 req/5m Email.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRateLimitProfile("tolerant");
+                  setRateLimitGeneralMax(300);
+                  setRateLimitAiMax(50);
+                  setRateLimitEmailMax(30);
+                  setRateLimitDbMax(30);
+                }}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
+                  rateLimitProfile === "tolerant"
+                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
+                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">⚡ Tolerante</span>
+                  {rateLimitProfile === "tolerant" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                </div>
+                <p className="text-[10px] text-slate-500">Alta Demanda. 300 req/15m Geral, 50 req/1m IA, 30 req/5m Email.</p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setRateLimitProfile("custom")}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
+                  rateLimitProfile === "custom"
+                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
+                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-extrabold text-slate-800 flex items-center gap-1">⚙️ Personalizado</span>
+                  {rateLimitProfile === "custom" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
+                </div>
+                <p className="text-[10px] text-slate-500">Defina limites específicos para cada categoria abaixo.</p>
+              </button>
+            </div>
+          </div>
+
+          {/* DETAILED CATEGORY LIMIT ADJUSTMENTS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">API Geral (/api/*)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="10"
+                  max="2000"
+                  value={rateLimitGeneralMax}
+                  onChange={(e) => {
+                    setRateLimitGeneralMax(Number(e.target.value));
+                    setRateLimitProfile("custom");
+                  }}
+                  disabled={!canEdit}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
+                />
+                <span className="text-[10px] text-slate-400 shrink-0">req / 15m</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Inteligência Artificial (Gemini)</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="2"
+                  max="500"
+                  value={rateLimitAiMax}
+                  onChange={(e) => {
+                    setRateLimitAiMax(Number(e.target.value));
+                    setRateLimitProfile("custom");
+                  }}
+                  disabled={!canEdit}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
+                />
+                <span className="text-[10px] text-slate-400 shrink-0">req / 1m</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Emails, SMS & Disparos</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="200"
+                  value={rateLimitEmailMax}
+                  onChange={(e) => {
+                    setRateLimitEmailMax(Number(e.target.value));
+                    setRateLimitProfile("custom");
+                  }}
+                  disabled={!canEdit}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
+                />
+                <span className="text-[10px] text-slate-400 shrink-0">req / 5m</span>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Sincronia de Banco de Dados</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="5"
+                  max="500"
+                  value={rateLimitDbMax}
+                  onChange={(e) => {
+                    setRateLimitDbMax(Number(e.target.value));
+                    setRateLimitProfile("custom");
+                  }}
+                  disabled={!canEdit}
+                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
+                />
+                <span className="text-[10px] text-slate-400 shrink-0">req / 1m</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+            <div className="flex items-center gap-2.5">
+              <input
+                type="checkbox"
+                id="rateLimitEnabledToggle"
+                checked={rateLimitEnabled}
+                onChange={(e) => setRateLimitEnabled(e.target.checked)}
+                disabled={!canEdit}
+                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
+              />
+              <label htmlFor="rateLimitEnabledToggle" className="font-semibold text-slate-700 cursor-pointer select-none">
+                Habilitar motor de proteção de taxa de requisições (Rate Limiter)
+              </label>
+            </div>
+
+            {canEdit && (
+              <button
+                type="submit"
+                disabled={isSavingRateLimit}
+                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs transition shadow-sm shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
+              >
+                <Shield className="w-4 h-4" />
+                {isSavingRateLimit ? "Gravando..." : "Salvar Política de Rate Limit"}
+              </button>
+            )}
+          </div>
+        </form>
+
+        {/* LOG TABLE OF BLOCKED REQUESTS (HTTP 429) */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Lock className="w-4 h-4 text-rose-500" />
+              <h4 className="font-bold text-slate-800 text-xs">Registro de Tentativas Bloqueadas por Rate Limit (HTTP 429)</h4>
+              <span className="bg-rose-100 text-rose-700 font-mono font-bold text-[10px] px-2 py-0.5 rounded-full">
+                {rateLimitViolations.length} {rateLimitViolations.length === 1 ? "registro" : "registros"}
+              </span>
+            </div>
+
+            {rateLimitViolations.length > 0 && canEdit && (
+              <button
+                type="button"
+                onClick={handleClearRateLimitLogs}
+                className="text-[10.5px] text-slate-500 hover:text-rose-600 transition flex items-center gap-1 cursor-pointer font-bold"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Limpar Registros
+              </button>
+            )}
+          </div>
+
+          {rateLimitViolations.length === 0 ? (
+            <div className="p-6 text-center rounded-xl bg-slate-50/50 border border-slate-200/60 text-slate-400 space-y-1">
+              <CheckCircle className="w-6 h-6 text-emerald-500 mx-auto opacity-80" />
+              <p className="font-bold text-slate-600 text-xs">Nenhum bloqueio de segurança registrado recentemente.</p>
+              <p className="text-[10px]">O sistema está operando normalmente dentro dos limites de taxa estabelecidos.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
+              <table className="w-full text-left text-[11px] text-slate-700 font-sans">
+                <thead className="bg-slate-100 text-slate-500 font-extrabold uppercase text-[9.5px] border-b border-slate-200">
+                  <tr>
+                    <th className="p-2.5">Horário / Data</th>
+                    <th className="p-2.5">IP de Origem</th>
+                    <th className="p-2.5">Método / Rota Alvo</th>
+                    <th className="p-2.5">Categoria</th>
+                    <th className="p-2.5 text-right">Ação Tomada</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/70 bg-white font-mono">
+                  {rateLimitViolations.map((v) => (
+                    <tr key={v.id} className="hover:bg-rose-50/20 transition">
+                      <td className="p-2.5 text-slate-600 font-bold whitespace-nowrap">
+                        {new Date(v.timestamp).toLocaleString("pt-MZ")}
+                      </td>
+                      <td className="p-2.5 font-bold text-slate-800">
+                        {v.ip}
+                      </td>
+                      <td className="p-2.5 text-slate-700 max-w-[220px] truncate">
+                        <span className="font-extrabold text-indigo-600 mr-1.5">{v.method}</span>
+                        <span>{v.endpoint}</span>
+                      </td>
+                      <td className="p-2.5">
+                        <span className="uppercase text-[9px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                          {v.category}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-right">
+                        <span className="inline-flex items-center gap-1 font-extrabold text-[9.5px] text-rose-600 bg-rose-100/80 px-2 py-0.5 rounded-full border border-rose-200">
+                          <AlertTriangle className="w-3 h-3" />
+                          BLOQUEADO 429
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* SEÇÃO DE SEGURANÇA AVANÇADA & PREVENÇÃO DE PERDAS (FIREWALL & DLP) */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-2.5 text-blue-600">
+            <Lock className="w-5 h-5 text-blue-600" />
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-850 text-sm">Firewall Anti-Invasão & Prevenção de Perda de Dados (DLP)</h3>
+                <span className={`text-[9.5px] font-black uppercase px-2 py-0.5 rounded-full border ${
+                  firewallEnabled 
+                    ? "bg-blue-50 text-blue-700 border-blue-200" 
+                    : "bg-slate-100 text-slate-600 border-slate-200"
+                }`}>
+                  {firewallEnabled ? "● Firewall Ativo" : "○ Firewall Inativo"}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Camadas de proteção contra injeções de código, invasão de sistema por força bruta, filtragem de IP e prevenção ativa contra perda acidental ou eliminação indevida de dados.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={fetchSecurityAndFirewallStatus}
+              disabled={isLoadingSecurityData}
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition text-xs font-bold cursor-pointer flex items-center gap-1"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSecurityData ? "animate-spin text-blue-600" : ""}`} />
+              <span className="hidden sm:inline">Diagnosticar Sistema</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleUndoLastRestore}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs transition shadow-sm shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
+              title="Anula o último restauro e reverte a base de dados para o ponto de segurança salvo automaticamente antes do restauro."
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Anular Última Restauração</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 1. SAÚDE DE ARMAZENAMENTO & PREVENÇÃO DE PERDAS (DLP METRICS) */}
+        <div className="space-y-3">
+          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+            <Database className="w-4 h-4 text-emerald-600" />
+            Integridade e Diagnóstico de Armazenamento da Base de Dados
+          </h4>
+
+          {storageHealth ? (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-100 space-y-1">
+                <span className="text-[9.5px] font-extrabold uppercase text-emerald-600 tracking-wider">Status Geral</span>
+                <div className="text-sm font-black text-emerald-800 flex items-center gap-1">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  {storageHealth.status}
+                </div>
+                <span className="text-[9px] text-slate-400">100% Tabelas Integras</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                <span className="text-[9.5px] font-extrabold uppercase text-slate-500 tracking-wider">Espaço Ocupado</span>
+                <div className="text-sm font-black text-slate-800 font-mono">
+                  {storageHealth.totalStorageKb} KB
+                </div>
+                <span className="text-[9px] text-slate-400">Base Local JSON</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-blue-50/50 border border-blue-100 space-y-1">
+                <span className="text-[9.5px] font-extrabold uppercase text-blue-600 tracking-wider">Snapshots Salvos</span>
+                <div className="text-sm font-black text-blue-800 font-mono">
+                  {storageHealth.backupFileCount} Arquivos ({storageHealth.totalBackupKb} KB)
+                </div>
+                <span className="text-[9px] text-slate-400">Histórico de Segurança</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100 space-y-1">
+                <span className="text-[9.5px] font-extrabold uppercase text-purple-600 tracking-wider">Firestore Admin</span>
+                <div className="text-sm font-black text-purple-800">
+                  {storageHealth.firestoreConnected ? "● Sincronizado" : "○ Offline Local"}
+                </div>
+                <span className="text-[9px] text-slate-400">Nuvem Firebase</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-sky-50/50 border border-sky-100 space-y-1">
+                <span className="text-[9.5px] font-extrabold uppercase text-sky-600 tracking-wider">Cloud SQL</span>
+                <div className="text-sm font-black text-sky-800">
+                  {storageHealth.cloudSqlConnected ? "● Conectado (PG)" : "○ Standby Local"}
+                </div>
+                <span className="text-[9px] text-slate-400">PostgreSQL Cloud</span>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 text-center rounded-xl bg-slate-50 border border-slate-200 text-slate-400 text-xs">
+              Carregando diagnósticos da base de dados...
+            </div>
+          )}
+        </div>
+
+        {/* 2. CONFIGURAÇÃO DE POLÍTICAS DE FIREWALL & PROTEÇÃO */}
+        <div className="space-y-4 pt-2 border-t border-slate-100">
+          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-blue-600" />
+            Mecanismos de Defesa Anti-Invasão e Filtros de Segurança
+          </h4>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="secHeadersToggle"
+                checked={securityHeadersEnabled}
+                onChange={(e) => setSecurityHeadersEnabled(e.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <label htmlFor="secHeadersToggle" className="font-bold text-slate-800 cursor-pointer">
+                  Cabeçalhos de Segurança HTTP (HSTS, Anti-XSS, Anti-Clickjacking)
+                </label>
+                <p className="text-[10px] text-slate-400">
+                  Injeta `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` e regras HSTS em todas as respostas HTTP do servidor.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="sanitizerToggle"
+                checked={sanitizerEnabled}
+                onChange={(e) => setSanitizerEnabled(e.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <label htmlFor="sanitizerToggle" className="font-bold text-slate-800 cursor-pointer">
+                  Filtro Sanitizador e Inspeção de Payload (Anti-Injeção)
+                </label>
+                <p className="text-[10px] text-slate-400">
+                  Bloqueia requisições contendo scripts maliciosos (`&lt;script&gt;`, `javascript:`) e instruções SQL nocivas (`UNION SELECT`, `DROP TABLE`).
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="bruteForceToggle"
+                checked={bruteForceEnabled}
+                onChange={(e) => setBruteForceEnabled(e.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <label htmlFor="bruteForceToggle" className="font-bold text-slate-800 cursor-pointer">
+                  Defesa Anti-Força Bruta e Bloqueio de IP por Erros de Autenticação
+                </label>
+                <p className="text-[10px] text-slate-400">
+                  Bloqueia temporariamente (15m) qualquer IP que acumule 5 falhas consecutivas de autenticação em menos de 10 minutos.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
+              <input
+                type="checkbox"
+                id="whitelistOnlyToggle"
+                checked={whitelistOnlyMode}
+                onChange={(e) => setWhitelistOnlyMode(e.target.checked)}
+                disabled={!canEdit}
+                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+              />
+              <div className="space-y-0.5">
+                <label htmlFor="whitelistOnlyToggle" className="font-bold text-slate-800 cursor-pointer">
+                  Modo Estrito de Whitelist de IP (Somente IPs Autorizados)
+                </label>
+                <p className="text-[10px] text-slate-400">
+                  Bloqueia o acesso a qualquer IP que não esteja explicitamente cadastrado na lista de permissões do sistema.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-between items-center pt-1">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="firewallEnabledToggle"
+                checked={firewallEnabled}
+                onChange={(e) => setFirewallEnabled(e.target.checked)}
+                disabled={!canEdit}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
+              />
+              <label htmlFor="firewallEnabledToggle" className="font-semibold text-slate-700 cursor-pointer text-xs">
+                Manter o Firewall Anti-Invasão Ativo
+              </label>
+            </div>
+
+            {canEdit && (
+              <button
+                type="button"
+                onClick={handleSaveFirewallPolicies}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs transition shadow-sm shadow-blue-600/10 cursor-pointer flex items-center gap-1.5"
+              >
+                <Shield className="w-4 h-4" />
+                Gravar Políticas de Firewall
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* 3. BLOQUEIOS DE FORÇA BRUTA ATIVOS */}
+        {activeLockouts.length > 0 && (
+          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+            <h4 className="font-bold text-rose-600 text-xs flex items-center gap-2">
+              <AlertOctagon className="w-4 h-4" />
+              IPs Bloqueados em Tempo Real por Tentativas de Força Bruta
+            </h4>
+
+            <div className="overflow-x-auto rounded-xl border border-rose-200 bg-rose-50/20">
+              <table className="w-full text-left text-[11px] text-slate-700 font-mono">
+                <thead className="bg-rose-100/70 text-rose-800 font-extrabold uppercase text-[9.5px]">
+                  <tr>
+                    <th className="p-2.5">Endereço IP</th>
+                    <th className="p-2.5">Tentativas Falhadas</th>
+                    <th className="p-2.5">Bloqueado Até</th>
+                    <th className="p-2.5 text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-rose-100">
+                  {activeLockouts.map((rec: any) => (
+                    <tr key={rec.ip}>
+                      <td className="p-2.5 font-bold text-slate-800">{rec.ip}</td>
+                      <td className="p-2.5 text-rose-700 font-black">{rec.failedCount} falhas</td>
+                      <td className="p-2.5 text-slate-600">{new Date(rec.lockedUntil).toLocaleString("pt-MZ")}</td>
+                      <td className="p-2.5 text-right">
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleUnlockIp(rec.ip)}
+                            className="px-2.5 py-1 rounded bg-white hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold transition cursor-pointer"
+                          >
+                            Desbloquear IP
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* 4. GERENCIADOR DE REGRAS DE IP (BLACKIST & WHITELIST) */}
+        <div className="space-y-3 pt-2 border-t border-slate-100">
+          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
+            <Filter className="w-4 h-4 text-blue-600" />
+            Regras de Firewall por IP (Listas Negras e Listas Brancas)
+          </h4>
+
+          {canEdit && (
+            <form onSubmit={handleAddIpRule} className="flex flex-wrap items-center gap-2">
+              <input
+                type="text"
+                placeholder="Insira o Endereço IP (ex: 192.168.1.100 ou 41.220.12.5)"
+                value={newIpInput}
+                onChange={(e) => setNewIpInput(e.target.value)}
+                className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 outline-none focus:bg-white focus:border-blue-500"
+              />
+              <select
+                value={newIpType}
+                onChange={(e: any) => setNewIpType(e.target.value)}
+                className="bg-slate-100 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none"
+              >
+                <option value="blacklist">Bloquear IP (Blacklist)</option>
+                <option value="whitelist">Autorizar IP (Whitelist)</option>
+              </select>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs transition cursor-pointer flex items-center gap-1"
+              >
+                <Plus className="w-4 h-4" />
+                Adicionar Regra
+              </button>
+            </form>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+            {/* BLACKLIST */}
+            <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-rose-700 text-xs flex items-center gap-1.5">
+                  <XCircle className="w-4 h-4 text-rose-500" />
+                  IP Blacklist (Bloqueados Permanente)
+                </span>
+                <span className="text-[10px] font-mono font-bold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-full">
+                  {blacklistedIps.length}
+                </span>
+              </div>
+              {blacklistedIps.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic">Nenhum IP bloqueado manualmente.</p>
+              ) : (
+                <div className="space-y-1">
+                  {blacklistedIps.map((ip) => (
+                    <div key={ip} className="flex items-center justify-between p-1.5 rounded bg-white border border-rose-100 text-xs font-mono">
+                      <span className="font-bold text-rose-800">{ip}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveIpRule(ip, "blacklist")}
+                          className="text-rose-500 hover:text-rose-700 p-0.5 transition cursor-pointer"
+                          title="Remover regra"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* WHITELIST */}
+            <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-emerald-700 text-xs flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                  IP Whitelist (Autorizados)
+                </span>
+                <span className="text-[10px] font-mono font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  {whitelistedIps.length}
+                </span>
+              </div>
+              {whitelistedIps.length === 0 ? (
+                <p className="text-[11px] text-slate-400 italic">Nenhum IP restrito na whitelist.</p>
+              ) : (
+                <div className="space-y-1">
+                  {whitelistedIps.map((ip) => (
+                    <div key={ip} className="flex items-center justify-between p-1.5 rounded bg-white border border-emerald-100 text-xs font-mono">
+                      <span className="font-bold text-emerald-800">{ip}</span>
+                      {canEdit && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveIpRule(ip, "whitelist")}
+                          className="text-slate-400 hover:text-rose-600 p-0.5 transition cursor-pointer"
+                          title="Remover regra"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Grid: Left Company profiles, Right Gateway integrations & backups */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 text-xs md:text-xs text-slate-800">
         
@@ -4115,14 +5127,14 @@ export default function SettingsModule({
 
               return (
                 <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {filteredLogs.map((log) => {
+                  {filteredLogs.map((log, logIdx) => {
                     const isError = (log.action || "").toUpperCase().includes("FALHA") || 
                                     (log.action || "").toUpperCase().includes("FAIL") ||
                                     (log.details || "").toUpperCase().includes("ERR") ||
                                     (log.details || "").toUpperCase().includes("RECUSOU");
                     return (
                       <div 
-                        key={log.id || `log-${Math.random()}`} 
+                        key={`${log.id || 'log'}-${logIdx}`} 
                         className={`p-2.5 rounded-xl border text-[11px] transition ${
                           isError 
                             ? "bg-rose-50/70 border-rose-100 text-rose-900" 
@@ -5860,8 +6872,8 @@ export default function SettingsModule({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-150 bg-white">
-                        {localBackupsLog.slice(0, 5).map((log: any) => (
-                          <tr key={log.id} className="hover:bg-slate-50/70 transition">
+                        {localBackupsLog.slice(0, 5).map((log: any, idx: number) => (
+                          <tr key={`${log.id || 'log'}-${idx}`} className="hover:bg-slate-50/70 transition">
                             <td className="py-3 px-3 font-semibold text-slate-800 font-mono">
                               {new Date(log.date).toLocaleString("pt-MZ", {
                                 day: "2-digit",
@@ -7017,6 +8029,21 @@ export default function SettingsModule({
                             ))}
                           </select>
                         </div>
+                      </div>
+
+                      {/* WebAuthn Biometric Status */}
+                      <div className="border-t border-slate-200/30 pt-2 flex items-center justify-between gap-2">
+                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
+                          <Fingerprint className="w-3 h-3 text-orange-500 shrink-0" />
+                          Login Biométrico (WebAuthn)
+                        </span>
+                        <span className={`text-[9.5px] px-2 py-0.5 rounded-full font-bold border ${
+                          emp.webAuthnEnabled || (typeof localStorage !== "undefined" && localStorage.getItem(`erp_webauthn_enabled_${emp.id}`) === "true")
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 font-mono"
+                            : "bg-slate-100 text-slate-500 border-slate-200"
+                        }`}>
+                          {emp.webAuthnEnabled || (typeof localStorage !== "undefined" && localStorage.getItem(`erp_webauthn_enabled_${emp.id}`) === "true") ? "Ativo" : "Desativado"}
+                        </span>
                       </div>
                     </div>
                   </div>

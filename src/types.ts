@@ -108,7 +108,7 @@ export interface Transaction extends MultiTenantMetadata {
 export interface CashFlowEntry extends MultiTenantMetadata {
   id: string;
   timestamp: string;
-  type: "INPUT" | "REINFORCEMENT" | "EXPENSE" | "QUEBRA";
+  type: "INPUT" | "REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "SANGRIA" | "DEVOLUTION";
   amount: number;
   reason: string;
   responsibleUser: string;
@@ -149,6 +149,8 @@ export interface Employee extends MultiTenantMetadata {
   observacoes?: string;
   expirationDate?: string;
   logoUrl?: string;
+  webAuthnEnabled?: boolean;
+  webAuthnCredentialId?: string;
   subscriptionPlan?: SubscriptionPlan;
   planGrantedBy?: string;
 }
