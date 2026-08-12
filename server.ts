@@ -5,7 +5,7 @@ import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { initializeApp as initializeAdminApp, getApps as getAdminApps } from "firebase-admin/app";
+import { initializeApp as initializeAdminApp, getApps as getAdminApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import { db as drizzleDb, isCloudSqlAvailable } from "./src/db/index";
 import { products as productsTable, customers as customersTable, transactions as transactionsTable, auditlogs as auditlogsTable, settings as settingsTable } from "./src/db/schema";
@@ -130,52 +130,91 @@ function getLockoutsStore(): Record<string, LockoutRecord> {
   return {};
 }
 
-function saveLockoutsStore(store: Record<string, LockoutRecord>) {
-  const dir = path.join(process.cwd(), "db_store");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function safeMkdir(dirPath: string): boolean {
+  try {
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+    return true;
+  } catch (err: any) {
+    return false;
   }
-  const lockoutsPath = path.join(dir, "auth_lockouts.json");
-  fs.writeFileSync(lockoutsPath, JSON.stringify(store, null, 2), "utf-8");
 }
 
-// Initialize Firebase Firestore using Firebase Admin SDK to bypass security rules on the trusted backend
+function safeWriteLocalDbFile(filePath: string, data: any): boolean {
+  try {
+    const dir = path.dirname(filePath);
+    safeMkdir(dir);
+    fs.writeFileSync(filePath, typeof data === "string" ? data : JSON.stringify(data, null, 2), "utf-8");
+    return true;
+  } catch (err: any) {
+    if (err.code === "EROFS" || err.message?.includes("read-only")) {
+      console.warn(`[SERVERLESS] Environment filesystem is read-only. Bypassing local JSON cache write for: ${filePath}`);
+    } else {
+      console.warn(`[STORAGE WARNING] Unable to write local db file ${filePath}:`, err.message || err);
+    }
+    return false;
+  }
+}
+
+function saveLockoutsStore(store: Record<string, LockoutRecord>) {
+  const dir = path.join(process.cwd(), "db_store");
+  const lockoutsPath = path.join(dir, "auth_lockouts.json");
+  safeWriteLocalDbFile(lockoutsPath, store);
+}
+
+// Initialize Firebase Firestore using Firebase Admin SDK
 const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
 let firebaseDb: any = null;
 
+let firebaseConfig: any = {};
 if (fs.existsSync(firebaseConfigPath)) {
   try {
-    const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-    if (getAdminApps().length === 0) {
-      initializeAdminApp({
-        projectId: firebaseConfig.projectId,
-      });
-    }
-    const dbInstance = getFirestore(firebaseConfig.firestoreDatabaseId || "(default)");
-    firebaseDb = dbInstance;
-    console.log("Firebase Admin SDK is initialized on the server. Connected to database:", firebaseConfig.firestoreDatabaseId);
+    firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
+  } catch (e) {
+    console.warn("Failed to parse firebase-applet-config.json:", e);
+  }
+}
 
-    // Perform an asynchronous verification check to handle cases where the server's ambient credentials 
-    // do not have IAM permissions to read/write the user's specific project database.
+const targetProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+const targetDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || "ostvendas-clean-db";
+
+if (targetProjectId) {
+  try {
+    if (getAdminApps().length === 0) {
+      const adminOptions: any = { projectId: targetProjectId };
+      if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
+        adminOptions.credential = cert({
+          projectId: targetProjectId,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+        });
+      }
+      initializeAdminApp(adminOptions);
+    }
+    const dbInstance = getFirestore(targetDatabaseId);
+    firebaseDb = dbInstance;
+    console.log(`Firebase Admin SDK initialized on the server. Project: ${targetProjectId}, Database: ${targetDatabaseId}`);
+
+    // Verification check
     (async () => {
       try {
         await dbInstance.collection("settings").limit(1).get();
-        console.log("[FIREBASE] Server verified Firestore access successfully. Cloud synchronization is active.");
+        console.log("[FIREBASE] Server verified Firestore access successfully.");
       } catch (verificationErr: any) {
         console.warn(
-          "[FIREBASE] Warning: Server does not have IAM permissions to access this Firestore project or database. " +
-          "Bypassing server-side sync to avoid background permission errors. Local-only JSON fallback will be active.",
+          "[FIREBASE] Warning: Server IAM check failed. Server-side Firestore operations bypassed to avoid errors.",
           verificationErr.message || verificationErr
         );
         firebaseDb = null;
       }
     })();
   } catch (err) {
-    console.error("Failed to initialize Firebase Admin SDK on the server:", err);
+    console.error("Failed to initialize Firebase Admin SDK on server:", err);
     firebaseDb = null;
   }
 } else {
-  console.warn("firebase-applet-config.json not found. Serving as offline local backup server.");
+  console.warn("No Firebase configuration or env variables found. Local JSON mode active.");
 }
 
 // Recursive helper to sanitize objects by removing 'undefined' values before sending to Firestore
@@ -2292,12 +2331,12 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             for (const t of tables) {
               if (result[t]) {
                 const filePath = path.join(DB_DIR, `${t}.json`);
-                fs.writeFileSync(filePath, JSON.stringify(result[t], null, 2), "utf-8");
+                safeWriteLocalDbFile(filePath, result[t]);
               }
             }
             if (result["settings"]) {
               const filePath = path.join(DB_DIR, "settings.json");
-              fs.writeFileSync(filePath, JSON.stringify(result["settings"], null, 2), "utf-8");
+              safeWriteLocalDbFile(filePath, result["settings"]);
             }
             console.log("Cache local sincronizado com dados do Firebase Firestore.");
             return res.json({ success: true, hasData, data: result, source: "firebase" });
@@ -2334,7 +2373,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
 
       // 1. Cache to local file
       const filePath = path.join(DB_DIR, `${table}.json`);
-      fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
+      safeWriteLocalDbFile(filePath, data);
 
       // 2. Synchronize to Firestore
       if (firebaseDb) {
@@ -2412,7 +2451,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       for (const t of tables) {
         if (payload[t] !== undefined) {
           const filePath = path.join(DB_DIR, `${t}.json`);
-          fs.writeFileSync(filePath, JSON.stringify(payload[t], null, 2), "utf-8");
+          safeWriteLocalDbFile(filePath, payload[t]);
         }
       }
 

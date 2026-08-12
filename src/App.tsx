@@ -56,6 +56,12 @@ import {
   getProdutosFromFirestore,
   addProdutoToFirestore,
   addProdutosToFirestoreBatch,
+  getCustomersFromFirestore,
+  addCustomersToFirestoreBatch,
+  getCashflowFromFirestore,
+  addCashflowToFirestoreBatch,
+  getSettingsFromFirestore,
+  saveSettingsToFirestore,
   updateProdutoInFirestore,
   deleteProdutoFromFirestore,
   deleteProductFromCloudSQL,
@@ -2164,38 +2170,25 @@ export default function App() {
       
       if (tableName === "products") {
         await addProdutosToFirestoreBatch(updatedData);
-        // Also update server-side local JSON and top-level Firestore (handles orphan deletes automatically on the server)
-        try {
-          await fetch("/api/db/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ table: "products", data: updatedData })
-          });
-        } catch (serverErr) {
-          console.warn("Could not save products to server DB store:", serverErr);
-        }
       } else if (tableName === "transactions") {
         await addTransacoesToFirestoreBatch(updatedData);
-        // Also update server-side local JSON and top-level Firestore
-        try {
-          await fetch("/api/db/save", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ table: "transactions", data: updatedData })
-          });
-        } catch (serverErr) {
-          console.warn("Could not save transactions to server DB store:", serverErr);
-        }
-      } else {
-        const response = await fetch("/api/db/save", {
+      } else if (tableName === "customers") {
+        await addCustomersToFirestoreBatch(updatedData);
+      } else if (tableName === "cashflow") {
+        await addCashflowToFirestoreBatch(updatedData);
+      } else if (tableName === "settings") {
+        await saveSettingsToFirestore(updatedData);
+      }
+
+      // Also send mutation to server endpoint if available
+      try {
+        await fetch("/api/db/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ table: tableName, data: updatedData })
         });
-        
-        if (!response.ok) {
-          throw new Error(`server returned error ${response.status}`);
-        }
+      } catch (serverErr) {
+        console.warn(`Could not save table '${tableName}' to server DB store:`, serverErr);
       }
       
       // Successfully synced! Try to clean from pending queue
@@ -2498,75 +2491,99 @@ export default function App() {
     testConnection();
 
     const fetchExistentialDb = async () => {
+      let loadedData = false;
       try {
         const response = await fetch("/api/db/load");
-        const json = await response.json();
-        if (json.success && json.hasData) {
-          const d = json.data;
-          if (d.products) setProducts(d.products);
+        const contentType = response.headers.get("content-type");
+        if (response.ok && contentType && contentType.includes("application/json")) {
+          const json = await response.json();
+          if (json.success && json.hasData) {
+            const d = json.data;
+            if (d.products) setProducts(d.products);
+            else setProducts(initialProducts);
+
+            if (d.customers) setCustomers(d.customers);
+            else setCustomers(initialCustomers);
+
+            if (d.transactions) setTransactions(d.transactions);
+            else setTransactions(generateMockTransactions());
+
+            if (d.cashflow) setCashFlow(d.cashflow);
+            else setCashFlow(initialCashFlow);
+
+            if (d.employees) {
+              setEmployees(d.employees);
+              setActiveUser(d.employees[0]);
+            } else {
+              setEmployees(initialEmployees);
+              setActiveUser(initialEmployees[0]);
+            }
+
+            if (d.auditlogs) setAuditLogs(d.auditlogs);
+            else setAuditLogs(initialAuditLogs);
+
+            if (d.settings) setSettings(d.settings);
+            else setSettings(defaultSettings);
+
+            console.log("Banco de dados existencial carregado com sucesso via servidor.");
+            loadedData = true;
+          }
+        }
+      } catch (err) {
+        console.warn("API de banco do servidor indisponível. Conectando diretamente ao Firestore no cliente...", err);
+      }
+
+      if (!loadedData) {
+        // Direct Client-Side Firestore Fetching (Primary fallback for static Vercel deployments)
+        try {
+          console.log("[FIRESTORE DIRECT] Carregando coleções diretamente do Firebase Firestore...");
+          const [fsProducts, fsCustomers, fsTransactions, fsCashflow, fsEmployees, fsSettings] = await Promise.all([
+            getProdutosFromFirestore().catch(() => []),
+            getCustomersFromFirestore().catch(() => []),
+            getTransacoesFromFirestore().catch(() => []),
+            getCashflowFromFirestore().catch(() => []),
+            getUsuariosFromFirestore().catch(() => []),
+            getSettingsFromFirestore().catch(() => null)
+          ]);
+
+          if (fsProducts && fsProducts.length > 0) setProducts(fsProducts);
           else setProducts(initialProducts);
 
-          if (d.customers) setCustomers(d.customers);
+          if (fsCustomers && fsCustomers.length > 0) setCustomers(fsCustomers);
           else setCustomers(initialCustomers);
 
-          if (d.transactions) setTransactions(d.transactions);
+          if (fsTransactions && fsTransactions.length > 0) setTransactions(fsTransactions);
           else setTransactions(generateMockTransactions());
 
-          if (d.cashflow) setCashFlow(d.cashflow);
+          if (fsCashflow && fsCashflow.length > 0) setCashFlow(fsCashflow);
           else setCashFlow(initialCashFlow);
 
-          if (d.employees) {
-            setEmployees(d.employees);
-            setActiveUser(d.employees[0]);
+          if (fsEmployees && fsEmployees.length > 0) {
+            setEmployees(fsEmployees);
+            setActiveUser(fsEmployees[0]);
           } else {
             setEmployees(initialEmployees);
             setActiveUser(initialEmployees[0]);
           }
 
-          if (d.auditlogs) setAuditLogs(d.auditlogs);
-          else setAuditLogs(initialAuditLogs);
-
-          if (d.settings) setSettings(d.settings);
+          if (fsSettings) setSettings(fsSettings);
           else setSettings(defaultSettings);
 
-          console.log("Banco de dados existencial carregado com sucesso.");
-        } else {
-          // Empty or first boot, submit initial structures to seed the server
-          console.log("Banco de dados vazio. Semeando tabelas padrão no servidor...");
-          const placeholderTransactions = generateMockTransactions();
-          await fetch("/api/db/save-all", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              products: initialProducts,
-              customers: initialCustomers,
-              transactions: placeholderTransactions,
-              cashflow: initialCashFlow,
-              employees: initialEmployees,
-              auditlogs: initialAuditLogs,
-              settings: defaultSettings
-            })
-          });
+          setAuditLogs(initialAuditLogs);
+          console.log("[FIRESTORE DIRECT] Dados carregados com sucesso diretamente do Firebase Firestore no navegador.");
+        } catch (fsErr) {
+          console.warn("Falha no carregamento direto do Firestore. Usando dados locais:", fsErr);
           setProducts(initialProducts);
           setCustomers(initialCustomers);
-          setTransactions(placeholderTransactions);
+          setTransactions(generateMockTransactions());
           setCashFlow(initialCashFlow);
           setEmployees(initialEmployees);
           setAuditLogs(initialAuditLogs);
           setSettings(defaultSettings);
         }
-      } catch (err) {
-        console.warn("Servidor inativo ou inacessível. Recuando para mock local:", err);
-        setProducts(initialProducts);
-        setCustomers(initialCustomers);
-        setTransactions(generateMockTransactions());
-        setCashFlow(initialCashFlow);
-        setEmployees(initialEmployees);
-        setAuditLogs(initialAuditLogs);
-        setSettings(defaultSettings);
-      } finally {
-        setIsDbLoaded(true);
       }
+
+      setIsDbLoaded(true);
     };
     fetchExistentialDb();
   }, []);

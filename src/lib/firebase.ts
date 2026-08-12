@@ -1163,6 +1163,119 @@ export const addTransacoesToFirestoreBatch = async (transactions: any[]): Promis
   }
 };
 
+// --- CUSTOMERS (CLIENTES) FIRESTORE CRUD ACTIONS ---
+
+export const getCustomersFromFirestore = async (): Promise<any[]> => {
+  const collPath = getPartitionPath("customers");
+  const { ownerId, companyId } = getActiveTenantContext();
+  try {
+    const querySnapshot = await getDocs(collection(db, collPath));
+    const list: any[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collPath);
+    return [];
+  }
+};
+
+export const addCustomersToFirestoreBatch = async (customers: any[]): Promise<void> => {
+  if (!customers || customers.length === 0) return;
+  const collPath = getPartitionPath("customers");
+  if (isCircuitBroken()) return;
+  try {
+    const batchSize = 400;
+    for (let i = 0; i < customers.length; i += batchSize) {
+      const chunk = customers.slice(i, i + batchSize);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, collPath, String(item.id));
+        const enriched = attachMultiTenantMetadata(item);
+        batch.set(docRef, sanitizeForFirestore(enriched));
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, collPath);
+  }
+};
+
+// --- CASHFLOW FIRESTORE CRUD ACTIONS ---
+
+export const getCashflowFromFirestore = async (): Promise<any[]> => {
+  const collPath = getPartitionPath("cashflow");
+  const { ownerId, companyId } = getActiveTenantContext();
+  try {
+    const querySnapshot = await getDocs(collection(db, collPath));
+    const list: any[] = [];
+    querySnapshot.forEach((docSnap) => {
+      const data = docSnap.data();
+      if (!data.ownerId || data.ownerId === ownerId || (companyId && data.companyId === companyId)) {
+        list.push({ ...data, id: docSnap.id });
+      }
+    });
+    return list;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, collPath);
+    return [];
+  }
+};
+
+export const addCashflowToFirestoreBatch = async (cashflow: any[]): Promise<void> => {
+  if (!cashflow || cashflow.length === 0) return;
+  const collPath = getPartitionPath("cashflow");
+  if (isCircuitBroken()) return;
+  try {
+    const batchSize = 400;
+    for (let i = 0; i < cashflow.length; i += batchSize) {
+      const chunk = cashflow.slice(i, i + batchSize);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const docRef = doc(db, collPath, String(item.id));
+        const enriched = attachMultiTenantMetadata(item);
+        batch.set(docRef, sanitizeForFirestore(enriched));
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, collPath);
+  }
+};
+
+// --- SETTINGS FIRESTORE CRUD ACTIONS ---
+
+export const getSettingsFromFirestore = async (): Promise<any | null> => {
+  try {
+    const collPath = getPartitionPath("settings");
+    const docRef = doc(db, collPath, "config");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data();
+    }
+    return null;
+  } catch (error) {
+    console.warn("Could not get settings from Firestore:", error);
+    return null;
+  }
+};
+
+export const saveSettingsToFirestore = async (settings: any): Promise<void> => {
+  if (isCircuitBroken()) return;
+  try {
+    const collPath = getPartitionPath("settings");
+    const docRef = doc(db, collPath, "config");
+    const enriched = attachMultiTenantMetadata(settings);
+    await setDoc(docRef, sanitizeForFirestore(enriched));
+  } catch (error) {
+    console.warn("Could not save settings to Firestore:", error);
+  }
+};
+
 // --- REAL-TIME PRODUCTS & STOCK LISTENER SUBSCRIPTION ---
 
 export const subscribeToProdutos = (
