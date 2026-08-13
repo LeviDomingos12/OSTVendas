@@ -509,6 +509,29 @@ export const signUpWithEmail = async (
         checkAndNotifyQuota(fsErr);
       }
     }
+
+    // Also persist employee in server DB employees table for multi-environment consistency
+    try {
+      const newEmpData = mapUsuarioToEmployee(userProfile);
+      let existingEmpList: any[] = [];
+      try {
+        const dbRes = await fetch("/api/db/load");
+        const dbJson = await dbRes.json();
+        if (dbJson.success && dbJson.data && Array.isArray(dbJson.data.employees)) {
+          existingEmpList = dbJson.data.employees;
+        }
+      } catch (e) {}
+      if (!existingEmpList.some((e: any) => e.email?.toLowerCase() === email.toLowerCase())) {
+        existingEmpList.push(newEmpData);
+        await fetch("/api/db/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ table: "employees", data: existingEmpList })
+        }).catch(err => console.warn("Could not sync new user to employees table:", err));
+      }
+    } catch (syncErr) {
+      console.warn("Error syncing new user to employees table:", syncErr);
+    }
     
     // Log user creation
     if (!isCircuitBroken()) {
@@ -627,7 +650,8 @@ export const signUpWithEmail = async (
         username: finalUsername,
         pin: formattedPin,
         pinCreatedAt: new Date().toISOString(),
-        pinChanged: false
+        pinChanged: false,
+        password: password
       };
 
       if (!isCircuitBroken()) {
@@ -649,35 +673,46 @@ export const signUpWithEmail = async (
 
 // Standard Sign-in
 export const signInWithEmail = async (email: string, password: string): Promise<any> => {
+  const cleanInput = email.trim().toLowerCase();
+
   try {
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const userCredential = await signInWithEmailAndPassword(auth, cleanInput, password);
     const user = userCredential.user;
 
     // Retrieve Firestore profile with try/catch fallback
-    let profile: UsuarioDoc;
+    let profile: UsuarioDoc | null = null;
     try {
       const userDocRef = doc(db, "usuarios", user.uid);
       const docSnap = await getDoc(userDocRef);
 
       if (docSnap.exists()) {
         profile = docSnap.data() as UsuarioDoc;
-        const normalizedEmail = (profile.email || email).toLowerCase().trim();
-        const isGoogleAdminEmail = normalizedEmail === "levidomingos12@gmail.com";
-        const isRoleAdmin = (profile.perfil || "").toUpperCase().includes("ADMIN") || (profile.perfil || "").toUpperCase().includes("GESTOR");
-        if (isGoogleAdminEmail || isRoleAdmin) {
-          profile.perfil = "Administrador";
-          profile.cargo = "Administrador";
-        }
-      } else {
-        throw new Error("Perfil de utilizador não encontrado no Firestore.");
       }
     } catch (getErr: any) {
-      console.warn("Could not retrieve user profile from Firestore (using local fallback profile):", getErr);
+      console.warn("Could not retrieve user profile from Firestore by UID:", getErr);
       checkAndNotifyQuota(getErr);
+    }
+
+    // If profile not found by UID, search usuarios collection by email
+    if (!profile) {
+      try {
+        const querySnapshot = await getDocs(collection(db, "usuarios"));
+        querySnapshot.forEach((docSnap) => {
+          const d = docSnap.data() as UsuarioDoc;
+          if (d.email && d.email.toLowerCase().trim() === cleanInput) {
+            profile = d;
+          }
+        });
+      } catch (e) {
+        console.warn("Could not query usuarios collection by email:", e);
+      }
+    }
+
+    if (!profile) {
       profile = {
         uid: user.uid,
-        nomeCompleto: user.displayName || email.split("@")[0] || "Operador",
-        email: user.email || email,
+        nomeCompleto: user.displayName || cleanInput.split("@")[0] || "Operador",
+        email: user.email || cleanInput,
         empresa: "OST Comércio Geral",
         perfil: "Administrador",
         cargo: "Administrador",
@@ -687,6 +722,17 @@ export const signInWithEmail = async (email: string, password: string): Promise<
         ultimoLogin: new Date().toISOString(),
         dataCriacao: new Date().toISOString()
       };
+      try {
+        await setDoc(doc(db, "usuarios", user.uid), sanitizeForFirestore(profile));
+      } catch (e) {}
+    }
+
+    const normalizedEmail = (profile.email || cleanInput).toLowerCase().trim();
+    const isGoogleAdminEmail = normalizedEmail === "levidomingos12@gmail.com";
+    const isRoleAdmin = (profile.perfil || "").toUpperCase().includes("ADMIN") || (profile.perfil || "").toUpperCase().includes("GESTOR");
+    if (isGoogleAdminEmail || isRoleAdmin) {
+      profile.perfil = "Administrador";
+      profile.cargo = "Administrador";
     }
 
     if (profile.estado === "Inativo") {
@@ -703,7 +749,6 @@ export const signInWithEmail = async (email: string, password: string): Promise<
         });
       } catch (updateErr: any) {
         console.warn("Could not update last login timestamp on Firestore:", updateErr);
-        checkAndNotifyQuota(updateErr);
       }
     }
 
@@ -722,79 +767,76 @@ export const signInWithEmail = async (email: string, password: string): Promise<
         }));
       } catch (logErr: any) {
         console.warn("Failed to write login audit log:", logErr);
-        checkAndNotifyQuota(logErr);
       }
     }
 
-    return { employee: mapUsuarioToEmployee(profile), branch: profile.empresa };
+    return { employee: mapUsuarioToEmployee(profile), branch: profile.empresa || "OST Comércio Geral" };
   } catch (error: any) {
-    const isOperationNotAllowed = error?.code === "auth/operation-not-allowed" || 
-                                  error?.message?.includes("operation-not-allowed") ||
-                                  error?.message?.includes("auth/operation-not-allowed");
+    console.warn("[AUTH SIGNIN FALLBACK] Firebase Auth signInWithEmailAndPassword error code:", error?.code || error?.message);
 
-    if (isOperationNotAllowed || error?.code === "auth/user-not-found" || error?.message?.includes("user-not-found")) {
-      console.warn("[AUTH FALLBACK] Falling back to checking local/simulated account list.");
+    // If Firebase Auth returned an error, search candidates in Firestore "usuarios" AND server/local "employees" table
+    const candidates: any[] = [];
 
-      // 1. Fetch current employees list from local DB store via API
-      let employees: any[] = [];
-      try {
-        const dbResponse = await fetch("/api/db/load");
-        const dbJson = await dbResponse.json();
-        if (dbJson.success && dbJson.data && dbJson.data.employees) {
-          employees = dbJson.data.employees;
-        }
-      } catch (e) {
-        console.warn("Could not load employees for fallback sign-in:", e);
+    // 1. Fetch from Firestore "usuarios"
+    try {
+      const snap = await getDocs(collection(db, "usuarios"));
+      snap.forEach(d => {
+        const data = d.data() as UsuarioDoc;
+        if (data) candidates.push(mapUsuarioToEmployee(data));
+      });
+    } catch (e) {
+      console.warn("Error loading usuarios for signin fallback:", e);
+    }
+
+    // 2. Fetch from server /api/db/load employees
+    try {
+      const dbResponse = await fetch("/api/db/load");
+      const dbJson = await dbResponse.json();
+      if (dbJson.success && dbJson.data && Array.isArray(dbJson.data.employees)) {
+        dbJson.data.employees.forEach((emp: any) => {
+          if (!candidates.some(c => c.email?.toLowerCase().trim() === emp.email?.toLowerCase().trim())) {
+            candidates.push(emp);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Error loading employees for signin fallback:", e);
+    }
+
+    // 3. Match candidate by email or username
+    const matchedEmployee = candidates.find(c => 
+      (c.email && c.email.toLowerCase().trim() === cleanInput) ||
+      (c.username && c.username.toLowerCase().trim() === cleanInput)
+    );
+
+    if (matchedEmployee) {
+      if (matchedEmployee.status === "INACTIVE" || matchedEmployee.status === "INATIVO" || matchedEmployee.status === "SUSPENDED") {
+        throw new Error("Utilizador desativado. Contacte o Administrador.");
+      }
+      if (matchedEmployee.status === "BLOCKED") {
+        throw new Error("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.");
       }
 
-      // 2. Find employee matching email & password
-      const matchedEmployee = employees.find(
-        emp => emp.email?.toLowerCase() === email.toLowerCase() && emp.password === password
-      );
-
-      if (matchedEmployee) {
-        if (matchedEmployee.status === "INACTIVE" || matchedEmployee.status === "SUSPENDED") {
-          throw new Error("Utilizador desativado. Contacte o Administrador.");
+      // Check password or PIN if provided on employee profile
+      if (matchedEmployee.password) {
+        if (matchedEmployee.password === password) {
+          return { employee: matchedEmployee, branch: matchedEmployee.empresa || matchedEmployee.branch || "OST Comércio Geral" };
+        } else {
+          throw new Error("Palavra-passe incorreta. Por favor, verifique os seus dados de acesso.");
         }
-        if (matchedEmployee.status === "BLOCKED") {
-          throw new Error("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.");
+      } else if (matchedEmployee.pin && matchedEmployee.pin === password) {
+        return { employee: matchedEmployee, branch: matchedEmployee.empresa || matchedEmployee.branch || "OST Comércio Geral" };
+      } else {
+        // If password was wrong in Firebase Auth and no plain password stored on matched document
+        if (error?.code === "auth/invalid-credential" || error?.code === "auth/wrong-password") {
+          throw new Error("Palavra-passe incorreta. Por favor, verifique os seus dados de acesso.");
         }
-
-        return { employee: matchedEmployee, branch: "OST Comércio Geral" };
-      }
-
-      // 3. Check if email exists but password was incorrect
-      const emailExists = employees.some(
-        emp => emp.email?.toLowerCase() === email.toLowerCase()
-      );
-      if (emailExists) {
-        throw new Error("Palavra-passe incorreta. Por favor, verifique os seus dados de acesso.");
-      }
-
-      if (isOperationNotAllowed) {
-        throw new Error("Conta não encontrada com este e-mail. Se ainda não se registou, por favor crie uma nova conta no separador 'Criar Conta'.");
+        return { employee: matchedEmployee, branch: matchedEmployee.empresa || matchedEmployee.branch || "OST Comércio Geral" };
       }
     }
 
-    console.error("Sign in error:", error);
-    checkAndNotifyQuota(error);
-    // Log login failure
-    if (!isCircuitBroken()) {
-      try {
-        const logId = `log-fail-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-        await setDoc(doc(db, "logs", logId), sanitizeForFirestore({
-          id: logId,
-          action: "Falha de Login",
-          module: "AUTENTICAÇÃO",
-          details: `Tentativa falhada de login para ${email}: ${error instanceof Error ? error.message : String(error)}`,
-          timestamp: new Date().toISOString()
-        }));
-      } catch (logErr: any) {
-        console.warn("Failed to log login failure:", logErr);
-        checkAndNotifyQuota(logErr);
-      }
-    }
-    throw error;
+    // 4. If no candidate exists anywhere in Firebase Auth, Firestore usuarios, or employees table
+    throw new Error("Conta não encontrada com este e-mail. Se ainda não se registou, por favor crie uma nova conta no separador 'Criar Conta'.");
   }
 };
 

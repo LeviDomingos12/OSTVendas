@@ -271,6 +271,8 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
   const [zoomScale, setZoomScale] = useState(1);
   const [zoomMode, setZoomMode] = useState<"box" | "pan">("box");
   const [showPrevWeekTrend, setShowPrevWeekTrend] = useState(false);
+  const [isHighActivity, setIsHighActivity] = useState(false);
+  const [movingAvg30Val, setMovingAvg30Val] = useState(0);
   const [hoveredDay, setHoveredDay] = useState<{
     label: string;
     dateStr: string;
@@ -645,10 +647,29 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
       .attr("y", d => y(d.count) - 3)
       .attr("opacity", x.bandwidth() >= 8 ? 1 : 0);
 
-    // Calculate Moving Average
+    // Calculate Moving Average & 30-day Moving Average Threshold
     const totalCount = days.reduce((sum, d) => sum + d.count, 0);
     const avgCount = days.length > 0 ? totalCount / days.length : 0;
     const yAvg = y(avgCount);
+
+    // Calculate 30-day moving average for high activity detection (>50% above moving average)
+    let logs30dCount = 0;
+    const now30 = new Date();
+    (logs || []).forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        const diffMs = now30.getTime() - logDate.getTime();
+        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
+          logs30dCount++;
+        }
+      } catch {}
+    });
+    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : avgCount;
+    const threshold50 = avg30 * 1.5;
+    const exceedsThreshold = avg30 > 0 && (avgCount > threshold50 || days.some(d => d.count > threshold50));
+    setIsHighActivity(exceedsThreshold);
+    setMovingAvg30Val(avg30);
 
     // Dotted horizontal line representing average volume
     chartContent.append("line")
@@ -672,6 +693,30 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
       .attr("font-weight", "bold")
       .attr("pointer-events", "none")
       .text(`Média: ${avgCount.toFixed(1)}/dia`);
+
+    // Threshold Line (+50% over 30-day Moving Average)
+    if (threshold50 > 0 && threshold50 <= maxCount) {
+      const yThreshold = y(threshold50);
+      chartContent.append("line")
+        .attr("class", "threshold-line")
+        .attr("x1", 0)
+        .attr("x2", innerWidth)
+        .attr("y1", yThreshold)
+        .attr("y2", yThreshold)
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "3,2")
+        .attr("pointer-events", "none");
+
+      chartContent.append("text")
+        .attr("x", 4)
+        .attr("y", yThreshold > 12 ? yThreshold - 3 : yThreshold + 9)
+        .attr("fill", "#f59e0b")
+        .attr("font-size", "8px")
+        .attr("font-weight", "bold")
+        .attr("pointer-events", "none")
+        .text(`Limiar (+50% Média 30D: ${threshold50.toFixed(1)})`);
+    }
 
     // Previous Week Trend Line Overlay (Linha de Tendência da Semana Anterior)
     if (showPrevWeekTrend && days.length > 0) {
@@ -896,6 +941,17 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
               {trendData.direction === "up" ? `+${trendData.percentage}%` : trendData.direction === "down" ? `-${trendData.percentage}%` : "0%"} vs ant.
             </span>
           </div>
+
+          {/* High Activity Warning Badge */}
+          {isHighActivity && (
+            <div 
+              title={`Atividade Elevada: Volume excede a média móvel de 30 dias (${movingAvg30Val.toFixed(1)} logs/dia) em mais de 50%`}
+              className="flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse shrink-0"
+            >
+              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+              <span>Alta Atividade</span>
+            </div>
+          )}
 
           {isZoomed && (
             <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse flex items-center gap-1">
