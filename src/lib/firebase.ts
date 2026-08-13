@@ -198,12 +198,14 @@ export function sanitizeForFirestore<T>(data: T): T {
 
 // Verification is triggered on boot
 export async function testConnection() {
+  if (isCircuitBroken()) return false;
   try {
     const testDoc = doc(db, "test", "connection");
     await getDocFromServer(testDoc);
     console.log("Firebase connection verified successfully in the browser!");
     return true;
   } catch (error) {
+    checkAndNotifyQuota(error);
     if (error instanceof Error && error.message.includes("the client is offline")) {
       console.error("Please check your Firebase configuration.");
     } else {
@@ -246,24 +248,22 @@ let isQuotaCircuitBroken = false;
 if (typeof window !== "undefined") {
   try {
     const lastDbId = localStorage.getItem("last_firestore_db_id");
-    if (lastDbId !== firestoreDatabaseId) {
+    if (lastDbId && lastDbId !== firestoreDatabaseId) {
       localStorage.removeItem("firestore_quota_circuit_broken_until");
       isQuotaCircuitBroken = false;
-      if (firestoreDatabaseId) {
-        localStorage.setItem("last_firestore_db_id", firestoreDatabaseId);
-      } else {
-        localStorage.removeItem("last_firestore_db_id");
-      }
-    } else {
-      const brokenUntil = localStorage.getItem("firestore_quota_circuit_broken_until");
-      if (brokenUntil && Number(brokenUntil) > Date.now()) {
-        isQuotaCircuitBroken = true;
-        disableNetwork(db).then(() => {
-          console.log("[QUOTA] Firestore network disabled on initialization due to active circuit breaker.");
-        }).catch((e) => {
-          console.warn("Could not disable Firestore network on initialization:", e);
-        });
-      }
+    }
+    if (firestoreDatabaseId) {
+      localStorage.setItem("last_firestore_db_id", firestoreDatabaseId);
+    }
+    
+    const brokenUntil = localStorage.getItem("firestore_quota_circuit_broken_until");
+    if (brokenUntil && Number(brokenUntil) > Date.now()) {
+      isQuotaCircuitBroken = true;
+      disableNetwork(db).then(() => {
+        console.log("[QUOTA] Firestore network disabled on initialization due to active circuit breaker.");
+      }).catch((e) => {
+        console.warn("Could not disable Firestore network on initialization:", e);
+      });
     }
   } catch (e) {
     // Ignore localStorage errors
@@ -274,8 +274,8 @@ export function breakCircuit() {
   isQuotaCircuitBroken = true;
   if (typeof window !== "undefined") {
     try {
-      // Break circuit for 2 hours
-      localStorage.setItem("firestore_quota_circuit_broken_until", String(Date.now() + 2 * 60 * 60 * 1000));
+      // Break circuit for 24 hours (until free daily quota resets)
+      localStorage.setItem("firestore_quota_circuit_broken_until", String(Date.now() + 24 * 60 * 60 * 1000));
     } catch (e) {}
   }
 
@@ -456,6 +456,7 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string
 
 // Fetch all registered users from Firestore to synchronize with local staff list
 export const getUsuariosFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   try {
     const { ownerId, companyId } = getActiveTenantContext();
     const querySnapshot = await getDocs(collection(db, "usuarios"));
@@ -693,20 +694,22 @@ export const signInWithEmail = async (email: string, password: string): Promise<
 
     // Retrieve Firestore profile with try/catch fallback
     let profile: UsuarioDoc | null = null;
-    try {
-      const userDocRef = doc(db, "usuarios", user.uid);
-      const docSnap = await getDoc(userDocRef);
+    if (!isCircuitBroken()) {
+      try {
+        const userDocRef = doc(db, "usuarios", user.uid);
+        const docSnap = await getDoc(userDocRef);
 
-      if (docSnap.exists()) {
-        profile = docSnap.data() as UsuarioDoc;
+        if (docSnap.exists()) {
+          profile = docSnap.data() as UsuarioDoc;
+        }
+      } catch (getErr: any) {
+        console.warn("Could not retrieve user profile from Firestore by UID:", getErr);
+        checkAndNotifyQuota(getErr);
       }
-    } catch (getErr: any) {
-      console.warn("Could not retrieve user profile from Firestore by UID:", getErr);
-      checkAndNotifyQuota(getErr);
     }
 
     // If profile not found by UID, search usuarios collection by email
-    if (!profile) {
+    if (!profile && !isCircuitBroken()) {
       try {
         const querySnapshot = await getDocs(collection(db, "usuarios"));
         querySnapshot.forEach((docSnap) => {
@@ -734,9 +737,13 @@ export const signInWithEmail = async (email: string, password: string): Promise<
         ultimoLogin: new Date().toISOString(),
         dataCriacao: new Date().toISOString()
       };
-      try {
-        await setDoc(doc(db, "usuarios", user.uid), sanitizeForFirestore(profile));
-      } catch (e) {}
+      if (!isCircuitBroken()) {
+        try {
+          await setDoc(doc(db, "usuarios", user.uid), sanitizeForFirestore(profile));
+        } catch (e) {
+          checkAndNotifyQuota(e);
+        }
+      }
     }
 
     const normalizedEmail = (profile.email || cleanInput).toLowerCase().trim();
@@ -790,14 +797,16 @@ export const signInWithEmail = async (email: string, password: string): Promise<
     const candidates: any[] = [];
 
     // 1. Fetch from Firestore "usuarios"
-    try {
-      const snap = await getDocs(collection(db, "usuarios"));
-      snap.forEach(d => {
-        const data = d.data() as UsuarioDoc;
-        if (data) candidates.push(mapUsuarioToEmployee(data));
-      });
-    } catch (e) {
-      console.warn("Error loading usuarios for signin fallback:", e);
+    if (!isCircuitBroken()) {
+      try {
+        const snap = await getDocs(collection(db, "usuarios"));
+        snap.forEach(d => {
+          const data = d.data() as UsuarioDoc;
+          if (data) candidates.push(mapUsuarioToEmployee(data));
+        });
+      } catch (e) {
+        console.warn("Error loading usuarios for signin fallback:", e);
+      }
     }
 
     // 2. Fetch from server /api/db/load employees
@@ -896,17 +905,19 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
     // 1. Validate e-mail exists in Firestore "usuarios" collection
     let existingProfileInFirestore: UsuarioDoc | null = null;
     let existingDocId: string | null = null;
-    try {
-      const querySnapshot = await getDocs(collection(db, "usuarios"));
-      querySnapshot.forEach((docSnap) => {
-        const d = docSnap.data() as UsuarioDoc;
-        if (d.email && d.email.toLowerCase().trim() === googleEmail) {
-          existingProfileInFirestore = d;
-          existingDocId = docSnap.id;
-        }
-      });
-    } catch (e) {
-      console.warn("Erro ao ler coleção 'usuarios' do Firestore para validar e-mail:", e);
+    if (!isCircuitBroken()) {
+      try {
+        const querySnapshot = await getDocs(collection(db, "usuarios"));
+        querySnapshot.forEach((docSnap) => {
+          const d = docSnap.data() as UsuarioDoc;
+          if (d.email && d.email.toLowerCase().trim() === googleEmail) {
+            existingProfileInFirestore = d;
+            existingDocId = docSnap.id;
+          }
+        });
+      } catch (e) {
+        console.warn("Erro ao ler coleção 'usuarios' do Firestore para validar e-mail:", e);
+      }
     }
 
     const matchedEmp = employeesList.find(emp => emp.email?.toLowerCase().trim() === googleEmail);
@@ -1068,6 +1079,7 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
 
 // Fetch all products from Firestore
 export const getProdutosFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("produtos");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1088,11 +1100,9 @@ export const getProdutosFromFirestore = async (): Promise<any[]> => {
 
 // Add product to Firestore
 export const addProdutoToFirestore = async (product: any): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("produtos");
   const path = `${collPath}/${product.id}`;
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   try {
     const enriched = attachMultiTenantMetadata(product);
     await setDoc(doc(db, collPath, product.id), sanitizeForFirestore(enriched));
@@ -1103,11 +1113,8 @@ export const addProdutoToFirestore = async (product: any): Promise<void> => {
 
 // Add multiple products to Firestore in batches of 400 to prevent quota/rate limiting issues
 export const addProdutosToFirestoreBatch = async (products: any[]): Promise<void> => {
-  if (!products || products.length === 0) return;
+  if (!products || products.length === 0 || isCircuitBroken()) return;
   const collPath = getPartitionPath("produtos");
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   
   try {
     const batchSize = 400; // conservative batch limit (max 500)
@@ -1128,11 +1135,9 @@ export const addProdutosToFirestoreBatch = async (products: any[]): Promise<void
 
 // Update product in Firestore
 export const updateProdutoInFirestore = async (productId: string, updatedFields: any): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("produtos");
   const path = `${collPath}/${productId}`;
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   try {
     const enriched = attachMultiTenantMetadata(updatedFields);
     await updateDoc(doc(db, collPath, productId), sanitizeForFirestore(enriched));
@@ -1143,11 +1148,9 @@ export const updateProdutoInFirestore = async (productId: string, updatedFields:
 
 // Delete product from Firestore
 export const deleteProdutoFromFirestore = async (productId: string): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("produtos");
   const path = `${collPath}/${productId}`;
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   try {
     await deleteDoc(doc(db, collPath, productId));
   } catch (error) {
@@ -1159,6 +1162,7 @@ export const deleteProdutoFromFirestore = async (productId: string): Promise<voi
 
 // Fetch all transactions from Firestore
 export const getTransacoesFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("transacoes");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1179,11 +1183,9 @@ export const getTransacoesFromFirestore = async (): Promise<any[]> => {
 
 // Add transaction to Firestore
 export const addTransacaoToFirestore = async (transaction: any): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("transacoes");
   const path = `${collPath}/${transaction.id}`;
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   try {
     const enriched = attachMultiTenantMetadata(transaction);
     await setDoc(doc(db, collPath, transaction.id), sanitizeForFirestore(enriched));
@@ -1194,11 +1196,8 @@ export const addTransacaoToFirestore = async (transaction: any): Promise<void> =
 
 // Add multiple transactions to Firestore in batches of 400 to prevent quota/rate limiting issues
 export const addTransacoesToFirestoreBatch = async (transactions: any[]): Promise<void> => {
-  if (!transactions || transactions.length === 0) return;
+  if (!transactions || transactions.length === 0 || isCircuitBroken()) return;
   const collPath = getPartitionPath("transacoes");
-  if (isCircuitBroken()) {
-    throw new Error("RESOURCE_EXHAUSTED: Firestore write cota excedida (circuito interrompido).");
-  }
   
   try {
     const batchSize = 400; // conservative batch limit (max 500)
@@ -1220,6 +1219,7 @@ export const addTransacoesToFirestoreBatch = async (transactions: any[]): Promis
 // --- CUSTOMERS (CLIENTES) FIRESTORE CRUD ACTIONS ---
 
 export const getCustomersFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("customers");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1262,6 +1262,7 @@ export const addCustomersToFirestoreBatch = async (customers: any[]): Promise<vo
 // --- CASHFLOW FIRESTORE CRUD ACTIONS ---
 
 export const getCashflowFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("cashflow");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1304,6 +1305,7 @@ export const addCashflowToFirestoreBatch = async (cashflow: any[]): Promise<void
 // --- SETTINGS FIRESTORE CRUD ACTIONS ---
 
 export const getSettingsFromFirestore = async (): Promise<any | null> => {
+  if (isCircuitBroken()) return null;
   try {
     const collPath = getPartitionPath("settings");
     const docRef = doc(db, collPath, "config");
@@ -1336,6 +1338,7 @@ export const subscribeToProdutos = (
   onUpdate: (products: any[]) => void,
   onError: (error: any) => void
 ) => {
+  if (isCircuitBroken()) return () => {};
   const collPath = getPartitionPath("produtos");
   const { ownerId, companyId } = getActiveTenantContext();
   return onSnapshot(
@@ -1612,6 +1615,7 @@ export const addAuditLogToCloudSQL = async (log: any): Promise<boolean> => {
  * Fetches security, login, and error logs from Firestore "logs" collection.
  */
 export const getLogsFromFirestore = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("logs");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1645,6 +1649,7 @@ export const createRecoveryRequest = async (request: {
   employeeName: string; 
   type: "SENHA" | "PIN";
 }): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
     const requestId = `recov-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -1668,6 +1673,7 @@ export const createRecoveryRequest = async (request: {
  * Fetches all recovery requests from Firestore.
  */
 export const getRecoveryRequests = async (): Promise<any[]> => {
+  if (isCircuitBroken()) return [];
   const collPath = getPartitionPath("solicitacoes_recuperacao");
   const { ownerId, companyId } = getActiveTenantContext();
   try {
@@ -1696,6 +1702,7 @@ export const getRecoveryRequests = async (): Promise<any[]> => {
  * Marks a recovery request as resolved.
  */
 export const resolveRecoveryRequest = async (requestId: string): Promise<void> => {
+  if (isCircuitBroken()) return;
   const collPath = getPartitionPath("solicitacoes_recuperacao");
   try {
     await updateDoc(doc(db, collPath, requestId), {
@@ -1703,6 +1710,7 @@ export const resolveRecoveryRequest = async (requestId: string): Promise<void> =
       resolvedAt: new Date().toISOString()
     });
   } catch (error) {
+    checkAndNotifyQuota(error);
     console.error("Failed to resolve recovery request:", error);
     throw error;
   }

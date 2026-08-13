@@ -51,6 +51,7 @@ import {
   auth, 
   db, 
   logout,
+  checkAndNotifyQuota,
   getUsuariosFromFirestore, 
   mapUsuarioToEmployee,
   getProdutosFromFirestore,
@@ -2033,6 +2034,7 @@ export default function App() {
           await setDoc(docRef, { counter: buildVersion, updatedAt: new Date().toISOString() });
         }
       } catch (err) {
+        checkAndNotifyQuota(err);
         console.warn("Failed to fetch/sync global version counter from Firestore:", err);
       }
     };
@@ -2041,7 +2043,7 @@ export default function App() {
       // Small delay or directly trigger
       syncFirestoreVersion();
     }
-  }, [isAuthenticated, activeUser, db, buildVersion]);
+  }, [isAuthenticated, activeUser]);
 
   // Unified function to increment build version both locally and in Firestore
   const incrementVersionCounter = async () => {
@@ -2064,6 +2066,7 @@ export default function App() {
           updatedAt: new Date().toISOString() 
         }, { merge: true });
       } catch (err) {
+        checkAndNotifyQuota(err);
         console.warn("Failed to update global version counter in Firestore:", err);
       }
     }
@@ -2220,8 +2223,8 @@ export default function App() {
     setLastSyncTime(new Date().toLocaleTimeString());
     await incrementVersionCounter();
     try {
-      if (!navigator.onLine) {
-        throw new Error("browser is offline");
+      if (!navigator.onLine || isCircuitBroken()) {
+        throw new Error("browser is offline or Firestore quota exceeded");
       }
       
       if (tableName === "products") {
@@ -2281,7 +2284,7 @@ export default function App() {
   }, [activeUser, auditLogs]); // Re-bind when user context or logs state updates
 
   const processSyncQueue = async () => {
-    if (!navigator.onLine) return;
+    if (!navigator.onLine || isCircuitBroken()) return;
     
     try {
       const rawQueue = localStorage.getItem("pos_sync_queue");
@@ -2438,8 +2441,8 @@ export default function App() {
   // Hook de sincronização automática periódica (a cada 5 minutos) específico para transações offline pendentes
   useEffect(() => {
     const syncPendingTransactions = async () => {
-      if (!navigator.onLine) {
-        console.log("[SYNC 5MIN] Sistema offline. Sincronização periódica suspensa.");
+      if (!navigator.onLine || isCircuitBroken()) {
+        console.log("[SYNC 5MIN] Sistema offline ou cota excedida. Sincronização periódica suspensa.");
         return;
       }
 
@@ -2671,18 +2674,24 @@ export default function App() {
 
           // Fetch user profile from Firestore "usuarios" with robust caching & local fallback
           let profileData: any = null;
-          try {
-            const userDocRef = doc(db, "usuarios", user.uid);
-            const docSnap = await getDoc(userDocRef);
-            if (docSnap.exists()) {
-              profileData = docSnap.data();
-              // Cache profile in localStorage for offline, permission, or quota fallback
-              localStorage.setItem(`cached_profile_${user.uid}`, JSON.stringify(profileData));
-            } else {
-              console.warn("[AUTH RESTORE] Perfil não encontrado no Firestore para uid:", user.uid);
+          if (!isCircuitBroken()) {
+            try {
+              const userDocRef = doc(db, "usuarios", user.uid);
+              const docSnap = await getDoc(userDocRef);
+              if (docSnap.exists()) {
+                profileData = docSnap.data();
+                // Cache profile in localStorage for offline, permission, or quota fallback
+                localStorage.setItem(`cached_profile_${user.uid}`, JSON.stringify(profileData));
+              } else {
+                console.warn("[AUTH RESTORE] Perfil não encontrado no Firestore para uid:", user.uid);
+              }
+            } catch (fsErr: any) {
+              checkAndNotifyQuota(fsErr);
+              console.warn("[AUTH RESTORE] Erro ao pesquisar Firestore, usando cache local como recurso:", fsErr);
             }
-          } catch (fsErr: any) {
-            console.warn("[AUTH RESTORE] Erro ao pesquisar Firestore, usando cache local como recurso:", fsErr);
+          }
+
+          if (!profileData) {
             const cached = localStorage.getItem(`cached_profile_${user.uid}`);
             if (cached) {
               try {
@@ -2718,9 +2727,12 @@ export default function App() {
             
             // Also write to Firestore to persist this mapping if online
             try {
-              const userDocRef = doc(db, "usuarios", user.uid);
-              await setDoc(userDocRef, profileData);
+              if (!isCircuitBroken()) {
+                const userDocRef = doc(db, "usuarios", user.uid);
+                await setDoc(userDocRef, profileData);
+              }
             } catch (err) {
+              checkAndNotifyQuota(err);
               console.warn("Could not save mapped Google profile to Firestore:", err);
             }
           }
@@ -2859,10 +2871,8 @@ export default function App() {
             console.log(`[FIRESTORE] Recebidos ${firestoreProducts.length} produtos em tempo real.`);
             setProducts(firestoreProducts);
           } else {
-            console.log("[FIRESTORE] Coleção de produtos vazia. Semeando produtos iniciais...");
-            for (const prod of initialProducts) {
-              await addProdutoToFirestore(prod);
-            }
+            console.log("[FIRESTORE] Coleção de produtos remota vazia ou offline. Mantendo catálogo de produtos locais.");
+            setProducts(prev => (prev && prev.length > 0 ? prev : initialProducts));
           }
         },
         (error) => {
@@ -2878,12 +2888,8 @@ export default function App() {
             console.log(`[FIRESTORE] Carregadas ${firestoreTx.length} transações.`);
             setTransactions(firestoreTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
           } else {
-            console.log("[FIRESTORE] Coleção de transações vazia. Semeando transações iniciais...");
-            const mockTx = generateMockTransactions();
-            for (const tx of mockTx) {
-              await addTransacaoToFirestore(tx);
-            }
-            setTransactions(mockTx);
+            console.log("[FIRESTORE] Sem transações no Firestore. Mantendo histórico de transações locais.");
+            setTransactions(prev => (prev && prev.length > 0 ? prev : generateMockTransactions()));
           }
         } catch (err) {
           console.error("[FIRESTORE] Erro ao carregar transações do Firestore:", err);
