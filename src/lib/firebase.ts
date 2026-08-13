@@ -2,17 +2,29 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { getFirestore, doc, getDocFromServer, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, disableNetwork, writeBatch } from "firebase/firestore";
 import { getStorage, ref, uploadString, getDownloadURL, listAll, deleteObject, getMetadata } from "firebase/storage";
-import firebaseConfig from "../../firebase-applet-config.json";
+import rawFirebaseConfig from "../../firebase-applet-config.json";
+
+// Resolve Firebase configuration with Vercel environment variables & fallback JSON
+const env = (import.meta as any).env || {};
+
+const firebaseConfig = {
+  apiKey: env.VITE_FIREBASE_API_KEY || (rawFirebaseConfig as any).apiKey || (rawFirebaseConfig as any).firebaseConfig?.apiKey,
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || (rawFirebaseConfig as any).authDomain || (rawFirebaseConfig as any).firebaseConfig?.authDomain,
+  projectId: env.VITE_FIREBASE_PROJECT_ID || (rawFirebaseConfig as any).projectId || (rawFirebaseConfig as any).firebaseConfig?.projectId,
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || (rawFirebaseConfig as any).storageBucket || (rawFirebaseConfig as any).firebaseConfig?.storageBucket,
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || (rawFirebaseConfig as any).messagingSenderId || (rawFirebaseConfig as any).firebaseConfig?.messagingSenderId,
+  appId: env.VITE_FIREBASE_APP_ID || (rawFirebaseConfig as any).appId || (rawFirebaseConfig as any).firebaseConfig?.appId,
+};
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
 // Initialize Cloud Firestore and Auth with the custom database ID from configuration
-const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId;
+const firestoreDatabaseId = env.VITE_FIREBASE_DATABASE_ID || (rawFirebaseConfig as any).firestoreDatabaseId || (rawFirebaseConfig as any).firebaseConfig?.firestoreDatabaseId || "ostvendas-clean-db";
 if (firestoreDatabaseId) {
   console.log(`[FIREBASE] Inicializando Firestore com Database ID: ${firestoreDatabaseId}`);
 } else {
-  console.warn("[FIREBASE] AVISO: firestoreDatabaseId não encontrado no firebase-applet-config.json. Usando base padrão.");
+  console.warn("[FIREBASE] AVISO: firestoreDatabaseId não encontrado na configuração. Usando base padrão.");
 }
 
 export const db = firestoreDatabaseId ? getFirestore(app, firestoreDatabaseId) : getFirestore(app);
