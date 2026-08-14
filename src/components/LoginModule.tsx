@@ -29,10 +29,13 @@ import {
   signUpWithEmail, 
   signInWithEmail, 
   recoverPassword, 
+  googleSignIn,
   googleSignInAndSync,
   createRecoveryRequest,
-  auth
+  auth,
+  db
 } from "../lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
 import { sendEmail } from "../lib/gmail";
 import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
 
@@ -91,10 +94,11 @@ export default function LoginModule({
   // Caps Lock State
   const [isCapsLockOn, setIsCapsLockOn] = useState(false);
 
-  // Loading Steps
+  // Loading Steps & Local Auth Tracking
   const [loadingState, setLoadingState] = useState<"IDLE" | "AUTHENTICATING" | "CONNECTING" | "LOADING_PERMISSIONS" | "COMPANY_SELECTION">("IDLE");
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [authenticatedUser, setAuthenticatedUser] = useState<Employee | null>(null);
+  const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
 
   // Error/Success Feedback
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -211,29 +215,47 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(15);
       
-      const result = await googleSignInAndSync(selectedBranch || "OST Comércio Geral", employees, "OURO", inputEmail);
+      // Step 1: Initiate Google OAuth with account chooser and email hint
+      const signInResult = await googleSignIn(false, inputEmail);
+      if (!signInResult || !signInResult.user) {
+        setLoadingState("IDLE");
+        setLoadingProgress(0);
+        return;
+      }
+
+      // Step 2: Explicitly capture Firebase UID & Email in local state before any Firestore querying
+      const currentUid = signInResult.user.uid;
+      const verifiedEmail = (signInResult.user.email || inputEmail).toLowerCase().trim();
+      setFirebaseUid(currentUid);
+      setEmail(verifiedEmail);
+
+      // Step 3: Advance progress to Firestore synchronization
+      setLoadingState("CONNECTING");
+      setLoadingProgress(50);
+
+      // Step 4: Synchronize profile in Firestore using the verified Firebase UID
+      const result = await googleSignInAndSync(
+        selectedBranch || "OST Comércio Geral", 
+        employees, 
+        "OURO", 
+        verifiedEmail
+      );
       
       if (result && result.employee) {
         setAuthenticatedUser(result.employee);
         setSelectedBranch(result.branch);
-        
-        setTimeout(() => {
-          setLoadingState("CONNECTING");
-          setLoadingProgress(55);
-        }, 500);
-
-        setTimeout(() => {
-          setLoadingState("LOADING_PERMISSIONS");
-          setLoadingProgress(90);
-        }, 1000);
+        setLoadingState("LOADING_PERMISSIONS");
+        setLoadingProgress(85);
 
         setTimeout(() => {
           setLoadingProgress(100);
+          setLoadingState("IDLE");
           onShowToast(`Autenticado com sucesso via Google!`, "success");
           onLoginSuccess(result.employee, result.branch);
-        }, 1500);
+        }, 1200);
       } else {
         setLoadingState("IDLE");
+        setLoadingProgress(0);
       }
     } catch (err: any) {
       setLoadingState("IDLE");
@@ -475,29 +497,37 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(15);
       
-      const result = await googleSignInAndSync("OST Comércio Geral", employees);
+      const signInResult = await googleSignIn(false, email.trim() || undefined);
+      if (!signInResult || !signInResult.user) {
+        setLoadingState("IDLE");
+        setLoadingProgress(0);
+        return;
+      }
+
+      const currentUid = signInResult.user.uid;
+      const verifiedEmail = (signInResult.user.email || email.trim()).toLowerCase().trim();
+      setFirebaseUid(currentUid);
+      if (verifiedEmail) setEmail(verifiedEmail);
+
+      setLoadingState("CONNECTING");
+      setLoadingProgress(50);
+
+      const result = await googleSignInAndSync("OST Comércio Geral", employees, "OURO", verifiedEmail);
       if (result && result.employee) {
-        // Run accelerated pipeline then trigger direct success redirect
         setAuthenticatedUser(result.employee);
         setSelectedBranch(result.branch);
-        
-        setTimeout(() => {
-          setLoadingState("CONNECTING");
-          setLoadingProgress(55);
-        }, 500);
-
-        setTimeout(() => {
-          setLoadingState("LOADING_PERMISSIONS");
-          setLoadingProgress(90);
-        }, 1000);
+        setLoadingState("LOADING_PERMISSIONS");
+        setLoadingProgress(85);
 
         setTimeout(() => {
           setLoadingProgress(100);
+          setLoadingState("IDLE");
           onShowToast(`Autenticado com sucesso via Google!`, "success");
           onLoginSuccess(result.employee, result.branch);
-        }, 1500);
+        }, 1200);
       } else {
         setLoadingState("IDLE");
+        setLoadingProgress(0);
       }
     } catch (err: any) {
       setLoadingState("IDLE");
@@ -511,11 +541,11 @@ export default function LoginModule({
                               
       let friendlyError = `❌ Erro Google Sign-In: ${err.message}`;
       if (isGoogleBlocked) {
-        friendlyError = `❌ Erro de Acesso (Google 403 / popup fechado): Como a aplicação está em modo de testes no Google Cloud, o Google bloqueia o login de outras contas Gmail que não foram adicionadas à lista de testadores pelo programador. Para entrar no sistema, por favor, clique em "Registe-se aqui" no final do formulário para criar uma conta de acesso rápido com qualquer e-mail e palavra-passe!`;
+        friendlyError = `❌ A autenticação Google não foi concluída: ${err.message}`;
       }
       
       setErrorMessage(friendlyError);
-      onShowToast(isGoogleBlocked ? "Acesso Google Restrito ou Fechado." : (err.message || "Não foi possível autenticar com o Google."), "error");
+      onShowToast(isGoogleBlocked ? "Acesso Google Cancelado ou Bloqueado." : (err.message || "Não foi possível autenticar com o Google."), "error");
     }
   };
 

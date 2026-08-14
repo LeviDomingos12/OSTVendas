@@ -403,7 +403,7 @@ export function getActiveTenantContext(): { ownerId: string; companyId?: string 
   }
 
   if (!ownerId) {
-    ownerId = "emp-master-admin-001";
+    ownerId = "default_tenant";
   }
 
   return { ownerId, companyId };
@@ -435,10 +435,46 @@ export function getPartitionPath(collectionName: string, adminUidOverride?: stri
   const cleanUid = (adminUid || "default_tenant")
     .trim()
     .replace(/\s+/g, "")
-    .replace(/[^a-zA-Z0-9_\\-]/g, "");
+    .replace(/[^a-zA-Z0-9_\-]/g, "");
 
   return `admins/${cleanUid}/${collectionName}`;
 }
+
+/**
+ * Helper to get the current Firebase ID Token for authenticating API calls
+ */
+export const getAuthToken = async (): Promise<string | null> => {
+  try {
+    if (auth.currentUser) {
+      return await auth.currentUser.getIdToken(false);
+    }
+  } catch (e) {
+    console.warn("Could not get Firebase ID token:", e);
+  }
+  const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+  if (storedSimulated) {
+    try {
+      const parsed = JSON.parse(storedSimulated);
+      return parsed.uid || parsed.id || null;
+    } catch (e) {}
+  }
+  return null;
+};
+
+/**
+ * Authenticated fetch helper for backend API endpoints
+ */
+export const authFetch = async (url: string, options: RequestInit = {}): Promise<Response> => {
+  const token = await getAuthToken();
+  const headers = new Headers(options.headers || {});
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return fetch(url, {
+    ...options,
+    headers
+  });
+};
 
 // Map Firestore doc to native Employee type
 export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string; subscriptionPlan?: string }): any {
@@ -461,27 +497,34 @@ export function mapUsuarioToEmployee(usuario: UsuarioDoc & { adminEmail?: string
   };
 }
 
-// Fetch all registered users from Firestore to synchronize with local staff list
+// Fetch all registered users from Firestore for the current tenant only
 export const getUsuariosFromFirestore = async (): Promise<any[]> => {
   if (isCircuitBroken()) return [];
   try {
-    const { ownerId, companyId } = getActiveTenantContext();
-    const querySnapshot = await getDocs(collection(db, "usuarios"));
+    const collPath = getPartitionPath("employees");
+    const querySnapshot = await getDocs(collection(db, collPath));
     const list: any[] = [];
     querySnapshot.forEach((docSnap) => {
-      const data = docSnap.data() as UsuarioDoc & { ownerId?: string; companyId?: string; empresa?: string };
-      if (data && data.uid) {
-        const docOwner = data.ownerId || data.uid;
-        const docCompany = data.companyId || data.empresa;
-        if (
-          !ownerId || ownerId === "emp-master-admin-001" ||
-          docOwner === ownerId ||
-          (companyId && docCompany === companyId)
-        ) {
-          list.push(mapUsuarioToEmployee(data));
-        }
+      const data = docSnap.data();
+      if (data) {
+        list.push(data.id ? data : { ...data, id: docSnap.id });
       }
     });
+
+    // Also check current user's profile if list is empty
+    if (list.length === 0 && auth.currentUser) {
+      try {
+        const userDocRef = doc(db, "usuarios", auth.currentUser.uid);
+        const docSnap = await getDoc(userDocRef);
+        if (docSnap.exists()) {
+          const profile = docSnap.data() as UsuarioDoc;
+          list.push(mapUsuarioToEmployee(profile));
+        }
+      } catch (err) {
+        console.warn("Could not load user profile:", err);
+      }
+    }
+
     return list;
   } catch (error) {
     console.error("Error getting users from Firestore:", error);
@@ -1446,7 +1489,7 @@ export const syncToCloudSql = async (): Promise<{
  */
 export const getProductsFromCloudSQL = async (): Promise<any[]> => {
   try {
-    const response = await fetch("/api/sql/products");
+    const response = await authFetch("/api/sql/products");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -1463,7 +1506,7 @@ export const getProductsFromCloudSQL = async (): Promise<any[]> => {
  */
 export const addProductToCloudSQL = async (product: any): Promise<boolean> => {
   try {
-    const response = await fetch("/api/sql/products", {
+    const response = await authFetch("/api/sql/products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(product)
@@ -1484,7 +1527,7 @@ export const addProductToCloudSQL = async (product: any): Promise<boolean> => {
  */
 export const deleteProductFromCloudSQL = async (productId: string): Promise<boolean> => {
   try {
-    const response = await fetch(`/api/sql/products/${productId}`, {
+    const response = await authFetch(`/api/sql/products/${productId}`, {
       method: "DELETE"
     });
     if (!response.ok) {
@@ -1503,7 +1546,7 @@ export const deleteProductFromCloudSQL = async (productId: string): Promise<bool
  */
 export const deleteCustomerFromCloudSQL = async (customerId: string): Promise<boolean> => {
   try {
-    const response = await fetch(`/api/sql/customers/${customerId}`, {
+    const response = await authFetch(`/api/sql/customers/${customerId}`, {
       method: "DELETE"
     });
     if (!response.ok) {
@@ -1522,7 +1565,7 @@ export const deleteCustomerFromCloudSQL = async (customerId: string): Promise<bo
  */
 export const getCustomersFromCloudSQL = async (): Promise<any[]> => {
   try {
-    const response = await fetch("/api/sql/customers");
+    const response = await authFetch("/api/sql/customers");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -1539,7 +1582,7 @@ export const getCustomersFromCloudSQL = async (): Promise<any[]> => {
  */
 export const addCustomerToCloudSQL = async (customer: any): Promise<boolean> => {
   try {
-    const response = await fetch("/api/sql/customers", {
+    const response = await authFetch("/api/sql/customers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(customer)
@@ -1560,7 +1603,7 @@ export const addCustomerToCloudSQL = async (customer: any): Promise<boolean> => 
  */
 export const getTransactionsFromCloudSQL = async (): Promise<any[]> => {
   try {
-    const response = await fetch("/api/sql/transactions");
+    const response = await authFetch("/api/sql/transactions");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -1577,7 +1620,7 @@ export const getTransactionsFromCloudSQL = async (): Promise<any[]> => {
  */
 export const addTransactionToCloudSQL = async (transaction: any): Promise<boolean> => {
   try {
-    const response = await fetch("/api/sql/transactions", {
+    const response = await authFetch("/api/sql/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(transaction)
@@ -1598,7 +1641,7 @@ export const addTransactionToCloudSQL = async (transaction: any): Promise<boolea
  */
 export const getAuditLogsFromCloudSQL = async (): Promise<any[]> => {
   try {
-    const response = await fetch("/api/sql/auditlogs");
+    const response = await authFetch("/api/sql/auditlogs");
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -1615,7 +1658,7 @@ export const getAuditLogsFromCloudSQL = async (): Promise<any[]> => {
  */
 export const addAuditLogToCloudSQL = async (log: any): Promise<boolean> => {
   try {
-    const response = await fetch("/api/sql/auditlogs", {
+    const response = await authFetch("/api/sql/auditlogs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(log)

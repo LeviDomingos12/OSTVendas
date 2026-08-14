@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";

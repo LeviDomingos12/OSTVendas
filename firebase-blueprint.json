@@ -177,21 +177,29 @@
       "schema": "usuario",
       "description": "User account documents synchronized to Firebase Auth"
     },
-    "empresas/{empresaId}": {
-      "schema": "empresa",
-      "description": "Multi-company and branch configurations"
-    },
-    "logs/{logId}": {
-      "schema": "log",
-      "description": "Consolidated security and operation audit logs"
-    },
-    "produtos/{produtoId}": {
+    "admins/{tenantUid}/produtos/{produtoId}": {
       "schema": "produto",
-      "description": "Active sales inventory items"
+      "description": "Tenant isolated active sales inventory items"
     },
-    "transacoes/{transacaoId}": {
+    "admins/{tenantUid}/transacoes/{transacaoId}": {
       "schema": "transacao",
-      "description": "Sales invoices and receipts records"
+      "description": "Tenant isolated sales invoices and receipts records"
+    },
+    "admins/{tenantUid}/customers/{customerId}": {
+      "schema": "usuario",
+      "description": "Tenant isolated customer directory records"
+    },
+    "admins/{tenantUid}/cashflow/{cashflowId}": {
+      "schema": "transacao",
+      "description": "Tenant isolated cash flow register entries"
+    },
+    "admins/{tenantUid}/logs/{logId}": {
+      "schema": "log",
+      "description": "Tenant isolated security and operation audit logs"
+    },
+    "admins/{tenantUid}/settings/{configId}": {
+      "schema": "empresa",
+      "description": "Tenant isolated application and branch configurations"
     }
   }
 }

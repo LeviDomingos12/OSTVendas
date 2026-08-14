@@ -2309,18 +2309,36 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // GET: Load all existing stateful tables
+  // Helper to resolve tenant-specific local DB path
+  function getTenantDbDir(tenantUid?: string | null): string {
+    if (!tenantUid) return DB_DIR;
+    const clean = tenantUid.trim().replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "");
+    if (!clean) return DB_DIR;
+    const tenantDir = path.join(DB_DIR, "tenants", clean);
+    if (!fs.existsSync(tenantDir)) {
+      fs.mkdirSync(tenantDir, { recursive: true });
+    }
+    return tenantDir;
+  }
+
+  // GET: Load stateful tables with strict multi-tenant isolation by Firebase UID
   app.get("/api/db/load", async (req, res) => {
     try {
+      const rawUid = (req.query.uid || req.headers["x-user-uid"] || "").toString().trim();
+      const tenantUid = rawUid ? rawUid.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "") : null;
+      const tenantDir = getTenantDbDir(tenantUid);
+
       const result: any = {};
       const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs"];
       let hasData = false;
 
-      if (firebaseDb) {
-        console.log("Servidor carregando dados do Firebase Firestore...");
+      // 1. Try Firestore with tenant partition
+      if (firebaseDb && tenantUid) {
+        console.log(`[SERVER] Carregando dados do Firestore particionados para tenant '${tenantUid}'...`);
         try {
+          const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
           for (const t of tables) {
-            const querySnapshot = await firebaseDb.collection(t).get();
+            const querySnapshot = await tenantRef.collection(t).get();
             if (!querySnapshot.empty) {
               const list: any[] = [];
               querySnapshot.forEach((doc: any) => {
@@ -2333,8 +2351,8 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             }
           }
 
-          // Load settings single doc
-          const settingsDoc = await firebaseDb.collection("settings").doc("config").get();
+          // Load settings doc
+          const settingsDoc = await tenantRef.collection("settings").doc("config").get();
           if (settingsDoc.exists) {
             result["settings"] = settingsDoc.data();
             hasData = true;
@@ -2342,66 +2360,100 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             result["settings"] = null;
           }
 
-          // Cache in local db_store for safe offline capabilities
+          // Cache in tenant local folder for offline resiliency
           if (hasData) {
             for (const t of tables) {
               if (result[t]) {
-                const filePath = path.join(DB_DIR, `${t}.json`);
+                const filePath = path.join(tenantDir, `${t}.json`);
                 safeWriteLocalDbFile(filePath, result[t]);
               }
             }
             if (result["settings"]) {
-              const filePath = path.join(DB_DIR, "settings.json");
+              const filePath = path.join(tenantDir, "settings.json");
               safeWriteLocalDbFile(filePath, result["settings"]);
             }
-            console.log("Cache local sincronizado com dados do Firebase Firestore.");
-            return res.json({ success: true, hasData, data: result, source: "firebase" });
+            return res.json({ success: true, hasData, data: result, source: "firebase", tenantUid });
           }
         } catch (firebaseErr: any) {
-          console.error("Erro ao pesquisar Firestore, voltando ao banco local:", firebaseErr);
+          console.error(`Erro ao consultar partição Firestore do tenant ${tenantUid}:`, firebaseErr);
         }
       }
 
-      // Fallback: Read local files if firebaseDb is null or query failed
+      // 2. Read local tenant files (or migrate existing root data to the first requesting tenant)
       let localHasData = false;
       for (const t of ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings"]) {
-        const filePath = path.join(DB_DIR, `${t}.json`);
-        if (fs.existsSync(filePath)) {
-          result[t] = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-          localHasData = true;
+        const tenantFilePath = path.join(tenantDir, `${t}.json`);
+        const rootFilePath = path.join(DB_DIR, `${t}.json`);
+
+        if (fs.existsSync(tenantFilePath)) {
+          try {
+            result[t] = JSON.parse(fs.readFileSync(tenantFilePath, "utf-8"));
+            localHasData = true;
+          } catch {
+            result[t] = null;
+          }
+        } else if (tenantUid && fs.existsSync(rootFilePath)) {
+          // Non-destructive initial migration: copy root data to this first authenticated tenant
+          try {
+            const initialData = JSON.parse(fs.readFileSync(rootFilePath, "utf-8"));
+            safeWriteLocalDbFile(tenantFilePath, initialData);
+            result[t] = initialData;
+            localHasData = true;
+          } catch {
+            result[t] = null;
+          }
+        } else if (fs.existsSync(rootFilePath)) {
+          try {
+            result[t] = JSON.parse(fs.readFileSync(rootFilePath, "utf-8"));
+            localHasData = true;
+          } catch {
+            result[t] = null;
+          }
         } else {
           result[t] = null;
         }
       }
-      res.json({ success: true, hasData: localHasData, data: result, source: "local_json" });
+
+      res.json({ success: true, hasData: localHasData, data: result, source: "local_json", tenantUid });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // POST: Save individual table state (mutations)
+  // POST: Save individual table state with tenant isolation
   app.post("/api/db/save", async (req, res) => {
     try {
-      const { table, data } = req.body;
+      const { table, data, tenantUid: bodyTenantUid } = req.body;
+      const rawUid = (bodyTenantUid || req.query.uid || req.headers["x-user-uid"] || "").toString().trim();
+      const tenantUid = rawUid ? rawUid.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "") : null;
+
       if (!table || data === undefined) {
         return res.status(400).json({ error: "Parâmetros table e data são obrigatórios." });
       }
 
-      // 1. Cache to local file
-      const filePath = path.join(DB_DIR, `${table}.json`);
+      // 1. Cache to tenant local file
+      const tenantDir = getTenantDbDir(tenantUid);
+      const filePath = path.join(tenantDir, `${table}.json`);
       safeWriteLocalDbFile(filePath, data);
 
-      // 2. Synchronize to Firestore
-      if (firebaseDb) {
-        console.log(`Buscando gravação em lote da tabela '${table}' para Firestore com suporte a reenvio...`);
+      // Also keep root file updated if no tenant specified
+      if (!tenantUid) {
+        const rootPath = path.join(DB_DIR, `${table}.json`);
+        safeWriteLocalDbFile(rootPath, data);
+      }
+
+      // 2. Synchronize to Firestore under tenant partition
+      if (firebaseDb && tenantUid) {
+        console.log(`[SERVER] Gravando tabela '${table}' na partição do tenant '${tenantUid}' no Firestore...`);
         try {
           await withRetry(async () => {
+            const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
             if (table === "settings") {
-              await firebaseDb.collection("settings").doc("config").set(sanitizeForFirestore(data));
+              await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(data));
             } else if (Array.isArray(data)) {
-              const collectionRef = firebaseDb.collection(table);
+              const collectionRef = tenantRef.collection(table);
 
-              // 1. Fetch current documents in Firestore for this collection to identify orphans
+              // Clean up orphan documents
               const snapshot = await collectionRef.get();
               const newDataIds = new Set(data.map((item: any) => String(item.id)));
               const refsToDelete: any[] = [];
@@ -2411,9 +2463,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
                 }
               });
 
-              // 2. Clean up any orphan documents no longer present in the updated local array
               if (refsToDelete.length > 0) {
-                console.log(`[FIRESTORE SYNC] Deletando ${refsToDelete.length} documentos órfãos na tabela '${table}'...`);
                 const deleteBatchSize = 400;
                 for (let i = 0; i < refsToDelete.length; i += deleteBatchSize) {
                   const deleteBatch = firebaseDb.batch();
@@ -2425,7 +2475,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
                 }
               }
 
-              // 3. Batch set updated/new items
+              // Batch set updated/new items
               const batchSize = 400;
               for (let i = 0; i < data.length; i += batchSize) {
                 const chunk = data.slice(i, i + batchSize);
@@ -2439,15 +2489,14 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
               }
             }
           });
-          console.log(`Gravação no Firestore para a tabela '${table}' concluída.`);
+          console.log(`Gravação no Firestore para a tabela '${table}' (tenant: ${tenantUid}) concluída.`);
         } catch (firebaseErr: any) {
-          console.error(`Falha ao sincronizar '${table}' ao Firebase após tentativas de reenvio:`, firebaseErr);
+          console.error(`Falha ao sincronizar '${table}' ao Firebase para tenant ${tenantUid}:`, firebaseErr);
         }
       }
 
       // If settings are saved, dynamically reschedule the backup cron jobs
       if (table === "settings") {
-        console.log("[SERVER] Settings modified. Rescheduling the background backup cron...");
         initBackupCronScheduler();
       }
 
@@ -2457,32 +2506,36 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // POST: Setup all tables (initial seed submission)
+  // POST: Setup all tables (initial seed submission with tenant isolation)
   app.post("/api/db/save-all", async (req, res) => {
     try {
       const payload = req.body;
+      const rawUid = (payload.tenantUid || req.query.uid || req.headers["x-user-uid"] || "").toString().trim();
+      const tenantUid = rawUid ? rawUid.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "") : null;
+      const tenantDir = getTenantDbDir(tenantUid);
       const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings"];
       
-      // 1. Save locally
+      // 1. Save locally in tenant directory
       for (const t of tables) {
         if (payload[t] !== undefined) {
-          const filePath = path.join(DB_DIR, `${t}.json`);
+          const filePath = path.join(tenantDir, `${t}.json`);
           safeWriteLocalDbFile(filePath, payload[t]);
         }
       }
 
-      // 2. Synchronize to Firestore
-      if (firebaseDb) {
-        console.log("Iniciando semeação das tabelas iniciais no Firebase Firestore com suporte a reenvio...");
+      // 2. Synchronize to Firestore under tenant partition
+      if (firebaseDb && tenantUid) {
+        console.log(`Iniciando semeação das tabelas no Firestore para tenant '${tenantUid}'...`);
         try {
           await withRetry(async () => {
+            const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
             for (const t of tables) {
               if (payload[t] !== undefined) {
                 const data = payload[t];
                 if (t === "settings") {
-                  await firebaseDb.collection("settings").doc("config").set(sanitizeForFirestore(data));
+                  await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(data));
                 } else if (Array.isArray(data)) {
-                  const collectionRef = firebaseDb.collection(t);
+                  const collectionRef = tenantRef.collection(t);
                   const batchSize = 400;
                   for (let i = 0; i < data.length; i += batchSize) {
                     const chunk = data.slice(i, i + batchSize);
@@ -2498,15 +2551,13 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
               }
             }
           });
-          console.log("Banco de dados semeado no Firebase com sucesso.");
+          console.log(`Banco de dados semeado no Firebase com sucesso para tenant '${tenantUid}'.`);
         } catch (firebaseErr: any) {
-          console.error("Falha ao semear banco no Firebase após tentativas de reenvio:", firebaseErr);
+          console.error("Falha ao semear banco no Firebase:", firebaseErr);
         }
       }
 
-      // If settings are present in payload, dynamically reschedule the backup cron jobs
       if (payload["settings"] !== undefined) {
-        console.log("[SERVER] Settings loaded via save-all. Rescheduling the background backup cron...");
         initBackupCronScheduler();
       }
 
