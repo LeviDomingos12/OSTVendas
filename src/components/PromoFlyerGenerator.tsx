@@ -159,14 +159,19 @@ export function PromoFlyerGenerator({
     try {
       const activeP = selectedProducts[0] || product;
       const { discount } = getProductPricesAndDiscount(activeP);
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       
       const response = await fetch("/api/gemini/marketing/slogan", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           productName: activeP.name,
           discountPercent: discount > 0 ? discount : 20,
-          price: productPrices[activeP.id]?.promoPrice || activeP.salePrice
+          price: productPrices[activeP.id]?.promoPrice || activeP.salePrice,
+          apiKey: clientApiKey || undefined
         })
       });
 

@@ -238,26 +238,42 @@ function sanitizeForFirestore(data: any): any {
 }
 
 // Initialize Google GenAI
-const apiKey = process.env.GEMINI_API_KEY;
-let aiClient: any = null;
+function getAiClient(req?: any) {
+  const headerKey = (req?.headers?.["x-gemini-key"] as string) || (req?.headers?.["x-api-key"] as string);
+  const bodyKey = req?.body?.apiKey;
+  const authHeader = req?.headers?.["authorization"] as string;
+  let bearerKey = "";
+  if (authHeader && authHeader.startsWith("Bearer AIza")) {
+    bearerKey = authHeader.replace("Bearer ", "").trim();
+  }
 
-// Lazy initialization of Gemini
-function getAiClient() {
-  if (!aiClient) {
-    if (!apiKey) {
-      console.warn("GEMINI_API_KEY environment variable is not defined. AI features will fallback to rule-based generation.");
-      return null;
-    }
-    aiClient = new GoogleGenAI({
-      apiKey: apiKey,
+  const currentKey = 
+    headerKey ||
+    bodyKey ||
+    bearerKey ||
+    process.env.GEMINI_API_KEY || 
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.VITE_GOOGLE_API_KEY;
+
+  if (!currentKey) {
+    console.warn("GEMINI_API_KEY environment variable is not defined. AI features will fallback to rule-based generation.");
+    return null;
+  }
+  try {
+    return new GoogleGenAI({
+      apiKey: currentKey,
       httpOptions: {
         headers: {
           'User-Agent': 'aistudio-build',
         }
       }
     });
+  } catch (err) {
+    console.error("Error creating GoogleGenAI instance:", err);
+    return null;
   }
-  return aiClient;
 }
 
 async function startServer() {
@@ -906,7 +922,7 @@ async function startServer() {
   app.post("/api/gemini/forecast", async (req, res) => {
     try {
       const { salesHistory, inventoryStatus, businessType } = req.body;
-      const ai = getAiClient();
+      const ai = getAiClient(req);
 
       if (!ai) {
         // Fallback rule-based forecasting if no key
@@ -950,7 +966,7 @@ Gere um relatório de previsão de vendas e conselhos comerciais práticos. Reto
 Utilize termos locais amigáveis e moedas locais de Moçambique se adequado (abreviação Meticais - MT ou MZN, M-Pesa, E-Mola). Mantenha um tom altamente profissional, motivacional, e extremamente polido.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.7-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -994,7 +1010,7 @@ Devido à alta demanda temporária no servidor de IA, geramos um relatório anal
   app.post("/api/gemini/marketing/sms", async (req, res) => {
     try {
       const { campaignType, details } = req.body;
-      const ai = getAiClient();
+      const ai = getAiClient(req);
 
       if (!ai) {
         return res.json({
@@ -1018,7 +1034,7 @@ Retorne no formato JSON abaixo:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.7-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1054,7 +1070,7 @@ Retorne no formato JSON abaixo:
   app.post("/api/gemini/marketing/slogan", async (req, res) => {
     try {
       const { productName, discountPercent, price } = req.body;
-      const ai = getAiClient();
+      const ai = getAiClient(req);
 
       if (!ai) {
         return res.json({
@@ -1075,7 +1091,7 @@ Retorne no formato JSON abaixo:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.7-flash",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
@@ -1110,7 +1126,7 @@ Retorne no formato JSON abaixo:
   app.post("/api/gemini/chat", async (req, res) => {
     try {
       const { question, context, businessType } = req.body;
-      const ai = getAiClient();
+      const ai = getAiClient(req);
 
       if (!ai) {
         // Fallback rule-based responses for common questions
@@ -1172,7 +1188,7 @@ ${JSON.stringify(context)}
 Responda de forma clara, objetiva, amigável e profissional em português de Moçambique. Use Markdown para formatar a resposta com marcadores, negrito e estrutura limpa. Mencione dados do contexto (como faturamento, produtos com estoque crítico, M-Pesa, etc.) se aplicável à pergunta.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.7-flash",
         contents: prompt,
       });
 
@@ -1191,7 +1207,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         return res.status(400).json({ error: "O prompt é obrigatório para gerar o logotipo." });
       }
 
-      const ai = getAiClient();
+      const ai = getAiClient(req);
       if (!ai) {
         console.log("Sem cliente de IA ativo. Retornando resposta de simulação offline.");
         return res.json({

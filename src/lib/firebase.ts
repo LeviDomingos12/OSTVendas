@@ -82,17 +82,24 @@ export const initAuth = (
 };
 
 // Must be called from a button click or user interaction
-export const googleSignIn = async (withScopes: boolean = false): Promise<{ user: User; accessToken: string } | null> => {
+export const googleSignIn = async (withScopes: boolean = false, loginHint?: string): Promise<{ user: User; accessToken: string } | null> => {
   try {
     isSigningIn = true;
     const selectedProvider = withScopes ? gmailProvider : baseProvider;
+    
+    // Configure account chooser and optional prefilled email hint
+    const customParams: Record<string, string> = {
+      prompt: "select_account"
+    };
+    if (loginHint && loginHint.includes("@")) {
+      customParams.login_hint = loginHint.trim();
+    }
+    selectedProvider.setCustomParameters(customParams);
+
     const result = await signInWithPopup(auth, selectedProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error('Failed to get access token from Firebase Auth');
-    }
-
-    cachedAccessToken = credential.accessToken;
+    
+    cachedAccessToken = credential?.accessToken || "google_session_token";
     localStorage.setItem("google_access_token", cachedAccessToken);
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
@@ -102,7 +109,7 @@ export const googleSignIn = async (withScopes: boolean = false): Promise<{ user:
       (error.code === 'auth/operation-not-allowed' ||
        (error.message && error.message.includes('operation-not-allowed')))
     ) {
-      throw new Error('O método de autenticação Google não está ativado no Console do Firebase (Authentication > Sign-in method). Pode alternar para o login por E-mail e Palavra-passe.');
+      throw new Error('O método de autenticação Google não está ativado no Console do Firebase (Authentication > Sign-in method).');
     }
     if (
       error &&
@@ -112,9 +119,9 @@ export const googleSignIn = async (withScopes: boolean = false): Promise<{ user:
     ) {
       const isIframe = window.self !== window.top;
       if (isIframe) {
-        throw new Error('O login do Google foi bloqueado ou fechado pelo navegador. Como esta aplicação está a ser executada dentro de um iframe de visualização, as janelas de popup do Google podem ser bloqueadas pelo seu navegador. Por favor, clique no link "abrir em nova aba" ou abra a aplicação numa nova aba para iniciar sessão com o Google com sucesso.');
+        throw new Error('O seletor de contas do Google foi bloqueado pelo navegador dentro do iframe. Por favor, clique no botão "Abrir Aplicativo em Nova Aba" para autenticar-se com o Google.');
       } else {
-        throw new Error('O popup de login do Google foi fechado antes de concluir a autenticação. Por favor, tente novamente e mantenha a janela aberta até o fim.');
+        throw new Error('A janela do Google foi fechada antes de selecionar a conta. Por favor, clique em Continuar para tentar novamente.');
       }
     }
     throw error;
@@ -890,9 +897,14 @@ export const recoverPassword = async (email: string): Promise<void> => {
 };
 
 // Google sign-in and profile synchronization
-export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio Geral", employeesList: any[] = [], selectedPlan: string = "OURO"): Promise<any> => {
+export const googleSignInAndSync = async (
+  defaultBranch: string = "OST Comércio Geral",
+  employeesList: any[] = [],
+  selectedPlan: string = "OURO",
+  loginHint?: string
+): Promise<any> => {
   try {
-    const signInResult = await googleSignIn();
+    const signInResult = await googleSignIn(false, loginHint);
     if (!signInResult) return null;
 
     const { user } = signInResult;
@@ -902,21 +914,29 @@ export const googleSignInAndSync = async (defaultBranch: string = "OST Comércio
       throw new Error("Não foi possível obter o endereço de e-mail da sua conta Google.");
     }
 
-    // 1. Validate e-mail exists in Firestore "usuarios" collection
+    // 1. Locate user in Firestore "usuarios" collection by Firebase UID or email
     let existingProfileInFirestore: UsuarioDoc | null = null;
     let existingDocId: string | null = null;
     if (!isCircuitBroken()) {
       try {
-        const querySnapshot = await getDocs(collection(db, "usuarios"));
-        querySnapshot.forEach((docSnap) => {
-          const d = docSnap.data() as UsuarioDoc;
-          if (d.email && d.email.toLowerCase().trim() === googleEmail) {
-            existingProfileInFirestore = d;
-            existingDocId = docSnap.id;
-          }
-        });
+        // Direct UID check first
+        const directDoc = await getDoc(doc(db, "usuarios", user.uid));
+        if (directDoc.exists()) {
+          existingProfileInFirestore = directDoc.data() as UsuarioDoc;
+          existingDocId = directDoc.id;
+        } else {
+          // Query collection by email
+          const querySnapshot = await getDocs(collection(db, "usuarios"));
+          querySnapshot.forEach((docSnap) => {
+            const d = docSnap.data() as UsuarioDoc;
+            if (d.email && d.email.toLowerCase().trim() === googleEmail) {
+              existingProfileInFirestore = d;
+              existingDocId = docSnap.id;
+            }
+          });
+        }
       } catch (e) {
-        console.warn("Erro ao ler coleção 'usuarios' do Firestore para validar e-mail:", e);
+        console.warn("Erro ao ler coleção 'usuarios' do Firestore para validar utilizador:", e);
       }
     }
 

@@ -242,18 +242,30 @@ Como posso ajudar você hoje? Pode escolher uma das perguntas rápidas abaixo ou
     }));
 
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/forecast", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           salesHistory: salesSummary,
           inventoryStatus: criticalStock,
-          businessType: settings.companyName
+          businessType: settings.companyName,
+          apiKey: clientApiKey || undefined
         })
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
       const data = await response.json();
-      setForecastResult(data);
-      onShowToast("Análise comercial generativa executada com sucesso!", "success", "Inteligência AI");
+      if (data && (data.forecastText || data.growthRate !== undefined)) {
+        setForecastResult(data);
+        onShowToast("Análise comercial generativa executada com sucesso!", "success", "Inteligência AI");
+      } else {
+        throw new Error("Invalid forecast payload format");
+      }
     } catch (err) {
       console.error(err);
       // Perfect falling back locally if server error/offline
@@ -306,9 +318,13 @@ Se estas ações corretivas forem executadas nos próximos 3 dias, a sua previs�
       .map(p => ({ item: p.name, stock: p.stock }));
 
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           question: text,
           context: {
@@ -320,9 +336,14 @@ Se estas ações corretivas forem executadas nos próximos 3 dias, a sua previs�
             salesRecent: salesSummary,
             company: settings.companyName
           },
-          businessType: settings.companyName
+          businessType: settings.companyName,
+          apiKey: clientApiKey || undefined
         })
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
 
       const data = await response.json();
       
@@ -669,9 +690,13 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
       .map(p => ({ item: p.name, stock: p.stock }));
 
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           question: q,
           context: {
@@ -683,7 +708,8 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
             salesRecent: salesSummary,
             company: settings.companyName
           },
-          businessType: settings.companyName
+          businessType: settings.companyName,
+          apiKey: clientApiKey || undefined
         })
       });
 

@@ -195,14 +195,15 @@ export default function LoginModule({
     onLoginSuccess(authenticatedUser, branchName);
   };
 
-  // 1. Real Firebase Auth - Standard Sign-in Handler
-  const handleRealSignIn = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // 1. Real Firebase Auth - Google Sign-in Handler with E-mail Hint
+  const handleRealSignIn = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    if (!email.trim() || !password.trim()) {
-      setErrorMessage("Por favor, preencha todos os campos.");
+    const inputEmail = email.trim();
+    if (!inputEmail) {
+      setErrorMessage("Por favor, introduza o seu endereço de e-mail.");
       return;
     }
 
@@ -210,24 +211,47 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(15);
       
-      const result = await signInWithEmail(email.trim(), password);
+      const result = await googleSignInAndSync(selectedBranch || "OST Comércio Geral", employees, "OURO", inputEmail);
       
       if (result && result.employee) {
-        triggerLoadingPipeline(result.employee, result.branch);
+        setAuthenticatedUser(result.employee);
+        setSelectedBranch(result.branch);
+        
+        setTimeout(() => {
+          setLoadingState("CONNECTING");
+          setLoadingProgress(55);
+        }, 500);
+
+        setTimeout(() => {
+          setLoadingState("LOADING_PERMISSIONS");
+          setLoadingProgress(90);
+        }, 1000);
+
+        setTimeout(() => {
+          setLoadingProgress(100);
+          onShowToast(`Autenticado com sucesso via Google!`, "success");
+          onLoginSuccess(result.employee, result.branch);
+        }, 1500);
+      } else {
+        setLoadingState("IDLE");
       }
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      const translatedError = err.message?.includes("auth/invalid-credential") || err.message?.includes("wrong-password")
-        ? "E-mail ou palavra-passe incorretos."
-        : err.message?.includes("auth/user-not-found")
-        ? "Utilizador não cadastrado."
-        : err.message?.includes("desativado")
-        ? "Utilizador desativado. Contacte o Administrador."
-        : err.message;
       
-      setErrorMessage(`❌ Falha no Login: ${translatedError}`);
-      onShowToast("Falha na autenticação.", "error");
+      const isGoogleBlocked = err.message?.includes("access_denied") || 
+                              err.message?.includes("popup-closed-by-user") || 
+                              err.message?.includes("cancelled-popup-request") ||
+                              err.message?.includes("não concluiu o processo") ||
+                              err.message?.includes("bloqueado");
+                              
+      let friendlyError = `❌ Falha no Acesso: ${err.message}`;
+      if (isGoogleBlocked) {
+        friendlyError = `❌ A autenticação Google não foi concluída: ${err.message}`;
+      }
+      
+      setErrorMessage(friendlyError);
+      onShowToast(err.message || "Falha na autenticação Google.", "error");
     }
   };
 
@@ -740,7 +764,7 @@ export default function LoginModule({
               {view === "LOGIN" && (
                 <>
                   <h2 className="text-3xl font-black text-white tracking-tight leading-none">Sistema de Gestão</h2>
-                  <p className="text-xs text-slate-400">Entre com seu e-mail e senha cadastrados para acessar.</p>
+                  <p className="text-xs text-slate-400">Introduza o seu e-mail para autenticar-se com o Google.</p>
                 </>
               )}
               {view === "SIGNUP" && (
@@ -787,7 +811,7 @@ export default function LoginModule({
             )}
 
             {/* ---------------------------------- */}
-            {/* VIEW: LOGIN FORM                   */}
+            {/* VIEW: LOGIN FORM (Modern Google)   */}
             {/* ---------------------------------- */}
             {view === "LOGIN" && (
               <form onSubmit={handleRealSignIn} className="space-y-4">
@@ -796,7 +820,7 @@ export default function LoginModule({
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Endereço de E-mail</label>
                   <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                       <Mail className="w-4 h-4" />
                     </span>
                     <input
@@ -804,127 +828,66 @@ export default function LoginModule({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3.5 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
                       placeholder="Introduza o seu e-mail de acesso"
+                      autoComplete="email"
                     />
                   </div>
                 </div>
 
-                {/* Password Input */}
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Palavra-passe</label>
+                {/* Google Authentication Info Box */}
+                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-left space-y-1">
+                  <div className="flex items-center gap-1.5 text-[#FF6B00]">
+                    <Chrome className="w-3.5 h-3.5 shrink-0" />
+                    <p className="text-[11px] font-bold text-slate-200">Autenticação Oficial Google</p>
                   </div>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
-                      <Lock className="w-4 h-4" />
-                    </span>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-10 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                      placeholder="Introduza a sua senha"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Aceda diretamente com a sua conta Google com proteção de sessão e seletor de contas. Nunca solicitamos nem guardamos a sua palavra-passe.
+                  </p>
                 </div>
 
-                {/* Caps Lock Detection Alert */}
-                {isCapsLockOn && (
-                  <div className="text-[10px] text-amber-400 font-bold flex items-center gap-1 bg-amber-950/20 px-2.5 py-1 rounded-md border border-amber-500/20 animate-pulse">
-                    <Keyboard className="w-3.5 h-3.5" />
-                    <span>Caps Lock ativado</span>
-                  </div>
-                )}
-
-                {/* Remember and Recovery Link */}
-                <div className="flex items-center justify-between text-xs pt-1">
-                  <label className="flex items-center gap-2 text-slate-400 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={rememberMe}
-                      onChange={(e) => setRememberMe(e.target.checked)}
-                      className="accent-[#FF6B00] w-4 h-4 rounded"
-                    />
-                    Lembrar sessão
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => { setView("RECOVERY"); setErrorMessage(null); setSuccessMessage(null); }}
-                    className="text-xs text-orange-400 hover:text-orange-300 hover:underline font-bold transition cursor-pointer"
-                  >
-                    Esqueceu a senha?
-                  </button>
-                </div>
-
-                {/* Google Sign-In Button Promoted */}
-                <div className="space-y-2.5 pt-1">
-                  <button
-                    type="button"
-                    onClick={handleGoogleSignIn}
-                    className="w-full py-3.5 bg-[#FF6B00]/10 hover:bg-[#FF6B00]/20 text-[#FF6B00] hover:text-orange-400 rounded-xl font-extrabold text-xs uppercase tracking-wider transition duration-300 border border-[#FF6B00]/30 hover:border-[#FF6B00]/60 flex items-center justify-center gap-2.5 cursor-pointer shadow-sm shadow-orange-950/10"
-                  >
-                    <Chrome className="w-4 h-4 shrink-0" />
-                    <span>Acesso Rápido com Google</span>
-                  </button>
-
-                  {/* Modern Google Autocreation Badge Info */}
-                  <div className="p-3 bg-slate-900/40 border border-slate-800/85 rounded-xl text-left space-y-1">
-                    <div className="flex items-center gap-1.5 text-[#FF6B00]">
-                      <span className="text-xs">✨</span>
-                      <p className="text-[11px] font-bold text-slate-200">Autocriação de Conta Ativa!</p>
-                    </div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      Agora suportamos login instantâneo com Google para qualquer conta. O sistema criará seu perfil administrativo de acesso geral de forma automática no primeiro acesso!
-                    </p>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      <em>Nota de homologação:</em> Se receber o erro 403 (access_denied) devido a restrições de teste do Google Cloud Console, use o botão <button type="button" onClick={() => { setView("SIGNUP"); setErrorMessage(null); setSuccessMessage(null); }} className="text-orange-400 hover:underline font-bold">"Registe-se aqui"</button> para criar seu perfil com qualquer e-mail de sua preferência.
-                    </p>
-                  </div>
-
-                  {window.self !== window.top && (
-                    <p className="text-[10px] text-slate-500 text-center leading-normal">
-                      Executando em ambiente de demonstração (iframe). Se o login do Google falhar,{" "}
-                      <a 
-                        href={window.location.href} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
-                        className="text-[#FF6B00] hover:underline font-bold"
-                      >
-                        clique aqui para abrir em nova aba
-                      </a>.
-                    </p>
-                  )}
-                </div>
-
-                {/* Login Submission Button */}
+                {/* Continue Button */}
                 <button
                   type="submit"
-                  className="w-full py-3.5 bg-gradient-to-r from-[#FF6B00] to-orange-600 hover:to-orange-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/20 hover:scale-[1.01] active:scale-[0.99] mt-3 flex items-center justify-center gap-2"
+                  disabled={loadingState !== "IDLE"}
+                  className="w-full py-3.5 bg-gradient-to-r from-[#FF6B00] to-orange-600 hover:to-orange-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/30 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span>Entrar</span>
+                  <Chrome className="w-4 h-4 shrink-0" />
+                  <span>Continuar</span>
+                  <ChevronRight className="w-4 h-4 shrink-0" />
                 </button>
 
-                {/* Navigate to Registration Form */}
-                <div className="text-center pt-2">
-                  <p className="text-xs text-slate-400">
-                    Ainda não possui uma conta?{" "}
-                    <button
-                      type="button"
-                      onClick={() => { setView("SIGNUP"); setErrorMessage(null); setSuccessMessage(null); }}
-                      className="text-orange-400 font-extrabold hover:underline hover:text-orange-300 cursor-pointer"
+                {window.self !== window.top && (
+                  <p className="text-[10px] text-slate-500 text-center leading-normal pt-1">
+                    Em visualização de iframe. Se a janela de seleção Google for bloqueada,{" "}
+                    <a 
+                      href={window.location.href} 
+                      target="_blank" 
+                      rel="noopener noreferrer" 
+                      className="text-[#FF6B00] hover:underline font-bold"
                     >
-                      Registe-se aqui
-                    </button>
+                      abra numa nova aba
+                    </a>.
                   </p>
+                )}
+
+                {/* Secondary navigation */}
+                <div className="flex items-center justify-between text-xs pt-3 border-t border-slate-800/80">
+                  <button
+                    type="button"
+                    onClick={() => { setView("EMPLOYEE"); setErrorMessage(null); setSuccessMessage(null); }}
+                    className="text-[11px] text-slate-400 hover:text-orange-400 font-bold transition cursor-pointer flex items-center gap-1"
+                  >
+                    <span>Terminal / Operador</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => { setView("SIGNUP"); setErrorMessage(null); setSuccessMessage(null); }}
+                    className="text-[11px] text-orange-400 hover:text-orange-300 font-extrabold hover:underline transition cursor-pointer"
+                  >
+                    Registar Nova Conta
+                  </button>
                 </div>
               </form>
             )}

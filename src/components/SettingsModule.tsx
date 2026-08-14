@@ -2458,10 +2458,17 @@ export default function SettingsModule({
     }
     setIsGeneratingLogo(true);
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/generate-logo", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: logoPrompt })
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
+        body: JSON.stringify({ 
+          prompt: logoPrompt,
+          apiKey: clientApiKey || undefined
+        })
       });
       if (!response.ok) {
         throw new Error("Falha ao comunicar com o servidor de IA.");

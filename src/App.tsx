@@ -3959,17 +3959,29 @@ export default function App() {
     }));
 
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/forecast", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           salesHistory: salesSummary,
           inventoryStatus: criticalStock,
-          businessType: settings.companyName
+          businessType: settings.companyName,
+          apiKey: clientApiKey || undefined
         })
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
       const data = await response.json();
-      setForecastResult(data);
+      if (data && (data.forecastText || data.growthRate !== undefined)) {
+        setForecastResult(data);
+      } else {
+        throw new Error("Invalid forecast payload format");
+      }
     } catch {
       // Offline fallback
       setForecastResult({

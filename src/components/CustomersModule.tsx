@@ -480,14 +480,23 @@ export default function CustomersModule({
     setSmsOptions([]);
 
     try {
+      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       const response = await fetch("/api/gemini/marketing/sms", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+        },
         body: JSON.stringify({
           campaignType: `Fidelização por Pontos (${campaignTarget})`,
-          details: `Incentivar o resgate de pontos de fidelidade de clientes com saldo ativo. Use as tags {NOME}, {PONTOS}, {VALOR_RESGATE} e {EMPRESA}. Instrução extra: ${customSmsPrompt || 'Nenhuma'}`
+          details: `Incentivar o resgate de pontos de fidelidade de clientes com saldo ativo. Use as tags {NOME}, {PONTOS}, {VALOR_RESGATE} e {EMPRESA}. Instrução extra: ${customSmsPrompt || 'Nenhuma'}`,
+          apiKey: clientApiKey || undefined
         })
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error ${response.status}`);
+      }
 
       const data = await response.json();
       if (data.smsList && Array.isArray(data.smsList)) {
