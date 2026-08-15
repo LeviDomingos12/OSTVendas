@@ -9,10 +9,11 @@ let dbInstance: any = null;
 
 export const isCloudSqlAvailable = (): boolean => {
   return !!(
-    process.env.SQL_HOST &&
-    process.env.SQL_USER &&
-    process.env.SQL_PASSWORD &&
-    process.env.SQL_DB_NAME
+    process.env.DATABASE_URL ||
+    (process.env.SQL_HOST &&
+      process.env.SQL_USER &&
+      process.env.SQL_PASSWORD &&
+      process.env.SQL_DB_NAME)
   );
 };
 
@@ -22,13 +23,25 @@ export const getPool = (): pg.Pool => {
     throw new Error("Google Cloud SQL configuration is missing in environment variables.");
   }
   if (!pool) {
-    pool = new Pool({
-      host: process.env.SQL_HOST,
-      user: process.env.SQL_USER,
-      password: process.env.SQL_PASSWORD,
-      database: process.env.SQL_DB_NAME,
-      connectionTimeoutMillis: 15000,
-    });
+    if (process.env.DATABASE_URL) {
+      pool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        connectionTimeoutMillis: 15000,
+        max: 10,
+        idleTimeoutMillis: 30000,
+      });
+    } else {
+      pool = new Pool({
+        host: process.env.SQL_HOST,
+        port: parseInt(process.env.SQL_PORT || "5432", 10),
+        user: process.env.SQL_USER,
+        password: process.env.SQL_PASSWORD,
+        database: process.env.SQL_DB_NAME,
+        connectionTimeoutMillis: 15000,
+        max: 10,
+        idleTimeoutMillis: 30000,
+      });
+    }
 
     pool.on("error", (err) => {
       console.error("Unexpected error on idle SQL pool client:", err);

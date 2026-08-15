@@ -2,41 +2,146 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for security validation
+    // --- Authentication & Ownership Helper Functions ---
     function isAuthenticated() {
       return request.auth != null && request.auth.uid != null;
-    }
-
-    function isTenantOwner(tenantUid) {
-      return isAuthenticated() && request.auth.uid == tenantUid;
     }
 
     function isUserSelf(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    function isTenantOwner(tenantUid) {
+      return isAuthenticated() && request.auth.uid == tenantUid;
+    }
+
+    function isDocumentOwner() {
+      return isAuthenticated() && (
+        resource != null && (
+          resource.data.ownerId == request.auth.uid ||
+          resource.data.uid == request.auth.uid ||
+          resource.data.userId == request.auth.uid
+        )
+      );
+    }
+
+    function willBeDocumentOwner() {
+      return isAuthenticated() && (
+        request.resource.data.ownerId == request.auth.uid || 
+        request.resource.data.uid == request.auth.uid || 
+        request.resource.data.userId == request.auth.uid
+      );
+    }
+
+    function canReadDoc() {
+      return isAuthenticated() && (
+        resource != null && (
+          resource.data.ownerId == request.auth.uid || 
+          resource.data.uid == request.auth.uid || 
+          resource.data.userId == request.auth.uid
+        )
+      );
+    }
+
     // 1. Strict Tenant Subtree Partitioning: /admins/{tenantUid}/...
-    // Only the authenticated tenant (matching request.auth.uid) can access their collections
-    // (produtos, customers, transacoes, cashflow, employees, settings, logs, solicitacoes_recuperacao)
-    match /admins/{tenantUid}/{document=**} {
+    // Enforces that the user's UID strictly matches the nested tenantUid parent path
+    match /admins/{tenantUid}/{allPaths=**} {
       allow read, write: if isTenantOwner(tenantUid);
     }
 
-    // 2. Strict User Subtree: /users/{userId}/...
-    match /users/{userId}/{document=**} {
+    // 2. Strict User Subtree Partitioning: /users/{userId}/...
+    // Enforces that the user's UID strictly matches the nested userId parent path
+    match /users/{userId}/{allPaths=**} {
       allow read, write: if isUserSelf(userId);
     }
 
-    // 3. User Profiles: /usuarios/{userId}
-    // Users can only read and write their own personal profile
+    // 3. User Profile Document: /usuarios/{userId}
+    // Users can only read and modify their own personal profile
     match /usuarios/{userId} {
-      allow read, write: if isUserSelf(userId);
+      allow read: if isUserSelf(userId);
+      allow create: if isUserSelf(userId) && request.resource.data.uid == request.auth.uid;
+      allow update: if isUserSelf(userId) && (!('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid);
+      allow delete: if isUserSelf(userId);
     }
 
-    // 4. Default Deny: All unauthenticated, global, or cross-tenant access is strictly blocked (403 Permission Denied)
+    // 4. Root Collections with Strict 'ownerId' / 'userId' / 'uid' Ownership Enforcement
+    match /products/{productId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /produtos/{produtoId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /transacoes/{transacaoId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /customers/{customerId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /cashflow/{cashflowId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /employees/{employeeId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /settings/{configId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /configuracoes/{configId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /logs/{logId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /auditlogs/{logId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    match /solicitacoes_recuperacao/{requestId} {
+      allow read: if canReadDoc();
+      allow create: if willBeDocumentOwner();
+      allow update, delete: if isDocumentOwner();
+    }
+
+    // 5. Default Deny: All unauthenticated, global, or cross-account access is strictly blocked
     match /{document=**} {
       allow read, write: if false;
     }
   }
 }
+
 

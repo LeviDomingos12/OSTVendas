@@ -9,6 +9,7 @@ import { initializeApp as initializeAdminApp, getApps as getAdminApps, cert } fr
 import { getFirestore } from "firebase-admin/firestore";
 import { db as drizzleDb, isCloudSqlAvailable } from "./src/db/index";
 import { products as productsTable, customers as customersTable, transactions as transactionsTable, auditlogs as auditlogsTable, settings as settingsTable } from "./src/db/schema";
+import { migrateTenantFromFirestoreToSql } from "./src/db/migrator";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
@@ -2601,137 +2602,37 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // Trigger migration / sync from local Firestore or JSON to Cloud SQL
-  app.post("/api/sql/sync", async (req, res) => {
+  // Trigger migration / sync from Firestore or local storage to Cloud SQL
+  app.post("/api/sql/sync", async (req: any, res) => {
     if (!isCloudSqlAvailable()) {
       return res.status(400).json({
         success: false,
-        error: "Cloud SQL is not available. Ensure SQL_HOST, SQL_USER, SQL_PASSWORD, and SQL_DB_NAME are configured."
+        error: "Cloud SQL is not available. Ensure DATABASE_URL or SQL_HOST/SQL_USER/SQL_PASSWORD are configured."
       });
     }
 
     try {
-      console.log("[SQL SYNC] Synchronizing application state with structured Cloud SQL tables...");
-      const tablesToSync = ["products", "customers", "transactions", "auditlogs"];
-      const syncedStats: any = {};
-
-      for (const t of tablesToSync) {
-        const filePath = path.join(DB_DIR, `${t === "auditlogs" ? "auditlogs" : t}.json`);
-        if (fs.existsSync(filePath)) {
-          const rawData = JSON.parse(fs.readFileSync(filePath, "utf-8"));
-          const list = Array.isArray(rawData) ? rawData : [];
-          
-          if (t === "products" && list.length > 0) {
-            for (const p of list) {
-              await drizzleDb.insert(productsTable).values({
-                id: p.id || `p-${Date.now()}-${Math.random()}`,
-                name: p.name || "Sem Nome",
-                code: p.code || "",
-                category: p.category || "Geral",
-                price: Number(p.price) || 0,
-                cost: Number(p.cost) || 0,
-                stock: Number(p.stock) || 0,
-                unit: p.unit || "Un",
-                isActive: p.isActive !== false
-              }).onConflictDoUpdate({
-                target: productsTable.id,
-                set: {
-                  name: p.name,
-                  code: p.code,
-                  category: p.category,
-                  price: Number(p.price),
-                  cost: Number(p.cost),
-                  stock: Number(p.stock),
-                  unit: p.unit,
-                  isActive: p.isActive !== false
-                }
-              });
-            }
-            syncedStats["products"] = list.length;
-          }
-
-          if (t === "customers" && list.length > 0) {
-            for (const c of list) {
-              await drizzleDb.insert(customersTable).values({
-                id: c.id || `c-${Date.now()}-${Math.random()}`,
-                name: c.name || "Sem Nome",
-                email: c.email || "",
-                phone: c.phone || "",
-                address: c.address || ""
-              }).onConflictDoUpdate({
-                target: customersTable.id,
-                set: {
-                  name: c.name,
-                  email: c.email,
-                  phone: c.phone,
-                  address: c.address
-                }
-              });
-            }
-            syncedStats["customers"] = list.length;
-          }
-
-          if (t === "transactions" && list.length > 0) {
-            for (const tx of list) {
-              await drizzleDb.insert(transactionsTable).values({
-                id: tx.id || `tx-${Date.now()}-${Math.random()}`,
-                invoiceNumber: tx.invoiceNumber || tx.id || "",
-                customerId: tx.customerId || null,
-                customerName: tx.customerName || null,
-                paymentMethod: tx.paymentMethod || "Dinheiro",
-                subtotal: Number(tx.subtotal) || 0,
-                discountTotal: Number(tx.discountTotal) || 0,
-                vatTotal: Number(tx.vatTotal) || 0,
-                grandTotal: Number(tx.grandTotal) || 0,
-                itemsJson: JSON.stringify(tx.items || [])
-              }).onConflictDoUpdate({
-                target: transactionsTable.id,
-                set: {
-                  invoiceNumber: tx.invoiceNumber || tx.id || "",
-                  customerId: tx.customerId || null,
-                  customerName: tx.customerName || null,
-                  paymentMethod: tx.paymentMethod || "Dinheiro",
-                  subtotal: Number(tx.subtotal) || 0,
-                  discountTotal: Number(tx.discountTotal) || 0,
-                  vatTotal: Number(tx.vatTotal) || 0,
-                  grandTotal: Number(tx.grandTotal) || 0,
-                  itemsJson: JSON.stringify(tx.items || [])
-                }
-              });
-            }
-            syncedStats["transactions"] = list.length;
-          }
-
-          if (t === "auditlogs" && list.length > 0) {
-            for (const log of list) {
-              await drizzleDb.insert(auditlogsTable).values({
-                id: log.id || `log-${Date.now()}-${Math.random()}`,
-                userId: log.userId || log.usuarioId || null,
-                userName: log.userName || log.usuarioNome || "Sistema",
-                action: log.action || log.detalhes || "Log",
-                module: log.module || "SISTEMA",
-                details: log.details || log.detalhes || ""
-              }).onConflictDoUpdate({
-                target: auditlogsTable.id,
-                set: {
-                  userId: log.userId || log.usuarioId || null,
-                  userName: log.userName || log.usuarioNome || "Sistema",
-                  action: log.action || log.detalhes || "Log",
-                  module: log.module || "SISTEMA",
-                  details: log.details || log.detalhes || ""
-                }
-              });
-            }
-            syncedStats["auditlogs"] = list.length;
-          }
-        }
+      const rawUid = (req.body?.tenantUid || req.query?.uid || req.headers?.["x-user-uid"] || req.user?.uid || "").toString().trim();
+      const tenantUid = rawUid ? rawUid.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "") : null;
+      if (!tenantUid) {
+        return res.status(400).json({ error: "Tenant UID is required to execute sync/migration." });
       }
 
-      res.json({
-        success: true,
-        message: "Structured relational synchronization with Google Cloud SQL database succeeded!",
-        stats: syncedStats
-      });
+      console.log(`[SQL MIGRATION] Starting progressive Firestore -> Cloud SQL migration for tenant '${tenantUid}'...`);
+      
+      if (firebaseDb) {
+        const summary = await migrateTenantFromFirestoreToSql(tenantUid, firebaseDb);
+        return res.json({
+          success: true,
+          message: "Progressive Firestore to Cloud SQL migration executed successfully!",
+          summary
+        });
+      } else {
+        return res.status(500).json({
+          success: false,
+          error: "Firebase Admin is not initialized to read Firestore collections."
+        });
+      }
     } catch (err: any) {
       console.error("[SQL SYNC ERROR] Failed to sync to Cloud SQL:", err);
       res.status(500).json({
