@@ -61,6 +61,9 @@ import {
 import { Product, Customer, Transaction, CashFlowEntry, SystemSettings } from "../types";
 import { printInvoiceHTML } from "../lib/printHelper";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
+import { DashboardSalesTab } from "./dashboard/DashboardSalesTab";
+import { DashboardPerformanceTab } from "./dashboard/DashboardPerformanceTab";
+import { DashboardOperationsTab } from "./dashboard/DashboardOperationsTab";
 
 interface DashboardModuleProps {
   products: Product[];
@@ -167,6 +170,9 @@ export default function DashboardModule({
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [carouselDirection, setCarouselDirection] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+
+  // Main Segmented Tab: "sales" | "performance" | "operations"
+  const [dashboardTab, setDashboardTab] = useState<"sales" | "performance" | "operations">("sales");
 
   // Employee goals states
   const [isEditingEmployeeGoals, setIsEditingEmployeeGoals] = useState(false);
@@ -2469,85 +2475,6 @@ export default function DashboardModule({
           </div>
           <div className="bg-amber-50 text-amber-600 p-3 rounded-xl shrink-0">
             <PiggyBank className="w-6 h-6" />
-          </div>
-        </div>
-
-        {/* Secondary metric blocks */}
-        {lowStockProducts.length > 0 && (
-          <div className="col-span-2 row-span-2 bg-orange-50 border border-orange-200 p-4.5 rounded-2xl flex flex-col gap-3 max-h-64 overflow-hidden">
-            <div className="flex items-center justify-between border-b border-orange-100 pb-2">
-              <div className="flex gap-2 items-center">
-                <AlertTriangle className="w-5 h-5 text-orange-600 animate-pulse" />
-                <h4 className="text-sm font-bold text-orange-800 tracking-tight">Central de Alertas (Risco de Ruptura)</h4>
-              </div>
-              <span className="bg-orange-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
-                {lowStockProducts.length} itens críticos
-              </span>
-            </div>
-            
-            <div className="flex-1 overflow-y-auto pr-2 space-y-2">
-              {lowStockProducts.map(prod => (
-                <div key={prod.id} className="bg-white/80 p-3 rounded-xl border border-orange-100/50 flex justify-between items-center shadow-sm">
-                  <div>
-                    <p className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                      <span className="text-lg">{prod.emoji || "📦"}</span> {prod.name}
-                    </p>
-                    <p className="text-[10px] text-slate-500 font-mono mt-0.5">SKU: {prod.code}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-orange-700 text-xs">Stock: {prod.stock}</p>
-                    <p className="text-[9px] text-slate-400 uppercase tracking-widest mt-0.5">Min: {prod.minStock}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="pt-2 border-t border-orange-100">
-              <button 
-                onClick={() => onChangeModule && onChangeModule("STOCK")}
-                className="w-full py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-xs shadow-lg shadow-orange-600/20 transition cursor-pointer"
-              >
-                Atualizar Inventário Agora
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className={`bg-red-50 border border-red-100 p-4.5 rounded-2xl flex flex-col justify-center gap-4 ${lowStockProducts.length > 0 ? "col-span-2 row-span-2" : "col-span-4 lg:col-span-2"}`}>
-          <div className="flex gap-3.5 items-center border-b border-red-100 pb-3">
-            <div className="p-2.5 bg-red-100 text-red-700 rounded-xl">
-              <Users className="w-5 h-5 shrink-0" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-800">Créditos de Clientes (Dívidas)</h4>
-              <p className="text-[10px] text-slate-500 mt-0.5">Visão geral do crédito na praça.</p>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total em Dívida</p>
-              <p className="text-lg font-bold text-red-700">{stats.totalOutstandingDebt.toLocaleString()} {currency}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Dívidas Ativas</p>
-              <p className="text-lg font-bold text-slate-800">{stats.activeDebtsCount} Clientes</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Liquidadas (Mês)</p>
-              <p className="text-lg font-bold text-emerald-600">{stats.debtsSettledMonth.toLocaleString()} {currency}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Recuperação</p>
-              <p className="text-lg font-bold text-emerald-600">{stats.recoveryRate}%</p>
-            </div>
-          </div>
-          <div className="pt-2 border-t border-red-100 flex justify-end">
-            <button
-              onClick={() => onChangeModule && onChangeModule("CUSTOMERS")}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs transition cursor-pointer"
-            >
-              Ver Devedores
-            </button>
           </div>
         </div>
       </div>

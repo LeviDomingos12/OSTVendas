@@ -215,7 +215,29 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(15);
       
-      // Step 1: Initiate Google OAuth with account chooser and email hint
+      // If password was entered, perform direct email/password or local credential login
+      if (password) {
+        setLoadingState("CONNECTING");
+        setLoadingProgress(45);
+        
+        const result = await signInWithEmail(inputEmail, password);
+        if (result && result.employee) {
+          setAuthenticatedUser(result.employee);
+          setSelectedBranch(result.branch || "OST Comércio Geral");
+          setLoadingState("LOADING_PERMISSIONS");
+          setLoadingProgress(85);
+
+          setTimeout(() => {
+            setLoadingProgress(100);
+            setLoadingState("IDLE");
+            onShowToast(`Autenticado com sucesso! Bem-vindo(a), ${result.employee.name}.`, "success");
+            onLoginSuccess(result.employee, result.branch || "OST Comércio Geral");
+          }, 800);
+          return;
+        }
+      }
+
+      // If no password, initiate Google OAuth with account chooser and email hint
       const signInResult = await googleSignIn(false, inputEmail);
       if (!signInResult || !signInResult.user) {
         setLoadingState("IDLE");
@@ -841,7 +863,7 @@ export default function LoginModule({
             )}
 
             {/* ---------------------------------- */}
-            {/* VIEW: LOGIN FORM (Modern Google)   */}
+            {/* VIEW: LOGIN FORM (Google & Email/Pass) */}
             {/* ---------------------------------- */}
             {view === "LOGIN" && (
               <form onSubmit={handleRealSignIn} className="space-y-4">
@@ -858,38 +880,83 @@ export default function LoginModule({
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3.5 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                      placeholder="Introduza o seu e-mail de acesso"
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
+                      placeholder="exemplo@empresa.com"
                       autoComplete="email"
                     />
                   </div>
                 </div>
 
-                {/* Google Authentication Info Box */}
-                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl text-left space-y-1">
-                  <div className="flex items-center gap-1.5 text-[#FF6B00]">
-                    <Chrome className="w-3.5 h-3.5 shrink-0" />
-                    <p className="text-[11px] font-bold text-slate-200">Autenticação Oficial Google</p>
+                {/* Password Input */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Palavra-passe</label>
+                    <button
+                      type="button"
+                      onClick={() => { setView("RECOVERY"); setErrorMessage(null); setSuccessMessage(null); }}
+                      className="text-[11px] text-orange-400 hover:text-orange-300 font-medium hover:underline transition cursor-pointer"
+                    >
+                      Esqueceu a palavra-passe?
+                    </button>
                   </div>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    Aceda diretamente com a sua conta Google com proteção de sessão e seletor de contas. Nunca solicitamos nem guardamos a sua palavra-passe.
-                  </p>
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                      <Lock className="w-4 h-4" />
+                    </span>
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-10 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
+                      placeholder="Introduza a sua palavra-passe"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {isCapsLockOn && (
+                    <p className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+                      ⚠️ Caps Lock está ativado!
+                    </p>
+                  )}
                 </div>
 
-                {/* Continue Button */}
+                {/* Submit / Sign In Button */}
                 <button
                   type="submit"
                   disabled={loadingState !== "IDLE"}
                   className="w-full py-3.5 bg-gradient-to-r from-[#FF6B00] to-orange-600 hover:to-orange-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/30 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Chrome className="w-4 h-4 shrink-0" />
-                  <span>Continuar</span>
+                  <span>Entrar no Sistema</span>
                   <ChevronRight className="w-4 h-4 shrink-0" />
+                </button>
+
+                {/* Divider */}
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t border-slate-800"></div>
+                  <span className="flex-shrink mx-3 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">ou autenticação rápida</span>
+                  <div className="flex-grow border-t border-slate-800"></div>
+                </div>
+
+                {/* Google Sign In Direct Button */}
+                <button
+                  type="button"
+                  onClick={handleGoogleSignIn}
+                  disabled={loadingState !== "IDLE"}
+                  className="w-full py-3 px-4 bg-slate-900 border border-slate-700 hover:border-orange-500/60 hover:bg-slate-850 rounded-xl text-white font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg group disabled:opacity-50"
+                >
+                  <Chrome className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform shrink-0" />
+                  <span>Entrar com Conta Google</span>
                 </button>
 
                 {window.self !== window.top && (
                   <p className="text-[10px] text-slate-500 text-center leading-normal pt-1">
-                    Em visualização de iframe. Se a janela de seleção Google for bloqueada,{" "}
+                    Em visualização de iframe. Se a janela de login Google for bloqueada,{" "}
                     <a 
                       href={window.location.href} 
                       target="_blank" 
@@ -905,7 +972,7 @@ export default function LoginModule({
                 <div className="flex items-center justify-between text-xs pt-3 border-t border-slate-800/80">
                   <button
                     type="button"
-                    onClick={() => { setView("EMPLOYEE"); setErrorMessage(null); setSuccessMessage(null); }}
+                    onClick={() => { setView("PIN"); setErrorMessage(null); setSuccessMessage(null); }}
                     className="text-[11px] text-slate-400 hover:text-orange-400 font-bold transition cursor-pointer flex items-center gap-1"
                   >
                     <span>Terminal / Operador</span>

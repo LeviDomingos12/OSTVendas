@@ -45,6 +45,7 @@ import AiForecastModule from "./components/AiForecastModule";
 import StockReplenishModal from "./components/StockReplenishModal";
 import QuickLogoModal from "./components/QuickLogoModal";
 import TutorialModal from "./components/TutorialModal";
+import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { 
   testConnection, 
@@ -1294,6 +1295,7 @@ export default function App() {
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
   const [isQuickLogoModalOpen, setIsQuickLogoModalOpen] = useState(false);
   const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
+  const [isSystemInfoHubOpen, setIsSystemInfoHubOpen] = useState(false);
 
   // Keyboard shortcut listener for F1 help
   useEffect(() => {
@@ -7525,6 +7527,27 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         onClose={() => setIsTutorialModalOpen(false)}
         theme={theme}
         onNavigateModule={(moduleKey) => setActiveTab(moduleKey)}
+      />
+
+      {/* Unified System Info Hub Modal */}
+      <SystemInfoHub
+        isOpen={isSystemInfoHubOpen}
+        onClose={() => setIsSystemInfoHubOpen(false)}
+        isOnline={isOnline}
+        companyName={settings.companyName || "OST Vendas"}
+        logoUrl={settings.logoUrl}
+        version={currentSystemVersion}
+        sessionSeconds={sessionSeconds}
+        activeUser={activeUser}
+        onSwitchUser={() => {
+          setIsUserSwitchModalOpen(true);
+          if (activeUser) {
+            setSwitchSelectedEmployeeId(activeUser.id);
+          }
+        }}
+        onOpenLogoModal={() => setIsQuickLogoModalOpen(true)}
+        onOpenTutorial={() => setIsTutorialModalOpen(true)}
+        theme={theme}
       />
     </div>
   );
