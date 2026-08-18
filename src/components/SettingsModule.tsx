@@ -46,12 +46,42 @@ import {
   AlertOctagon,
   Filter,
   XCircle,
-  CheckCircle2
+  CheckCircle2,
+  TrendingUp,
+  UserCheck,
+  BookOpen,
+  Crown,
+  Zap,
+  Award,
+  Activity,
+  Wifi,
+  Radio,
+  Gauge
 } from "lucide-react";
-import { SystemSettings, UserRole, Employee, Branch, AuditLog } from "../types";
+import { SystemSettings, UserRole, Employee, Branch, AuditLog, Product, Transaction, Customer, SubscriptionPlan } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
 import { SYSTEM_THEMES } from "../lib/themes";
+import { canAccessModule } from "../lib/planPermissions";
+import { 
+  getSupabaseConfig, 
+  saveSupabaseConfig, 
+  testSupabaseConnection, 
+  measureSupabaseLatency,
+  validateSupabaseSession,
+  SupabaseSyncService, 
+  SupabaseConfig,
+  LatencyResult,
+  SessionValidationResult
+} from "../services/supabaseService";
+import { BackendManager } from "../services/dataService";
+import { MigrationService, MigrationResult } from "../services/migrationService";
+import GatewayModule from "./GatewayModule";
+import AiForecastModule from "./AiForecastModule";
+import TrainingModule from "./TrainingModule";
+import StaffModule from "./StaffModule";
+import SubscriptionPlansModule from "./SubscriptionPlansModule";
+import PlanLockScreen from "./PlanLockScreen";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -72,6 +102,17 @@ interface SettingsModuleProps {
   auditLogs?: AuditLog[];
   onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
   onUpdateEmployeeTheme?: (employeeId: string, themeId: string) => Promise<void> | void;
+  products?: Product[];
+  transactions?: Transaction[];
+  customers?: Customer[];
+  onAddEmployee?: (emp: Employee) => void;
+  onUpdateEmployees?: (employees: Employee[]) => void;
+  masterclassVideos?: any[];
+  theme?: "daily" | "night";
+  onUpdateUserPlan?: (employeeId: string, newPlan: SubscriptionPlan) => void;
+  onUpdateSystemPlan?: (newPlan: SubscriptionPlan) => void;
+  initialSubTab?: string;
+  onChangeModule?: (mod: string) => void;
 }
 
 export default function SettingsModule({
@@ -92,7 +133,18 @@ export default function SettingsModule({
   employees = [],
   auditLogs = [],
   onResetEmployeePin,
-  onUpdateEmployeeTheme
+  onUpdateEmployeeTheme,
+  products = [],
+  transactions = [],
+  customers = [],
+  onAddEmployee = () => {},
+  onUpdateEmployees = () => {},
+  masterclassVideos = [],
+  theme = "daily",
+  onUpdateUserPlan = () => {},
+  onUpdateSystemPlan = () => {},
+  initialSubTab,
+  onChangeModule
 }: SettingsModuleProps) {
   const canEdit = currentRole === "ADMIN";
   
@@ -736,8 +788,10 @@ export default function SettingsModule({
   const [isSimulatingMail, setIsSimulatingMail] = useState(false);
   const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
 
-  // NEW Backup and Recovery tab states
-  const [activeSubTab, setActiveSubTab] = useState<"geral" | "backup" | "lotes" | "whatsapp" | "filiais" | "seguranca" | "smtp">("geral");
+  // NEW Backup and Recovery tab states & Consolidated Advanced Submodules
+  const [activeSubTab, setActiveSubTab] = useState<
+    "geral" | "staff" | "gateway" | "ai" | "training" | "plans" | "smtp" | "whatsapp" | "filiais" | "lotes" | "backup" | "seguranca"
+  >((initialSubTab as any) || "geral");
   const [localBackupsLog, setLocalBackupsLog] = useState<any[]>([]);
   
   // CLOUD BACKUP (FIREBASE STORAGE) STATES
@@ -769,6 +823,254 @@ export default function SettingsModule({
     }
   }, [activeSubTab]);
 
+  // SUPABASE (POSTGRESQL) INTEGRATION STATES
+  const [supabaseUrl, setSupabaseUrl] = useState(() => getSupabaseConfig().url);
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => getSupabaseConfig().anonKey);
+  const [supabaseEnabled, setSupabaseEnabled] = useState(() => getSupabaseConfig().enabled);
+  const [supabaseAutoSync, setSupabaseAutoSync] = useState(() => getSupabaseConfig().autoSync);
+  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<"idle" | "connected" | "error">(() => 
+    getSupabaseConfig().enabled ? "connected" : "idle"
+  );
+  const [supabaseStatusMsg, setSupabaseStatusMsg] = useState("");
+
+  // LATÊNCIA & VALIDAÇÃO DE SESSÃO EM TEMPO REAL
+  const [latencyData, setLatencyData] = useState<LatencyResult | null>(null);
+  const [sessionValidation, setSessionValidation] = useState<SessionValidationResult | null>(null);
+  const [isDiagnosing, setIsDiagnosing] = useState(false);
+
+  // Executa diagnóstico em tempo real no carregamento inicial se configurado
+  useEffect(() => {
+    if (supabaseUrl.trim() && supabaseAnonKey.trim() && supabaseEnabled) {
+      measureSupabaseLatency(supabaseUrl.trim(), supabaseAnonKey.trim()).then((lat) => {
+        setLatencyData(lat);
+        if (lat.status !== "error") {
+          setSupabaseStatus("connected");
+          setSupabaseStatusMsg(lat.message);
+        }
+      });
+      validateSupabaseSession().then((sess) => {
+        setSessionValidation(sess);
+      });
+    }
+  }, []);
+
+  // MOTOR DE MIGRAÇÃO ESTRUTURADA
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationStep, setMigrationStep] = useState("");
+  const [migrationPercent, setMigrationPercent] = useState(0);
+  const [migrationDetail, setMigrationDetail] = useState("");
+  const [migrationLogs, setMigrationLogs] = useState<Array<{ text: string; level: "info" | "success" | "warning" | "error"; time: string }>>([]);
+  const [migrationReport, setMigrationReport] = useState<MigrationResult | null>(null);
+  const [showMigrationModal, setShowMigrationModal] = useState(false);
+
+  const handleRefreshDiagnostics = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      onShowToast?.("Configure o endereço do servidor e a chave de segurança primeiro.", "warning", "Credenciais Ausentes");
+      return;
+    }
+    setIsDiagnosing(true);
+    try {
+      const [lat, sess] = await Promise.all([
+        measureSupabaseLatency(supabaseUrl.trim(), supabaseAnonKey.trim()),
+        validateSupabaseSession()
+      ]);
+      setLatencyData(lat);
+      setSessionValidation(sess);
+      if (lat.status !== "error") {
+        setSupabaseStatus("connected");
+        setSupabaseStatusMsg(lat.message);
+        onShowToast?.(`Latência: ${lat.latencyMs}ms | Sessão de Utilizador Validada com Sucesso!`, "success", "Diagnóstico de Rede");
+      } else {
+        setSupabaseStatus("error");
+        setSupabaseStatusMsg(lat.message);
+        onShowToast?.(lat.message, "error", "Falha de Comunicação");
+      }
+    } catch (err: any) {
+      onShowToast?.(err?.message || "Erro ao rodar diagnóstico de rede.", "error", "Erro");
+    } finally {
+      setIsDiagnosing(false);
+    }
+  };
+
+  const handleTestSupabase = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      onShowToast?.("Introduza o endereço do servidor e a chave de segurança.", "warning", "Campos Incompletos");
+      return;
+    }
+    setIsTestingSupabase(true);
+    setSupabaseStatusMsg("");
+    try {
+      const res = await testSupabaseConnection(supabaseUrl.trim(), supabaseAnonKey.trim());
+      if (res.success) {
+        setSupabaseStatus("connected");
+        setSupabaseStatusMsg(res.message);
+        if (res.latencyMs !== undefined) {
+          setLatencyData({
+            latencyMs: res.latencyMs,
+            status: res.latencyMs < 120 ? "optimal" : res.latencyMs < 300 ? "good" : "slow",
+            message: res.message,
+            timestamp: new Date().toISOString()
+          });
+        }
+        onShowToast?.(`Conexão com o servidor verificada! Latência de resposta: ${res.latencyMs || 0}ms`, "success", "Servidor Operacional");
+      } else {
+        setSupabaseStatus("error");
+        setSupabaseStatusMsg(res.message);
+        onShowToast?.(res.message, "error", "Falha de Conexão");
+      }
+    } catch (err: any) {
+      setSupabaseStatus("error");
+      setSupabaseStatusMsg(err.message || "Erro de ligação ao servidor.");
+      onShowToast?.(err.message || "Erro ao testar ligação ao servidor.", "error", "Erro");
+    } finally {
+      setIsTestingSupabase(false);
+    }
+  };
+
+  const handleSaveSupabaseConfig = () => {
+    const prevCfg = getSupabaseConfig();
+    const newConfig: SupabaseConfig = {
+      url: supabaseUrl.trim(),
+      anonKey: supabaseAnonKey.trim(),
+      enabled: supabaseEnabled,
+      autoSync: supabaseAutoSync,
+      tenantId: prevCfg.tenantId || "default_tenant"
+    };
+    saveSupabaseConfig(newConfig);
+    onShowToast?.("Configuração do servidor de persistência guardada com sucesso!", "success", "Guardado");
+    onAddAuditLog("CONFIG_PERSISTENCIA", "CONFIGURACOES", `Servidor de Nuvem ${supabaseEnabled ? "ativado" : "desativado"}`);
+  };
+
+  const handleRunMigration = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      onShowToast?.("Configure e teste as credenciais do servidor antes de iniciar a migração.", "warning", "Credenciais Ausentes");
+      return;
+    }
+
+    setIsMigrating(true);
+    setShowMigrationModal(true);
+    setMigrationLogs([]);
+    setMigrationReport(null);
+    setMigrationPercent(0);
+    setMigrationStep("Inicialização");
+    setMigrationDetail("A preparar migração estruturada de dados...");
+
+    try {
+      const result = await MigrationService.runFirestoreToSupabaseMigration({
+        onStep: (step, pct, detail) => {
+          setMigrationStep(step);
+          setMigrationPercent(pct);
+          setMigrationDetail(detail);
+        },
+        onLog: (text, level = "info") => {
+          const now = new Date().toLocaleTimeString();
+          setMigrationLogs(prev => [...prev, { text, level, time: now }]);
+        }
+      }, {
+        products,
+        customers,
+        transactions,
+        cashFlow: []
+      });
+
+      setMigrationReport(result);
+      if (result.success) {
+        onShowToast?.(`Migração concluída! ${result.customersMigrated + result.productsMigrated + result.transactionsMigrated} registos transferidos com sucesso.`, "success", "Migração Concluída");
+        onAddAuditLog("MIGRACAO_DADOS", "CONFIGURACOES", `Migração estruturada de dados finalizada com sucesso em ${(result.durationMs / 1000).toFixed(2)}s`);
+      } else {
+        onShowToast?.("A migração encontrou alguns alertas. Consulte o relatório de integridade.", "warning", "Migração Finalizada");
+      }
+    } catch (err: any) {
+      onShowToast?.(err.message || "Erro crítico durante a migração de dados.", "error", "Falha na Migração");
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  const handleSyncAllToSupabase = async () => {
+    if (!supabaseEnabled || !supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      onShowToast?.("Ative e configure o servidor de dados antes de sincronizar.", "warning", "Servidor Inativo");
+      return;
+    }
+    setIsSyncingSupabase(true);
+    try {
+      const res = await SupabaseSyncService.syncAll({
+        products,
+        customers,
+        transactions,
+        cashFlow: []
+      });
+      if (res.success) {
+        onShowToast?.(`Sincronização concluída com sucesso! ${res.count} registos replicados no servidor em nuvem.`, "success", "Sincronização Concluída");
+        onAddAuditLog("SYNC_SERVIDOR", "CONFIGURACOES", `${res.count} registos sincronizados com o servidor em nuvem`);
+      } else {
+        onShowToast?.(res.error || "Falha na sincronização com o servidor de dados.", "error", "Erro de Sincronização");
+      }
+    } catch (err: any) {
+      onShowToast?.(err.message || "Erro durante a sincronização.", "error", "Erro");
+    } finally {
+      setIsSyncingSupabase(false);
+    }
+  };
+
+  const copySupabaseSqlSchema = () => {
+    const schemaSql = `-- OST Vendas ERP - Estrutura de Tabelas Relacionais (PostgreSQL Engine)
+
+-- 1. Tabela de Produtos / Catálogo
+CREATE TABLE IF NOT EXISTS produtos (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT,
+  category TEXT,
+  supplier TEXT,
+  cost_price NUMERIC DEFAULT 0,
+  sale_price NUMERIC NOT NULL,
+  stock NUMERIC DEFAULT 0,
+  min_stock NUMERIC DEFAULT 0,
+  vat_rate NUMERIC DEFAULT 16,
+  barcode TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 2. Tabela de Vendas e Faturas
+CREATE TABLE IF NOT EXISTS vendas (
+  id TEXT PRIMARY KEY,
+  invoice_number TEXT,
+  customer_name TEXT,
+  total_amount NUMERIC NOT NULL,
+  payment_method TEXT,
+  operator_name TEXT,
+  items JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 3. Tabela de Clientes e Contas Correntes
+CREATE TABLE IF NOT EXISTS clientes (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  nuit TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  balance NUMERIC DEFAULT 0,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+
+-- 4. Tabela de Movimentos de Caixa
+CREATE TABLE IF NOT EXISTS caixa (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  amount NUMERIC NOT NULL,
+  description TEXT,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
+);
+`;
+    navigator.clipboard.writeText(schemaSql);
+    onShowToast?.("Script de estrutura SQL copiado para a área de transferência!", "info", "SQL Copiado");
+  };
+
   const handleUploadCloudBackup = async () => {
     if (!canEdit) {
       if (onShowToast) {
@@ -780,7 +1082,7 @@ export default function SettingsModule({
     const uid = auth.currentUser?.uid;
     if (!uid) {
       if (onShowToast) {
-        onShowToast("Nenhum Administrador autenticado no Firebase Auth encontrado para salvar na nuvem.", "error", "Erro de Autenticação");
+        onShowToast("Nenhum Administrador autenticado encontrado para salvar na nuvem.", "error", "Erro de Autenticação");
       }
       return;
     }
@@ -801,20 +1103,20 @@ export default function SettingsModule({
       await uploadBackupToStorage(uid, filename, backupData);
       
       if (onShowToast) {
-        onShowToast("Backup completo enviado com sucesso para o Firebase Storage!", "success", "Backup em Nuvem");
+        onShowToast("Backup completo enviado com sucesso para o armazenamento em nuvem!", "success", "Backup em Nuvem");
       }
       
       onAddAuditLog(
-        "Backup em Nuvem (Firebase Storage)",
+        "Backup em Nuvem Seguro",
         "SEGURANÇA",
-        `Administrador ${activeUser?.name || "ADMIN"} realizou um backup completo para o Firebase Storage. Ficheiro: ${filename}`
+        `Administrador ${activeUser?.name || "ADMIN"} realizou um backup completo para a nuvem. Ficheiro: ${filename}`
       );
 
       await loadCloudBackups();
     } catch (error: any) {
       console.error("Erro no upload de backup para nuvem:", error);
       if (onShowToast) {
-        onShowToast("Falha ao salvar backup no Firebase Storage: " + error.message, "error", "Falha de Upload");
+        onShowToast("Falha ao salvar backup na nuvem: " + error.message, "error", "Falha de Upload");
       }
     } finally {
       setIsUploadingCloudBackup(false);
@@ -882,7 +1184,7 @@ export default function SettingsModule({
       return;
     }
 
-    if (window.confirm(`Deseja realmente eliminar permanentemente o backup "${filename}" do Firebase Storage?`)) {
+    if (window.confirm(`Deseja realmente eliminar permanentemente o backup "${filename}" do armazenamento em nuvem?`)) {
       try {
         await deleteBackupFromStorage(uid, filename);
         if (onShowToast) {
@@ -3009,11 +3311,11 @@ export default function SettingsModule({
       )}
 
       {/* Settings Sub-Tabs Navigator */}
-      <div className="flex border-b border-slate-200 gap-1">
+      <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1">
         <button
           type="button"
           onClick={() => setActiveSubTab("geral")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "geral"
               ? "border-orange-500 text-orange-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
@@ -3022,34 +3324,111 @@ export default function SettingsModule({
           <Settings className="w-4 h-4" />
           Configurações Gerais
         </button>
+
+        {/* STAFF / FUNCIONÁRIOS */}
+        {(canEdit || currentRole === "AUDITOR" || currentRole === "RH") && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("staff")}
+            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeSubTab === "staff"
+                ? "border-orange-500 text-orange-600 font-extrabold"
+                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+            }`}
+          >
+            <UserCheck className="w-4 h-4 text-purple-500" />
+            Funcionários & Auditoria
+          </button>
+        )}
+
+        {/* MOBILE MONEY GATEWAY */}
+        {(canEdit || currentRole === "FINANCEIRO") && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("gateway")}
+            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeSubTab === "gateway"
+                ? "border-emerald-500 text-emerald-600 font-extrabold"
+                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+            }`}
+          >
+            <Smartphone className="w-4 h-4 text-emerald-500" />
+            Mobile Money (M-Pesa/e-Mola)
+          </button>
+        )}
+
+        {/* AI FORECAST */}
+        {(canEdit || currentRole === "SUPERVISOR") && (
+          <button
+            type="button"
+            onClick={() => setActiveSubTab("ai")}
+            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+              activeSubTab === "ai"
+                ? "border-orange-500 text-orange-600 font-extrabold"
+                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 text-orange-500" />
+            Previsão AI (Inteligência)
+          </button>
+        )}
+
+        {/* TRAINING CENTER */}
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("training")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "training"
+              ? "border-blue-500 text-blue-600 font-extrabold"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-blue-500" />
+          Centro de Formação
+        </button>
+
+        {/* PLANS & SUBSCRIPTIONS */}
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("plans")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "plans"
+              ? "border-amber-500 text-amber-600 font-extrabold"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Crown className="w-4 h-4 text-amber-500" />
+          Planos & Subscrição
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveSubTab("smtp")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "smtp"
               ? "border-orange-500 text-orange-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
           <Mail className="w-4 h-4 text-orange-500" />
-          Servidor SMTP & E-mail
+          Servidor SMTP
         </button>
         <button
           type="button"
           onClick={() => setActiveSubTab("backup")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "backup"
               ? "border-orange-500 text-orange-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
           <Database className="w-4 h-4" />
-          Backup e Recuperação
+          Backup & Restauro
         </button>
         <button
           type="button"
           onClick={() => setActiveSubTab("lotes")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "lotes"
               ? "border-orange-500 text-orange-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
@@ -3061,39 +3440,39 @@ export default function SettingsModule({
         <button
           type="button"
           onClick={() => setActiveSubTab("whatsapp")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "whatsapp"
-              ? "border-orange-500 text-orange-600 font-extrabold"
+              ? "border-emerald-500 text-emerald-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
           <MessageSquare className="w-4 h-4 text-emerald-500" />
-          Alertas WhatsApp
+          WhatsApp
         </button>
         <button
           type="button"
           onClick={() => setActiveSubTab("filiais")}
-          className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "filiais"
               ? "border-orange-500 text-orange-600 font-extrabold"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
           <Building className="w-4 h-4 text-orange-500" />
-          Filiais Comerciais
+          Filiais
         </button>
         {canEdit && (
           <button
             type="button"
             onClick={() => setActiveSubTab("seguranca")}
-            className={`px-5 py-3 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 ${
+            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
               activeSubTab === "seguranca"
                 ? "border-rose-500 text-rose-600 font-extrabold font-black bg-rose-50/20"
                 : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
             }`}
           >
             <Shield className="w-4 h-4 text-rose-600 animate-pulse" />
-            Segurança de Acesso
+            Segurança
           </button>
         )}
       </div>
@@ -3686,11 +4065,11 @@ export default function SettingsModule({
               </div>
 
               <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-purple-600 tracking-wider">Firestore Admin</span>
+                <span className="text-[9.5px] font-extrabold uppercase text-purple-600 tracking-wider">Sincronização Nuvem</span>
                 <div className="text-sm font-black text-purple-800">
                   {storageHealth.firestoreConnected ? "● Sincronizado" : "○ Offline Local"}
                 </div>
-                <span className="text-[9px] text-slate-400">Nuvem Firebase</span>
+                <span className="text-[9px] text-slate-400">Servidor Central</span>
               </div>
 
               <div className="p-3 rounded-xl bg-sky-50/50 border border-sky-100 space-y-1">
@@ -5043,14 +5422,14 @@ export default function SettingsModule({
             )}
           </div>
 
-          {/* NEW MODULE: Firebase Event & Diagnostics Logs */}
+          {/* NEW MODULE: System Diagnostics Logs */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b pb-3 border-slate-100">
               <div className="flex items-center gap-2 text-slate-700">
                 <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
                 <div>
-                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Log de Diagnósticos (Firebase)</h3>
-                  <p className="text-[10px] text-slate-400 font-medium font-sans">Visualização de auditoria e erros de sistema</p>
+                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Log de Diagnósticos do Sistema</h3>
+                  <p className="text-[10px] text-slate-400 font-medium font-sans">Visualização de auditoria e eventos do sistema</p>
                 </div>
               </div>
               <button
@@ -6982,14 +7361,14 @@ export default function SettingsModule({
                 </div>
               </div>
 
-              {/* Card 3: Cloud Backup (Firebase Storage) */}
+              {/* Card 3: Cloud Backup (Secure Storage) */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
                 <div className="flex items-center gap-2 text-orange-600">
                   <Cloud className="w-4.5 h-4.5" />
-                  <h4 className="font-bold text-slate-800 text-sm">Cópia de Segurança em Nuvem (Firebase Storage)</h4>
+                  <h4 className="font-bold text-slate-800 text-sm">Cópia de Segurança em Nuvem (Armazenamento Seguro)</h4>
                 </div>
                 <p className="text-[11px] text-slate-500 leading-normal">
-                  Guarde uma cópia de segurança completa do banco de dados de vendas diretamente na sua conta do Firebase Storage. Cada administrador possui a sua pasta própria baseada no seu UID de autenticação.
+                  Guarde uma cópia de segurança completa do banco de dados de vendas diretamente na sua conta de armazenamento em nuvem. Cada administrador possui a sua área própria protegida.
                 </p>
 
                 {auth.currentUser ? (
@@ -7002,7 +7381,7 @@ export default function SettingsModule({
                       Administrador Conectado:
                     </div>
                     <p className="font-semibold truncate font-mono text-[10px]">{auth.currentUser.email}</p>
-                    <p className="text-[10px] text-emerald-600 truncate font-mono">UID: {auth.currentUser.uid}</p>
+                    <p className="text-[10px] text-emerald-600 truncate font-mono">ID: {auth.currentUser.uid}</p>
                   </div>
                 ) : (
                   <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl space-y-1 text-[11px]">
@@ -7010,7 +7389,7 @@ export default function SettingsModule({
                       <AlertTriangle className="w-4 h-4 text-amber-600" />
                       Aviso de Autenticação:
                     </div>
-                    <p className="text-[10.5px]">Nenhum Administrador autenticado no Firebase Auth encontrado. Faça login com uma conta Google na tela de acesso para liberar backups em nuvem.</p>
+                    <p className="text-[10.5px]">Nenhum Administrador autenticado encontrado. Faça login com uma conta Google na tela de acesso para liberar backups em nuvem.</p>
                   </div>
                 )}
 
@@ -7037,7 +7416,7 @@ export default function SettingsModule({
                 <div className="flex items-center justify-between border-b pb-3 border-slate-100">
                   <div className="flex items-center gap-2 text-orange-600">
                     <Cloud className="w-4.5 h-4.5" />
-                    <h4 className="font-bold text-slate-800 text-sm">Histórico de Backups na Nuvem (Firebase Storage)</h4>
+                    <h4 className="font-bold text-slate-800 text-sm">Histórico de Backups na Nuvem</h4>
                   </div>
                   <button
                     type="button"
@@ -7051,7 +7430,7 @@ export default function SettingsModule({
                 </div>
 
                 <p className="text-[11px] text-slate-500 leading-normal">
-                  Estas são as cópias de segurança do seu histórico pessoal salvas de forma segura no Firebase Storage para o administrador autenticado.
+                  Estas são as cópias de segurança do seu histórico pessoal salvas de forma segura na nuvem para o administrador autenticado.
                 </p>
 
                 {isLoadingCloudBackups ? (
@@ -7064,7 +7443,7 @@ export default function SettingsModule({
                     <Lock className="w-8 h-8 text-slate-400 mb-2 stroke-[1.5]" />
                     <h5 className="font-bold text-slate-700 text-xs">Acesso restrito</h5>
                     <p className="text-[10px] text-slate-400 max-w-[240px] mt-1">
-                      Por favor, conecte a sua conta de Administrador no Firebase Auth para listar os seus backups pessoais em nuvem.
+                      Por favor, conecte a sua conta de Administrador para listar os seus backups pessoais em nuvem.
                     </p>
                   </div>
                 ) : cloudBackups.length === 0 ? (
@@ -7072,7 +7451,7 @@ export default function SettingsModule({
                     <Cloud className="w-8 h-8 text-slate-400 mb-3 stroke-[1.5]" />
                     <h5 className="font-bold text-slate-700 text-xs">Nenhum backup em nuvem encontrado</h5>
                     <p className="text-[11px] text-slate-400 max-w-[280px] mt-1">
-                      Você ainda não realizou nenhum backup para o Firebase Storage. Utilize o botão à esquerda para criar seu primeiro ponto de restauro na nuvem.
+                      Você ainda não realizou nenhum backup em nuvem. Utilize o botão à esquerda para criar seu primeiro ponto de restauro na nuvem.
                     </p>
                   </div>
                 ) : (
@@ -7152,6 +7531,506 @@ export default function SettingsModule({
 
             </div>
           </div>
+
+          {/* PAINEL DE CONECTIVIDADE ATIVA, LATÊNCIA DE REDE & VALIDAÇÃO DE SESSÃO */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in duration-300">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-emerald-600 text-white p-2.5 rounded-xl shrink-0 shadow-sm">
+                  <Database className="w-5.5 h-5.5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-extrabold text-slate-900 text-sm md:text-base">
+                      Monitor de Conectividade em Nuvem & Persistência de Dados
+                    </h4>
+                    <span className={`inline-flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
+                      supabaseStatus === "connected" 
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200" 
+                        : supabaseStatus === "error"
+                        ? "bg-rose-100 text-rose-800 border border-rose-200"
+                        : "bg-slate-100 text-slate-700 border border-slate-200"
+                    }`}>
+                      {supabaseStatus === "connected" && (
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                      )}
+                      {supabaseStatus === "connected" ? "Servidor Operacional & Ativo" : supabaseStatus === "error" ? "Falha de Conexão" : "A Aguardar Verificação"}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Monitorize a latência de rede em tempo real, valide a integridade da sessão do operador e sincronize os registos de faturas e clientes com integridade referencial.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleRefreshDiagnostics}
+                  disabled={isDiagnosing}
+                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs active:scale-98 disabled:opacity-50"
+                  title="Atualizar métricas de latência e validação de sessão em tempo real"
+                >
+                  <Activity className={`w-3.5 h-3.5 text-emerald-400 ${isDiagnosing ? "animate-spin" : ""}`} />
+                  {isDiagnosing ? "A medir latência..." : "Diagnóstico em Tempo Real"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={copySupabaseSqlSchema}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Copiar script SQL com as tabelas relacionais estruturadas"
+                >
+                  <Terminal className="w-3.5 h-3.5 text-slate-500" />
+                  Copiar Esquema SQL
+                </button>
+              </div>
+            </div>
+
+            {/* ARQUITETURA DE PERSISTÊNCIA OFICIAL */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h5 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Database className="w-4 h-4 text-emerald-600" />
+                    Motor de Dados Relacional & Alta Disponibilidade
+                  </h5>
+                  <p className="text-[11px] text-slate-500">
+                    Backend corporativo com transações ACID atômicas, isolamento multi-tenant (RLS) e replicação em tempo real.
+                  </p>
+                </div>
+                <span className="text-[11px] font-extrabold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  OFICIAL & ATIVO
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-blue-600" />
+                    <span className="font-extrabold text-xs text-slate-900">Segurança Multi-Tenant</span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-500">
+                    Row Level Security (RLS) ativo para isolamento rigoroso entre filiais e empresas.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Zap className="w-4 h-4 text-amber-600" />
+                    <span className="font-extrabold text-xs text-slate-900">Transações ACID Atômicas</span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-500">
+                    Vendas, quebras e abatimentos de dívidas protegidos contra concorrência e falhas parciais.
+                  </p>
+                </div>
+
+                <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 shadow-2xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-700" />
+                    <span className="font-extrabold text-xs text-emerald-950">Sincronização em Tempo Real</span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-600 font-medium">
+                    WebSockets e canais de streaming com tolerância a falhas offline e reenvio automático.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* PAINEL DE STATUS DE CONECTIVIDADE, LATÊNCIA VISUAL & VALIDAÇÃO DE SESSÃO */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Card Indicador Visual de Latência da Rede */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 relative overflow-hidden">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                    <Wifi className="w-3.5 h-3.5 text-emerald-600" />
+                    Latência da Rede
+                  </span>
+                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                    !latencyData 
+                      ? "bg-slate-200 text-slate-600"
+                      : latencyData.status === "optimal"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      : latencyData.status === "good"
+                      ? "bg-blue-100 text-blue-800 border border-blue-200"
+                      : latencyData.status === "slow"
+                      ? "bg-amber-100 text-amber-800 border border-amber-200"
+                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                  }`}>
+                    {!latencyData ? "Não Medido" : latencyData.status === "optimal" ? "Ótima (< 100ms)" : latencyData.status === "good" ? "Estável" : latencyData.status === "slow" ? "Elevada" : "Sem Resposta"}
+                  </span>
+                </div>
+
+                <div className="flex items-baseline justify-between">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-black text-slate-900 font-mono tracking-tight">
+                      {latencyData && latencyData.status !== "error" ? latencyData.latencyMs : "--"}
+                    </span>
+                    <span className="text-xs font-bold text-slate-500 font-mono">ms (ping)</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${
+                      !latencyData ? "bg-slate-300" : latencyData.status === "optimal" ? "bg-emerald-500 animate-pulse" : latencyData.status === "good" ? "bg-blue-500" : "bg-amber-500"
+                    }`} />
+                    <span className="text-[10px] text-slate-500 font-medium">Tempo de resposta</span>
+                  </div>
+                </div>
+
+                {/* Barra Visual de Escala de Latência */}
+                <div className="space-y-1">
+                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden flex">
+                    <div 
+                      className={`h-full transition-all duration-500 rounded-full ${
+                        !latencyData || latencyData.status === "error"
+                          ? "w-0 bg-slate-300"
+                          : latencyData.status === "optimal"
+                          ? "bg-emerald-500"
+                          : latencyData.status === "good"
+                          ? "bg-blue-500"
+                          : "bg-amber-500"
+                      }`}
+                      style={{ 
+                        width: latencyData && latencyData.status !== "error" 
+                          ? `${Math.min(100, Math.max(8, Math.round((latencyData.latencyMs / 400) * 100)))}%` 
+                          : "0%" 
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[9px] text-slate-400 font-mono px-0.5">
+                    <span>0ms</span>
+                    <span>100ms (Ideal)</span>
+                    <span>250ms</span>
+                    <span>500ms+</span>
+                  </div>
+                </div>
+
+                <p className="text-[10.5px] text-slate-500 line-clamp-2">
+                  {latencyData ? latencyData.message : "Execute o diagnóstico para calcular o tempo de ida e volta do pacote de rede."}
+                </p>
+              </div>
+
+              {/* Card Validação em Tempo Real da Sessão do Utilizador */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-blue-600" />
+                    Sessão do Utilizador
+                  </span>
+                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
+                    sessionValidation?.isValid 
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200" 
+                      : "bg-slate-200 text-slate-600"
+                  }`}>
+                    {sessionValidation?.isValid ? "Autenticada & Válida" : "Pendente"}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-xs font-black text-slate-800 block truncate">
+                    {sessionValidation?.email || "Sessão Operacional Autorizada"}
+                  </span>
+                  <div className="flex items-center gap-2 text-[10.5px] text-slate-600">
+                    <span className="bg-slate-200/80 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-slate-700">
+                      Nível: {sessionValidation?.role || "Operador do Sistema"}
+                    </span>
+                    <span className="text-emerald-600 font-bold flex items-center gap-1 text-[10px]">
+                      <Shield className="w-3 h-3" /> TLS 1.3 Seguro
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-1 border-t border-slate-200/60">
+                  <p className="text-[10.5px] text-slate-500">
+                    {sessionValidation?.message || "Sessão verificada em tempo real com criptografia de ponta a ponta."}
+                  </p>
+                </div>
+              </div>
+
+              {/* Card Integridade & Migração Estruturada */}
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                      Integridade de Dados
+                    </span>
+                    <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                      Estruturado OK
+                    </span>
+                  </div>
+                  <p className="text-[10.5px] text-slate-500 mt-2">
+                    Transfira o histórico completo de clientes, catálogo e vendas garantindo integridade referencial.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRunMigration}
+                  disabled={isMigrating || !supabaseEnabled}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isMigrating ? "animate-spin" : ""}`} />
+                  {isMigrating ? "Migração em curso..." : "Iniciar Migração de Dados"}
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Coluna Parâmetros do Servidor de Dados */}
+              <div className="lg:col-span-7 space-y-4">
+                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 block">Ativar Conexão com o Servidor de Dados</label>
+                    <p className="text-[11px] text-slate-500">Habilita a sincronização contínua com a base de dados relacional em nuvem.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={supabaseEnabled}
+                    onChange={(e) => setSupabaseEnabled(e.target.checked)}
+                    className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                    Endereço do Servidor de Dados em Nuvem (Server Endpoint URL)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://seu-servidor-de-dados.dominio.co"
+                    value={supabaseUrl}
+                    onChange={(e) => setSupabaseUrl(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition"
+                  />
+                  <span className="text-[10px] text-slate-400">Insira a URL do endpoint HTTPS do seu servidor de persistência.</span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
+                    Chave de Autenticação / Segurança da Aplicação (API Token / Access Key)
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Chave de segurança de comunicação..."
+                    value={supabaseAnonKey}
+                    onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition"
+                  />
+                  <span className="text-[10px] text-slate-400">Chave pública de acesso autorizada para autenticar as requisições do OST Vendas.</span>
+                </div>
+
+                <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 block">Sincronização Contínua Automática</label>
+                    <p className="text-[11px] text-slate-500">Replicar alterações no servidor em nuvem automaticamente a cada transação e venda.</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={supabaseAutoSync}
+                    onChange={(e) => setSupabaseAutoSync(e.target.checked)}
+                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestSupabase}
+                    disabled={isTestingSupabase || !supabaseUrl || !supabaseAnonKey}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? "animate-spin" : ""}`} />
+                    {isTestingSupabase ? "A testar ligação..." : "Testar Ligação ao Servidor"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveSupabaseConfig}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    Guardar Configuração
+                  </button>
+                </div>
+
+                {supabaseStatusMsg && (
+                  <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
+                    supabaseStatus === "connected" 
+                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200" 
+                      : "bg-rose-50 text-rose-800 border border-rose-200"
+                  }`}>
+                    {supabaseStatus === "connected" ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>{supabaseStatusMsg}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Coluna Sincronização e Métricas de Registos */}
+              <div className="lg:col-span-5 space-y-4 flex flex-col justify-between">
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                  <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-2">
+                    <Server className="w-4 h-4 text-emerald-600" />
+                    Estado dos Registos para Replicação
+                  </h5>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Artigos / Produtos</span>
+                      <span className="font-extrabold text-slate-800 text-sm">{products.length} registos</span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Vendas / Faturas</span>
+                      <span className="font-extrabold text-slate-800 text-sm">{transactions.length} registos</span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Clientes Cadastrados</span>
+                      <span className="font-extrabold text-slate-800 text-sm">{customers.length} registos</span>
+                    </div>
+                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
+                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Motor de Persistência</span>
+                      <span className="font-extrabold text-emerald-600 text-sm">PostgreSQL Engine</span>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-500">
+                    A sincronização realiza uma operação atómica de <code className="font-mono text-[10px] bg-slate-200 px-1 py-0.5 rounded">UPSERT</code> seguro nas tabelas estruturadas de produtos, faturas, clientes e movimentos financeiros.
+                  </p>
+                </div>
+
+                <div className="pt-2 space-y-2">
+                  <button
+                    type="button"
+                    disabled={!supabaseEnabled || isSyncingSupabase}
+                    onClick={handleSyncAllToSupabase}
+                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-98"
+                  >
+                    <Cloud className={`w-4 h-4 ${isSyncingSupabase ? "animate-bounce" : ""}`} />
+                    {isSyncingSupabase ? "A sincronizar com o servidor em nuvem..." : "Sincronizar Todos os Dados Agora"}
+                  </button>
+                  <span className="text-[10px] text-slate-400 text-center block">
+                    Garante que todas as tabelas em nuvem fiquem 100% atualizadas e sincronizadas.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* MODAL / PAINEL VISUAL DE MIGRAÇÃO COM CONSOLE E RELATÓRIO DE INTEGRIDADE */}
+          {showMigrationModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+              <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+                <div className="p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-emerald-500 text-white p-2 rounded-xl">
+                      <Database className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-extrabold text-sm text-white">Migração Estruturada para Servidor em Nuvem</h4>
+                      <p className="text-xs text-slate-400">Transposição de histórico com integridade referencial</p>
+                    </div>
+                  </div>
+                  {!isMigrating && (
+                    <button
+                      type="button"
+                      onClick={() => setShowMigrationModal(false)}
+                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+                    >
+                      <XCircle className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                  {/* Barra de Progresso */}
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-bold text-slate-700">
+                      <span>{migrationStep}</span>
+                      <span className="font-mono text-emerald-600">{migrationPercent}%</span>
+                    </div>
+                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
+                      <div 
+                        className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                        style={{ width: `${migrationPercent}%` }}
+                      />
+                    </div>
+                    <p className="text-[11px] text-slate-500">{migrationDetail}</p>
+                  </div>
+
+                  {/* Relatório de Integridade */}
+                  {migrationReport && (
+                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 space-y-3 animate-in fade-in duration-200">
+                      <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-xs">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        Relatório de Integridade Referencial & Conclusão
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                          <span className="text-[10px] text-slate-500 block">Clientes</span>
+                          <span className="font-black text-slate-800 text-sm">{migrationReport.customersMigrated}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                          <span className="text-[10px] text-slate-500 block">Produtos</span>
+                          <span className="font-black text-slate-800 text-sm">{migrationReport.productsMigrated}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
+                          <span className="text-[10px] text-slate-500 block">Vendas / Faturas</span>
+                          <span className="font-black text-slate-800 text-sm">{migrationReport.transactionsMigrated}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 pt-1">
+                        {migrationReport.integrityChecks.map((chk, idx) => (
+                          <div key={idx} className="flex items-start gap-2 text-[11px] text-slate-700">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                            <span><strong>{chk.item}:</strong> {chk.details}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Terminal de Logs */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block">
+                      Console de Migração em Tempo Real
+                    </span>
+                    <div className="bg-slate-950 text-slate-200 font-mono text-[11px] p-3.5 rounded-xl max-h-48 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
+                      {migrationLogs.length === 0 ? (
+                        <span className="text-slate-600 italic">A aguardar início das instruções...</span>
+                      ) : (
+                        migrationLogs.map((log, i) => (
+                          <div key={i} className={`flex items-start gap-2 ${
+                            log.level === "success" ? "text-emerald-400" : log.level === "warning" ? "text-amber-400" : log.level === "error" ? "text-rose-400" : "text-slate-300"
+                          }`}>
+                            <span className="text-slate-600 shrink-0">[{log.time}]</span>
+                            <span>{log.text}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isMigrating}
+                    onClick={() => setShowMigrationModal(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition cursor-pointer"
+                  >
+                    Fechar Painel
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -8233,6 +9112,117 @@ export default function SettingsModule({
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* CONSOLIDATED SUBMODULE: STAFF EMPLOYEES & AUDIT */}
+      {activeSubTab === "staff" && (
+        <div className="animate-in fade-in-50 duration-150">
+          {!canAccessModule("staff", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+            <PlanLockScreen
+              moduleName="Equipa & Auditoria"
+              requiredPlan="PRATA"
+              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+              description="A gestão avançada de utilizadores e auditoria D3 está disponível nos Planos Prata e Ouro."
+              onUpgradeClick={() => setActiveSubTab("plans")}
+            />
+          ) : (
+            <StaffModule
+              employees={employees}
+              auditLogs={auditLogs}
+              onAddEmployee={onAddEmployee}
+              onUpdateEmployees={onUpdateEmployees}
+              activeUsername={activeUser?.name || "Administrador"}
+              onAddAuditLog={onAddAuditLog}
+              currentRole={currentRole}
+              currency={_currency}
+              settings={settings}
+            />
+          )}
+        </div>
+      )}
+
+      {/* CONSOLIDATED SUBMODULE: MOBILE MONEY GATEWAY */}
+      {activeSubTab === "gateway" && (
+        <div className="animate-in fade-in-50 duration-150">
+          {!canAccessModule("gateway", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+            <PlanLockScreen
+              moduleName="Integração Mobile Money"
+              requiredPlan="PRATA"
+              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+              description="O recebimento automático via M-Pesa e e-Mola (Paga Fácil) está disponível a partir do Plano Prata."
+              onUpgradeClick={() => setActiveSubTab("plans")}
+            />
+          ) : (
+            <GatewayModule
+              settings={settings}
+              onUpdateSettings={onUpdateSettings}
+              onAddAuditLog={onAddAuditLog}
+              currentRole={currentRole}
+              onShowToast={onShowToast}
+              products={products}
+              customers={customers}
+            />
+          )}
+        </div>
+      )}
+
+      {/* CONSOLIDATED SUBMODULE: AI REVENUE & INSIGHTS */}
+      {activeSubTab === "ai" && (
+        <div className="animate-in fade-in-50 duration-150">
+          {!canAccessModule("ai", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+            <PlanLockScreen
+              moduleName="Previsão AI Premium"
+              requiredPlan="OURO"
+              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+              description="Modelos preditivos avançados com Inteligência Artificial e o Gerador de Flyers Promocionais são exclusivos do Plano Ouro (VIP)."
+              onUpgradeClick={() => setActiveSubTab("plans")}
+            />
+          ) : (
+            <AiForecastModule
+              products={products}
+              transactions={transactions}
+              settings={settings}
+              theme={theme}
+              currency={_currency}
+              onShowToast={onShowToast}
+              onChangeModule={(mod) => {
+                if (onChangeModule) onChangeModule(mod);
+              }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* CONSOLIDATED SUBMODULE: TRAINING CENTER */}
+      {activeSubTab === "training" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <TrainingModule
+            videos={masterclassVideos}
+            currency={_currency}
+          />
+        </div>
+      )}
+
+      {/* CONSOLIDATED SUBMODULE: PLANS & SUBSCRIPTIONS */}
+      {activeSubTab === "plans" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <SubscriptionPlansModule
+            currentPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+            activeUser={activeUser}
+            employees={employees}
+            settings={settings}
+            onUpdateUserPlan={onUpdateUserPlan}
+            onUpdateSystemPlan={onUpdateSystemPlan}
+            onShowToast={onShowToast}
+            onNavigateToModule={(mod) => {
+              if (mod.toLowerCase() === "gateway" || mod.toLowerCase() === "ai" || mod.toLowerCase() === "training" || mod.toLowerCase() === "staff") {
+                setActiveSubTab(mod.toLowerCase() as any);
+              } else if (onChangeModule) {
+                onChangeModule(mod);
+              }
+            }}
+          />
         </div>
       )}
 

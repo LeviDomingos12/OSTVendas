@@ -60,18 +60,13 @@ export default function Sidebar({
   const currentProfile = profiles.find(p => p.role === currentRole) || profiles[0];
 
   const menuItems = [
-    { id: "dashboard", label: "Dashboard Inteligente", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
     { id: "pos", label: "Vendas (POS)", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
     { id: "stock", label: "Gestão de Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
     { id: "cash", label: "Gestão de Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
     { id: "customers", label: "Gestão de Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-    { id: "staff", label: "Funcionários & Auditoria", icon: UserCheck, roles: ["ADMIN", "AUDITOR", "RH"] },
-    { id: "ai", label: "Previsão AI (Premium)", icon: TrendingUp, roles: ["ADMIN", "SUPERVISOR"] },
     { id: "reports", label: "Relatórios & Faturação", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-    { id: "training", label: "Centro de Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
-    { id: "settings", label: "Configurações Gerais", icon: Settings, roles: ["ADMIN"] },
-    { id: "gateway", label: "Integração Mobile Money", icon: Smartphone, roles: ["ADMIN", "FINANCEIRO"] },
-    { id: "plans", label: "Planos & Subscrições", icon: Crown, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
+    { id: "settings", label: "Configurações Gerais", icon: Settings, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
   ];
 
   const getRoleLabel = (role: UserRole) => {

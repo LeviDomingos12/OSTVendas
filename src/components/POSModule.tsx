@@ -25,7 +25,9 @@ import {
   QrCode,
   Keyboard,
   HelpCircle,
-  Zap
+  Zap,
+  Barcode,
+  Clock
 } from "lucide-react";
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
 import QrCodeScannerComponent from "./QrCodeScannerComponent";
@@ -102,9 +104,8 @@ export default function POSModule({
   // Session stats & setup
   const [currentSaleNumber, setCurrentSaleNumber] = useState<number>(245);
   const [currentTime, setCurrentTime] = useState<string>("");
-  const [isOnline, setIsOnline] = useState<boolean>(true);
 
-  // Time ticker and network toggle simulation
+  // Time ticker
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
@@ -119,13 +120,52 @@ export default function POSModule({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const customerSelectRef = useRef<HTMLSelectElement>(null);
 
+  // Auto-focus barcode/search input immediately on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, []);
+
   // State
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [cart, setCart] = useState<UpgradedCartItem[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("CASH");
-  const [showPanicConfirm, setShowPanicConfirm] = useState(false);
+
+  // High-performance indexed cache for instant O(1) barcode, internal code, and product lookups
+  const productCache = useMemo(() => {
+    const barcodeMap = new Map<string, Product>();
+    const codeMap = new Map<string, Product>();
+    const idMap = new Map<string, Product>();
+
+    localProducts.forEach(p => {
+      if (p.id) {
+        idMap.set(p.id.trim(), p);
+        idMap.set(p.id.trim().toLowerCase(), p);
+      }
+      if (p.barcode) {
+        const b = p.barcode.trim();
+        barcodeMap.set(b, p);
+        barcodeMap.set(b.toLowerCase(), p);
+      }
+      if (p.code) {
+        const c = p.code.trim();
+        codeMap.set(c, p);
+        codeMap.set(c.toLowerCase(), p);
+      }
+    });
+
+    return {
+      findByBarcodeOrCode: (codeOrBarcode: string): Product | undefined => {
+        const clean = codeOrBarcode.trim();
+        const lower = clean.toLowerCase();
+        return barcodeMap.get(clean) || barcodeMap.get(lower) || codeMap.get(clean) || codeMap.get(lower) || idMap.get(clean) || idMap.get(lower);
+      }
+    };
+  }, [localProducts]);
 
   // Multi-method payment cash allocations
   const [mixedCash, setMixedCash] = useState<number>(0);
@@ -409,7 +449,46 @@ export default function POSModule({
     };
   }, [cart, selectedPaymentMethod, showPreCheckoutModal, showShortcutsHelp]);
 
-  // Buffer input speed for USB Barcode Scanners - Robust hardware listener (50ms interval + 150ms debounce)
+  // Web Audio API feedback for retail barcode scanner
+  const playBarcodeBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(1760, ctx.currentTime); // High pitch retail scanner beep (A6)
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.1);
+      }
+    } catch {}
+  };
+
+  const playErrorBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(320, ctx.currentTime);
+        gain.gain.setValueAtTime(0.25, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.25);
+      }
+    } catch {}
+  };
+
+  // Buffer input speed for USB / Bluetooth Barcode Scanners - High-speed O(1) Cache Listener
   useEffect(() => {
     let lastKeyTime = Date.now();
     let scanBuffer = "";
@@ -417,24 +496,37 @@ export default function POSModule({
 
     const processBuffer = () => {
       const code = scanBuffer.trim();
-      if (code.length >= 3) {
-        const prod = localProducts.find(p => p.barcode === code || p.code === code);
+      if (code.length >= 2) {
+        const prod = productCache.findByBarcodeOrCode(code);
         if (prod) {
           if (prod.stock <= 0) {
-            if (onShowToast) onShowToast(`Produto ${prod.name} está esgotado!`, "error");
+            playErrorBeep();
+            if (onShowToast) onShowToast(`Produto "${prod.name}" está esgotado!`, "error", "Stock Vazio");
           } else {
+            playBarcodeBeep();
             handleTriggerAddToCart(prod);
-            if (onShowToast) onShowToast(`Leitor: ${prod.name} adicionado!`, "success");
+            if (onShowToast) onShowToast(`📦 ${prod.name} adicionado (+1)`, "success", "Leitor de Código");
+            setSearchQuery("");
+            // Maintain focus on the search input
+            setTimeout(() => {
+              searchInputRef.current?.focus();
+            }, 30);
           }
+        } else {
+          playErrorBeep();
+          if (onShowToast) onShowToast(`Código "${code}" não cadastrado no catálogo.`, "warning", "Leitor de Código");
         }
       }
       scanBuffer = "";
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if inside input/textarea fields (handled individually by inputs)
       const target = e.target as HTMLElement;
-      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      const isSearchInput = target === searchInputRef.current;
+      const isOtherInputField = !isSearchInput && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
+      
+      // If user is editing a quantity input or customer select, don't hijack manual typing
+      if (isOtherInputField) return;
 
       // Ignore modifier keys
       if (e.ctrlKey || e.altKey || e.metaKey || e.key === "Shift" || e.key === "Control" || e.key === "Alt") return;
@@ -462,7 +554,6 @@ export default function POSModule({
           scanBuffer += e.key;
         }
       } else {
-        // Reset buffer if typing slow
         if (e.key.length === 1) {
           scanBuffer = e.key;
         }
@@ -470,10 +561,10 @@ export default function POSModule({
 
       // Timeout fallback for scanners that do not append Enter key at the end
       timeoutId = setTimeout(() => {
-        if (scanBuffer.trim()) {
+        if (scanBuffer.trim().length >= 3) {
           processBuffer();
         }
-      }, 150);
+      }, 120);
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -481,7 +572,7 @@ export default function POSModule({
       window.removeEventListener("keydown", handleKeyDown);
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [localProducts]);
+  }, [productCache, onShowToast]);
 
   // Add Item Router (check if weight-based)
   const handleTriggerAddToCart = (product: Product, forcedWeight?: number) => {
@@ -1814,31 +1905,73 @@ export default function POSModule({
   };
 
   return (
-    <div className={`flex flex-col xl:flex-row h-full gap-5 ${isPOSFullscreen ? "h-screen p-5 bg-slate-950 text-slate-100" : ""}`}>
+    <div className="flex flex-col xl:flex-row h-full gap-4">
       
-      {/* LEFT COLUMN: Product Browse Grid & Header info */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 outline-none overflow-hidden shadow-sm">
+      {/* LEFT COLUMN: Clean Product Catalog & Barcode Scanner Bar */}
+      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         
-        {/* 1. & 21. Dynamic POS Header & Status info */}
-        <div className="p-4 bg-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800">
-          <div className="flex items-center gap-4 text-xs font-mono">
-            <div className="flex items-center gap-2 text-orange-400 font-semibold text-sm">
-              <ShoppingCart className="w-4 h-4" />
-              <span>🛒 POS Nº {String(currentSaleNumber).padStart(6, '0')}</span>
+        {/* Minimalist Top Bar: Barcode Scanner & Search */}
+        <div className="p-3.5 border-b border-slate-150 bg-slate-50/70 space-y-2.5">
+          <div className="flex items-center gap-2.5">
+            {/* Primary Barcode & Search Input */}
+            <div className="relative flex-1">
+              <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-400 pointer-events-none">
+                <Barcode className="w-4 h-4 text-orange-500" />
+                <Search className="w-3.5 h-3.5" />
+              </div>
+              <input
+                ref={searchInputRef}
+                type="text"
+                autoFocus
+                placeholder="Bipe o código de barras ou pesquise o produto (Pressione Enter)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const code = searchQuery.trim();
+                    if (code) {
+                      const prod = productCache.findByBarcodeOrCode(code) || localProducts.find(
+                        p => p.name.toLowerCase().includes(code.toLowerCase())
+                      );
+                      if (prod) {
+                        e.preventDefault();
+                        if (prod.stock <= 0) {
+                          playErrorBeep();
+                          if (onShowToast) onShowToast(`Produto "${prod.name}" está esgotado!`, "error", "Stock Vazio");
+                        } else {
+                          playBarcodeBeep();
+                          handleTriggerAddToCart(prod);
+                          if (onShowToast) onShowToast(`📦 ${prod.name} adicionado (+1)`, "success", "Código Lido");
+                          setSearchQuery("");
+                          setTimeout(() => {
+                            searchInputRef.current?.focus();
+                          }, 30);
+                        }
+                      } else {
+                        playErrorBeep();
+                        if (onShowToast) onShowToast(`Código/Produto "${code}" não localizado.`, "warning", "Não Encontrado");
+                      }
+                    }
+                  }
+                }}
+                className="w-full bg-white border border-slate-200 rounded-xl pl-14 pr-24 py-3 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-orange-500/25 focus:border-orange-500 outline-none transition shadow-inner placeholder:text-slate-400"
+              />
+              <button
+                type="button"
+                onClick={() => setScannerModalOpen(true)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
+                title="Abrir Leitor de Código de Barras (Câmara/Simulador)"
+              >
+                <Scan className="w-3.5 h-3.5" />
+                <span>Scanner</span>
+              </button>
             </div>
-            <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
-            <div>👤 OPERADOR: <span className="text-slate-300 font-bold">{activeUsername}</span></div>
-            <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
-            <div>🏪 CAIXA: <span className="text-slate-300 font-bold">CAIXA PRINCIPAL</span></div>
-            <div className="h-4 w-px bg-slate-800 hidden sm:block"></div>
-            <div>📅 TURNO: <span className="text-slate-300 font-bold">MANHÃ</span></div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {/* Suspended sales recall badge */}
+            {/* Suspended Sales Quick Recall */}
             {suspendedCarts.length > 0 && (
-              <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg text-amber-400 text-[10px] font-bold">
-                <span>⏳ Suspensa(s): {suspendedCarts.length}</span>
+              <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 px-2.5 py-1.5 rounded-xl text-amber-800 text-xs font-bold shrink-0">
+                <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                <span>{suspendedCarts.length} Suspensa(s)</span>
                 <select
                   onChange={(e) => {
                     if (e.target.value) {
@@ -1846,190 +1979,38 @@ export default function POSModule({
                       e.target.value = "";
                     }
                   }}
-                  className="bg-transparent text-amber-400 font-bold text-[10px] outline-none cursor-pointer"
+                  className="bg-transparent text-amber-900 font-bold text-xs outline-none cursor-pointer underline ml-1"
                 >
-                  <option value="" className="text-slate-900">Retomar...</option>
+                  <option value="">Retomar...</option>
                   {suspendedCarts.map((sc, i) => (
-                    <option key={sc.id} value={sc.id} className="text-slate-900">
-                      Venda {i+1} ({sc.time}) - {localCustomers.find(c => c.id === sc.customerId)?.name || "Geral"}
+                    <option key={sc.id} value={sc.id}>
+                      Venda {i+1} ({sc.time})
                     </option>
                   ))}
                 </select>
               </div>
             )}
 
-            {itemsLeavingStockBelowCritical.length > 0 && (
-              <button
-                onClick={() => setShowCriticalStockModal(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-full text-[11px] font-extrabold cursor-pointer transition animate-pulse shadow-md shadow-red-500/20"
-                title={`${itemsLeavingStockBelowCritical.length} produtos atingirão estoque crítico após a venda! Clique para inspecionar.`}
-              >
-                <AlertTriangle className="w-3.5 h-3.5 text-white animate-bounce" />
-                <span>ALERTA STOCK ({itemsLeavingStockBelowCritical.length})</span>
-              </button>
-            )}
-
+            {/* Sales History Quick Button */}
             <button
-              onClick={() => setShowShortcutsHelp(true)}
-              className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-[11px] font-bold cursor-pointer transition shadow-sm"
-              title="Ajuda e Atalhos de Teclado (F1)"
+              onClick={() => setShowSalesHistoryModal(true)}
+              className="px-3 py-2 bg-white hover:bg-slate-100 border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0 transition"
+              title="Histórico de Vendas Realizadas"
             >
-              <HelpCircle className="w-3.5 h-3.5" />
-              <span>ATALHOS (F1)</span>
+              <History className="w-3.5 h-3.5 text-slate-500" />
+              <span className="hidden sm:inline">Histórico</span>
             </button>
-
-            <button
-              onClick={() => setIsOnline(!isOnline)}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold cursor-pointer transition ${
-                isOnline ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20" : "bg-red-500/15 text-red-400 border border-red-500/20"
-              }`}
-            >
-              <Wifi className="w-3.5 h-3.5" />
-              <span>{isOnline ? "🟢 ONLINE" : "🔴 OFFLINE"}</span>
-            </button>
-
-            {onTriggerPanic && (
-              <button
-                onClick={() => setShowPanicConfirm(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-extrabold cursor-pointer transition-all bg-red-600 hover:bg-red-700 text-white shadow-md shadow-red-600/30 ring-2 ring-red-400 hover:scale-[1.03] animate-pulse"
-                title="Botão de Pânico / Alerta Crítico"
-              >
-                <AlertTriangle className="w-3.5 h-3.5 animate-bounce" />
-                <span>🚨 PÂNICO</span>
-              </button>
-            )}
-
-            {onChangePOSFullscreen && (
-              <button
-                onClick={() => {
-                  onChangePOSFullscreen(!isPOSFullscreen);
-                  if (onShowToast) {
-                    onShowToast(
-                      !isPOSFullscreen 
-                        ? "Modo Foco Ativado! Sidebars e cabeçalhos ocultados para maximizar área de checkout." 
-                        : "Modo Foco Desativado. Restaurado painel principal.",
-                      "info",
-                      "Modo Checkout"
-                    );
-                  }
-                  onAddAuditLog(
-                    !isPOSFullscreen ? "Ativar Modo Foco POS" : "Desativar Modo Foco POS",
-                    "POS",
-                    `O operador alterou o modo de exibição de checkout (Modo Foco: ${!isPOSFullscreen ? "ATIVADO" : "DESATIVADO"}).`
-                  );
-                }}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-extrabold cursor-pointer transition-all ${
-                  isPOSFullscreen 
-                    ? "bg-rose-600 text-white hover:bg-rose-500 shadow-md shadow-rose-600/30 animate-pulse ring-2 ring-rose-400" 
-                    : "bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-700"
-                }`}
-                title={isPOSFullscreen ? "Sair do Modo de Foco Imersivo" : "Expandir para Modo de Foco Imersivo"}
-              >
-                {isPOSFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5 text-amber-400" />}
-                <span>{isPOSFullscreen ? "SAIR DO MODO" : "EXPANDIR"}</span>
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Search header & Filter bar */}
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 space-y-3">
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                placeholder="Pesquisar por nome, marca, código de barras (F3) ou bipe o leitor..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    const code = searchQuery.trim();
-                    if (code) {
-                      const prod = localProducts.find(p => p.barcode === code || p.code === code);
-                      if (prod) {
-                        e.preventDefault();
-                        if (prod.stock <= 0) {
-                          if (onShowToast) onShowToast(`Produto ${prod.name} está esgotado!`, "error");
-                        } else {
-                          handleTriggerAddToCart(prod);
-                          if (onShowToast) onShowToast(`Leitor: ${prod.name} adicionado ao carrinho!`, "success");
-                          setSearchQuery("");
-                        }
-                      }
-                    }
-                  }
-                }}
-                className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-24 py-2 text-xs focus:ring-1 focus:ring-orange-500 focus:border-orange-500 outline-none transition"
-              />
-              <button
-                type="button"
-                onClick={() => setScannerModalOpen(true)}
-                className="absolute right-2 top-1.5 px-2 py-1 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-600 rounded-lg text-[10px] font-extrabold flex items-center gap-1 transition focus:outline-none focus:ring-1 focus:ring-orange-500"
-                title="Abrir Scanner de Código de Barras (Câmara/Teclado)"
-              >
-                <Scan className="w-3.5 h-3.5 animate-pulse" />
-                <span>SCAN</span>
-              </button>
-            </div>
-            
-            <div className="flex gap-2">
-              {/* Hardware Barcode Scanner Status Indicator */}
-              <div 
-                className="px-2.5 bg-green-50 text-green-700 border border-green-200 rounded-xl text-[10px] font-extrabold flex items-center gap-1.5 shadow-sm select-none"
-                title="O sistema está escutando bipes de leitores de código de barras USB/Bluetooth de forma contínua e global."
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                </span>
-                <span className="hidden md:inline">Leitor Ativo</span>
-                <span className="md:hidden">Leitor</span>
-              </div>
-              {/* 20. Scanner Dialog button */}
-              <button
-                onClick={() => setScannerModalOpen(true)}
-                className="px-3 bg-orange-500 hover:bg-orange-600 text-white border border-orange-600 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition"
-                title="Simular/Ler Código de Barras com a Câmara"
-              >
-                <Camera className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">📷 Scanner de Câmara</span>
-              </button>
-
-              <button
-                onClick={() => setShowSalesHistoryModal(true)}
-                className="px-3 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-sm"
-              >
-                <History className="w-3.5 h-3.5 text-slate-500" />
-                <span className="hidden sm:inline">Histórico</span>
-              </button>
-            </div>
           </div>
 
-          {/* 5. Recent Sold Products Horizontal pill row */}
-          <div className="flex items-center gap-2 text-xs text-slate-500 overflow-x-auto pb-1">
-            <span className="font-semibold shrink-0">⭐ Populares:</span>
-            {localProducts.slice(0, 5).map(prod => (
-              <button
-                key={prod.id}
-                onClick={() => handleTriggerAddToCart(prod)}
-                className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[11px] text-slate-700 cursor-pointer shrink-0"
-              >
-                {prod.emoji} {prod.name.split(' (')[0]}
-              </button>
-            ))}
-          </div>
-
-          {/* Quick Categories list with Favoritos category */}
-          <div className="flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+          {/* Quick Category Filter Pills */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar">
             {categories.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer shrink-0 transition-all ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer shrink-0 transition-all ${
                   selectedCategory === cat
-                    ? "bg-orange-500 text-white shadow-sm shadow-orange-500/25"
+                    ? "bg-slate-900 text-white shadow-sm"
                     : "bg-white hover:bg-slate-100 border border-slate-200 text-slate-600"
                 }`}
               >
@@ -2039,307 +2020,206 @@ export default function POSModule({
           </div>
         </div>
 
-        {/* Products catalog list grid */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-4 bg-slate-50/50">
+        {/* Products Grid */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3.5 bg-slate-50/40">
           {filteredProducts.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center p-8">
               <span className="text-3xl mb-2">🔍</span>
-              <p className="text-sm font-semibold text-slate-700">Nenhum produto cadastrado foi localizado</p>
-              <p className="text-xs text-slate-400 mt-1">Tente pesquisar por outro termo ou limpe os filtros seleccionados.</p>
+              <p className="text-sm font-semibold text-slate-700">Nenhum produto encontrado</p>
+              <p className="text-xs text-slate-400 mt-1">Bipe um código de barras ou pesquise por outro termo.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {filteredProducts.map((p) => {
                 const isOutOfStock = p.stock <= 0;
                 const isLowStock = p.stock > 0 && p.stock <= p.minStock;
                 
                 return (
-                  <div
+                  <button
                     key={p.id}
-                    className="relative"
-                    onMouseEnter={() => setHoveredProductId(p.id)}
-                    onMouseLeave={() => setHoveredProductId(null)}
+                    onClick={() => {
+                      playBarcodeBeep();
+                      handleTriggerAddToCart(p);
+                    }}
+                    disabled={isOutOfStock}
+                    id={`btn-product-${p.id}`}
+                    className={`group bg-white p-3 rounded-xl border relative text-left transition-all flex flex-col justify-between select-none h-40 ${
+                      isOutOfStock 
+                        ? "border-slate-200 bg-slate-100/70 cursor-not-allowed opacity-60" 
+                        : "border-slate-200 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
+                    }`}
                   >
-                    {/* Product Hover Details Tooltip */}
-                    {hoveredProductId === p.id && (
-                      <div className="absolute z-20 bottom-full left-0 right-0 mb-2 p-3 bg-slate-900 text-white rounded-xl text-[10px] space-y-1.5 font-mono shadow-2xl border border-slate-800 animate-in fade-in slide-in-from-bottom-2 duration-150">
-                        <p className="text-orange-400 font-bold border-b border-slate-800 pb-1">{p.name}</p>
-                        <p>📦 Fornecedor: {p.supplier}</p>
-                        <p>🏷️ Marca: {p.brand || "Generica"}</p>
-                        <p>🔤 Código: {p.code}</p>
-                        <p>💾 Stock Atual: {p.stock} {p.weightBased ? "kg" : "un"}</p>
-                        <p>💵 P. Custo: {p.costPrice.toLocaleString()} MT</p>
-                        <p>📈 Lucro: {(p.salePrice - p.costPrice).toLocaleString()} MT ({Math.round(((p.salePrice - p.costPrice)/p.salePrice)*100)}% margem)</p>
-                        <p className="text-[9px] text-slate-400">📅 Última Compra: 22/06/2026</p>
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => handleTriggerAddToCart(p)}
-                      disabled={isOutOfStock}
-                      id={`btn-product-${p.id}`}
-                      className={`w-full group bg-white p-4 rounded-xl border relative text-left transition-all flex flex-col justify-between select-none h-44 ${
-                        isOutOfStock 
-                          ? "border-slate-150 bg-slate-100/70 cursor-not-allowed opacity-60" 
-                          : "border-slate-200 hover:border-orange-300 hover:shadow-md cursor-pointer"
-                      }`}
-                    >
-                      {/* Floating Status badges */}
-                      <div className="absolute top-2 right-2 flex flex-col items-end gap-1 z-10">
+                    {/* Status & Barcode badge */}
+                    <div className="flex items-start justify-between w-full">
+                      <span className="text-2xl p-1 bg-slate-50 group-hover:bg-orange-50 rounded-lg transition">{p.emoji || "📦"}</span>
+                      <div className="flex flex-col items-end gap-0.5">
                         {isOutOfStock ? (
-                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700 leading-none">🔴 ESGOTADO</span>
+                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-red-100 text-red-700">ESGOTADO</span>
                         ) : isLowStock ? (
-                          <span className="text-[8px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 leading-none">🟠 APENAS {p.stock}</span>
+                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{p.stock} un</span>
                         ) : (
-                          <span className="text-[8.5px] font-semibold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 leading-none">🟢 {p.stock} Disp.</span>
+                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">{p.stock} un</span>
                         )}
-
-                        {/* 3. Promo label tags */}
-                        {p.promotion === "PROMO" && (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-orange-500 text-white leading-none">🔥 PROMOÇÃO</span>
-                        )}
-                        {p.promotion === "MAIS_VENDIDO" && (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-rose-500 text-white leading-none">⭐ MAIS VENDIDO</span>
-                        )}
-                        {p.promotion === "NOVO" && (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-indigo-500 text-white leading-none">🆕 NOVO</span>
-                        )}
-                        {p.promotion === "DESCONTO" && (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-600 text-white leading-none">🏷️ DESCONTO</span>
+                        {p.barcode && (
+                          <span className="text-[7.5px] font-mono text-slate-400 flex items-center gap-0.5">
+                            <Barcode className="w-2.5 h-2.5 text-slate-300" />
+                            {p.barcode.slice(-5)}
+                          </span>
                         )}
                       </div>
+                    </div>
 
-                      {/* Product Visual Layout */}
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-3xl p-1 bg-slate-100 group-hover:bg-orange-50 rounded-lg transition">{p.emoji || "📦"}</span>
-                        {p.weightBased && (
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 leading-none">Venda p/ Peso</span>
-                        )}
-                      </div>
+                    {/* Title */}
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800 line-clamp-2 leading-snug">{p.name}</h4>
+                      <p className="text-[9.5px] text-slate-400 font-mono mt-0.5">{p.category}</p>
+                    </div>
 
-                      {/* Title & Brand */}
-                      <div>
-                        <h4 className="text-xs font-bold text-slate-800 line-clamp-2 leading-tight pr-2">{p.name}</h4>
-                        <p className="text-[9px] text-slate-400 font-mono mt-0.5">{p.brand ? `${p.brand} • ` : ""}{p.category}</p>
-                      </div>
-
-                      {/* Price stamp */}
-                      <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                        <span className="text-sm font-black text-slate-900">{p.salePrice.toLocaleString()} <span className="text-[10px] font-medium text-slate-400">{currency}</span></span>
-                        <span className="text-[9px] text-slate-400 font-mono">IVA {p.vatRate}%</span>
-                      </div>
-                    </button>
-                  </div>
+                    {/* Price */}
+                    <div className="mt-1 pt-1.5 border-t border-slate-100 flex items-center justify-between">
+                      <span className="text-sm font-black text-slate-900">{p.salePrice.toLocaleString()} <span className="text-[10px] font-semibold text-slate-400">{currency}</span></span>
+                      <span className="text-[10px] font-bold text-orange-600 group-hover:translate-x-0.5 transition">+ Adicionar</span>
+                    </div>
+                  </button>
                 );
               })}
             </div>
           )}
         </div>
-
-        {/* Bottom shortcuts bar for operator */}
-        <div className="p-3 bg-slate-100 border-t border-slate-200 flex flex-wrap items-center justify-center gap-4 text-[10px] font-mono text-slate-500">
-          <span className="font-bold uppercase text-slate-700">Atalhos Operador:</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F1</kbd> Finalizar</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F2</kbd> Buscar Cliente</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F3</kbd> Pesquisa Prod.</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F4</kbd> Novo Cliente</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F6</kbd> Desconto</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">F8</kbd> Alternar Pago</span>
-          <span><kbd className="px-1.5 py-0.5 bg-white border rounded shadow-sm text-slate-700 font-bold">ESC</kbd> Cancelar Venda</span>
-        </div>
       </div>
 
-      {/* RIGHT COLUMN: Interactive Shopping Cart sidebar */}
-      <div className="w-full xl:w-96 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
+      {/* RIGHT COLUMN: Minimalist Cart & 5-Second Express Checkout */}
+      <div className="w-full xl:w-[420px] bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
         
-        {/* 22. Cart Upper Status details panel */}
-        <div className="p-4 bg-slate-900 text-white border-b border-slate-800">
-          <div className="flex items-center justify-between mb-1">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <ShoppingCart className="w-3.5 h-3.5 text-orange-400" />
-              <span className="font-mono uppercase tracking-wider">Carrinho Ativo</span>
-              {itemsLeavingStockBelowCritical.length > 0 && (
-                <span 
-                  onClick={() => setShowCriticalStockModal(true)}
-                  className="inline-flex items-center gap-1 bg-red-650 hover:bg-red-700 text-white text-[8.5px] font-extrabold px-1.5 py-0.5 rounded cursor-pointer animate-pulse shrink-0"
-                  title="Há itens que ficarão abaixo do stock crítico. Clique para ver."
-                >
-                  <AlertTriangle className="w-2.5 h-2.5" />
-                  <span>CRÍTICO</span>
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] bg-slate-800 text-orange-300 font-mono px-2 py-0.5 rounded border border-slate-700">
-              Hora: {currentTime}
-            </span>
-          </div>
-          <div className="flex justify-between items-center mt-2">
-            <div className="text-xs text-slate-300">
-              <span className="font-bold">{cart.length}</span> produtos ({calculations.totalQty} {calculations.totalQty === 1 ? "un" : "un/kg"})
-            </div>
-            <div className="text-[11px] font-semibold text-slate-400">
-              Cliente: <span className="text-orange-300 font-bold">{selectedCustomer ? selectedCustomer.name : "Consumidor Geral"}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* 10. Modern Customer selection bar */}
-        <div className="p-3 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
-          <div className="flex-1 relative">
-            <select
-              ref={customerSelectRef}
-              value={selectedCustomerId}
-              onChange={(e) => setSelectedCustomerId(e.target.value)}
-              className="w-full bg-white border border-slate-200 rounded-lg text-xs py-1.5 pl-2 pr-6 outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer text-slate-700 font-medium"
-            >
-              <option value="">-- 👤 Consumidor Geral --</option>
-              {localCustomers.map(c => (
-                <option key={c.id} value={c.id}>{c.name} ({c.phone})</option>
-              ))}
-            </select>
-          </div>
-          
-          <button
-            onClick={() => setQuickCustomerModalOpen(true)}
-            className="p-1.5 bg-orange-100 text-orange-700 hover:bg-orange-200 rounded-lg transition-all text-xs cursor-pointer flex items-center justify-center shrink-0 w-8 h-8"
-            title="Adicionar Novo Cliente (F4)"
-          >
-            <UserPlus className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Scrollable container for all calculator actions, cart list, and finalize button */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col min-h-0" id="pos-sidebar-scrollable-content">
-          {/* 23. Intelligent Alerts panel */}
-          {selectedCustomer && selectedCustomer.debt > 0 && (
-            <div className="px-3.5 py-1.5 bg-amber-50 border-b border-amber-100 text-amber-800 text-[10px] font-bold flex items-center gap-1.5 animate-pulse shrink-0">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-              <span>⚠️ Cliente possui dívida activa de {selectedCustomer.debt.toLocaleString()} MT!</span>
-            </div>
-          )}
-
-          {itemsLeavingStockBelowCritical.length > 0 && (
-            <div 
-              onClick={() => setShowCriticalStockModal(true)}
-              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 border-b border-red-100 text-red-800 text-[10px] font-bold flex items-start gap-1.5 cursor-pointer shrink-0 transition"
-            >
-              <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5 animate-pulse" />
+        {/* Cart Header & Customer */}
+        <div className="p-3.5 border-b border-slate-150 bg-slate-50/80 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center shadow-sm">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
               <div>
-                <span className="block font-black uppercase tracking-wider">🚨 ALERTA: STOCK CRÍTICO</span>
-                <p className="font-medium text-red-600 mt-0.5">{itemsLeavingStockBelowCritical.length} {itemsLeavingStockBelowCritical.length === 1 ? "produto ficará" : "produtos ficarão"} abaixo do nível crítico de stock após concluir esta venda. <strong className="underline">Ver artigos →</strong></p>
+                <h3 className="text-xs font-extrabold text-slate-800 leading-tight">Carrinho de Venda</h3>
+                <span className="text-[10px] text-slate-500 font-medium">
+                  {cart.length} {cart.length === 1 ? "produto" : "produtos"} • {calculations.totalQty} un
+                </span>
               </div>
             </div>
-          )}
 
-          {/* Shopping list of cart items */}
-          <div className="max-h-[320px] min-h-[150px] overflow-y-auto custom-scrollbar p-3 space-y-2.5 shrink-0 border-b border-slate-100">
+            {cart.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm("Deseja esvaziar o carrinho?")) {
+                    handleReset();
+                    if (onShowToast) onShowToast("Carrinho limpo.", "info");
+                  }
+                }}
+                className="text-[11px] text-red-500 hover:text-red-700 font-semibold px-2 py-1 rounded-lg hover:bg-red-50 transition cursor-pointer flex items-center gap-1"
+                title="Limpar Carrinho"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Limpar</span>
+              </button>
+            )}
+          </div>
+
+          {/* Quick Customer Picker */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 relative">
+              <select
+                ref={customerSelectRef}
+                value={selectedCustomerId}
+                onChange={(e) => setSelectedCustomerId(e.target.value)}
+                className="w-full bg-white border border-slate-200 rounded-xl text-xs py-2 pl-3 pr-8 outline-none focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 cursor-pointer text-slate-700 font-medium shadow-inner"
+              >
+                <option value="">👤 Consumidor Geral</option>
+                {localCustomers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.phone || "Geral"})</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => setQuickCustomerModalOpen(true)}
+              className="p-2 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-xl transition text-xs cursor-pointer flex items-center justify-center shrink-0 w-9 h-9 active:scale-95"
+              title="Adicionar Novo Cliente (F4)"
+            >
+              <UserPlus className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+
+        {/* Cart Items List */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-[160px] max-h-[300px]">
           {cart.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 mt-12">
-              <span className="text-2xl mb-2">🛒</span>
-              <p className="text-xs font-semibold text-slate-600">Carrinho Vazio</p>
-              <p className="text-[10px] text-slate-400 mt-1 max-w-[200px] mx-auto">Insira produtos utilizando o catálogo ao lado ou passe o código de barras no scanner.</p>
+            <div className="h-full flex flex-col items-center justify-center text-center p-6 text-slate-400 my-auto">
+              <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mb-2">
+                <Barcode className="w-6 h-6 text-slate-300" />
+              </div>
+              <p className="text-xs font-bold text-slate-600">Carrinho Vazio</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Bipe um código de barras para começar a venda instantânea.</p>
             </div>
           ) : (
             <AnimatePresence initial={false}>
               {cart.map((item) => {
                 const isInsufficient = item.quantity > item.product.stock;
-                const hasNoVat = item.product.vatRate === 0;
-                
                 return (
                   <motion.div 
                     key={item.product.id} 
                     layout
-                    initial={{ opacity: 0, y: -10, scale: 0.96 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.92, height: 0, marginBottom: 0, overflow: "hidden" }}
-                    transition={{ duration: 0.2, ease: "easeOut" }}
-                    className={`p-2.5 rounded-xl border space-y-2 relative group transition-colors ${
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" }}
+                    transition={{ duration: 0.15 }}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
                       isInsufficient 
                         ? "bg-red-50/70 border-red-200" 
-                        : "bg-slate-50 border-slate-100 hover:border-slate-300"
+                        : "bg-slate-50/60 border-slate-150 hover:border-slate-300"
                     }`}
                   >
-                    <button
-                      onClick={() => handleDeleteRow(item.product.id)}
-                      className="absolute top-2 right-2 p-1 text-slate-300 hover:text-red-500 rounded-lg cursor-pointer"
-                      title="Remover Item"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-
-                    <div className="pr-6">
-                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">{item.product.brand || "Generico"}</span>
-                      <h5 className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight">{item.product.name}</h5>
-                      
-                      {/* Item price / calculations breakdown */}
+                    <div className="flex-1 min-w-0 pr-1">
+                      <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">{item.product.name}</h5>
                       <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        {item.product.salePrice.toLocaleString()} MT × {item.quantity} {item.product.weightBased ? "kg" : "un"}
+                        {item.product.salePrice.toLocaleString()} MT/un
                       </p>
-
-                      {/* Inline active alerts inside items */}
-                      {isInsufficient && (
-                        <p className="text-[9px] text-red-600 font-bold flex items-center gap-1 mt-1">
-                          <AlertTriangle className="w-3 h-3" /> Estoque insuficiente! Max: {item.product.stock}
-                        </p>
-                      )}
-                      {hasNoVat && (
-                        <p className="text-[9px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
-                          💡 Remessa Isenta de IVA (Isento)
-                        </p>
-                      )}
-
-                      {/* Show Observation note if configured */}
-                      {item.observation && (
-                        <div className="mt-1 bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded text-[9.5px] font-mono inline-block">
-                          📝 Obs: "{item.observation}"
-                        </div>
-                      )}
                     </div>
 
-                    {/* 25. Large Touch Target Controls for Tablet */}
-                    <div className="flex items-center justify-between pt-1">
-                      <div className="flex items-center gap-1">
-                        <button 
-                          onClick={() => handleRemoveFromCart(item.product.id)}
-                          className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95 shrink-0"
-                          title="Decrementar"
-                        >
-                          <Minus className="w-4 h-4" />
-                        </button>
-                        
-                        {/* Direct quantity input */}
-                        <input
-                          type="number"
-                          step={item.product.weightBased ? "0.05" : "1"}
-                          value={item.quantity}
-                          onChange={(e) => handleDirectQuantityEdit(item.product.id, e.target.value)}
-                          className="w-12 h-10 bg-white border text-center font-mono font-bold text-xs rounded-lg outline-none focus:ring-1 focus:ring-orange-500"
-                          title="Quantidade Directa"
-                        />
+                    {/* Quantity Controls */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button 
+                        onClick={() => handleRemoveFromCart(item.product.id)}
+                        className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95"
+                      >
+                        <Minus className="w-3.5 h-3.5" />
+                      </button>
+                      
+                      <input
+                        type="number"
+                        step={item.product.weightBased ? "0.05" : "1"}
+                        value={item.quantity}
+                        onChange={(e) => handleDirectQuantityEdit(item.product.id, e.target.value)}
+                        className="w-10 h-7 bg-white border border-slate-200 text-center font-mono font-bold text-xs rounded-lg outline-none focus:border-orange-500"
+                      />
 
-                        <button 
-                          onClick={() => handleTriggerAddToCart(item.product.id as any)}
-                          disabled={item.quantity >= item.product.stock}
-                          className="w-10 h-10 border bg-white text-slate-600 hover:bg-slate-150 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95 shrink-0"
-                          title="Incrementar"
-                        >
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
+                      <button 
+                        onClick={() => handleTriggerAddToCart(item.product.id as any)}
+                        disabled={item.quantity >= item.product.stock}
+                        className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
 
-                      <div className="flex flex-col items-end gap-1">
-                        {/* 6. Obs button trigger */}
-                        <button
-                          onClick={() => handleAddObservation(item.product.id)}
-                          className="text-[10px] text-slate-500 hover:text-orange-600 flex items-center gap-0.5 font-medium hover:underline bg-white px-2 py-1 rounded border border-slate-100 cursor-pointer"
-                        >
-                          📝 Nota
-                        </button>
-                        
-                        <span className="text-xs font-black text-slate-800">
-                          {(item.product.salePrice * item.quantity).toLocaleString()} MT
-                        </span>
-                      </div>
+                    {/* Item Total */}
+                    <div className="text-right shrink-0 min-w-[65px]">
+                      <span className="text-xs font-black text-slate-900 block font-mono">
+                        {(item.product.salePrice * item.quantity).toLocaleString()} MT
+                      </span>
+                      <button
+                        onClick={() => handleDeleteRow(item.product.id)}
+                        className="text-[10px] text-red-400 hover:text-red-600 cursor-pointer transition mt-0.5"
+                      >
+                        Remover
+                      </button>
                     </div>
                   </motion.div>
                 );
@@ -2348,507 +2228,152 @@ export default function POSModule({
           )}
         </div>
 
-        {/* Global discount & VAT overrides panel */}
-        <div className="p-3 bg-slate-50 border-t border-slate-100 space-y-3 shrink-0">
-          
-          {/* Quick discounts triggers */}
-          <div>
-            <div className="flex justify-between items-center mb-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Desconto Geral</label>
-              {discountValue > 0 && (
-                <span className="text-[10px] text-orange-600 font-bold">
-                  -{calculations.discountTotal.toLocaleString()} MT
-                </span>
-              )}
+        {/* Financial Big Total Banner */}
+        <div className="p-3.5 bg-slate-900 text-white shrink-0">
+          <div className="flex justify-between items-baseline">
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Total a Pagar</span>
+            <div className="text-right">
+              <span className="text-2xl font-black tracking-tight text-orange-400 font-mono">
+                {calculations.grandTotal.toLocaleString()}
+              </span>
+              <span className="text-xs font-bold text-orange-300 ml-1.5">{currency}</span>
             </div>
-            <div className="grid grid-cols-5 gap-1">
-              <button 
-                onClick={() => { setDiscountValue(0); }}
-                className={`py-1.5 text-[10px] font-bold rounded-lg border transition ${discountValue === 0 ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"}`}
-              >
-                Isento
-              </button>
-              {[5, 10, 15, 25].map(pct => (
-                <button 
-                  key={pct}
-                  onClick={() => {
-                    setDiscountType("PERCENT");
-                    setDiscountValue(pct);
-                  }}
-                  className={`py-1.5 text-[10px] font-bold rounded-lg border transition ${discountValue === pct && discountType === "PERCENT" ? "bg-orange-500 text-white border-orange-500" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"}`}
-                >
-                  {pct}%
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Key VAT selector customization */}
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Regulamento de IVA</span>
-            <div className="flex bg-white rounded-lg p-0.5 border border-slate-200 text-[10px] font-bold">
-              <button 
-                onClick={() => setVatMode("AUTO")}
-                className={`px-2 py-1 rounded-md transition ${vatMode === "AUTO" ? "bg-slate-200 text-slate-800 font-extrabold" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Auto
-              </button>
-              <button 
-                onClick={() => setVatMode("EXEMPT")}
-                className={`px-2 py-1 rounded-md transition ${vatMode === "EXEMPT" ? "bg-slate-200 text-slate-800 font-extrabold" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Isento
-              </button>
-              <button 
-                onClick={() => setVatMode("CUSTOM")}
-                className={`px-2 py-1 rounded-md transition ${vatMode === "CUSTOM" ? "bg-slate-200 text-slate-800 font-extrabold" : "text-slate-500 hover:text-slate-800"}`}
-              >
-                Custom
-              </button>
-            </div>
-            {vatMode === "CUSTOM" && (
-              <input
-                type="number"
-                value={customVatRate}
-                onChange={(e) => setCustomVatRate(Number(e.target.value))}
-                className="w-12 bg-white border border-slate-200 rounded-lg text-xs font-bold py-1 text-center outline-none focus:border-orange-500"
-                min="0"
-                max="100"
-              />
-            )}
-          </div>
-        </div>
-
-        {/* 14. Financial Detailed Summary Card */}
-        <div className="p-3 bg-slate-100 border-t border-slate-200 text-[11px] font-mono text-slate-600 space-y-1 shrink-0">
-          <div className="flex justify-between">
-            <span>Produtos Únicos:</span>
-            <span className="font-bold text-slate-800">{cart.length} item(s)</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Volume Total:</span>
-            <span className="font-bold text-slate-800">{calculations.totalQty} unidades</span>
-          </div>
-          <div className="flex justify-between">
-            <span>Soma Subtotal:</span>
-            <span className="font-bold text-slate-800">{calculations.subtotal.toLocaleString()} MT</span>
           </div>
           {calculations.discountTotal > 0 && (
-            <div className="flex justify-between text-red-650 font-bold">
+            <div className="flex justify-between text-[11px] text-emerald-400 font-mono pt-1 mt-1 border-t border-slate-800">
               <span>Desconto Aplicado:</span>
               <span>-{calculations.discountTotal.toLocaleString()} MT</span>
             </div>
           )}
-          <div className="flex justify-between">
-            <span>Total de Imposto IVA:</span>
-            <span className="font-bold text-slate-800">{calculations.vatTotal.toLocaleString()} MT</span>
-          </div>
-          <div className="flex justify-between text-sm font-black text-slate-900 border-t border-dashed border-slate-300 pt-1 font-sans">
-            <span>TOTAL A FATURAR:</span>
-            <span>{calculations.grandTotal.toLocaleString()} MT</span>
-          </div>
         </div>
 
-        {/* Liquidation options & actions */}
-        <div className="p-3 border-t border-slate-200 bg-white space-y-3.5 shrink-0">
+        {/* Express Payment & Finalize Panel */}
+        <div className="p-3.5 bg-white space-y-3 shrink-0 border-t border-slate-200">
           
-          {/* 11. Payment selector grid with icons */}
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block">Método de Liquidação</label>
-            <div className="grid grid-cols-4 gap-1.5">
-              {[
-                { id: "CASH", label: "💵 Dinheiro" },
-                { id: "MPESA_PAGA_FACIL", label: "📱 M-Pesa" },
-                { id: "EMOLA", label: "📱 E-Mola" },
-                { id: "POS_CARD", label: "💳 POS" },
-                { id: "CREDIT_CARD", label: "💳 Cartão" },
-                { id: "BANK_TRANSFER", label: "🏦 Transf" },
-                { id: "DEBT", label: "🧾 Dívida" },
-                { id: "MIXED", label: "🤝 Misto" }
-              ].map(method => (
-                <button
-                  key={method.id}
-                  onClick={() => {
-                    setSelectedPaymentMethod(method.id);
-                  }}
-                  className={`py-2 text-[10px] font-bold rounded-lg border text-center transition ${
-                    selectedPaymentMethod === method.id 
-                      ? "bg-slate-900 text-orange-400 border-slate-900 shadow-md" 
-                      : "bg-white hover:bg-slate-50 text-slate-600 border-slate-200 hover:border-slate-300"
-                  }`}
-                >
-                  {method.label}
-                </button>
-              ))}
-            </div>
+          {/* Quick Payment Method Selector (4 Big Direct Buttons) */}
+          <div className="grid grid-cols-4 gap-1.5">
+            {[
+              { id: "CASH", label: "💵 Dinheiro", short: "Dinheiro" },
+              { id: "MPESA_PAGA_FACIL", label: "📱 M-Pesa", short: "M-Pesa" },
+              { id: "EMOLA", label: "📱 E-Mola", short: "E-Mola" },
+              { id: "POS_CARD", label: "💳 Cartão", short: "Cartão" },
+            ].map(method => (
+              <button
+                key={method.id}
+                onClick={() => setSelectedPaymentMethod(method.id)}
+                className={`py-2 px-1 text-xs font-bold rounded-xl border text-center transition cursor-pointer active:scale-95 ${
+                  selectedPaymentMethod === method.id 
+                    ? "bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-500/20" 
+                    : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                }`}
+              >
+                {method.label}
+              </button>
+            ))}
           </div>
 
-          {/* 12. Mixed Payment Configuration */}
-          {selectedPaymentMethod === "MIXED" && (
-            <div className="bg-orange-50/50 p-2.5 rounded-xl border border-orange-100 space-y-2 text-[11px] animate-in slide-in-from-top-1 duration-150">
-              <div className="flex justify-between items-center border-b border-orange-100 pb-1">
-                <span className="font-extrabold text-orange-850">🤝 Partilha de Pagamento Misto</span>
-                <span className="font-mono text-[9px] bg-orange-100 text-orange-800 px-1 py-0.5 rounded">
-                  Falta: {Math.max(0, calculations.grandTotal - mixedSumTotal).toLocaleString()} MT
-                </span>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">💵 Numerário</label>
-                  <input
-                    type="number"
-                    value={mixedCash || ""}
-                    onChange={(e) => setMixedCash(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold text-center"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">📱 Celular (Mpesa)</label>
-                  <input
-                    type="number"
-                    value={mixedMpesa || ""}
-                    onChange={(e) => setMixedMpesa(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold text-center"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-1">💳 POS Cartão</label>
-                  <input
-                    type="number"
-                    value={mixedPOS || ""}
-                    onChange={(e) => setMixedPOS(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold text-center"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center text-[10px] pt-1">
-                <span>Total Alocado:</span>
-                <span className={`font-bold ${Math.abs(mixedSumTotal - calculations.grandTotal) < 1 ? "text-emerald-600" : "text-red-500 animate-pulse"}`}>
-                  {mixedSumTotal.toLocaleString()} MT / {calculations.grandTotal.toLocaleString()} MT
-                </span>
-              </div>
-              {Math.abs(mixedSumTotal - calculations.grandTotal) < 1 ? (
-                <p className="text-[9.5px] text-emerald-700 font-bold text-center">✓ Alocação correta e equilibrada!</p>
-              ) : (
-                <p className="text-[9.5px] text-amber-600 font-bold text-center">⚠️ Alocação pendente... preencha os valores acima.</p>
-              )}
-            </div>
-          )}
-
-          {/* 13. Cash Troco Automático Panel (for Numerário or mixed Numerário) */}
-          {(selectedPaymentMethod === "CASH" || (selectedPaymentMethod === "MIXED" && mixedCash > 0)) && (
-            <div className="bg-emerald-50/50 p-2.5 rounded-xl border border-emerald-100 space-y-1.5 text-[11px] animate-in slide-in-from-top-1 duration-150">
-              <span className="font-extrabold text-emerald-850">💵 Cálculo de Troco Automático</span>
+          {/* Fast Cash & Change Calculator */}
+          {selectedPaymentMethod === "CASH" && (
+            <div className="bg-emerald-50/70 p-3 rounded-xl border border-emerald-200/80 space-y-2 animate-in fade-in duration-150">
               <div className="flex items-center gap-2">
                 <div className="flex-1">
-                  <label className="text-[9px] text-slate-500 block">Valor Recebido do Cliente:</label>
+                  <label className="text-[10px] font-bold text-emerald-900 block mb-0.5">Valor Recebido (MT):</label>
                   <input
                     type="number"
-                    value={selectedPaymentMethod === "MIXED" ? mixedCash : (receivedCashAmount || "")}
-                    disabled={selectedPaymentMethod === "MIXED"}
+                    value={receivedCashAmount || ""}
                     onChange={(e) => setReceivedCashAmount(parseFloat(e.target.value) || 0)}
-                    placeholder="Ex: 2000"
-                    className="w-full bg-white border border-emerald-200 rounded p-1.5 text-xs font-bold text-center outline-none focus:ring-1 focus:ring-emerald-500"
+                    placeholder={String(calculations.grandTotal)}
+                    className="w-full bg-white border border-emerald-300 rounded-lg py-1.5 px-2 text-sm font-black text-center text-slate-900 outline-none focus:ring-2 focus:ring-emerald-500/30"
                   />
                 </div>
                 
-                {/* Large Green Badge Change Highlight */}
-                <div className="bg-emerald-600 text-white p-2 rounded-xl text-center shrink-0 min-w-[100px] flex flex-col justify-center">
-                  <span className="text-[8px] font-bold tracking-wider uppercase opacity-85">Troco</span>
-                  <span className="text-sm font-black tracking-tight">{calculatedChange.toLocaleString()} MT</span>
+                {/* Big Green Change Badge */}
+                <div className="bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-center shrink-0 min-w-[110px]">
+                  <span className="text-[8.5px] font-extrabold tracking-wider uppercase opacity-90 block">Troco</span>
+                  <span className="text-base font-black tracking-tight font-mono">{calculatedChange.toLocaleString()} MT</span>
                 </div>
               </div>
 
-              {/* Fast Cash Preset selection bills */}
-              {selectedPaymentMethod !== "MIXED" && (
-                <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-emerald-150/50">
-                  <span className="text-[9px] text-slate-400 font-semibold self-center">Presets:</span>
-                  {[200, 500, 1000, 2000].map(val => (
-                    <button
-                      key={val}
-                      onClick={() => setReceivedCashAmount(val)}
-                      className="px-1.5 py-0.5 bg-white border hover:bg-emerald-100/50 border-emerald-200 rounded text-[10px] font-bold text-emerald-700 cursor-pointer transition active:scale-95"
-                    >
-                      {val} MT
-                    </button>
-                  ))}
+              {/* Fast Cash Preset Bills */}
+              <div className="flex flex-wrap gap-1 pt-1 border-t border-emerald-200/60">
+                {[100, 200, 500, 1000, 2000].map(val => (
                   <button
-                    onClick={() => setReceivedCashAmount(calculations.grandTotal)}
-                    className="px-1.5 py-0.5 bg-emerald-100 hover:bg-emerald-200 rounded text-[10px] font-bold text-emerald-800 cursor-pointer"
+                    key={val}
+                    onClick={() => setReceivedCashAmount(val)}
+                    className="px-2 py-1 bg-white border border-emerald-300 hover:bg-emerald-100/70 rounded-lg text-[10.5px] font-bold text-emerald-800 cursor-pointer transition active:scale-95"
                   >
-                    Exato
+                    {val} MT
                   </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {(selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") && (
-            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-3 text-[11px] animate-in slide-in-from-top-1 duration-150">
-              <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                <span className="font-extrabold flex items-center gap-1.5 text-slate-800">
-                  <QrCode className="w-4 h-4 text-orange-500" />
-                  Pagamento via QR Code Móvel
-                </span>
-                <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                  mobilePaymentProvider === "MPESA" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700"
-                }`}>
-                  {mobilePaymentProvider}
-                </span>
-              </div>
-
-              {/* QR Code Graphic or status */}
-              <div className="flex flex-col items-center justify-center py-2 bg-white rounded-lg border border-slate-200 relative overflow-hidden">
-                {mobilePaymentStatus === "CONFIRMED" ? (
-                  <div className="h-[160px] flex flex-col items-center justify-center text-center space-y-2 animate-in zoom-in-95 duration-200">
-                    <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600 animate-bounce">
-                      <Check className="w-6 h-6 stroke-[3]" />
-                    </div>
-                    <p className="font-bold text-emerald-700 text-xs">PAGAMENTO CONFIRMADO!</p>
-                    <p className="text-[10px] text-slate-500">Valor de {calculations.grandTotal.toLocaleString()} MT recebido</p>
-                  </div>
-                ) : mobilePaymentStatus === "EXPIRED" ? (
-                  <div className="h-[160px] flex flex-col items-center justify-center text-center space-y-2 animate-in zoom-in-95 duration-200">
-                    <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-500">
-                      <AlertTriangle className="w-6 h-6" />
-                    </div>
-                    <p className="font-bold text-red-700">QR CODE EXPIRADO</p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMobilePaymentTimer(120);
-                        setMobilePaymentStatus("IDLE");
-                        setMobileReference(`VND-${Math.floor(100000 + Math.random() * 900000)}`);
-                      }}
-                      className="mt-1 px-3 py-1 bg-slate-900 text-white rounded text-[10px] font-bold cursor-pointer"
-                    >
-                      Regenerar QR Code
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative flex flex-col items-center justify-center">
-                    {mobileQrDataUrl ? (
-                      <img
-                        src={mobileQrDataUrl}
-                        alt="QR Code de Pagamento"
-                        className="w-[140px] h-[140px] object-contain"
-                      />
-                    ) : (
-                      <div className="w-[140px] h-[140px] bg-slate-100 animate-pulse flex items-center justify-center">
-                        <span className="text-slate-400 text-[10px]">Gerando...</span>
-                      </div>
-                    )}
-                    {/* Brand overlay logo in middle of QR code */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="bg-white p-1 rounded-md shadow-md border border-slate-100">
-                        {mobilePaymentProvider === "MPESA" ? (
-                          <span className="text-[8px] font-black text-red-600 tracking-tighter">M-PESA</span>
-                        ) : (
-                          <span className="text-[8px] font-black text-orange-600 tracking-tighter">e-Mola</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Counter & Reference */}
-                {mobilePaymentStatus !== "CONFIRMED" && mobilePaymentStatus !== "EXPIRED" && (
-                  <div className="mt-1 text-center">
-                    <p className="text-[10px] text-slate-500">
-                      Expira em: <span className="font-mono font-bold text-slate-800">{Math.floor(mobilePaymentTimer / 60)}:{(mobilePaymentTimer % 60).toString().padStart(2, "0")}</span>
-                    </p>
-                    <p className="text-[9px] font-mono text-slate-400">Ref: {mobileReference}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Dynamic QR Fields edit */}
-              <div className="grid grid-cols-2 gap-2 text-[10px]">
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-0.5">Código Agente / Carteira</label>
-                  <input
-                    type="text"
-                    value={mobileMerchantCode}
-                    onChange={(e) => setMobileMerchantCode(e.target.value)}
-                    placeholder="Ex: 849001202"
-                    disabled={mobilePaymentStatus === "CONFIRMED" || mobilePaymentStatus === "SENDING_PUSH" || mobilePaymentStatus === "AWAITING_PIN" || mobilePaymentStatus === "VERIFYING"}
-                    className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold text-center outline-none focus:ring-1 focus:ring-orange-500 disabled:opacity-60"
-                  />
-                </div>
-                <div>
-                  <label className="text-[9px] font-bold text-slate-500 block mb-0.5">Número Cliente (para Push)</label>
-                  <input
-                    type="text"
-                    value={mobileCustomerPhone}
-                    onChange={(e) => setMobileCustomerPhone(e.target.value)}
-                    placeholder="Ex: 84XXXXXXX"
-                    disabled={mobilePaymentStatus === "CONFIRMED" || mobilePaymentStatus === "SENDING_PUSH" || mobilePaymentStatus === "AWAITING_PIN" || mobilePaymentStatus === "VERIFYING"}
-                    className="w-full bg-white border border-slate-200 rounded p-1 text-xs font-bold text-center outline-none focus:ring-1 focus:ring-orange-500 disabled:opacity-60"
-                  />
-                </div>
-              </div>
-
-              {/* Simulation status logs & feedback */}
-              {mobilePaymentStatus !== "IDLE" && mobilePaymentStatus !== "CONFIRMED" && mobilePaymentStatus !== "EXPIRED" && (
-                <div className="bg-slate-900 text-slate-100 p-2.5 rounded-lg font-mono text-[9px] space-y-1">
-                  <div className="flex justify-between items-center">
-                    <span className="text-orange-400 font-bold">STATUS API:</span>
-                    <span className="animate-pulse">● PROCESSANDO</span>
-                  </div>
-                  <p className="text-slate-300 leading-snug">
-                    {mobilePaymentStatus === "SENDING_PUSH" && ">> Enviando pedido de liquidação via M-Pesa API..."}
-                    {mobilePaymentStatus === "AWAITING_PIN" && ">> Pedido Push entregue. Aguardando PIN no telemóvel..."}
-                    {mobilePaymentStatus === "VERIFYING" && ">> PIN inserido pelo cliente. Verificando fundos e reconciliando..."}
-                  </p>
-                  <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
-                    <div 
-                      className="bg-orange-500 h-full transition-all duration-300"
-                      style={{ width: `${mobilePaymentProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Actions Row */}
-              <div className="flex gap-2 pt-1">
-                {mobilePaymentStatus === "IDLE" || mobilePaymentStatus === "EXPIRED" ? (
-                  <button
-                    type="button"
-                    onClick={handleSimulateMobilePayment}
-                    className="flex-1 py-2 bg-slate-900 text-white hover:bg-slate-800 font-bold text-[10px] rounded-lg cursor-pointer flex items-center justify-center gap-1 transition"
-                  >
-                    <Smartphone className="w-3.5 h-3.5 text-orange-400 animate-pulse" />
-                    Enviar Push USSD & Simular
-                  </button>
-                ) : mobilePaymentStatus === "CONFIRMED" ? (
-                  <div className="flex-1 bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold py-2 px-3 text-center rounded-lg text-[10.5px]">
-                    ✓ Transação Confirmada por API Móvel!
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled
-                    className="flex-1 py-2 bg-slate-200 text-slate-400 font-bold text-[10px] rounded-lg flex items-center justify-center gap-1 cursor-not-allowed"
-                  >
-                    <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
-                    Processando Liquidação...
-                  </button>
-                )}
-
-                {mobilePaymentStatus !== "CONFIRMED" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMobilePaymentStatus("CONFIRMED");
-                      if (onShowToast) {
-                        onShowToast("Reconciliação manual bem sucedida!", "success", "Manual Bypass");
-                      }
-                    }}
-                    className="px-2.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[10px] rounded-lg cursor-pointer border border-slate-200 transition"
-                    title="Forçar Reconciliação Manual"
-                  >
-                    Forçar
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {selectedPaymentMethod === "DEBT" && (
-            <div className="bg-red-50/70 p-2.5 rounded-xl border border-red-100 space-y-1.5 text-[11px] animate-in slide-in-from-top-1 duration-150">
-              <span className="font-extrabold text-red-800">🧾 Liquidação de Crédito (Dívida em Conta)</span>
-              <div className="flex items-center gap-2">
-                <span className="text-slate-500 font-semibold text-[10px]">Prazo Acordado:</span>
-                <select
-                  value={debtDays}
-                  onChange={(e) => setDebtDays(Number(e.target.value))}
-                  className="bg-white border border-red-200 rounded p-1 text-xs font-bold text-red-700 outline-none"
+                ))}
+                <button
+                  onClick={() => setReceivedCashAmount(calculations.grandTotal)}
+                  className="px-2 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-[10.5px] font-extrabold cursor-pointer transition ml-auto active:scale-95"
                 >
-                  <option value={5}>5 Dias</option>
-                  <option value={10}>10 Dias</option>
-                  <option value={15}>15 Dias</option>
-                  <option value={30}>30 Dias</option>
-                </select>
+                  Exato
+                </button>
               </div>
-              <p className="text-[9.5px] text-slate-500 font-mono leading-tight">
-                Vencimento do Crédito em: <span className="font-bold text-red-600">{new Date(Date.now() + debtDays * 24 * 60 * 60 * 1000).toLocaleDateString()}</span>
-              </p>
             </div>
           )}
 
-          {/* Checkout & extra bottom buttons panel */}
-          <div className="space-y-2">
-            {selectedCustomer?.oneClickCheckoutEnabled && selectedCustomer.preferredPaymentMethod && (
-              <button
-                onClick={handleOneClickCheckout}
-                disabled={cart.length === 0}
-                className={`w-full py-2.5 h-11 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg transition-all bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white cursor-pointer active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed`}
-                title={`Finalizar venda imediatamente utilizando o método preferido: ${selectedCustomer.preferredPaymentMethod}`}
-              >
-                <Zap className="w-4 h-4 text-amber-300 fill-amber-300 shrink-0 animate-pulse" />
-                <span>⚡ Checkout 1-Clique ({
-                  selectedCustomer.preferredPaymentMethod === "CASH" ? "Dinheiro" :
-                  selectedCustomer.preferredPaymentMethod === "MPESA_PAGA_FACIL" ? "M-Pesa" :
-                  selectedCustomer.preferredPaymentMethod === "EMOLA" ? "E-Mola" :
-                  selectedCustomer.preferredPaymentMethod === "POS_CARD" ? "POS" :
-                  selectedCustomer.preferredPaymentMethod === "CREDIT_CARD" ? "Cartão" :
-                  selectedCustomer.preferredPaymentMethod === "BANK_TRANSFER" ? "Transf" :
-                  selectedCustomer.preferredPaymentMethod === "DEBT" ? "Dívida" : "Dinheiro"
-                })</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                if (cart.length > 0) setShowPreCheckoutModal(true);
-              }}
-              disabled={cart.length === 0}
-              className={`w-full py-2.5 h-11 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all ${
-                cart.length === 0
-                  ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
-                  : "bg-orange-500 hover:bg-orange-600 text-white cursor-pointer shadow-orange-500/15 active:scale-[0.99]"
-              }`}
-            >
-              <Receipt className="w-4 h-4" />
-              Finalizar Venda (Recibo - F1 / F9)
-            </button>
-
-            {/* 15. Bottom Control actions row */}
-            <div className="grid grid-cols-3 gap-1.5 pt-1">
-              <button
-                onClick={handleSuspendSale}
-                disabled={cart.length === 0}
-                className="py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-[10px] font-bold rounded-lg border border-slate-200 cursor-pointer transition active:scale-95"
-              >
-                ⏸️ Suspender
-              </button>
-              <button
-                onClick={handleGenerateBudget}
-                disabled={cart.length === 0}
-                className="py-2 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 disabled:opacity-50 text-[10px] font-bold rounded-lg cursor-pointer transition active:scale-95"
-              >
-                📝 Orçamento
-              </button>
-              <button
-                onClick={() => {
-                  if (cart.length === 0) return;
-                  if (confirm("Deseja mesmo esvaziar todo o carrinho?")) {
-                    handleReset();
-                    if (onShowToast) onShowToast("Carrinho cancelado.", "info");
-                  }
-                }}
-                disabled={cart.length === 0}
-                className="py-2 bg-red-50 hover:bg-red-100 disabled:opacity-50 text-red-650 text-[10px] font-bold rounded-lg border border-red-100 cursor-pointer transition active:scale-95"
-              >
-                ❌ Cancelar
-              </button>
+          {/* Mobile Payment QR/Push Simulation */}
+          {(selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") && (
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-slate-800 flex items-center gap-1 text-[11px]">
+                  <QrCode className="w-3.5 h-3.5 text-orange-500" />
+                  Pagamento {selectedPaymentMethod === "MPESA_PAGA_FACIL" ? "M-Pesa" : "e-Mola"}
+                </span>
+                <button
+                  onClick={handleSimulateMobilePayment}
+                  className="px-2.5 py-1 bg-slate-900 text-white hover:bg-slate-800 font-bold text-[10px] rounded-lg cursor-pointer"
+                >
+                  {mobilePaymentStatus === "CONFIRMED" ? "✓ Confirmado" : "⚡ Simular Push"}
+                </button>
+              </div>
+              {mobilePaymentStatus === "CONFIRMED" && (
+                <div className="bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold p-1.5 text-center rounded-lg text-[11px]">
+                  ✓ Pagamento móvel confirmado via API!
+                </div>
+              )}
             </div>
+          )}
+
+          {/* Primary Express 5-Second Checkout Button */}
+          <button
+            onClick={() => {
+              if (cart.length > 0) setShowPreCheckoutModal(true);
+            }}
+            disabled={cart.length === 0}
+            className={`w-full py-3 rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-lg transition-all ${
+              cart.length === 0
+                ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-600/20 active:scale-[0.98]"
+            }`}
+          >
+            <Zap className="w-4 h-4 text-amber-300 fill-amber-300 animate-pulse" />
+            <span>⚡ Concluir Venda ({calculations.grandTotal.toLocaleString()} MT)</span>
+          </button>
+
+          {/* Auxiliary Actions (Suspend & Budget) */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleSuspendSale}
+              disabled={cart.length === 0}
+              className="py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-50 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200 cursor-pointer transition active:scale-95 flex items-center justify-center gap-1"
+            >
+              <Clock className="w-3 h-3 text-slate-500" />
+              <span>Suspender</span>
+            </button>
+            <button
+              onClick={handleGenerateBudget}
+              disabled={cart.length === 0}
+              className="py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800 disabled:opacity-50 text-[11px] font-bold rounded-lg cursor-pointer transition active:scale-95 flex items-center justify-center gap-1"
+            >
+              <Receipt className="w-3 h-3 text-amber-600" />
+              <span>Orçamento</span>
+            </button>
           </div>
 
-        </div>
-        {/* End of pos-sidebar-scrollable-content */}
         </div>
       </div>
 
@@ -4750,56 +4275,6 @@ export default function POSModule({
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
               >
                 Compreendi! Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Panic Button Confirmation Modal */}
-      {showPanicConfirm && (
-        <div className="fixed inset-0 bg-red-950/85 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-md w-full border-2 border-red-500 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col">
-            <div className="p-6 bg-red-50 border-b border-red-100 flex items-center gap-3">
-              <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center shadow-inner animate-pulse">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div className="text-left">
-                <h3 className="font-extrabold text-red-900 text-base">⚠️ CONFIRMAÇÃO DE EMERGÊNCIA</h3>
-                <p className="text-xs text-red-700 font-semibold mt-0.5">SISTEMA DE SEGURANÇA OST VENDAS</p>
-              </div>
-            </div>
-
-            <div className="p-6 space-y-4 text-left">
-              <p className="text-xs text-slate-700 font-medium leading-relaxed">
-                Você está prestes a acionar o <strong>Botão de Pânico / Alerta Crítico</strong> do sistema comercial.
-              </p>
-              <div className="bg-red-50/50 p-4 rounded-xl border border-red-100 text-xs text-red-800 space-y-1.5 font-semibold">
-                <p>● Um log de emergência crítica será registado imediatamente.</p>
-                <p>● Todos os administradores receberão SMS e E-mail de pânico com a sua identidade, localização geográfica e endereço IP.</p>
-                <p>● Use apenas em caso de incidentes graves de segurança, roubo ou perigo iminente.</p>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowPanicConfirm(false)}
-                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
-              >
-                Cancelar (Não Enviar)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (onTriggerPanic) {
-                    onTriggerPanic();
-                  }
-                  setShowPanicConfirm(false);
-                }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-extrabold rounded-xl shadow-md shadow-red-600/30 transition cursor-pointer animate-pulse"
-              >
-                🚨 ENVIAR ALERTA DE PÂNICO
               </button>
             </div>
           </div>

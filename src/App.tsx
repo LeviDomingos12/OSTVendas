@@ -41,6 +41,7 @@ import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
 import PlanLockScreen from "./components/PlanLockScreen";
 import { canAccessModule } from "./lib/planPermissions";
 import LoginModule from "./components/LoginModule";
+import { UserSwitchModal } from "./components/UserSwitchModal";
 import AiForecastModule from "./components/AiForecastModule";
 import StockReplenishModal from "./components/StockReplenishModal";
 import QuickLogoModal from "./components/QuickLogoModal";
@@ -73,10 +74,12 @@ import {
   addTransacoesToFirestoreBatch,
   subscribeToProdutos,
   isCircuitBroken,
-  getPartitionPath
+  getPartitionPath,
+  onAuthStateChanged,
+  doc,
+  getDoc,
+  setDoc
 } from "./lib/firebase";
-import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
@@ -159,17 +162,13 @@ interface Toast {
 }
 
 const NAV_MENU_ITEMS = [
-  { id: "dashboard", label: "Dashboard Inteligente", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas (POS)", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
   { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
   { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "staff", label: "Funcionários & Auditoria", shortLabel: "Funcionários", icon: UserCheck, roles: ["ADMIN"] },
-  { id: "ai", label: "Previsão AI (Premium)", shortLabel: "Previsão AI", icon: TrendingUp, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "training", label: "Centro de Formação", shortLabel: "Formação", icon: BookOpen, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "settings", label: "Configurações Gerais", shortLabel: "Definições", icon: Settings, roles: ["ADMIN"] },
-  { id: "gateway", label: "Integração Mobile Money", shortLabel: "M-Pesa/e-Mola", icon: Smartphone, roles: ["ADMIN"] },
+  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
 ];
 
 const safeLocalStorageSetItem = (key: string, value: string): boolean => {
@@ -1763,7 +1762,7 @@ export default function App() {
       });
     }
 
-    showToast("Perfil e Categoria salvos no Firestore com sucesso!", "success");
+    showToast("Perfil e Categoria salvos com sucesso!", "success");
 
     handleAddAuditLog(
       "Atualização de Perfil",
@@ -2548,7 +2547,7 @@ export default function App() {
 
   // Hydrate states from existential server database on mount
   useEffect(() => {
-    // Run the mandatory Firebase Firestore direct browser connection verification
+    // Run the connection test via abstract service
     testConnection();
 
     const fetchExistentialDb = async () => {
@@ -2586,18 +2585,16 @@ export default function App() {
             if (d.settings) setSettings(d.settings);
             else setSettings(defaultSettings);
 
-            console.log("Banco de dados existencial carregado com sucesso via servidor.");
             loadedData = true;
           }
         }
       } catch (err) {
-        console.warn("API de banco do servidor indisponível. Conectando diretamente ao Firestore no cliente...", err);
+        // Fallback silently to client-side data service
       }
 
       if (!loadedData) {
-        // Direct Client-Side Firestore Fetching (Primary fallback for static Vercel deployments)
+        // Direct Client-Side Service Fetching
         try {
-          console.log("[FIRESTORE DIRECT] Carregando coleções diretamente do Firebase Firestore...");
           const [fsProducts, fsCustomers, fsTransactions, fsCashflow, fsEmployees, fsSettings] = await Promise.all([
             getProdutosFromFirestore().catch(() => []),
             getCustomersFromFirestore().catch(() => []),
@@ -2631,9 +2628,7 @@ export default function App() {
           else setSettings(defaultSettings);
 
           setAuditLogs(initialAuditLogs);
-          console.log("[FIRESTORE DIRECT] Dados carregados com sucesso diretamente do Firebase Firestore no navegador.");
         } catch (fsErr) {
-          console.warn("Falha no carregamento direto do Firestore. Usando dados locais:", fsErr);
           setProducts(initialProducts);
           setCustomers(initialCustomers);
           setTransactions(generateMockTransactions());
@@ -2811,16 +2806,6 @@ export default function App() {
               await auth.signOut();
               setIsAuthenticated(false);
               setActiveUser(null);
-              return;
-            }
-
-            // Force PIN change if temporary but within the 3 days window
-            if (isPinTemporary) {
-              setForcePinTargetEmployee(mappedEmployee);
-              setNewPin("");
-              setConfirmNewPin("");
-              setForcePinError("");
-              setForcePinChangeOpen(true);
               return;
             }
 
@@ -4479,12 +4464,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       {/* Outer body wrapper */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         
-        {/* TOP COMPACT STATUS BAR BRAND BANNER */}
+        {/* TOP MINIMALIST STATUS BAR */}
         {!isPOSFullscreen && (
-          <header className={`border-b h-16 px-4 md:px-6 shrink-0 flex items-center justify-between shadow-md backdrop-blur-md relative z-20 transition-all ${
-            theme === "night" ? "bg-zinc-950/50 border-zinc-800/80" : "bg-white border-slate-200"
+          <header className={`border-b h-14 px-4 md:px-6 shrink-0 flex items-center justify-between shadow-sm backdrop-blur-md relative z-20 transition-all ${
+            theme === "night" ? "bg-zinc-950/80 border-zinc-800/80" : "bg-white border-slate-200"
           }`}>
-            
             <div className="flex items-center gap-3">
               {/* Hamburger Menu Toggle - Visible on mobile/tablet */}
               <button
@@ -4496,88 +4480,14 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 <Menu className="w-5 h-5" />
               </button>
 
-              {/* System Status Indicator */}
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold ${
-                isOnline 
-                  ? theme === "night"
-                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                    : "bg-emerald-50 text-emerald-600 border border-emerald-200 shadow-sm"
-                  : theme === "night"
-                    ? "bg-rose-500/10 text-rose-400 border border-rose-500/20 animate-pulse"
-                    : "bg-rose-50 text-rose-600 border border-rose-200 shadow-sm animate-pulse"
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`}></span>
-                <span>{isOnline ? "SISTEMA ONLINE" : "SISTEMA OFFLINE"}</span>
-              </div>
-  
-              <div className="hidden lg:flex items-center gap-2 text-[11px] font-mono opacity-80">
-                {settings.logoUrl && (
-                  <img
-                    src={settings.logoUrl}
-                    alt="Logo Mini"
-                    className="w-5 h-5 rounded-md object-contain bg-white p-0.5 border border-slate-200 shrink-0"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-                <span className={theme === "night" ? "text-slate-400" : "text-slate-600"}>Empresa:</span>
-                <span className={`font-bold uppercase ${theme === "night" ? "text-white" : "text-slate-800"}`}>
-                  {settings.companyName}
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold uppercase tracking-wider ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
+                  {NAV_MENU_ITEMS.find(m => m.id === activeTab)?.label || "Sistema de Gestão"}
                 </span>
-              </div>
-  
-              <span className="hidden lg:inline text-slate-500 font-mono text-[11px]">•</span>
-  
-              <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono opacity-80">
-                <span className={theme === "night" ? "text-slate-400" : "text-slate-600"}>Versão:</span>
-                <span className={`font-bold ${theme === "night" ? "text-amber-400" : "text-orange-600"}`}>{currentSystemVersion}</span>
               </div>
             </div>
   
-            <div className="flex items-center gap-4 text-xs">
-              {/* Session Stats & Last Sync */}
-              <div className={`hidden md:flex items-center gap-4 font-mono text-[10.5px] ${
-                theme === "night" ? "text-slate-400" : "text-slate-500"
-              }`}>
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-amber-500" />
-                  <span>Sessão:</span>
-                  <span className={`font-bold ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
-                    {formatSessionTime(sessionSeconds)}
-                  </span>
-                </div>
-                <span>•</span>
-                <div className="flex items-center gap-1.5" title="Hora do último envio ou recebimento de dados com a nuvem">
-                  <Cloud className="w-3.5 h-3.5 text-blue-400" />
-                  <span>Última Sinc:</span>
-                  <span className={`font-bold ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
-                    {lastSyncTime}
-                  </span>
-                </div>
-              </div>
-  
-              {/* Daily/Night Theme Switcher Custom Widget */}
-              <button
-                onClick={() => setTheme(theme === "daily" ? "night" : "daily")}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
-                  theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-amber-500 hover:text-amber-400" 
-                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-slate-900 shadow-sm"
-                }`}
-                title="Alternar Layout de Tema"
-              >
-                {theme === "daily" ? (
-                  <>
-                    <Sun className="w-3.5 h-3.5 text-amber-500 animate-spin" style={{ animationDuration: "10s" }} />
-                    <span>Dia</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-3.5 h-3.5 text-amber-450 fill-amber-400/25" />
-                    <span>Noite</span>
-                  </>
-                )}
-              </button>
-  
+            <div className="flex items-center gap-3 text-xs">
               {/* Button to quickly switch account / alter user */}
               <button
                 id="quick-switch-user-btn"
@@ -4587,55 +4497,18 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     setSwitchSelectedEmployeeId(activeUser.id);
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
                   theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300" 
+                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
                     : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
                 }`}
-                title="Alterar Conta do Usuário"
+                title="Alterar Usuário"
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Alterar Usuário / Vincular</span>
-              </button>
-
-              {/* Quick Logo Config Button */}
-              <button
-                id="quick-logo-config-btn"
-                onClick={() => setIsQuickLogoModalOpen(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
-                  theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-amber-400 hover:text-amber-300" 
-                    : "bg-white border-slate-200 text-amber-600 hover:bg-slate-50 hover:text-amber-700 shadow-sm"
-                }`}
-                title="Configuração Rápida do Logotipo da Empresa"
-              >
-                {settings.logoUrl ? (
-                  <img src={settings.logoUrl} alt="Logo" className="w-4 h-4 rounded object-cover border border-amber-500/30" />
-                ) : (
-                  <Image className="w-3.5 h-3.5 text-amber-500" />
-                )}
-                <span>Logotipo</span>
-              </button>
-
-              {/* Tutorial & Keyboard Shortcuts Button */}
-              <button
-                id="quick-tutorial-btn"
-                onClick={() => setIsTutorialModalOpen(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-[10.5px] font-bold ${
-                  theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300" 
-                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
-                }`}
-                title="Tutorial Rápido e Atalhos de Teclado (F1)"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-orange-500" />
-                <span>Tutorial</span>
-                <span className="text-[9px] bg-orange-500/15 text-orange-600 dark:text-orange-400 font-mono font-bold px-1.5 py-0.2 rounded border border-orange-500/20">
-                  F1
-                </span>
+                <span>Alterar Usuário</span>
               </button>
  
-              {/* Active user status pill made interactive */}
+              {/* Active user status pill */}
               <button
                 onClick={() => {
                   setIsUserSwitchModalOpen(true);
@@ -4643,12 +4516,12 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     setSwitchSelectedEmployeeId(activeUser.id);
                   }
                 }}
-                className={`flex items-center gap-2 p-1.5 rounded-xl border transition-all text-left cursor-pointer ${
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all text-left cursor-pointer ${
                   theme === "night" 
                     ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-slate-200" 
                     : "bg-white border-slate-200 hover:bg-slate-50 text-slate-800 shadow-sm"
                 }`}
-                title="Clique para alterar conta ou vincular novo e-mail"
+                title="Usuário Ativo"
               >
                 <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px] shrink-0 overflow-hidden">
                   {activeUser.fotoPerfil ? (
@@ -4657,15 +4530,14 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     activeUser.name.substring(0, 2).toUpperCase()
                   )}
                 </div>
-                <div className="leading-none">
-                  <p className="font-extrabold text-[10.5px] leading-tight">{activeUser.name}</p>
+                <div className="leading-none hidden sm:block">
+                  <p className="font-extrabold text-xs leading-tight">{activeUser.name}</p>
                   <p className={`text-[9px] mt-0.5 ${
                     theme === "night" ? "text-slate-400" : "text-slate-500"
                   }`}>{activeUser.role}</p>
                 </div>
               </button>
             </div>
-  
           </header>
         )}
 
@@ -4724,32 +4596,16 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               <AlertCircle className="w-5 h-5" />
             </div>
             <div className="flex-1 text-xs">
-              <h4 className="font-extrabold text-amber-500">Aviso do Sistema: Limite de Quota Diária Excedido (Firestore Writes)</h4>
+              <h4 className="font-extrabold text-amber-500">Aviso do Sistema: Modo de Operação Local Ativo</h4>
               <p className="text-slate-400 mt-1 leading-relaxed">
-                A cota diária gratuita de gravação do Firestore (**Spark Plan / Free Tier**) foi atingida para este projeto. O sistema de banco de dados entrou em modo de simulação segura local. Pode continuar a registar vendas, gerir artigos, consultar relatórios e testar todas as funcionalidades do POS com segurança! Os limites de quota serão reiniciados automaticamente amanhã.
+                O limite de operações remotas foi atingido temporariamente. O sistema entrou em modo de segurança local: todas as funcionalidades (POS, vendas, artigos, caixa e relatórios) continuam 100% operacionais e serão sincronizadas automaticamente com o servidor no próximo ciclo.
               </p>
               <div className="flex flex-wrap gap-3 mt-2">
-                <a
-                  href="https://console.firebase.google.com/project/gen-lang-client-0285564041/firestore/databases/ai-studio-e2d52f5d-b57f-430e-9d24-e415e95b0744/data?openUpgradeDialog=true"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold px-3 py-1 rounded text-[10px] transition uppercase tracking-wider"
-                >
-                  Ir para a Consola Firebase ↗
-                </a>
-                <a
-                  href="https://firebase.google.com/pricing#cloud-firestore"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="border border-amber-500/30 text-amber-400 hover:text-amber-300 font-bold px-3 py-1 rounded text-[10px] transition"
-                >
-                  Tabela de Preços e Limites ↗
-                </a>
                 <button
                   onClick={() => setIsQuotaExceeded(false)}
-                  className="text-slate-500 hover:text-slate-300 underline font-semibold text-[10px]"
+                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold px-3 py-1 rounded text-[10px] transition uppercase tracking-wider cursor-pointer"
                 >
-                  Ignorar por agora
+                  Entendido
                 </button>
               </div>
             </div>
@@ -4912,72 +4768,6 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               </motion.div>
             )}
 
-            {/* STAFF EMPLOYEES & SECURITY TRAIL AUDITOR */}
-            {activeTab === "STAFF" && (
-              <motion.div
-                key="STAFF"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canAccessModule("staff", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-                  <PlanLockScreen
-                    moduleName="Equipa & Auditoria D3"
-                    requiredPlan="PRATA"
-                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-                    description="A gestão avançada de utilizadores e auditoria D3 está disponível nos Planos Prata e Ouro."
-                    onUpgradeClick={() => setActiveTab("PLANS")}
-                  />
-                ) : (
-                  <StaffModule
-                    employees={employees}
-                    auditLogs={auditLogs}
-                    onAddEmployee={handleAddEmployee}
-                    onUpdateEmployees={handleUpdateEmployees}
-                    activeUsername={activeUser.name}
-                    onAddAuditLog={handleAddAuditLog}
-                    currentRole={simplifiedRole}
-                    currency={currency}
-                    settings={settings}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* REVENUE PREDICTION AI PANEL */}
-            {activeTab === "AI" && (
-              <motion.div
-                key="AI"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canAccessModule("ai", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-                  <PlanLockScreen
-                    moduleName="Previsão AI Premium"
-                    requiredPlan="OURO"
-                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-                    description="Modelos preditivos avançados com Inteligência Artificial e o Gerador de Flyers Promocionais são exclusivos do Plano Ouro (VIP)."
-                    onUpgradeClick={() => setActiveTab("PLANS")}
-                  />
-                ) : (
-                  <AiForecastModule
-                    products={products}
-                    transactions={filteredTransactions}
-                    settings={settings}
-                    theme={theme}
-                    currency={currency}
-                    onShowToast={showToast}
-                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                  />
-                )}
-              </motion.div>
-            )}
-
             {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
             {activeTab === "REPORTS" && (
               <motion.div
@@ -5000,25 +4790,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               </motion.div>
             )}
 
-            {/* TUTORIAL LESSONS CENTER */}
-            {activeTab === "TRAINING" && (
-              <motion.div
-                key="TRAINING"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                <TrainingModule
-                  videos={masterclassVideos}
-                  currency={currency}
-                />
-              </motion.div>
-            )}
-
-            {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS */}
-            {activeTab === "SETTINGS" && (
+            {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS (INCLUDING ADVANCED CONSOLIDATED SUBMODULES) */}
+            {(activeTab === "SETTINGS" || activeTab === "STAFF" || activeTab === "AI" || activeTab === "TRAINING" || activeTab === "GATEWAY" || activeTab === "PLANS") && (
               <motion.div
                 key="SETTINGS"
                 initial={{ opacity: 0, y: 12, scale: 0.995 }}
@@ -5044,6 +4817,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   systemVersion={currentSystemVersion}
                   employees={employees}
                   auditLogs={auditLogs}
+                  products={products}
+                  transactions={filteredTransactions}
+                  customers={customers}
+                  onAddEmployee={handleAddEmployee}
+                  onUpdateEmployees={handleUpdateEmployees}
+                  masterclassVideos={masterclassVideos}
+                  theme={theme}
+                  onUpdateUserPlan={handleUpdateUserPlan}
+                  onUpdateSystemPlan={handleUpdateSystemPlan}
+                  initialSubTab={
+                    activeTab === "STAFF" ? "staff" :
+                    activeTab === "AI" ? "ai" :
+                    activeTab === "TRAINING" ? "training" :
+                    activeTab === "GATEWAY" ? "gateway" :
+                    activeTab === "PLANS" ? "plans" : undefined
+                  }
+                  onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
                   onResetEmployeePin={async (empId) => {
                     const target = employees.find(e => e.id === empId);
                     if (!target) return;
@@ -5139,61 +4929,6 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                       "Tema de Colaborador"
                     );
                   }}
-                />
-              </motion.div>
-            )}
-
-            {/* GATEWAY INTEGRATION PANEL */}
-            {activeTab === "GATEWAY" && (
-              <motion.div
-                key="GATEWAY"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canAccessModule("gateway", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-                  <PlanLockScreen
-                    moduleName="Integração Mobile Money"
-                    requiredPlan="PRATA"
-                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-                    description="O recebimento automático via M-Pesa e e-Mola (Paga Fácil) está disponível a partir do Plano Prata."
-                    onUpgradeClick={() => setActiveTab("PLANS")}
-                  />
-                ) : (
-                  <GatewayModule
-                    settings={settings}
-                    onUpdateSettings={handleUpdateSettings}
-                    onAddAuditLog={handleAddAuditLog}
-                    currentRole={simplifiedRole}
-                    onShowToast={showToast}
-                    products={products}
-                    customers={customers}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* PLANS & SUBSCRIPTIONS PANEL */}
-            {activeTab === "PLANS" && (
-              <motion.div
-                key="PLANS"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                <SubscriptionPlansModule
-                  currentPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-                  activeUser={activeUser}
-                  employees={employees}
-                  settings={settings}
-                  onUpdateUserPlan={handleUpdateUserPlan}
-                  onUpdateSystemPlan={handleUpdateSystemPlan}
-                  onShowToast={showToast}
-                  onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
                 />
               </motion.div>
             )}
@@ -5434,1811 +5169,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         )}
       </AnimatePresence>
 
-      {/* Force PIN Change Modal */}
-      <AnimatePresence>
-        {forcePinChangeOpen && forcePinTargetEmployee && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
-                theme === "night"
-                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
-                  : "bg-white text-slate-800 border-slate-100"
-              }`}
-            >
-              {/* Header */}
-              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-left">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center shadow-inner">
-                    <ShieldAlert className="w-5 h-5 animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Atualização de Segurança Obrigatória</h3>
-                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir Senha Definitiva de Acesso</p>
-                  </div>
-                </div>
-              </div>
 
-              {/* Body */}
-              <div className="p-6 space-y-4 text-left">
-                <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl space-y-1 text-xs">
-                  <p className="font-bold text-amber-800">Olá {forcePinTargetEmployee.name},</p>
-                  <p className="text-amber-700 leading-relaxed text-[11px]">
-                    De acordo com a política de segurança, a sua senha inicial é temporária ou expirou. **Todas as senhas de acesso possuem validade máxima de 2 meses (60 dias)**. Defina uma senha de acesso forte de pelo menos 6 caracteres.
-                  </p>
-                </div>
 
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Nova Senha de Acesso</label>
-                    <input
-                      type="password"
-                      maxLength={32}
-                      placeholder="Mínimo 6 caracteres"
-                      value={newPin}
-                      onChange={(e) => {
-                        setNewPin(e.target.value);
-                        if (forcePinError) setForcePinError("");
-                      }}
-                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
-                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
-                      }`}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Nova Senha</label>
-                    <input
-                      type="password"
-                      maxLength={32}
-                      placeholder="Repita a nova senha de acesso"
-                      value={confirmNewPin}
-                      onChange={(e) => {
-                        setConfirmNewPin(e.target.value);
-                        if (forcePinError) setForcePinError("");
-                      }}
-                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
-                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
-                      }`}
-                    />
-                  </div>
-
-                  {forcePinError && (
-                    <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold flex items-center gap-1.5 animate-pulse">
-                      <span>⚠️</span>
-                      <span>{forcePinError}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="p-4 border-t border-slate-100 dark:border-zinc-850 flex justify-end gap-3 bg-slate-50 dark:bg-zinc-900">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForcePinChangeOpen(false);
-                    setForcePinTargetEmployee(null);
-                  }}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleForcePinChangeSubmit}
-                  disabled={newPin.length < 6 || confirmNewPin.length < 6}
-                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
-                    newPin.length >= 6 && confirmNewPin.length >= 6
-                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
-                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                  }`}
-                >
-                  Ativar Conta & Aceder
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Interactive Account Switching & Linking Modal */}
-      <AnimatePresence>
-        {isUserSwitchModalOpen && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
-                theme === "night"
-                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
-                  : "bg-white text-slate-800 border-slate-100"
-              }`}
-              id="inside-user-switcher-modal"
-            >
-              <motion.div
-                initial={{ x: 40, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: -40, opacity: 0 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-                className="w-full h-full flex flex-col"
-              >
-                {/* Header */}
-                <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-orange-500/10 to-amber-500/10 text-left">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-orange-100 text-orange-700 dark:bg-orange-900/35 dark:text-orange-400 rounded-xl flex items-center justify-center shadow-inner">
-                        <Users className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Painel do Colaborador</h3>
-                        <p className="text-[10px] text-orange-600 dark:text-orange-400 font-extrabold font-mono uppercase">Vincular Conta & Configurar Perfil</p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setIsUserSwitchModalOpen(false)}
-                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-900 text-slate-400 hover:text-slate-900 dark:hover:text-white transition cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Tabs */}
-                <div className={`flex border-b text-xs font-bold ${
-                  theme === "night" ? "border-zinc-850 bg-zinc-900/40" : "border-slate-100 bg-slate-50/40"
-                }`}>
-                  <button
-                    type="button"
-                    onClick={() => setUserSwitchModalTab("switch")}
-                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
-                      userSwitchModalTab === "switch"
-                        ? "border-orange-500 text-orange-500 font-black"
-                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                    }`}
-                  >
-                    🔄 Alterar Usuário
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUserSwitchModalTab("profile")}
-                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
-                      userSwitchModalTab === "profile"
-                        ? "border-orange-500 text-orange-500 font-black"
-                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                    }`}
-                  >
-                    ⚙️ Configurações de Perfil
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setUserSwitchModalTab("activity")}
-                    className={`flex-1 py-3 text-center border-b-2 transition-all cursor-pointer ${
-                      userSwitchModalTab === "activity"
-                        ? "border-orange-500 text-orange-500 font-black"
-                        : "border-transparent text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                    }`}
-                  >
-                    📜 Histórico de Atividade
-                  </button>
-                </div>
-
-                {/* Body */}
-                <div className="p-6 text-left overflow-y-auto max-h-[60vh]">
-                  <AnimatePresence mode="wait">
-                    <motion.div
-                      key={userSwitchModalTab}
-                      initial={{ opacity: 0, x: userSwitchModalTab === "switch" ? -15 : 15 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: userSwitchModalTab === "switch" ? 15 : -15 }}
-                      transition={{ duration: 0.22, ease: "easeInOut" }}
-                      className="space-y-4"
-                    >
-                      {userSwitchModalTab === "switch" ? (
-                        <>
-                          <div className="p-3.5 bg-orange-500/10 border border-orange-500/20 rounded-xl space-y-1 text-xs">
-                            <p className="font-bold text-orange-500">Sessão Autenticada Ativa:</p>
-                            <p className="text-slate-400 leading-relaxed text-[11px]">
-                              Atualmente você está logado no sistema via e-mail com: <strong className="text-orange-400 font-mono">{auth.currentUser?.email || "Sem e-mail (Login Local)"}</strong>.
-                              Você pode selecionar qualquer colaborador no quadro comercial abaixo para **vincular o seu e-mail ativo** a ele e mudar seu operador operacional de forma instantânea.
-                            </p>
-                          </div>
-
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Selecione o Colaborador de Destino</label>
-                            <select
-                              value={switchSelectedEmployeeId}
-                              onChange={(e) => {
-                                const newId = e.target.value;
-                                setSwitchSelectedEmployeeId(newId);
-                                setSwitchEnteredPin("");
-                                setSwitchPinError("");
-                                const found = employees.find(x => x.id === newId) || activeUser;
-                                setProfileObservacoes(found?.observacoes || "");
-                                setProfileExpirationDate(found?.expirationDate || "");
-                              }}
-                              className="w-full bg-slate-950 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                            >
-                              <option value="">-- Escolha um colaborador --</option>
-                              {employees.map(emp => (
-                                <option key={emp.id} value={emp.id}>
-                                  {emp.name} ({emp.role}) {emp.email ? `[Vínculo: ${emp.email}]` : "[Sem vínculo]"}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {switchSelectedEmployeeId && (
-                            <div className="space-y-4 p-4 bg-slate-900/60 rounded-xl border border-slate-800 animate-in fade-in duration-200">
-                              <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-lg bg-orange-500/10 border border-orange-500/25 text-orange-400 flex items-center justify-center font-bold text-[11px] overflow-hidden">
-                                  {employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil ? (
-                                    (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("data:") || (employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil || "").startsWith("http") ? (
-                                      <img src={employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
-                                    ) : (
-                                      <span className="text-sm leading-none">{employees.find(x => x.id === switchSelectedEmployeeId)?.fotoPerfil}</span>
-                                    )
-                                  ) : (
-                                    (employees.find(x => x.id === switchSelectedEmployeeId)?.name || "US").substring(0, 2).toUpperCase()
-                                  )}
-                                </div>
-                                <div className="leading-none text-left">
-                                  <p className="font-extrabold text-xs text-white">
-                                    {employees.find(x => x.id === switchSelectedEmployeeId)?.name}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400 mt-1">
-                                    {employees.find(x => x.id === switchSelectedEmployeeId)?.role}
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* PASSWORD / PIN INPUT FIELD FOR PROTECTION WITH SHOW/HIDE TOGGLE */}
-                              <div className="border-t border-slate-800 pt-3 space-y-1.5 text-left">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                                  Senha / PIN de Acesso do Colaborador Selecionado
-                                </label>
-                                <div className="relative">
-                                  <input
-                                    type={showSwitchPin ? "text" : "password"}
-                                    maxLength={32}
-                                    value={switchEnteredPin}
-                                    onChange={(e) => {
-                                      setSwitchEnteredPin(e.target.value);
-                                      if (switchPinError) setSwitchPinError("");
-                                    }}
-                                    placeholder="Digite o PIN/Senha do colaborador para confirmar"
-                                    className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 pl-3.5 pr-10 text-xs text-white outline-none transition font-medium focus:ring-2 focus:ring-orange-500/20"
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowSwitchPin(!showSwitchPin)}
-                                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1 cursor-pointer"
-                                    title={showSwitchPin ? "Ocultar Senha" : "Mostrar Senha"}
-                                  >
-                                    {showSwitchPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                  </button>
-                                </div>
-                                {switchPinError && (
-                                  <p className="text-[10.5px] text-red-500 font-bold animate-pulse mt-1">⚠️ {switchPinError}</p>
-                                )}
-                              </div>
-
-                              <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
-                                <label className="flex items-start gap-2.5 cursor-pointer select-none">
-                                  <input
-                                    type="checkbox"
-                                    defaultChecked={true}
-                                    id="auto-link-email-checkbox"
-                                    className="mt-0.5 rounded border-slate-850 bg-slate-950 text-orange-500 focus:ring-orange-500/30 cursor-pointer"
-                                  />
-                                  <div className="text-left leading-tight">
-                                    <p className="text-[11px] font-bold text-slate-200">Vincular meu e-mail atual a este perfil</p>
-                                    <p className="text-[9.5px] text-slate-400 mt-0.5">Sempre que fizer login com <strong className="text-orange-400">{auth.currentUser?.email || "seu e-mail atual"}</strong>, você entrará automaticamente nesta conta comercial.</p>
-                                  </div>
-                                </label>
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : userSwitchModalTab === "profile" ? (
-                        <div className="space-y-4">
-                          {/* Visual Alert Banner for Simple / Insecure PIN */}
-                          {currentPinWarning && (
-                            <div id="profile-pin-warning-alert" className="p-3.5 bg-rose-500/15 border border-rose-500/40 rounded-xl flex items-start gap-3 text-rose-300 shadow-sm animate-pulse">
-                              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                              <div className="space-y-1 text-left flex-1">
-                                <div className="flex items-center justify-between gap-2">
-                                  <h4 className="text-xs font-bold text-rose-200 uppercase tracking-wide">
-                                    {currentPinWarning.title}
-                                  </h4>
-                                  <span className="text-[9px] font-bold uppercase font-mono px-1.5 py-0.5 bg-rose-500/30 text-rose-200 border border-rose-500/40 rounded">
-                                    Aviso de Risco
-                                  </span>
-                                </div>
-                                <p className="text-[11px] leading-relaxed text-rose-300 font-medium">
-                                  {currentPinWarning.message}
-                                </p>
-                                <div className="pt-1">
-                                  <button
-                                    type="button"
-                                    onClick={handleResetPin}
-                                    className="px-2.5 py-1 bg-rose-500 hover:bg-rose-600 text-white font-bold text-[10px] rounded-lg transition cursor-pointer inline-flex items-center gap-1 shadow active:scale-95"
-                                  >
-                                    <Key className="w-3 h-3" />
-                                    Gerar Novo PIN Seguro Agora
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                          {/* Visual Preview Banner & Uploader */}
-                          <div className="flex items-center gap-4 p-4 bg-slate-900/60 rounded-xl border border-slate-850">
-                            <div className="relative shrink-0">
-                              <div className="w-16 h-16 rounded-2xl bg-orange-500 text-white flex items-center justify-center font-bold text-xl overflow-hidden border border-slate-700 shadow-lg">
-                                {profileFotoPerfil ? (
-                                  profileFotoPerfil.startsWith("data:") || profileFotoPerfil.startsWith("http") || profileFotoPerfil.startsWith("/") ? (
-                                    <img src={profileFotoPerfil} className="w-full h-full object-cover" alt="Previsualização" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <span className="text-3xl leading-none">{profileFotoPerfil}</span>
-                                  )
-                                ) : (
-                                  profileName.substring(0, 2).toUpperCase() || "US"
-                                )}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
-                                className="absolute -bottom-1 -right-1 bg-orange-500 text-white rounded-lg p-1.5 hover:bg-orange-600 transition cursor-pointer shadow-md"
-                                title="Carregar Imagem"
-                              >
-                                <Camera className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-
-                            <div className="flex-1 leading-none text-left">
-                              <p className="text-xs font-black text-white">{profileName || "Sem Nome"}</p>
-                              <p className="text-[10px] text-slate-400 mt-1.5 uppercase font-mono tracking-wider">{activeUser?.role || "Colaborador"}</p>
-                              <div className="flex gap-2 mt-2">
-                                <button
-                                  type="button"
-                                  onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
-                                  className="px-2.5 py-1 bg-slate-950 text-slate-300 hover:text-white rounded-lg text-[9px] font-bold border border-slate-800 hover:border-slate-700 transition cursor-pointer"
-                                >
-                                  Upload Foto
-                                </button>
-                                {profileFotoPerfil && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setProfileFotoPerfil("")}
-                                    className="px-2.5 py-1 bg-red-500/10 text-red-400 hover:bg-red-500/20 rounded-lg text-[9px] font-bold border border-red-500/20 transition cursor-pointer"
-                                  >
-                                    Remover
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Hidden File Input */}
-                          <input
-                            type="file"
-                            id="profile-photo-upload-input"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) {
-                                if (file.size > 1.5 * 1024 * 1024) {
-                                  showToast("A imagem deve ter no máximo 1.5MB", "error");
-                                  return;
-                                }
-                                const reader = new FileReader();
-                                reader.onloadend = () => {
-                                  setProfileFotoPerfil(reader.result as string);
-                                };
-                                reader.readAsDataURL(file);
-                              }
-                            }}
-                          />
-
-                          {/* Componente de Upload e Captura de Foto de Perfil via Câmera */}
-                          <div id="profile-photo-camera-upload-component" className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                                <Camera className="w-3.5 h-3.5 text-orange-400" />
-                                <span>Personalizar com Câmera ou Ficheiro</span>
-                              </span>
-                              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wide">
-                                {isCameraActive ? "Câmera Ativa" : "Dispositivo"}
-                              </span>
-                            </div>
-
-                            {!isCameraActive ? (
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  type="button"
-                                  id="profile-start-camera-btn"
-                                  onClick={async () => {
-                                    setCameraError("");
-                                    setIsCameraActive(true);
-                                    try {
-                                      const stream = await navigator.mediaDevices.getUserMedia({
-                                        video: { width: { ideal: 640 }, height: { ideal: 640 }, facingMode: "user" }
-                                      });
-                                      mediaStreamRef.current = stream;
-                                      if (videoRef.current) {
-                                        videoRef.current.srcObject = stream;
-                                        videoRef.current.play();
-                                      }
-                                    } catch (err: any) {
-                                      console.error("Erro ao acessar câmera:", err);
-                                      setCameraError("Acesso à câmera bloqueado ou indisponível.");
-                                    }
-                                  }}
-                                  className="flex items-center justify-center gap-1.5 p-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 shadow-sm"
-                                >
-                                  <Video className="w-3.5 h-3.5" />
-                                  <span>Usar Câmera</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  id="profile-trigger-upload-btn"
-                                  onClick={() => document.getElementById("profile-photo-upload-input")?.click()}
-                                  className="flex items-center justify-center gap-1.5 p-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 shadow-sm"
-                                >
-                                  <Upload className="w-3.5 h-3.5 text-slate-400" />
-                                  <span>Carregar Ficheiro</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="space-y-2.5 bg-slate-950 p-3 rounded-xl border border-slate-800">
-                                <div className="relative aspect-square max-w-[200px] mx-auto rounded-xl overflow-hidden bg-black border border-slate-700 shadow-inner">
-                                  <video
-                                    ref={videoRef}
-                                    autoPlay
-                                    playsInline
-                                    muted
-                                    className="w-full h-full object-cover transform -scale-x-100"
-                                  />
-                                  <div className="absolute top-2 right-2 bg-slate-900/80 text-orange-400 text-[9px] font-mono px-2 py-0.5 rounded-full border border-orange-500/30 flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping" />
-                                    <span>Ao Vivo</span>
-                                  </div>
-                                </div>
-
-                                {cameraError && (
-                                  <p className="text-[10.5px] text-rose-400 font-medium text-center bg-rose-500/10 p-2 rounded-lg border border-rose-500/20">
-                                    {cameraError}
-                                  </p>
-                                )}
-
-                                <div className="flex items-center justify-center gap-2 pt-1">
-                                  <button
-                                    type="button"
-                                    id="profile-capture-snapshot-btn"
-                                    onClick={() => {
-                                      if (videoRef.current) {
-                                        const canvas = document.createElement("canvas");
-                                        canvas.width = 400;
-                                        canvas.height = 400;
-                                        const ctx = canvas.getContext("2d");
-                                        if (ctx) {
-                                          ctx.translate(canvas.width, 0);
-                                          ctx.scale(-1, 1);
-                                          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-                                          const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
-                                          setProfileFotoPerfil(dataUrl);
-                                          showToast("Foto capturada com sucesso!", "success");
-                                          stopCamera();
-                                        }
-                                      }
-                                    }}
-                                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
-                                  >
-                                    <Camera className="w-3.5 h-3.5" />
-                                    <span>Capturar Foto</span>
-                                  </button>
-
-                                  <button
-                                    type="button"
-                                    id="profile-close-camera-btn"
-                                    onClick={stopCamera}
-                                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1 border border-slate-700"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    <span>Cancelar</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Emojis Preset Grid */}
-                          <div className="space-y-2">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Escolha um Emoji como Avatar</label>
-                            <div className="grid grid-cols-8 gap-2">
-                              {["👨‍💼", "👩‍💼", "👨‍💻", "👩‍💻", "🚀", "🌟", "🍊", "💼", "☕", "🎮", "🦁", "🍕", "⚡", "❤️", "👑", "💡"].map((emoji) => (
-                                <button
-                                  type="button"
-                                  key={emoji}
-                                  onClick={() => setProfileFotoPerfil(emoji)}
-                                  className={`text-lg p-2 rounded-xl transition-all border cursor-pointer hover:scale-110 flex items-center justify-center ${
-                                    profileFotoPerfil === emoji
-                                      ? "bg-orange-500/15 border-orange-500 text-white"
-                                      : "bg-slate-950 border-slate-850 hover:border-slate-650 text-slate-300"
-                                  }`}
-                                >
-                                  {emoji}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Manual Image URL */}
-                          <div className="space-y-1.5">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Ou Cole uma URL de Imagem</label>
-                            <input
-                              type="text"
-                              value={profileFotoPerfil.startsWith("data:") ? "" : profileFotoPerfil}
-                              placeholder="https://exemplo.com/sua-foto.jpg"
-                              onChange={(e) => setProfileFotoPerfil(e.target.value)}
-                              className="w-full bg-slate-950 border border-slate-850 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium"
-                            />
-                          </div>
-
-                          {/* Campos Editáveis de Nome, Contacto e WhatsApp com Botão de Gravar Alterações */}
-                          <div id="editable-profile-info-section" className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
-                            <div className="flex items-center justify-between gap-2">
-                              <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                                <UserCheck className="w-3.5 h-3.5 text-orange-400" />
-                                <span>Dados do Colaborador (Editável)</span>
-                              </label>
-                              <button
-                                type="button"
-                                id="save-profile-changes-btn"
-                                onClick={handleSaveProfileChanges}
-                                className="px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95"
-                                title="Gravar alterações no Firestore"
-                              >
-                                <Save className="w-3.5 h-3.5" />
-                                <span>Gravar Alterações</span>
-                              </button>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <label htmlFor="profile-name-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                                    Nome Completo
-                                  </label>
-                                  {profileName.trim() ? (
-                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                      Preenchido
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                                      <AlertCircle className="w-3 h-3 text-rose-400" />
-                                      Obrigatório
-                                    </span>
-                                  )}
-                                </div>
-                                <input
-                                  type="text"
-                                  id="profile-name-input"
-                                  value={profileName}
-                                  onChange={(e) => setProfileName(e.target.value)}
-                                  placeholder="Digite o nome completo"
-                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
-                                    profileName.trim()
-                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
-                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
-                                  }`}
-                                />
-                                {!profileName.trim() && (
-                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
-                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
-                                    <span>O nome é obrigatório para identificação do colaborador.</span>
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <label htmlFor="profile-email-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                                    <Mail className="w-3 h-3 text-sky-400" />
-                                    <span>E-mail Profissional</span>
-                                  </label>
-                                  {profileEmail.trim() && (
-                                    isEmailFormatValid(profileEmail) ? (
-                                      <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                        Válido
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                                        <AlertCircle className="w-3 h-3 text-rose-400" />
-                                        Formato Inválido
-                                      </span>
-                                    )
-                                  )}
-                                </div>
-                                <input
-                                  type="email"
-                                  id="profile-email-input"
-                                  value={profileEmail}
-                                  onChange={(e) => setProfileEmail(e.target.value)}
-                                  placeholder="colaborador@empresa.com"
-                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
-                                    profileEmail.trim()
-                                      ? isEmailFormatValid(profileEmail)
-                                        ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
-                                        : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
-                                      : "border-slate-800 focus:border-orange-500"
-                                  }`}
-                                />
-                                {profileEmail.trim() && !isEmailFormatValid(profileEmail) && (
-                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
-                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
-                                    <span>Insira um formato válido de e-mail (ex: usuario@dominio.com).</span>
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <label htmlFor="profile-contact-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                                    Contacto Telefónico
-                                  </label>
-                                  {profileContact.trim() && isMozambicanPhoneValid(profileContact) ? (
-                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                      Válido (+258)
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                                      <AlertCircle className="w-3 h-3 text-rose-400" />
-                                      {!profileContact.trim() ? "Obrigatório" : "Formato Inválido"}
-                                    </span>
-                                  )}
-                                </div>
-                                <input
-                                  type="text"
-                                  id="profile-contact-input"
-                                  value={profileContact}
-                                  onChange={(e) => setProfileContact(formatMozambicanPhoneInput(e.target.value))}
-                                  placeholder="+258XXXXXXXXX (ex: +258841234567)"
-                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
-                                    profileContact.trim() && isMozambicanPhoneValid(profileContact)
-                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
-                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
-                                  }`}
-                                />
-                                {(!profileContact.trim() || !isMozambicanPhoneValid(profileContact)) && (
-                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
-                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
-                                    <span>
-                                      {!profileContact.trim()
-                                        ? "O contacto telefónico é obrigatório."
-                                        : "Use o formato moçambicano: +258 seguido de 9 dígitos (ex: +258841234567)."}
-                                    </span>
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="space-y-1.5">
-                                <div className="flex items-center justify-between gap-1">
-                                  <label htmlFor="profile-whatsapp-input" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                                    <MessageSquare className="w-3 h-3 text-emerald-400" />
-                                    <span>WhatsApp (Pedidos)</span>
-                                  </label>
-                                  {profileWhatsapp.trim() && isMozambicanPhoneValid(profileWhatsapp) ? (
-                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                      Válido (+258)
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                                      <AlertCircle className="w-3 h-3 text-rose-400" />
-                                      {!profileWhatsapp.trim() ? "Obrigatório" : "Formato Inválido"}
-                                    </span>
-                                  )}
-                                </div>
-                                <input
-                                  type="text"
-                                  id="profile-whatsapp-input"
-                                  value={profileWhatsapp}
-                                  onChange={(e) => setProfileWhatsapp(formatMozambicanPhoneInput(e.target.value))}
-                                  placeholder="+258XXXXXXXXX (ex: +258841234567)"
-                                  className={`w-full bg-slate-950 border rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium ${
-                                    profileWhatsapp.trim() && isMozambicanPhoneValid(profileWhatsapp)
-                                      ? "border-emerald-500/70 focus:border-emerald-500 bg-emerald-950/10"
-                                      : "border-rose-500 focus:border-rose-500 bg-rose-950/20"
-                                  }`}
-                                />
-                                {(!profileWhatsapp.trim() || !isMozambicanPhoneValid(profileWhatsapp)) && (
-                                  <p className="text-[10px] text-rose-400 font-medium flex items-center gap-1 mt-1">
-                                    <AlertCircle className="w-3 h-3 shrink-0 text-rose-400" />
-                                    <span>
-                                      {!profileWhatsapp.trim()
-                                        ? "O número de WhatsApp é obrigatório para envio de pedidos."
-                                        : "Use o formato moçambicano: +258 seguido de 9 dígitos (ex: +258841234567)."}
-                                    </span>
-                                  </p>
-                                )}
-                              </div>
-
-                              {/* Campo Categoria de Perfil (Admin, Operador, Auditor) */}
-                              <div id="profile-role-field-container" className="sm:col-span-2 space-y-2.5 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
-                                <div className="flex items-center justify-between gap-2">
-                                  <label htmlFor="profile-role-select" className="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                    <ShieldCheck className="w-3.5 h-3.5 text-orange-400" />
-                                    <span>Categoria de Perfil (Role / Permissões)</span>
-                                  </label>
-                                  <span className="text-[10px] text-orange-400 font-bold px-2 py-0.5 bg-orange-500/10 border border-orange-500/20 rounded-md">
-                                    {profileRole}
-                                  </span>
-                                </div>
-                                <select
-                                  id="profile-role-select"
-                                  value={profileRole}
-                                  onChange={(e) => setProfileRole(e.target.value)}
-                                  className="w-full bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl py-2.5 px-3 text-xs text-white outline-none transition font-medium cursor-pointer"
-                                >
-                                  <option value="Admin">Admin (Acesso Total / Gestão Global)</option>
-                                  <option value="Operador">Operador (Vendas, Ponto de Venda e Caixa)</option>
-                                  <option value="Auditor">Auditor (Acesso Restrito a Leitura e Relatórios)</option>
-                                </select>
-                                <p className="text-[10px] text-slate-400 font-medium leading-tight">
-                                  Atualiza a função e o nível de acesso do colaborador no Firestore ao guardar as alterações.
-                                </p>
-                              </div>
-
-                              {/* Campo Logotipo da Empresa com Pré-Visualização da Imagem */}
-                              <div id="profile-logo-field-container" className="sm:col-span-2 space-y-2.5 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl">
-                                <div className="flex items-center justify-between gap-2">
-                                  <label htmlFor="profile-logo-input" className="text-[10px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                                    <Image className="w-3.5 h-3.5 text-orange-400" />
-                                    <span>Logotipo da Empresa / Documentos (PDF)</span>
-                                  </label>
-                                  {profileLogoUrl.trim() ? (
-                                    <span className="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                      Logotipo Ativo
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] text-slate-400 font-medium">
-                                      Padrão do Sistema
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="flex flex-col sm:flex-row items-center gap-3">
-                                  {/* Pré-visualização do Logotipo */}
-                                  <div className="w-20 h-20 shrink-0 bg-slate-900 border-2 border-dashed border-slate-700 rounded-xl flex flex-col items-center justify-center relative overflow-hidden group">
-                                    {profileLogoUrl ? (
-                                      <>
-                                        <img
-                                          src={profileLogoUrl}
-                                          alt="Pré-visualização do Logotipo"
-                                          className="w-full h-full object-contain p-1.5"
-                                          onError={(e) => {
-                                            (e.target as HTMLElement).style.display = 'none';
-                                          }}
-                                        />
-                                        <button
-                                          type="button"
-                                          onClick={() => setProfileLogoUrl("")}
-                                          className="absolute inset-0 bg-slate-900/85 text-rose-400 opacity-0 group-hover:opacity-100 transition flex items-center justify-center font-bold text-[10px] cursor-pointer"
-                                          title="Remover Logotipo"
-                                        >
-                                          Remover
-                                        </button>
-                                      </>
-                                    ) : (
-                                      <div className="text-center p-2">
-                                        <Building className="w-6 h-6 text-slate-500 mx-auto mb-1" />
-                                        <span className="text-[8px] text-slate-500 font-bold block leading-tight">Sem Logo</span>
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  <div className="flex-1 space-y-2 w-full">
-                                    <p className="text-[10px] text-slate-400 leading-tight">
-                                      Este logotipo é incluído automaticamente no cabeçalho das Ordens de Compra e ficheiros PDF para fornecedores.
-                                    </p>
-                                    <div className="flex items-center gap-2">
-                                      <input
-                                        type="text"
-                                        id="profile-logo-input"
-                                        value={profileLogoUrl}
-                                        onChange={(e) => setProfileLogoUrl(e.target.value)}
-                                        placeholder="Cole a URL do logotipo (https://...)"
-                                        className="flex-1 bg-slate-900 border border-slate-800 focus:border-orange-500 rounded-xl py-2 px-3 text-xs text-white outline-none transition font-medium"
-                                      />
-                                      <input
-                                        type="file"
-                                        id="profile-logo-file-input"
-                                        accept="image/*"
-                                        className="hidden"
-                                        onChange={(e) => {
-                                          const file = e.target.files?.[0];
-                                          if (file) {
-                                            if (file.size > 2 * 1024 * 1024) {
-                                              showToast("O ficheiro de logotipo deve ter no máximo 2MB", "error");
-                                              return;
-                                            }
-                                            const reader = new FileReader();
-                                            reader.onloadend = () => {
-                                              setProfileLogoUrl(reader.result as string);
-                                              showToast("Logotipo carregado com sucesso!", "success");
-                                            };
-                                            reader.readAsDataURL(file);
-                                          }
-                                        }}
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => document.getElementById("profile-logo-file-input")?.click()}
-                                        className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-orange-400 border border-orange-500/30 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer"
-                                        title="Carregar Ficheiro de Logotipo"
-                                      >
-                                        <Upload className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Upload</span>
-                                      </button>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Read-only PIN Creation Date, Reset PIN & Visual Strength Indicator */}
-                          <div className="space-y-3 p-3.5 bg-slate-900/60 rounded-xl border border-slate-800">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="space-y-1 flex-1">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                                  Data de Criação do PIN Atual
-                                </label>
-                                <input
-                                  type="text"
-                                  readOnly
-                                  value={
-                                    activeUser?.pinCreatedAt
-                                      ? new Date(activeUser.pinCreatedAt).toLocaleDateString("pt-PT", {
-                                          day: "2-digit",
-                                          month: "2-digit",
-                                          year: "numeric",
-                                          hour: "2-digit",
-                                          minute: "2-digit"
-                                        })
-                                      : activeUser?.admissionDate
-                                      ? new Date(activeUser.admissionDate).toLocaleDateString("pt-PT", {
-                                          day: "2-digit",
-                                          month: "2-digit",
-                                          year: "numeric"
-                                        })
-                                      : "Data não registrada"
-                                  }
-                                  className="bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs rounded-lg py-1.5 px-3 outline-none cursor-not-allowed w-full"
-                                />
-                              </div>
-                              <button
-                                type="button"
-                                onClick={handleResetPin}
-                                className="shrink-0 mt-5 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 hover:text-amber-400 border border-amber-500/30 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 active:scale-95 shadow-sm"
-                                title="Gerar novo PIN temporário aleatório"
-                              >
-                                <Key className="w-3.5 h-3.5 text-amber-500" />
-                                Resetar PIN
-                              </button>
-                            </div>
-
-                            {/* PIN Entry & Visual Strength Indicator */}
-                            <div className="border-t border-slate-800/80 pt-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                                  PIN Gerado / Testar Força do PIN
-                                </label>
-                                {testPinInput && (
-                                  <span className={`text-[10px] font-bold font-mono ${pinStrength.colorText}`}>
-                                    {pinStrength.label}
-                                  </span>
-                                )}
-                              </div>
-
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  maxLength={8}
-                                  value={testPinInput}
-                                  onChange={(e) => setTestPinInput(e.target.value.replace(/\D/g, ""))}
-                                  placeholder="Digite um PIN ou clique em Resetar PIN"
-                                  className="w-full bg-slate-950 border border-slate-800 focus:border-amber-500 rounded-xl py-2 px-3 text-xs text-white font-mono outline-none transition"
-                                />
-                              </div>
-
-                              {/* Visual Strength Progress Bar (3-segment indicator) */}
-                              <div className="space-y-1">
-                                <div className="grid grid-cols-3 gap-1.5 h-1.5 w-full">
-                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[0] ? pinStrength.colorBg : "bg-slate-800"}`} />
-                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[1] ? pinStrength.colorBg : "bg-slate-800"}`} />
-                                  <div className={`rounded-full transition-all duration-300 ${pinStrength.bars[2] ? pinStrength.colorBg : "bg-slate-800"}`} />
-                                </div>
-                                <p className="text-[10px] text-slate-400 font-medium leading-tight pt-0.5">
-                                  {pinStrength.feedback}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* PIN Expiration Indicator */}
-                          <div className={`p-3.5 rounded-xl border flex flex-col gap-1 text-xs leading-relaxed transition-all ${
-                            pinRemainingDays <= 7 
-                              ? "bg-rose-500/10 border-rose-500/25 text-rose-400 animate-pulse" 
-                              : "bg-emerald-500/10 border-emerald-500/25 text-emerald-400"
-                          }`}>
-                            <div className="flex items-center justify-between font-bold">
-                              <span className="flex items-center gap-1.5">
-                                {pinRemainingDays <= 7 ? "⚠️ Expiração de Segurança (PIN)" : "🛡️ Validade da Senha (PIN)"}
-                              </span>
-                              <span className={`font-mono text-[11px] px-2.5 py-0.5 rounded-md bg-black/40 font-black ${
-                                pinRemainingDays <= 7 ? "text-rose-400 border border-rose-500/30" : "text-emerald-400"
-                              }`}>
-                                {pinRemainingDays} {pinRemainingDays === 1 ? "dia" : "dias"}
-                              </span>
-                            </div>
-                            <p className="text-[10.5px] opacity-85 mt-1">
-                              {pinRemainingDays <= 7 
-                                ? `Atenção colaborador! Seu PIN de acesso está prestes a expirar. Por segurança de dados comerciais, atualize o seu PIN em breve (Resta(m) apenas ${pinRemainingDays} dia(s)).`
-                                : `Sua senha de segurança está em conformidade com as regras de rotação obrigatória do sistema (máximo 60 dias).`}
-                            </p>
-                          </div>
-
-                          {/* 2FA Verification Selector Card */}
-                          <div id="profile-2fa-setting-card" className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-2.5">
-                                <div className={`p-2 rounded-xl transition-all ${profileTwoFactorEmail ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>
-                                  <ShieldCheck className="w-5 h-5" />
-                                </div>
-                                <div>
-                                  <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
-                                    <span>Verificação em Dois Passos (2FA) via E-mail</span>
-                                    <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded ${profileTwoFactorEmail ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30" : "bg-slate-800 text-slate-400 border border-slate-700"}`}>
-                                      {profileTwoFactorEmail ? "ATIVADO" : "DESATIVADO"}
-                                    </span>
-                                  </h4>
-                                  <p className="text-[10.5px] text-slate-400 mt-0.5">
-                                    Autenticação por e-mail para logins de novas localizações
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Interactive Switch Selector */}
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={profileTwoFactorEmail}
-                                onClick={() => {
-                                  const newValue = !profileTwoFactorEmail;
-                                  setProfileTwoFactorEmail(newValue);
-                                  showToast(
-                                    newValue 
-                                      ? "2FA via e-mail ativado para novas localizações!" 
-                                      : "2FA via e-mail desativado.",
-                                    newValue ? "success" : "info"
-                                  );
-                                }}
-                                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                                  profileTwoFactorEmail ? "bg-orange-500" : "bg-slate-700"
-                                }`}
-                                title="Ativar/Desativar Verificação em Dois Passos"
-                              >
-                                <span className="sr-only">Habilitar Verificação em Dois Passos</span>
-                                <span
-                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                                    profileTwoFactorEmail ? "translate-x-5" : "translate-x-0"
-                                  }`}
-                                />
-                              </button>
-                            </div>
-
-                            <div className="p-2.5 bg-slate-950/70 rounded-lg border border-slate-850 flex items-start gap-2 text-[10.5px] text-slate-300">
-                              <Globe className="w-4 h-4 text-orange-400 shrink-0 mt-0.5" />
-                              <p className="leading-snug">
-                                Ao realizar login a partir de um novo navegador, dispositivo ou localização não reconhecida, um código de verificação será enviado ao e-mail cadastrado (<strong>{activeUser?.email || settings.reportRecipientEmail || "e-mail do sistema"}</strong>).
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* 2FA Verification via SMS Card */}
-                          <div id="profile-2fa-sms-setting-card" className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3.5 shadow-md">
-                            {/* Header & Status Counter Badge Bar */}
-                            <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
-                                  Autenticação por SMS
-                                </span>
-                              </div>
-                              {/* Status Counter & Badges */}
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
-                                  profilePhoneValidated 
-                                    ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" 
-                                    : "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                                }`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${profilePhoneValidated ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-                                  <span>Validação: {profilePhoneValidated ? "1/1 Confirmado" : "0/1 Pendente"}</span>
-                                </span>
-
-                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
-                                  profileTwoFactorSms && profilePhoneValidated
-                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10"
-                                    : "bg-slate-800 text-slate-400 border-slate-700"
-                                }`}>
-                                  <span>2FA SMS: {profileTwoFactorSms && profilePhoneValidated ? "Ativo (1/1)" : "Inativo (0/1)"}</span>
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
-                                  profileTwoFactorSms && profilePhoneValidated 
-                                    ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-lg shadow-emerald-500/10" 
-                                    : "bg-slate-800/80 text-slate-400 border border-slate-700/80"
-                                }`}>
-                                  <Smartphone className="w-5 h-5" />
-                                </div>
-                                <div>
-                                  <h4 className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
-                                    <span>Verificação em Dois Passos (2FA) via SMS</span>
-                                    <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border ${
-                                      !profilePhoneValidated 
-                                        ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
-                                        : profileTwoFactorSms 
-                                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
-                                        : "bg-slate-800 text-slate-400 border-slate-700"
-                                    }`}>
-                                      {!profilePhoneValidated ? "REQUER VALIDAÇÃO DE NÚMERO" : profileTwoFactorSms ? "ATIVADO" : "DESATIVADO"}
-                                    </span>
-                                  </h4>
-                                  <p className="text-[10.5px] text-slate-400 mt-0.5">
-                                    Receber código de verificação por mensagem de texto SMS no telemóvel cadastrado
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Enhanced Visually Attractive Toggle Switch */}
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={profileTwoFactorSms}
-                                onClick={() => {
-                                  const hasValidContact = profileContact && profileContact.trim().length >= 8;
-                                  if (!profilePhoneValidated && !hasValidContact) {
-                                    showToast("Insira e valide o seu número de contacto telefónico para ativar 2FA via SMS.", "warning", "Validação Necessária");
-                                    return;
-                                  }
-
-                                  const newValue = !profileTwoFactorSms;
-                                  if (newValue && !profilePhoneValidated && hasValidContact) {
-                                    setProfilePhoneValidated(true);
-                                  }
-
-                                  setProfileTwoFactorSms(newValue);
-                                  showToast(
-                                    newValue 
-                                      ? "2FA via SMS ativado com sucesso para o número " + profileContact + "!" 
-                                      : "2FA via SMS desativado.",
-                                    newValue ? "success" : "info"
-                                  );
-                                }}
-                                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                                  profileTwoFactorSms && profilePhoneValidated 
-                                    ? "bg-emerald-500 border-emerald-400 shadow-md shadow-emerald-500/30" 
-                                    : "bg-slate-800 border-slate-700 hover:border-slate-600"
-                                }`}
-                                title="Ativar/Desativar Verificação em Dois Passos por SMS"
-                              >
-                                <span className="sr-only">Habilitar Verificação por SMS</span>
-                                <span
-                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out mt-0.5 ${
-                                    profileTwoFactorSms && profilePhoneValidated 
-                                      ? "translate-x-5 bg-white shadow-emerald-900/50" 
-                                      : "translate-x-0.5 bg-slate-300"
-                                  }`}
-                                />
-                              </button>
-                            </div>
-
-                            {/* Contact Number & Validation Section */}
-                            <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-850 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
-                              <div className="flex items-center gap-2">
-                                <Smartphone className="w-4 h-4 text-emerald-400 shrink-0" />
-                                <div>
-                                  <span className="text-slate-400 block text-[9.5px]">Número de Telemóvel / Contacto:</span>
-                                  <span className="text-slate-100 font-mono font-bold">
-                                    {profileContact || "Nenhum contacto cadastrado"}
-                                  </span>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                {profilePhoneValidated ? (
-                                  <span className="inline-flex items-center gap-1 text-[9.5px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-md border border-emerald-500/20 font-bold">
-                                    <Check className="w-3 h-3" />
-                                    <span>Contacto Validado (1/1)</span>
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (!profileContact || profileContact.trim().length < 8) {
-                                        showToast("Por favor insira um número de contacto válido no formulário acima antes de validar.", "warning");
-                                        return;
-                                      }
-                                      setProfilePhoneValidated(true);
-                                      showToast(`Número ${profileContact} validado com sucesso para envio de SMS!`, "success", "Número Confirmado");
-                                    }}
-                                    className="px-2.5 py-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md transition text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <ShieldCheck className="w-3.5 h-3.5" />
-                                    <span>Validar Contacto para SMS</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* WebAuthn Biometric Login Setting Card */}
-                          <div id="profile-webauthn-setting-card" className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3.5 shadow-md">
-                            <div className="flex items-center justify-between gap-3 border-b border-slate-800/80 pb-2.5">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wider font-mono flex items-center gap-1.5">
-                                  <Fingerprint className="w-3.5 h-3.5" />
-                                  Segurança Biométrica
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className={`inline-flex items-center gap-1 text-[9.5px] font-mono font-bold px-2 py-0.5 rounded-full border transition-all ${
-                                  profileWebAuthnEnabled 
-                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm shadow-emerald-500/10"
-                                    : "bg-slate-800 text-slate-400 border-slate-700"
-                                }`}>
-                                  <span className={`w-1.5 h-1.5 rounded-full ${profileWebAuthnEnabled ? "bg-emerald-400 animate-pulse" : "bg-slate-500"}`} />
-                                  <span>{profileWebAuthnEnabled ? "WebAuthn Ativo" : "Biometria Inativa"}</span>
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="flex items-center gap-3">
-                                <div className={`p-2.5 rounded-xl transition-all duration-300 ${
-                                  profileWebAuthnEnabled 
-                                    ? "bg-gradient-to-br from-orange-500/20 to-amber-500/20 text-orange-400 border border-orange-500/40 shadow-lg shadow-orange-500/10" 
-                                    : "bg-slate-800/80 text-slate-400 border border-slate-700/80"
-                                }`}>
-                                  <Fingerprint className="w-5 h-5" />
-                                </div>
-                                <div>
-                                  <h4 className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
-                                    <span>Login Biométrico via WebAuthn</span>
-                                    <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-md border ${
-                                      profileWebAuthnEnabled 
-                                        ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30" 
-                                        : "bg-slate-800 text-slate-400 border-slate-700"
-                                    }`}>
-                                      {profileWebAuthnEnabled ? "HABILITADO" : "DESABILITADO"}
-                                    </span>
-                                  </h4>
-                                  <p className="text-[10.5px] text-slate-400 mt-0.5 leading-relaxed">
-                                    Inicie sessão com Touch ID, Face ID ou impressão digital do dispositivo sem digitar o PIN.
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Interactive Switch Toggle */}
-                              <button
-                                type="button"
-                                role="switch"
-                                aria-checked={profileWebAuthnEnabled}
-                                onClick={() => {
-                                  const empId = switchSelectedEmployeeId || activeUser?.id || "e1";
-                                  if (profileWebAuthnEnabled) {
-                                    setProfileWebAuthnEnabled(false);
-                                    setProfileWebAuthnCredentialId("");
-                                    localStorage.removeItem(`erp_webauthn_enabled_${empId}`);
-                                    localStorage.removeItem(`erp_webauthn_cred_${empId}`);
-                                    setEmployees(prev => prev.map(emp => emp.id === empId ? { ...emp, webAuthnEnabled: false } : emp));
-                                    showToast("Login biométrico desativado.", "info");
-                                  } else {
-                                    handleRegisterWebAuthn();
-                                  }
-                                }}
-                                className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 transition-all duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                                  profileWebAuthnEnabled 
-                                    ? "bg-orange-500 border-orange-400 shadow-md shadow-orange-500/30" 
-                                    : "bg-slate-800 border-slate-700 hover:border-slate-600"
-                                }`}
-                                title="Ativar/Desativar Login Biométrico via WebAuthn"
-                              >
-                                <span className="sr-only">Habilitar Login Biométrico</span>
-                                <span
-                                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-300 ease-in-out mt-0.5 ${
-                                    profileWebAuthnEnabled 
-                                      ? "translate-x-5 bg-white shadow-orange-900/50" 
-                                      : "translate-x-0.5 bg-slate-300"
-                                  }`}
-                                />
-                              </button>
-                            </div>
-
-                            <div className="p-3 bg-slate-950/70 rounded-lg border border-slate-850 flex flex-wrap items-center justify-between gap-2 text-[10.5px]">
-                              <div className="flex items-center gap-2">
-                                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                                <div>
-                                  <span className="text-slate-400 block text-[9.5px]">Leitor Biométrico e Passkeys:</span>
-                                  <span className="text-slate-200 font-mono font-bold">
-                                    {typeof window !== "undefined" && window.PublicKeyCredential ? "Hardware Suportado (Touch ID / Face ID)" : "Simulador WebAuthn Habilitado"}
-                                  </span>
-                                </div>
-                              </div>
-
-                              {profileWebAuthnEnabled && (
-                                <button
-                                  type="button"
-                                  onClick={handleTestWebAuthn}
-                                  className="px-2.5 py-1 bg-orange-500/15 hover:bg-orange-500/25 text-orange-300 border border-orange-500/30 rounded-md transition text-[10px] font-bold flex items-center gap-1 cursor-pointer"
-                                >
-                                  <Fingerprint className="w-3.5 h-3.5 text-orange-400" />
-                                  <span>Testar Biometria</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {(() => {
-                            const selectedOrActiveEmp = switchSelectedEmployeeId 
-                              ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
-                              : activeUser;
-
-                            const empName = selectedOrActiveEmp?.name?.toLowerCase() || "";
-                            const empId = selectedOrActiveEmp?.id?.toLowerCase() || "";
-                            const searchLower = activitySearchText.trim().toLowerCase();
-
-                            const filteredCollaboratorLogs = auditLogs
-                              .filter(log => {
-                                if (!selectedOrActiveEmp) return false;
-                                const logUser = (log.user || "").toLowerCase();
-                                const logDetails = (log.details || "").toLowerCase();
-                                const logAction = (log.action || "").toLowerCase();
-                                const logModule = (log.module || "").toLowerCase();
-
-                                const matchesCollaborator = logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
-                                if (!matchesCollaborator) return false;
-
-                                if (activityModuleFilter && activityModuleFilter !== "Todos") {
-                                  const filterUpper = activityModuleFilter.toUpperCase();
-                                  const logUpper = logModule.toUpperCase();
-                                  let matchMod = logUpper === filterUpper;
-                                  if (!matchMod) {
-                                    if (filterUpper === "VENDAS") matchMod = logUpper.includes("VENDA") || logUpper.includes("POS");
-                                    else if (filterUpper === "STOCK" || filterUpper === "ESTOQUE") matchMod = logUpper.includes("STOCK") || logUpper.includes("ESTOQUE") || logUpper.includes("PRODUTO");
-                                    else if (filterUpper === "SEGURANÇA" || filterUpper === "SEGURANCA") matchMod = logUpper.includes("SEGURA") || logUpper.includes("AUTENTIC") || logUpper.includes("LOGIN") || logUpper.includes("AUDIT");
-                                    else if (filterUpper === "CAIXA") matchMod = logUpper.includes("CAIXA") || logUpper.includes("CASH");
-                                    else if (filterUpper === "CLIENTES") matchMod = logUpper.includes("CLIENTE");
-                                    else if (filterUpper === "FUNCIONÁRIOS" || filterUpper === "EQUIPA") matchMod = logUpper.includes("FUNC") || logUpper.includes("STAFF") || logUpper.includes("RH") || logUpper.includes("EQUIP");
-                                    else if (filterUpper === "RELATÓRIOS") matchMod = logUpper.includes("RELAT") || logUpper.includes("REPORT");
-                                    else if (filterUpper === "CONFIGURAÇÕES") matchMod = logUpper.includes("CONFIG") || logUpper.includes("SISTEMA");
-                                    else if (filterUpper === "ASSINATURAS") matchMod = logUpper.includes("ASSINATURA") || logUpper.includes("PLANO");
-                                  }
-                                  if (!matchMod) return false;
-                                }
-
-                                if (searchLower) {
-                                  const matchesText = logUser.includes(searchLower) ||
-                                                      logDetails.includes(searchLower) ||
-                                                      logAction.includes(searchLower) ||
-                                                      logModule.includes(searchLower);
-                                  if (!matchesText) return false;
-                                }
-
-                                if (log.timestamp) {
-                                  const logTime = new Date(log.timestamp).getTime();
-                                  if (activityStartDate) {
-                                    const startMs = new Date(`${activityStartDate}T00:00:00`).getTime();
-                                    if (!isNaN(startMs) && logTime < startMs) return false;
-                                  }
-                                  if (activityEndDate) {
-                                    const endMs = new Date(`${activityEndDate}T23:59:59.999`).getTime();
-                                    if (!isNaN(endMs) && logTime > endMs) return false;
-                                  }
-                                }
-
-                                return true;
-                              })
-                              .slice(-50)
-                              .reverse();
-
-                            const hasActiveFilters = Boolean(activitySearchText || (activityModuleFilter && activityModuleFilter !== "Todos") || activityStartDate || activityEndDate);
-
-                            return (
-                              <>
-                                {/* Search and Date Filter Controls at Top */}
-                                <div id="activity-log-filters-container" className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-bold text-orange-400 flex items-center gap-1.5">
-                                      <Filter className="w-3.5 h-3.5 text-orange-400" />
-                                      <span>Filtros de Pesquisa de Histórico</span>
-                                    </span>
-                                    {hasActiveFilters && (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setActivitySearchText("");
-                                          setActivityModuleFilter("Todos");
-                                          setActivityStartDate("");
-                                          setActivityEndDate("");
-                                        }}
-                                        className="text-[10px] font-extrabold text-slate-400 hover:text-orange-400 underline transition cursor-pointer"
-                                      >
-                                        Limpar Filtros
-                                      </button>
-                                    )}
-                                  </div>
-
-                                  {/* Campo de Texto para busca de logs com Botão de Exportação CSV */}
-                                  <div className="space-y-2">
-                                    <div className="flex items-center gap-2">
-                                      <div className="relative flex-1">
-                                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                                        <input
-                                          type="text"
-                                          id="activity-log-search-input"
-                                          value={activitySearchText}
-                                          onChange={(e) => setActivitySearchText(e.target.value)}
-                                          placeholder="Buscar por ação, detalhes, módulo ou palavra-chave..."
-                                          className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-xl pl-9 pr-3 py-2 outline-none focus:border-orange-500 transition font-medium"
-                                        />
-                                      </div>
-                                      <button
-                                        type="button"
-                                        id="activity-log-export-csv-btn"
-                                        onClick={() => handleExportAuditLogsCSV(filteredCollaboratorLogs)}
-                                        className="px-3.5 py-2 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shrink-0 shadow-sm cursor-pointer"
-                                        title="Exportar lista atual de logs filtrados em CSV"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Exportar Logs (CSV)</span>
-                                        <span className="sm:hidden">CSV</span>
-                                      </button>
-                                    </div>
-
-                                    {/* Botões de atalho rápidos (chips) */}
-                                    <div id="activity-log-quick-chips" className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mr-0.5">Filtro rápido:</span>
-                                      {[
-                                        { label: "Todos Módulos", query: "Todos", icon: "📋" },
-                                        { label: "Vendas", query: "Vendas", icon: "🛒" },
-                                        { label: "Stock", query: "Stock", icon: "📦" },
-                                        { label: "Segurança", query: "Segurança", icon: "🛡️" },
-                                        { label: "Configurações", query: "Configurações", icon: "⚙️" }
-                                      ].map((chip) => {
-                                        const isActive = activityModuleFilter === chip.query || (chip.query === "Todos" && activityModuleFilter === "Todos");
-                                        return (
-                                          <button
-                                            key={chip.label}
-                                            type="button"
-                                            onClick={() => {
-                                              setActivityModuleFilter(chip.query);
-                                            }}
-                                            className={`px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all flex items-center gap-1.5 cursor-pointer ${
-                                              isActive
-                                                ? "bg-orange-500 text-white border-orange-400 shadow-sm"
-                                                : "bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:text-white hover:bg-slate-900"
-                                            }`}
-                                          >
-                                            <span className="text-xs">{chip.icon}</span>
-                                            <span>{chip.label}</span>
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-
-                                    {/* Gráfico D3 de Volume Diário de Logs nos últimos 7 dias */}
-                                    <AuditLogsD3BarChart logs={filteredCollaboratorLogs} />
-                                  </div>
-
-                                  {/* Seletor de Módulo e Intervalo de Datas */}
-                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                    <div>
-                                      <label htmlFor="activity-log-module-select" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
-                                        <Filter className="w-3 h-3 text-orange-400" />
-                                        Filtrar por Módulo
-                                      </label>
-                                      <select
-                                        id="activity-log-module-select"
-                                        value={activityModuleFilter}
-                                        onChange={(e) => setActivityModuleFilter(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition font-medium cursor-pointer"
-                                      >
-                                        <option value="Todos">Todos os Módulos</option>
-                                        <option value="Vendas">Vendas / POS</option>
-                                        <option value="Stock">Stock & Inventário</option>
-                                        <option value="Segurança">Segurança & Autenticação</option>
-                                        <option value="Caixa">Caixa & Movimentos</option>
-                                        <option value="Clientes">Clientes & Fidelização</option>
-                                        <option value="Funcionários">Funcionários & RH</option>
-                                        <option value="Relatórios">Relatórios & Análise</option>
-                                        <option value="Configurações">Configurações do Sistema</option>
-                                        <option value="Assinaturas">Assinaturas & Planos</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label htmlFor="activity-log-start-date" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
-                                        <Calendar className="w-3 h-3 text-orange-400" />
-                                        Data Início
-                                      </label>
-                                      <input
-                                        type="date"
-                                        id="activity-log-start-date"
-                                        value={activityStartDate}
-                                        onChange={(e) => setActivityStartDate(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label htmlFor="activity-log-end-date" className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1 flex items-center gap-1">
-                                        <Calendar className="w-3 h-3 text-orange-400" />
-                                        Data Fim
-                                      </label>
-                                      <input
-                                        type="date"
-                                        id="activity-log-end-date"
-                                        value={activityEndDate}
-                                        onChange={(e) => setActivityEndDate(e.target.value)}
-                                        className="w-full bg-slate-950 border border-slate-750 text-slate-100 text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-orange-500 transition"
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Banner de Resumo */}
-                                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-xs">
-                                  <p className="font-bold text-orange-400 flex items-center justify-between">
-                                    <span>Registos do Colaborador: <strong className="text-white">{selectedOrActiveEmp?.name}</strong></span>
-                                    <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">{filteredCollaboratorLogs.length} registro(s)</span>
-                                  </p>
-                                  {hasActiveFilters && (
-                                    <p className="text-[10.5px] text-slate-400 italic">
-                                      Exibindo registos filtrados por texto/intervalo de datas.
-                                    </p>
-                                  )}
-                                </div>
-
-                                {filteredCollaboratorLogs.length > 0 ? (
-                                  <div className="space-y-2">
-                                    {filteredCollaboratorLogs.map((log, logIdx) => (
-                                      <div key={`${log.id || 'log'}-${logIdx}`} className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl space-y-1 text-left hover:border-slate-750 transition">
-                                        <div className="flex items-center justify-between gap-2">
-                                          <span className="px-2 py-0.5 bg-orange-500/15 text-orange-400 border border-orange-500/30 font-bold font-mono text-[9.5px] rounded-md uppercase">
-                                            {log.module || "SISTEMA"} • {log.action || "AÇÃO"}
-                                          </span>
-                                          <span className="text-[10px] text-slate-400 font-mono">
-                                            {new Date(log.timestamp).toLocaleString("pt-PT", {
-                                              day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-                                            })}
-                                          </span>
-                                        </div>
-                                        <p className="text-xs text-slate-200 font-medium leading-tight pt-1">
-                                          {log.details || "Ação registrada no sistema."}
-                                        </p>
-                                        <p className="text-[9.5px] text-slate-500 font-mono">
-                                          Operador: <strong className="text-slate-400">{log.user}</strong>
-                                        </p>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className="p-8 text-center bg-slate-900/40 rounded-xl border border-slate-800 space-y-2">
-                                    <p className="text-2xl">📜</p>
-                                    <p className="text-xs font-bold text-slate-300">Nenhum registro encontrado</p>
-                                    <p className="text-[10.5px] text-slate-500">
-                                      {hasActiveFilters 
-                                        ? "Nenhuma ação corresponde aos filtros de pesquisa ou intervalo de datas definidos." 
-                                        : `Não foram encontradas ações no log de auditoria para ${selectedOrActiveEmp?.name || "este colaborador"}.`}
-                                    </p>
-                                  </div>
-                                )}
-                              </>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </div>
-
-                {/* Footer Componente de Observações do Colaborador */}
-                {(() => {
-                  const targetEmp = switchSelectedEmployeeId 
-                    ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
-                    : activeUser;
-
-                  return (
-                    <div id="modal-employee-observacoes-section" className="px-6 py-3.5 border-t border-slate-100 dark:border-zinc-850 bg-slate-900/40 dark:bg-zinc-950/60 text-left space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <label htmlFor="modal-employee-observacoes-input" className="text-[10.5px] font-bold text-slate-300 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                          <FileText className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                          <span>Observações & Notas Extras na Ficha ({targetEmp?.name || "Colaborador"})</span>
-                        </label>
-                        <button
-                          type="button"
-                          id="save-collaborator-observacoes-btn"
-                          onClick={async () => {
-                            const targetEmpId = targetEmp?.id;
-                            if (!targetEmpId) return;
-
-                            const updatedEmployees = employees.map(emp => {
-                              if (emp.id === targetEmpId) {
-                                return { ...emp, observacoes: profileObservacoes.trim(), expirationDate: profileExpirationDate };
-                              }
-                              return emp;
-                            });
-
-                            setEmployees(updatedEmployees);
-                            await syncTable("employees", updatedEmployees);
-
-                            if (activeUser && activeUser.id === targetEmpId) {
-                              setActiveUser({
-                                ...activeUser,
-                                observacoes: profileObservacoes.trim(),
-                                expirationDate: profileExpirationDate
-                              });
-                            }
-
-                            showToast(`Observações e Data de Expiração de ${targetEmp.name} salvas na ficha com sucesso!`, "success");
-                            handleAddAuditLog(
-                              "Atualização de Observações/Expiração",
-                              "COLABORADORES",
-                              `Observações e data de expiração (${profileExpirationDate || "não definida"}) atualizadas para o colaborador ${targetEmp.name} (ID: ${targetEmp.id}).`
-                            );
-                          }}
-                          className="px-2.5 py-1 bg-orange-500/15 hover:bg-orange-500/25 text-orange-400 border border-orange-500/30 rounded-lg text-[10px] font-bold transition cursor-pointer flex items-center gap-1 active:scale-95 shadow-sm"
-                          title="Salvar apenas as observações e data de expiração no cadastro do colaborador"
-                        >
-                          <Save className="w-3 h-3" />
-                          <span>Salvar Notas</span>
-                        </button>
-                      </div>
-
-                      <textarea
-                        id="modal-employee-observacoes-input"
-                        rows={2}
-                        value={profileObservacoes}
-                        onChange={(e) => setProfileObservacoes(e.target.value)}
-                        placeholder={`Digite observações, notas extras ou anotações na ficha de ${targetEmp?.name || "este colaborador"}...`}
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl p-2.5 text-xs text-slate-100 outline-none transition font-medium resize-none shadow-inner placeholder:text-slate-500"
-                      />
-
-                      {/* Campo de Entrada de Data 'Data de Expiração' */}
-                      <div className="pt-1.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-800/60">
-                        <label htmlFor="modal-employee-expiration-date-input" className="text-[10.5px] font-bold text-slate-300 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-orange-400 shrink-0" />
-                          <span>Data de Expiração (Contrato / Credencial)</span>
-                        </label>
-                        <input
-                          type="date"
-                          id="modal-employee-expiration-date-input"
-                          value={profileExpirationDate}
-                          onChange={(e) => setProfileExpirationDate(e.target.value)}
-                          className="bg-slate-950 border border-slate-800 focus:border-orange-500 rounded-xl px-3 py-1.5 text-xs text-slate-100 outline-none transition font-medium shadow-inner cursor-pointer"
-                        />
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* Footer */}
-                <div className="p-6 border-t border-slate-100 dark:border-zinc-850 flex items-center justify-between gap-3 bg-slate-900/10">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={handleGeneratePaymentQr}
-                      disabled={isGeneratingQr}
-                      className="px-3.5 py-2 text-xs font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                    >
-                      <QrCode className="w-4 h-4 text-emerald-500 shrink-0" />
-                      {isGeneratingQr ? "Gerando QR..." : "Gerar QR de Pagamento"}
-                    </button>
-
-                    <button
-                      type="button"
-                      id="export-collaborator-pdf-button"
-                      onClick={handleExportCollaboratorPdf}
-                      className="px-3.5 py-2 text-xs font-bold bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                      title="Gerar e exportar Ficha do Colaborador em PDF"
-                    >
-                      <FileText className="w-4 h-4 text-sky-500 shrink-0" />
-                      Exportar Ficha de Colaborador
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleSuspendCollaborator}
-                      className="px-3.5 py-2 text-xs font-bold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                      title="Suspender Colaborador Atual"
-                    >
-                      <UserX className="w-4 h-4 text-rose-500 shrink-0" />
-                      Suspender Colaborador
-                    </button>
-
-                    <button
-                      type="button"
-                      id="view-full-activity-history-btn"
-                      onClick={() => setUserSwitchModalTab("activity")}
-                      className="px-3.5 py-2 text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                      title="Alternar para a aba de Histórico de Atividade"
-                    >
-                      <History className="w-4 h-4 text-amber-500 shrink-0" />
-                      <span>Ver Histórico Completo</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      id="clear-collaborator-observacoes-btn"
-                      onClick={() => {
-                        setProfileObservacoes("");
-                        showToast("Observações limpas com sucesso!", "info");
-                      }}
-                      className="px-3.5 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-750 text-slate-300 dark:text-slate-200 border border-slate-700 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-sm"
-                      title="Limpar o campo de notas/observações do colaborador selecionado"
-                    >
-                      <Trash2 className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span>Limpar Observações</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsUserSwitchModalOpen(false)}
-                      className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
-                    >
-                      Fechar
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (userSwitchModalTab === "switch") {
-                          if (!switchSelectedEmployeeId) return;
-                          const selectedEmp = employees.find(x => x.id === switchSelectedEmployeeId);
-                          if (!selectedEmp) return;
-
-                          // Verify PIN/password before switching!
-                          const requiredPin = selectedEmp.pin || "123456";
-                          if (!switchEnteredPin.trim()) {
-                            setSwitchPinError("Por favor, introduza a senha / PIN de acesso deste colaborador.");
-                            return;
-                          }
-                          if (switchEnteredPin.trim() !== requiredPin.trim()) {
-                            setSwitchPinError("Senha incorreta. Por favor, tente novamente.");
-                            return;
-                          }
-
-                          // Check if account is blocked/inactive
-                          if (selectedEmp.status === "BLOCKED") {
-                            setSwitchPinError("Esta conta está BLOQUEADA por expiração de senha ou motivos de segurança.");
-                            return;
-                          }
-                          if (selectedEmp.status === "INACTIVE" || selectedEmp.status === "SUSPENDED") {
-                            setSwitchPinError("Esta conta está inativa ou suspensa. Contacte o Administrador.");
-                            return;
-                          }
-
-                          // Check expiration policy (2 months / 60 days)
-                          const now = new Date();
-                          const createdAtStr = selectedEmp.pinCreatedAt || selectedEmp.admissionDate || now.toISOString();
-                          const createdAt = new Date(createdAtStr);
-                          const diffTime = now.getTime() - createdAt.getTime();
-                          const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-                          const isPinTemporary = selectedEmp.pinChanged === false;
-
-                          // If password is temporary (first login) OR has expired (older than 60 days)
-                          if (isPinTemporary) {
-                            setForcePinTargetEmployee(selectedEmp);
-                            setNewPin("");
-                            setConfirmNewPin("");
-                            setForcePinError("Este é o seu primeiro login. Por favor, crie uma senha pessoal segura.");
-                            setForcePinChangeOpen(true);
-                            setIsUserSwitchModalOpen(false);
-                            return;
-                          }
-
-                          if (diffDays > 60) {
-                            setForcePinTargetEmployee(selectedEmp);
-                            setNewPin("");
-                            setConfirmNewPin("");
-                            setForcePinError("A sua senha de acesso expirou (validade de 2 meses). Por favor, defina uma nova senha.");
-                            setForcePinChangeOpen(true);
-                            setIsUserSwitchModalOpen(false);
-                            return;
-                          }
-
-                          const autoLinkChecked = (document.getElementById("auto-link-email-checkbox") as HTMLInputElement)?.checked ?? true;
-                          const emailToBind = auth.currentUser?.email || selectedEmp.email || "";
-
-                          let updatedEmployees = employees.map(emp => {
-                            if (emp.id === switchSelectedEmployeeId) {
-                              return { 
-                                ...emp, 
-                                email: autoLinkChecked && emailToBind ? emailToBind.toLowerCase().trim() : (emp.email || ""),
-                                observacoes: profileObservacoes.trim(),
-                                expirationDate: profileExpirationDate
-                              };
-                            }
-                            return emp;
-                          });
-                          setEmployees(updatedEmployees);
-                          await syncTable("employees", updatedEmployees);
-
-                          // Perform active switch
-                          const finalActiveUser = {
-                            ...selectedEmp,
-                            email: autoLinkChecked && emailToBind ? emailToBind : (selectedEmp.email || ""),
-                            fotoPerfil: selectedEmp.fotoPerfil || "",
-                            observacoes: profileObservacoes.trim(),
-                            expirationDate: profileExpirationDate
-                          };
-                          setActiveUser(finalActiveUser);
-
-                          showToast(
-                            `Usuário alterado com sucesso para ${selectedEmp.name}!${autoLinkChecked ? " Conta vinculada com sucesso." : ""}`, 
-                            "success"
-                          );
-
-                          handleAddAuditLog(
-                            "Alteração de Usuário",
-                            "SISTEMA",
-                            `Operador alterado para ${selectedEmp.name} (ID: ${selectedEmp.id})${autoLinkChecked ? ` com vínculo de e-mail ao ${emailToBind}` : ""}`
-                          );
-
-                          setIsUserSwitchModalOpen(false);
-                        } else {
-                          await handleSaveProfileChanges();
-                          setIsUserSwitchModalOpen(false);
-                        }
-                      }}
-                      disabled={userSwitchModalTab === "switch" ? (!switchSelectedEmployeeId || !switchEnteredPin.trim()) : !profileName.trim()}
-                      className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
-                        (userSwitchModalTab === "switch" ? (switchSelectedEmployeeId && switchEnteredPin.trim()) : profileName.trim())
-                          ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
-                          : "bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700"
-                      }`}
-                    >
-                      {userSwitchModalTab === "switch" ? "Vincular & Alterar Conta" : "Salvar Perfil"}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Ultra-Clean User / Collaborator Switch Modal */}
+      <UserSwitchModal
+        isOpen={isUserSwitchModalOpen}
+        onClose={() => setIsUserSwitchModalOpen(false)}
+        theme={theme}
+        employees={employees}
+        activeUser={activeUser}
+        onSelectEmployee={(newEmp) => {
+          setActiveUser(newEmp);
+          showToast(`Operador alterado para ${newEmp.name}!`, "success");
+        }}
+        onAuditLog={(action, module, details) => {
+          handleAddAuditLog(action, module, details);
+        }}
+      />
 
       {/* Payment QR Code Modal Overlay */}
       <AnimatePresence>

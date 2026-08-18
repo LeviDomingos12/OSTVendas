@@ -331,3 +331,25 @@ export interface SalesForecast {
   growthTrend: "up" | "down" | "stable";
   suggestedCampaigns: string[];
 }
+
+export type SystemUser = Employee;
+
+export interface Reminder {
+  id: string;
+  title: string;
+  description?: string;
+  time?: string;
+  completed: boolean;
+  priority?: "low" | "medium" | "high";
+  date?: string;
+}
+
+export interface RecurringReminder {
+  id: string;
+  title: string;
+  description?: string;
+  frequency: "daily" | "weekly" | "monthly";
+  daysOfWeek?: number[];
+  time?: string;
+  active: boolean;
+}

@@ -1099,6 +1099,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
   // Form Fields
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [barcode, setBarcode] = useState("");
   const [category, setCategory] = useState("Mercearia");
   const [supplier, setSupplier] = useState("");
   const [costPrice, setCostPrice] = useState<number>(0);
@@ -1271,6 +1272,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     setEditingProduct(null);
     setName("");
     setCode(`PROD-${Math.floor(1000 + Math.random() * 9000)}`);
+    setBarcode(`560${Math.floor(100000000 + Math.random() * 900000000)}`);
     setCategory("Mercearia");
     setSupplier("");
     setCostPrice(0);
@@ -1290,6 +1292,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     setEditingProduct(p);
     setName(p.name);
     setCode(p.code);
+    setBarcode(p.barcode || "");
     setCategory(p.category);
     setSupplier(p.supplier || "");
     setCostPrice(p.costPrice);
@@ -1311,6 +1314,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
       id: `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       name: `${p.name} (Cópia)`,
       code: `${p.code}-COP`,
+      barcode: p.barcode ? `${p.barcode}-1` : `560${Math.floor(100000000 + Math.random() * 900000000)}`,
       stock: 0
     };
     onAddProduct(duplicated);
@@ -1341,6 +1345,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
       id: editingProduct ? editingProduct.id : `prod-${Date.now()}`,
       name,
       code,
+      barcode: barcode.trim() || undefined,
       category,
       supplier,
       costPrice,
@@ -4241,6 +4246,29 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none focus:border-orange-500"
+                  />
+                </div>
+
+                {/* Barcode (EAN / Scanner) */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                      <span>🏷️ Código de Barras (EAN)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setBarcode(`560${Math.floor(100000000 + Math.random() * 900000000)}`)}
+                      className="text-[9.5px] text-orange-600 hover:text-orange-700 font-bold hover:underline cursor-pointer"
+                    >
+                      ⚡ Gerar EAN-13
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Bipe com o leitor ou digite o código de barras"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold font-mono text-slate-800 outline-none focus:border-orange-500"
                   />
                 </div>
 
