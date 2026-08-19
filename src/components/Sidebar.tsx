@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { UserRole, UserProfile, Employee, SubscriptionPlan } from "../types";
 import { canAccessModule } from "../lib/planPermissions";
+import { useSystemVersion } from "../lib/versionManager";
 
 interface SidebarProps {
   currentRole: UserRole;
@@ -49,6 +50,7 @@ export default function Sidebar({
   onSwitchUser,
   subscriptionPlan = "OURO"
 }: SidebarProps) {
+  const { formattedVersion } = useSystemVersion();
   const effectivePlan: SubscriptionPlan = activeUser?.subscriptionPlan || subscriptionPlan || "OURO";
   
   const profiles: UserProfile[] = [
@@ -122,7 +124,7 @@ export default function Sidebar({
                 OST Vendas
               </h1>
               <span className="text-[9px] text-orange-500 font-extrabold uppercase tracking-widest font-mono mt-0.5 block">
-                Comercial v1.0
+                Comercial {formattedVersion}
               </span>
             </div>
           </div>

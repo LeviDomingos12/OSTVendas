@@ -64,6 +64,8 @@ import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import { DashboardSalesTab } from "./dashboard/DashboardSalesTab";
 import { DashboardPerformanceTab } from "./dashboard/DashboardPerformanceTab";
 import { DashboardOperationsTab } from "./dashboard/DashboardOperationsTab";
+import { ManualSyncWidget } from "./dashboard/ManualSyncWidget";
+import { ProfitMarginWidget } from "./dashboard/ProfitMarginWidget";
 
 interface DashboardModuleProps {
   products: Product[];
@@ -1069,6 +1071,48 @@ export default function DashboardModule({
 
     const currentCashDesk = baseReinforcements + cashSalesAmount - cashExpenses;
 
+    // Specific Daily Sales & Cost of Goods Sold (Custo de Vendas) for selectedDateStr and previous day
+    let dailySales = 0;
+    let dailyCostOfSales = 0;
+    
+    const prevDayObj = new Date(selectedDateStr);
+    prevDayObj.setDate(prevDayObj.getDate() - 1);
+    const prevDayDateStr = prevDayObj.toISOString().split("T")[0];
+
+    let yesterdaySales = 0;
+    let yesterdayCostOfSales = 0;
+
+    transactions.forEach(tx => {
+      const txDate = dateSplit(tx.timestamp);
+      let txCost = 0;
+      tx.items.forEach(item => {
+        const prod = products.find(p => p.id === item.productId);
+        const cost = prod && typeof prod.costPrice === "number" ? prod.costPrice : item.price * 0.7;
+        txCost += cost * item.quantity;
+      });
+
+      if (txDate === selectedDateStr) {
+        dailySales += tx.grandTotal;
+        dailyCostOfSales += txCost;
+      }
+      if (txDate === prevDayDateStr) {
+        yesterdaySales += tx.grandTotal;
+        yesterdayCostOfSales += txCost;
+      }
+    });
+
+    const dailyProfit = dailySales - dailyCostOfSales;
+    const dailyProfitMarginPercent = dailySales > 0 ? (dailyProfit / dailySales) * 100 : 0;
+
+    const yesterdayProfit = yesterdaySales - yesterdayCostOfSales;
+    const yesterdayProfitMarginPercent = yesterdaySales > 0 ? (yesterdayProfit / yesterdaySales) * 100 : 0;
+
+    const profitGrowthRate = yesterdayProfit > 0
+      ? ((dailyProfit - yesterdayProfit) / yesterdayProfit) * 100
+      : (dailyProfit > 0 ? 100 : 0);
+
+    const marginPointsDiff = dailyProfitMarginPercent - yesterdayProfitMarginPercent;
+
     return {
       salesToday: salesCurrent,
       profitToday: profitCurrent,
@@ -1082,7 +1126,17 @@ export default function DashboardModule({
       activeDebtsCount,
       debtsSettledMonth,
       recoveryRate,
-      currentCashDesk
+      currentCashDesk,
+      dailySales,
+      dailyCostOfSales,
+      dailyProfit,
+      dailyProfitMarginPercent,
+      yesterdaySales,
+      yesterdayCostOfSales,
+      yesterdayProfit,
+      yesterdayProfitMarginPercent,
+      profitGrowthRate,
+      marginPointsDiff
     };
   }, [transactions, products, customers, cashFlow, selectedDateStr, timeScope]);
 
@@ -1801,68 +1855,15 @@ export default function DashboardModule({
   return (
     <div className="space-y-6">
 
-      {/* PERSISTENT OFFLINE SYNC PENDING BANNER */}
-      {Object.keys(pendingSyncQueue).length > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: -8 }}
-          animate={{ opacity: 1, y: 0 }}
-          className={`p-4 rounded-3xl border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm transition-all duration-200 ${
-            theme === "night"
-              ? "bg-amber-500/10 border-amber-500/20 text-amber-100"
-              : "bg-amber-50 border-amber-200 text-slate-800"
-          }`}
-        >
-          <div className="flex items-start gap-3.5">
-            <div className={`p-2.5 rounded-2xl shrink-0 transition-all ${
-              theme === "night" ? "bg-amber-500/25 text-amber-400" : "bg-amber-100 text-amber-700"
-            }`}>
-              <WifiOff className="w-5 h-5 animate-pulse" />
-            </div>
-            <div className="space-y-0.5">
-              <h4 className="font-extrabold text-sm md:text-base flex flex-wrap items-center gap-2">
-                <span>Alterações Pendentes de Sincronização</span>
-                <span className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold uppercase ${
-                  isOnline 
-                    ? theme === "night"
-                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                      : "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                    : theme === "night"
-                      ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                      : "bg-rose-50 text-rose-600 border border-rose-200"
-                }`}>
-                  {isOnline ? "Ligação Disponível" : "Sem Ligação"}
-                </span>
-              </h4>
-              <p className={`text-xs leading-relaxed ${theme === "night" ? "text-slate-400" : "text-slate-600"}`}>
-                Existem dados registados offline localmente que ainda não foram sincronizados com o servidor principal. 
-                Secções pendentes: <strong className="font-extrabold text-amber-500">{Object.keys(pendingSyncQueue).map(k => {
-                  if (k === "products") return "Produtos";
-                  if (k === "transactions") return "Vendas";
-                  if (k === "customers") return "Clientes";
-                  if (k === "cashflow") return "Caixa";
-                  if (k === "employees") return "Funcionários";
-                  if (k === "auditlogs") return "Auditoria";
-                  if (k === "settings") return "Definições";
-                  return k;
-                }).join(", ")}</strong>.
-              </p>
-            </div>
-          </div>
-
-          <button
-            onClick={onManualSync}
-            disabled={isManualSyncing}
-            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
-              isManualSyncing
-                ? "bg-slate-300 dark:bg-zinc-800 text-slate-500 cursor-not-allowed"
-                : "bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:from-orange-600 hover:to-amber-600 shadow-md shadow-orange-500/20 hover:scale-[1.02] active:scale-[0.98]"
-            }`}
-          >
-            <RefreshCw className={`w-4 h-4 ${isManualSyncing ? "animate-spin" : ""}`} />
-            <span>{isManualSyncing ? "Sincronizar Agora" : "Sincronizar Agora"}</span>
-          </button>
-        </motion.div>
-      )}
+      {/* DEDICATED MANUAL SYNC & OFFLINE QUEUE DASHBOARD WIDGET */}
+      <ManualSyncWidget
+        pendingSyncQueue={pendingSyncQueue}
+        isManualSyncing={isManualSyncing}
+        isOnline={isOnline}
+        onManualSync={onManualSync}
+        theme={theme}
+        onShowToast={onShowToast}
+      />
 
       {/* TOP NOTIFICATION BAR - VISUAL REMINDERS AND MANAGEMENT TASKS */}
       <motion.div 
@@ -2404,6 +2405,23 @@ export default function DashboardModule({
           )}
         </div>
       </div>
+
+      {/* PERFORMANCE KPI WIDGET - DAILY PROFIT MARGIN */}
+      <ProfitMarginWidget
+        dailySales={stats.dailySales}
+        dailyCostOfSales={stats.dailyCostOfSales}
+        dailyProfit={stats.dailyProfit}
+        dailyProfitMarginPercent={stats.dailyProfitMarginPercent}
+        yesterdaySales={stats.yesterdaySales}
+        yesterdayCostOfSales={stats.yesterdayCostOfSales}
+        yesterdayProfit={stats.yesterdayProfit}
+        yesterdayProfitMarginPercent={stats.yesterdayProfitMarginPercent}
+        profitGrowthRate={stats.profitGrowthRate}
+        marginPointsDiff={stats.marginPointsDiff}
+        currency={currency}
+        selectedDateStr={selectedDateStr}
+        isToday={selectedDateStr === todayStr}
+      />
 
       {/* 1. KEY INDICATORS ROW - Bento Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

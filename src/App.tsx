@@ -1231,26 +1231,32 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
-  // Global Fetch Rate Limit (429) Interceptor
+  // Global Fetch Rate Limit (429) Interceptor with Toast Throttling & Auto-Recovery
   useEffect(() => {
     const originalFetch = window.fetch;
+    let lastToastTime = 0;
+
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
       if (response.status === 429) {
-        try {
-          const clone = response.clone();
-          const data = await clone.json();
-          showToast(
-            data.message || data.error || "Muitas requisições enviadas ao servidor. Sistema de proteção e Rate Limit ativado.",
-            "warning",
-            "🛡️ Rate Limit (429 Bloqueio)"
-          );
-        } catch {
-          showToast(
-            "Limite de requisições ao servidor excedido (429 Too Many Requests). Por favor aguarde alguns instantes.",
-            "warning",
-            "🛡️ Rate Limit (429 Bloqueio)"
-          );
+        const now = Date.now();
+        if (now - lastToastTime > 5000) {
+          lastToastTime = now;
+          try {
+            const clone = response.clone();
+            const data = await clone.json();
+            showToast(
+              data.message || data.error || "Muitas requisições enviadas. Sistema de proteção e Rate Limit em vigor.",
+              "warning",
+              "🛡️ Rate Limit"
+            );
+          } catch {
+            showToast(
+              "Limite de requisições ao servidor atingido (429). Aguarde alguns segundos.",
+              "warning",
+              "🛡️ Rate Limit"
+            );
+          }
         }
       }
       return response;
@@ -2124,33 +2130,67 @@ export default function App() {
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(isCircuitBroken());
 
+  // Stable refs for DB state, performance optimization and concurrency locks
+  const sessionStartTimeRef = useRef<number>(Date.now());
+  const lastSyncQueueRawRef = useRef<string>("");
+  const isSyncProcessingRef = useRef<boolean>(false);
+  const isLoggingAuditRef = useRef<boolean>(false);
+  const isBackingUpRef = useRef<boolean>(false);
+
+  const dbStateRef = useRef({
+    settings,
+    products,
+    customers,
+    transactions,
+    cashFlow,
+    employees,
+    auditLogs
+  });
+
+  useEffect(() => {
+    dbStateRef.current = {
+      settings,
+      products,
+      customers,
+      transactions,
+      cashFlow,
+      employees,
+      auditLogs
+    };
+  }, [settings, products, customers, transactions, cashFlow, employees, auditLogs]);
+
   // Offline sync queue state & status tracking
   const [pendingSyncQueue, setPendingSyncQueue] = useState<Record<string, any>>(() => {
     try {
       const raw = localStorage.getItem("pos_sync_queue");
-      return raw ? JSON.parse(raw) : {};
+      if (raw) {
+        lastSyncQueueRawRef.current = raw;
+        return JSON.parse(raw);
+      }
+      return {};
     } catch {
       return {};
     }
   });
   const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
 
-  // Periodically monitor the local storage for changes to sync queue
+  // Periodically monitor the local storage for changes to sync queue without double JSON.stringify
   useEffect(() => {
     const checkQueue = () => {
       try {
-        const raw = localStorage.getItem("pos_sync_queue");
-        const parsed = raw ? JSON.parse(raw) : {};
-        if (JSON.stringify(parsed) !== JSON.stringify(pendingSyncQueue)) {
+        const raw = localStorage.getItem("pos_sync_queue") || "";
+        if (raw !== lastSyncQueueRawRef.current) {
+          lastSyncQueueRawRef.current = raw;
+          const parsed = raw ? JSON.parse(raw) : {};
           setPendingSyncQueue(parsed);
         }
       } catch (e) {
         console.warn("Erro ao monitorizar fila offline:", e);
       }
     };
-    const interval = setInterval(checkQueue, 1500);
+    const interval = setInterval(checkQueue, 5000);
     return () => clearInterval(interval);
-  }, [pendingSyncQueue]);
+  }, []);
 
   // Listen for Firestore Quota Exceeded events and initialize system error capturing
   useEffect(() => {
@@ -2210,14 +2250,49 @@ export default function App() {
 
   // Advanced top bar metrics states
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => new Date().toLocaleTimeString());
-  const [sessionSeconds, setSessionSeconds] = useState<number>(0);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setSessionSeconds(prev => prev + 1);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // GENERAL AUDIT LOGGING WRAPPER
+  const handleAddAuditLog = useCallback((action: string, module: string, details: string, customUser?: Employee) => {
+    if (isLoggingAuditRef.current) return;
+    isLoggingAuditRef.current = true;
+    try {
+      let authRole: UserRole = "CASHIER";
+      const targetUser = customUser || activeUser;
+      const username = targetUser ? targetUser.name : "Sistema / Visitante";
+      if (targetUser && targetUser.role) {
+        const raw = targetUser.role.toLowerCase();
+        if (raw.includes("supervisor")) authRole = "SUPERVISOR";
+        else if (raw.includes("administrador") || raw.includes("gestor")) authRole = "ADMIN";
+      }
+
+      const ipStr = userIpInfo ? `${userIpInfo.ip} (${userIpInfo.city}, ${userIpInfo.country})` : "102.81.12.94 (Maputo, Moçambique)";
+      const devStr = deviceInfo || "Desktop (Chrome)";
+
+      const newLog: AuditLog = {
+        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        timestamp: new Date().toISOString(),
+        user: username,
+        userRole: authRole,
+        action,
+        module,
+        details,
+        ip: ipStr,
+        device: devStr
+      };
+      setAuditLogs(prev => {
+        let updated = [...prev, newLog];
+        if (updated.length > 200) {
+          updated = updated.slice(-200);
+        }
+        try {
+          syncTable("auditlogs", updated);
+        } catch (e) {}
+        return updated;
+      });
+    } finally {
+      isLoggingAuditRef.current = false;
+    }
+  }, [activeUser, userIpInfo, deviceInfo]);
 
   // DB Sync helper with robust offline queueing
   const syncTable = async (tableName: string, updatedData: any) => {
@@ -2257,21 +2332,29 @@ export default function App() {
         const queue = JSON.parse(rawQueue);
         if (queue[tableName]) {
           delete queue[tableName];
-          safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
+          const newRaw = JSON.stringify(queue);
+          safeLocalStorageSetItem("pos_sync_queue", newRaw);
+          lastSyncQueueRawRef.current = newRaw;
+          setPendingSyncQueue(queue);
         }
       }
     } catch (err: any) {
       console.warn(`[OFFLINE CACHE] Não foi possível sincronizar a tabela '${tableName}' (${err.message}). Guardando para reenvio automático.`);
-      handleAddAuditLog(
-        "Falha de Sincronização",
-        "Erros do Sistema",
-        `Erro de conexão ao sincronizar tabela '${tableName}': ${err.message}. Guardado na fila de reenvio offline.`
-      );
+      if (tableName !== "auditlogs") {
+        handleAddAuditLog(
+          "Falha de Sincronização",
+          "Erros do Sistema",
+          `Erro de conexão ao sincronizar tabela '${tableName}': ${err.message}. Guardado na fila de reenvio offline.`
+        );
+      }
       try {
         const rawQueue = localStorage.getItem("pos_sync_queue");
         const queue = rawQueue ? JSON.parse(rawQueue) : {};
         queue[tableName] = updatedData;
-        safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
+        const newRaw = JSON.stringify(queue);
+        safeLocalStorageSetItem("pos_sync_queue", newRaw);
+        lastSyncQueueRawRef.current = newRaw;
+        setPendingSyncQueue(queue);
       } catch (queueErr) {
         console.warn("Erro ao guardar alteração na fila offline local (quota de armazenamento excedida):", queueErr);
       }
@@ -2282,11 +2365,13 @@ export default function App() {
   useEffect(() => {
     // Register the callback to capture silent errors and log them to AuditLogs
     setLogCallback(handleAddAuditLog);
-  }, [activeUser, auditLogs]); // Re-bind when user context or logs state updates
+  }, [handleAddAuditLog]);
 
   const processSyncQueue = async () => {
+    if (isSyncProcessingRef.current) return;
     if (!navigator.onLine || isCircuitBroken()) return;
     
+    isSyncProcessingRef.current = true;
     try {
       const rawQueue = localStorage.getItem("pos_sync_queue");
       if (!rawQueue) return;
@@ -2354,10 +2439,14 @@ export default function App() {
         }
       }
       
-      safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
+      const newRaw = JSON.stringify(queue);
+      safeLocalStorageSetItem("pos_sync_queue", newRaw);
+      lastSyncQueueRawRef.current = newRaw;
       setPendingSyncQueue(queue);
     } catch (err) {
       console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
+    } finally {
+      isSyncProcessingRef.current = false;
     }
   };
 
@@ -2419,7 +2508,7 @@ export default function App() {
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
     
-    // Periodically try to re-sync every 15 seconds as a robust retry mechanism
+    // Periodically try to re-sync every 30 seconds as a robust retry mechanism
     const interval = setInterval(() => {
       if (navigator.onLine) {
         setIsOnline(true);
@@ -2427,7 +2516,7 @@ export default function App() {
       } else {
         setIsOnline(false);
       }
-    }, 15000);
+    }, 30000);
 
     // Initial attempt on load
     processSyncQueue();
@@ -2442,11 +2531,13 @@ export default function App() {
   // Hook de sincronização automática periódica (a cada 5 minutos) específico para transações offline pendentes
   useEffect(() => {
     const syncPendingTransactions = async () => {
+      if (isSyncProcessingRef.current) return;
       if (!navigator.onLine || isCircuitBroken()) {
         console.log("[SYNC 5MIN] Sistema offline ou cota excedida. Sincronização periódica suspensa.");
         return;
       }
 
+      isSyncProcessingRef.current = true;
       try {
         const rawQueue = localStorage.getItem("pos_sync_queue");
         if (!rawQueue) return;
@@ -2458,13 +2549,15 @@ export default function App() {
           console.log(`[SYNC 5MIN] Sincronização periódica iniciada: ${pendingTxs.length} transações pendentes encontradas.`);
           
           try {
-            // Envia transações pendentes para o Firestore
-            const promises = pendingTxs.map((tx: any) => addTransacaoToFirestore(tx));
-            await Promise.all(promises);
+            // Envia transações pendentes para o Firestore em lote
+            await addTransacoesToFirestoreBatch(pendingTxs);
 
             // Sucesso! Remove a chave transactions da fila offline
             delete queue["transactions"];
-            safeLocalStorageSetItem("pos_sync_queue", JSON.stringify(queue));
+            const newRaw = JSON.stringify(queue);
+            safeLocalStorageSetItem("pos_sync_queue", newRaw);
+            lastSyncQueueRawRef.current = newRaw;
+            setPendingSyncQueue(queue);
             
             setLastSyncTime(new Date().toLocaleTimeString());
             console.log("[SYNC 5MIN] Sincronização automática das transações offline concluída com sucesso!");
@@ -2485,19 +2578,18 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("[SYNC 5MIN] Erro ao analisar fila de sincronização:", err);
+      } finally {
+        isSyncProcessingRef.current = false;
       }
     };
 
     // Define o intervalo para exatamente 5 minutos (300.000 milissegundos)
     const intervalId = setInterval(syncPendingTransactions, 300000);
 
-    // Executa uma verificação inicial rápida ao montar o componente
-    syncPendingTransactions();
-
     return () => {
       clearInterval(intervalId);
     };
-  }, []);
+  }, [handleAddAuditLog]);
 
   // Global keyboard shortcuts for POS operations (F1, F2, etc.) handled in the App component to improve checkout efficiency
   useEffect(() => {
@@ -3150,41 +3242,6 @@ export default function App() {
     setForcePinTargetEmployee(null);
   };
 
-  // GENERAL AUDIT LOGGING WRAPPER
-  const handleAddAuditLog = (action: string, module: string, details: string, customUser?: Employee) => {
-    let authRole: UserRole = "CASHIER";
-    const targetUser = customUser || activeUser;
-    const username = targetUser ? targetUser.name : "Sistema / Visitante";
-    if (targetUser && targetUser.role) {
-      const raw = targetUser.role.toLowerCase();
-      if (raw.includes("supervisor")) authRole = "SUPERVISOR";
-      else if (raw.includes("administrador") || raw.includes("gestor")) authRole = "ADMIN";
-    }
-
-    const ipStr = userIpInfo ? `${userIpInfo.ip} (${userIpInfo.city}, ${userIpInfo.country})` : "102.81.12.94 (Maputo, Moçambique)";
-    const devStr = deviceInfo || "Desktop (Chrome)";
-
-    const newLog: AuditLog = {
-      id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
-      timestamp: new Date().toISOString(),
-      user: username,
-      userRole: authRole,
-      action,
-      module,
-      details,
-      ip: ipStr,
-      device: devStr
-    };
-    setAuditLogs(prev => {
-      let updated = [...prev, newLog];
-      if (updated.length > 200) {
-        updated = updated.slice(-200);
-      }
-      syncTable("auditlogs", updated);
-      return updated;
-    });
-  };
-
   // PANIC SYSTEM / EMERGENCY SECURITY ALERT
   const handleTriggerPanic = async () => {
     const operatorName = activeUser?.name || "Operador Desconhecido";
@@ -3432,20 +3489,23 @@ export default function App() {
 
   // NEW: Unified local backup creation (supports manual and automatic scheduled runs)
   const handleTriggerLocalBackup = (type: "manual" | "automatic" = "manual") => {
+    if (isBackingUpRef.current) return false;
+    isBackingUpRef.current = true;
     try {
+      const currentData = dbStateRef.current;
       const dbPayload = {
         app: "OST Vendas",
         exportDate: new Date().toISOString(),
         version: currentSystemVersion,
         operator: type === "manual" ? (activeUser?.name || "ADMIN") : "Agendador Automático Redundante",
         data: {
-          settings,
-          products,
-          customers,
-          transactions,
-          cashFlow,
-          employees,
-          auditLogs: auditLogs.slice(-50) // Only backup last 50 logs to conserve localStorage quota
+          settings: currentData.settings,
+          products: currentData.products,
+          customers: currentData.customers,
+          transactions: currentData.transactions,
+          cashFlow: currentData.cashFlow,
+          employees: currentData.employees,
+          auditLogs: currentData.auditLogs.slice(-50) // Only backup last 50 logs to conserve localStorage quota
         }
       };
 
@@ -3465,7 +3525,7 @@ export default function App() {
       } catch (e) {}
       if (!Array.isArray(logs)) logs = [];
 
-      const frequency = settings?.backupFrequency || "daily";
+      const frequency = currentData.settings?.backupFrequency || "daily";
       
       const newLog = {
         id: backupId,
@@ -3473,7 +3533,7 @@ export default function App() {
         type: type === "manual" ? "Manual" : "Automático",
         frequency: type === "manual" ? "N/A" : (frequency === "daily" ? "Diária" : frequency === "weekly" ? "Semanal" : frequency === "monthly" ? "Mensal" : "12 Horas"),
         size: dataStr.length,
-        itemCount: (products.length || 0) + (customers.length || 0) + (transactions.length || 0),
+        itemCount: (currentData.products.length || 0) + (currentData.customers.length || 0) + (currentData.transactions.length || 0),
         status: "Sucesso"
       };
 
@@ -3493,30 +3553,35 @@ export default function App() {
         }
       }
 
-      handleAddAuditLog(
-        type === "manual" ? "Backup Local Manual" : `Backup Local Automático (${frequency === "daily" ? "Diária" : frequency === "weekly" ? "Semanal" : frequency === "monthly" ? "Mensal" : "12 Horas"})`,
-        type === "manual" ? "SEGURANÇA" : "SISTEMA",
-        `Cópia de segurança gravada localmente com sucesso (${type === "manual" ? "Manual" : settings?.backupFrequency || "Diária"}).`
-      );
+      if (type === "manual") {
+        handleAddAuditLog(
+          "Backup Local Manual",
+          "SEGURANÇA",
+          "Cópia de segurança gravada localmente com sucesso (Manual)."
+        );
+      }
 
       return true;
     } catch (error) {
       console.error("Erro ao realizar backup local:", error);
       return false;
+    } finally {
+      isBackingUpRef.current = false;
     }
   };
 
   // Automated scheduled database backup to localStorage (runs checking interval every 15m; backups based on user configuration)
   useEffect(() => {
-    if (!isAuthenticated || products.length === 0) return;
+    if (!isAuthenticated) return;
 
     const runAutomaticBackup = () => {
       try {
+        if (isBackingUpRef.current) return;
         const lastBackupTimeStr = localStorage.getItem("erp_last_auto_backup_time");
         const lastBackupTime = lastBackupTimeStr ? new Date(lastBackupTimeStr).getTime() : 0;
         const now = Date.now();
         
-        const frequency = settings?.backupFrequency || "daily";
+        const frequency = dbStateRef.current.settings?.backupFrequency || "daily";
         let intervalMs = 24 * 60 * 60 * 1000; // default 1 day (daily)
         if (frequency === "weekly") {
           intervalMs = 7 * 24 * 60 * 60 * 1000;
@@ -3535,14 +3600,14 @@ export default function App() {
       }
     };
 
-    // Run check immediately
+    // Run check on mount / frequency change
     runAutomaticBackup();
 
     // Check every 15 minutes
     const intervalId = setInterval(runAutomaticBackup, 900000);
 
     return () => clearInterval(intervalId);
-  }, [isAuthenticated, products, customers, transactions, cashFlow, employees, auditLogs, settings]);
+  }, [isAuthenticated, settings?.backupFrequency]);
 
   const handleGetBackupPayload = () => {
     return {
@@ -5484,7 +5549,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         companyName={settings.companyName || "OST Vendas"}
         logoUrl={settings.logoUrl}
         version={currentSystemVersion}
-        sessionSeconds={sessionSeconds}
+        sessionSeconds={Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)}
         activeUser={activeUser}
         onSwitchUser={() => {
           setIsUserSwitchModalOpen(true);

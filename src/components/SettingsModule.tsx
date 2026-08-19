@@ -840,7 +840,7 @@ export default function SettingsModule({
   const [sessionValidation, setSessionValidation] = useState<SessionValidationResult | null>(null);
   const [isDiagnosing, setIsDiagnosing] = useState(false);
 
-  // Executa diagnóstico em tempo real no carregamento inicial se configurado
+  // Executa diagnóstico em tempo real no carregamento inicial ou ao mudar para aba de backup
   useEffect(() => {
     if (supabaseUrl.trim() && supabaseAnonKey.trim() && supabaseEnabled) {
       measureSupabaseLatency(supabaseUrl.trim(), supabaseAnonKey.trim()).then((lat) => {
@@ -854,7 +854,7 @@ export default function SettingsModule({
         setSessionValidation(sess);
       });
     }
-  }, []);
+  }, [activeSubTab]);
 
   // MOTOR DE MIGRAÇÃO ESTRUTURADA
   const [isMigrating, setIsMigrating] = useState(false);

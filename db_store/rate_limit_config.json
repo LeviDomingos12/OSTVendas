@@ -1,0 +1,12 @@
+{
+  "profile": "tolerant",
+  "generalMax": 10000,
+  "generalWindowMs": 900000,
+  "aiMax": 300,
+  "aiWindowMs": 60000,
+  "emailMax": 150,
+  "emailWindowMs": 300000,
+  "dbMax": 3000,
+  "dbWindowMs": 60000,
+  "enabled": true
+}

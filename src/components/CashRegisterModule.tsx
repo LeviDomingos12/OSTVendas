@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { 
@@ -30,6 +30,135 @@ import {
 import { CashFlowEntry, Transaction, UserRole, SystemSettings } from "../types";
 import CashAnalyticalCharts from "./CashAnalyticalCharts";
 import DenominationCounter, { DENOMINATIONS } from "./DenominationCounter";
+
+// ============================================================================
+// COMPONENTES DE LINHA MEMOIZADOS (React.memo) PARA MÁXIMA PERFORMANCE
+// ============================================================================
+
+interface CashTimelineItemRowProps {
+  item: any;
+  currency: string;
+}
+
+const CashTimelineItemRow: React.FC<CashTimelineItemRowProps> = React.memo(({ item, currency }) => {
+  let textAmountColor = "";
+  if (item.type === "SALE" || item.type === "INPUT") textAmountColor = "text-emerald-600 dark:text-emerald-400";
+  else if (item.type === "REINFORCEMENT") textAmountColor = "text-blue-600 dark:text-blue-400";
+  else if ((item.reason || "").toLowerCase().includes("sangria")) textAmountColor = "text-orange-500 dark:text-orange-400";
+  else if (item.type === "EXPENSE") textAmountColor = "text-rose-600 dark:text-rose-400";
+  else textAmountColor = "text-purple-650 dark:text-purple-400";
+
+  return (
+    <div className="relative group animate-in fade-in duration-200">
+      {/* Bullet node */}
+      <div className={`absolute -left-[35px] top-1.5 w-6 h-6 rounded-full flex items-center justify-center text-xs border bg-white dark:bg-zinc-900 ${item.badgeColor}`}>
+        {item.iconText}
+      </div>
+
+      <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-1 p-3 rounded-xl hover:bg-slate-50/50 dark:hover:bg-zinc-950/20 transition">
+        {/* Visual Timeline detailed item */}
+        <div className="space-y-1">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200">{item.reason}</h4>
+            <span className="text-[9px] text-slate-400">•</span>
+            <span className="text-[10px] font-mono text-slate-400">
+              {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 text-[10px] text-slate-450">
+            {item.supplier && (
+              <span className="flex items-center gap-0.5">
+                <span className="font-bold text-slate-500">Credor/Dest:</span> {item.supplier}
+              </span>
+            )}
+            <span className="hidden sm:inline text-slate-300">•</span>
+            <span className="flex items-center gap-0.5">
+              <User className="w-3 h-3" />
+              {item.responsibleUser}
+            </span>
+          </div>
+        </div>
+
+        {/* Timeline Amount visual */}
+        <div className="text-right shrink-0">
+          <span className={`text-xs font-bold font-mono ${textAmountColor}`}>
+            {item.isInput ? "+" : "-"} {item.amount.toLocaleString()} {currency}
+          </span>
+          <p className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider mt-0.5">
+            {item.type === "SALE" ? "Venda" : item.type === "INPUT" ? "Entrada" : item.type === "REINFORCEMENT" ? "Reforço" : (item.reason || "").toLowerCase().includes("sangria") ? "Sangria" : item.type === "EXPENSE" ? "Despesa" : "Quebra"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+});
+CashTimelineItemRow.displayName = "CashTimelineItemRow";
+
+interface CashClosureTableRowProps {
+  hist: any;
+  onExportPDF: (closure: any) => void;
+  onPrintThermal: (closure: any) => void;
+}
+
+const CashClosureTableRow: React.FC<CashClosureTableRowProps> = React.memo(({
+  hist,
+  onExportPDF,
+  onPrintThermal
+}) => {
+  return (
+    <tr key={hist.id} className="hover:bg-slate-50/40 dark:hover:bg-zinc-950/20">
+      <td className="p-3.5 font-mono text-slate-500 font-bold">
+        {new Date(hist.timestamp).toLocaleString()}
+      </td>
+      <td className="p-3.5 font-semibold text-slate-800 dark:text-zinc-200">
+        {hist.operator}
+      </td>
+      <td className="p-3.5 text-slate-600 dark:text-zinc-400 font-medium">
+        {hist.authorizedSupervisor}
+      </td>
+      <td className="p-3.5 text-right font-mono text-slate-650 font-bold dark:text-zinc-350">
+        {hist.theoreticalBalance.toLocaleString()} MT
+      </td>
+      <td className="p-3.5 text-right font-mono text-slate-800 font-bold dark:text-zinc-100">
+        {hist.physicalBalance.toLocaleString()} MT
+      </td>
+      <td className="p-3.5 text-center">
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+          hist.difference === 0 
+            ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30" 
+            : "bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30"
+        }`}>
+          {hist.difference > 0 ? "+" : ""}{hist.difference.toLocaleString()} MT
+        </span>
+      </td>
+      <td className="p-3.5 text-slate-500 italic font-medium max-w-[200px] truncate">
+        {hist.observations}
+      </td>
+      <td className="p-3.5 text-center flex items-center justify-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onExportPDF(hist)}
+          className="px-2.5 py-1 text-[10px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/20 dark:hover:bg-orange-900/30 dark:text-orange-400 rounded-lg flex items-center gap-1 transition cursor-pointer"
+          title="Exportar Comprovante de Fecho PDF"
+        >
+          <Download className="w-3 h-3" />
+          <span>PDF</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onPrintThermal(hist)}
+          className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 rounded-lg flex items-center gap-1 transition cursor-pointer"
+          title="Imprimir Talão Térmico 80mm"
+        >
+          <Printer className="w-3 h-3" />
+          <span>Talão</span>
+        </button>
+      </td>
+    </tr>
+  );
+});
+CashClosureTableRow.displayName = "CashClosureTableRow";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -621,7 +750,7 @@ export default function CashRegisterModule({
   }, [cashCalculation, lastDiscrepancy, currency]);
 
   // Handle Open Shift Action
-  const handleOpenShiftSubmit = (e: React.FormEvent) => {
+  const handleOpenShiftSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     setShiftStatus("OPEN");
     setShowOpeningModal(false);
@@ -631,10 +760,10 @@ export default function CashRegisterModule({
       "CAIXA",
       `Caixa aberto por ${openingOperator || activeUsername} com Fundo de Maneio de ${openingBalance} ${currency}. Supervisor responsável: ${openingSupervisor}.`
     );
-  };
+  }, [openingOperator, activeUsername, openingBalance, currency, openingSupervisor, onAddAuditLog]);
 
   // Handle Quick Sangria Action
-  const handlePerformQuickSangria = (e: React.FormEvent) => {
+  const handlePerformQuickSangria = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (sangriaAmount <= 0) {
       alert("Por favor, introduza um valor positivo para a sangria.");
@@ -660,10 +789,10 @@ export default function CashRegisterModule({
     setShowSangriaModal(false);
     setSangriaAmount(0);
     setSangriaReason("");
-  };
+  }, [sangriaAmount, sangriaDestination, sangriaReason, activeUsername, onAddCashFlowEntry, onAddAuditLog, currency, sangriaSupervisor]);
 
   // Print 80mm Thermal Receipt
-  const handlePrintThermalReceipt = (closure: any) => {
+  const handlePrintThermalReceipt = useCallback((closure: any) => {
     const printWindow = window.open("", "_blank", "width=380,height=600");
     if (!printWindow) return;
 
@@ -737,10 +866,10 @@ export default function CashRegisterModule({
     setTimeout(() => {
       printWindow.print();
     }, 500);
-  };
+  }, [settings?.companyName, settings?.companyNuit, settings?.storeAddress, activeUsername]);
 
   // Create individual cash-flow launching
-  const handleSubmitEntry = (e: React.FormEvent) => {
+  const handleSubmitEntry = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (entryAmount <= 0 || !entryReason.trim()) {
       setLocalError("Por favor, introduza um valor positivo e especifique o motivo.");
@@ -773,10 +902,10 @@ export default function CashRegisterModule({
     setEntryReason("");
     setEntrySupplier("");
     setShowAddForm(false);
-  };
+  }, [entryAmount, entryReason, entryType, entrySupplier, entryResponsible, onAddCashFlowEntry, onAddAuditLog, currency]);
 
   // Submit Closure Workflow (Item 11)
-  const handlePerformClosure = () => {
+  const handlePerformClosure = useCallback(() => {
     if (supervisorPin !== "1234") {
       setPinError("PIN do Supervisor incorreto! Use 1234 para homologar.");
       return;
@@ -823,10 +952,10 @@ export default function CashRegisterModule({
       setClosingObservation("");
       setOperatorSignature("");
     }, 4500);
-  };
+  }, [supervisorPin, physicalCount, cashCalculation, activeUsername, closingSupervisor, closingObservation, onAddAuditLog]);
 
   // Export functions (Item 12)
-  const handleExportPDF = async () => {
+  const handleExportPDF = useCallback(async () => {
     const doc = new jsPDF();
     
     const logoData = await getBase64ImageFromUrl(settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
@@ -861,9 +990,9 @@ export default function CashRegisterModule({
 
     doc.save(`OST_Livro_Caixa_${Date.now()}.pdf`);
     onAddAuditLog("Exportar Relatório PDF", "CAIXA", `Relatório PDF de caixa exportado por ${activeUsername}.`);
-  };
+  }, [settings?.logoUrl, startDate, endDate, activeUsername, filteredTimeline, currency, onAddAuditLog]);
 
-  const handleExportSingleClosurePDF = async (closure: any) => {
+  const handleExportSingleClosurePDF = useCallback(async (closure: any) => {
     try {
       const doc = new jsPDF();
       
@@ -875,11 +1004,11 @@ export default function CashRegisterModule({
       // Header Style
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
-      doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 20);
+      doc.text(settings?.companyName || "OST COMÉRCIO CENTRAL", 14, 20);
       
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
-      doc.text(`NUIT: ${settings.companyNuit || "400293112"} | ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 26);
+      doc.text(`NUIT: ${settings?.companyNuit || "400293112"} | ${settings?.storeAddress || "Av. Marginal, Maputo"}`, 14, 26);
       
       doc.setDrawColor(220, 220, 220);
       doc.line(14, 30, 196, 30);
@@ -956,9 +1085,9 @@ export default function CashRegisterModule({
     } catch (err) {
       console.error("Erro ao gerar PDF do fecho:", err);
     }
-  };
+  }, [settings?.logoUrl, settings?.companyName, settings?.companyNuit, settings?.storeAddress, activeUsername, currency, onAddAuditLog]);
 
-  const handleExportCSV = () => {
+  const handleExportCSV = useCallback(() => {
     const headers = ["DATA_HORA", "TIPO", "OPERADOR", "MOTIVO_LANÇAMENTO", "VALOR"];
     const rows = filteredTimeline.map(item => [
       item.timestamp,
@@ -978,7 +1107,7 @@ export default function CashRegisterModule({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, [filteredTimeline]);
 
   return (
     <div className="space-y-6">
@@ -1377,61 +1506,9 @@ export default function CashRegisterModule({
                       Nenhuma atividade encontrada para os filtros aplicados.
                     </div>
                   ) : (
-                    filteredTimeline.map((item, index) => {
-                      // Apply Item 17 color rules
-                      let textAmountColor = "";
-                      if (item.type === "SALE" || item.type === "INPUT") textAmountColor = "text-emerald-600 dark:text-emerald-400";
-                      else if (item.type === "REINFORCEMENT") textAmountColor = "text-blue-600 dark:text-blue-400";
-                      else if ((item.reason || "").toLowerCase().includes("sangria")) textAmountColor = "text-orange-500 dark:text-orange-400";
-                      else if (item.type === "EXPENSE") textAmountColor = "text-rose-600 dark:text-rose-400";
-                      else textAmountColor = "text-purple-650 dark:text-purple-400";
-
-                      return (
-                        <div key={item.id} className="relative group animate-in fade-in duration-200">
-                          
-                          {/* Bullet node */}
-                          <div className={`absolute -left-[35px] top-1.5 w-6 h-6 rounded-full flex items-center justify-center text-xs border bg-white dark:bg-zinc-900 ${item.badgeColor}`}>
-                            {item.iconText}
-                          </div>
-
-                          <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-1 p-3 rounded-xl hover:bg-slate-50/50 dark:hover:bg-zinc-950/20 transition">
-                            
-                            {/* Visual Timeline detailed item */}
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200">{item.reason}</h4>
-                                <span className="text-[9px] text-slate-400">•</span>
-                                <span className="text-[10px] font-mono text-slate-400">{new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-
-                              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 text-[10px] text-slate-450">
-                                {item.supplier && (
-                                  <span className="flex items-center gap-0.5">
-                                    <span className="font-bold text-slate-500">Credor/Dest:</span> {item.supplier}
-                                  </span>
-                                )}
-                                <span className="hidden sm:inline text-slate-300">•</span>
-                                <span className="flex items-center gap-0.5">
-                                  <User className="w-3 h-3" />
-                                  {item.responsibleUser}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Timeline Amount visual */}
-                            <div className="text-right shrink-0">
-                              <span className={`text-xs font-bold font-mono ${textAmountColor}`}>
-                                {item.isInput ? "+" : "-"} {item.amount.toLocaleString()} {currency}
-                              </span>
-                              <p className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider mt-0.5">
-                                {item.type === "SALE" ? "Venda" : item.type === "INPUT" ? "Entrada" : item.type === "REINFORCEMENT" ? "Reforço" : (item.reason || "").toLowerCase().includes("sangria") ? "Sangria" : item.type === "EXPENSE" ? "Despesa" : "Quebra"}
-                              </p>
-                            </div>
-
-                          </div>
-                        </div>
-                      );
-                    })
+                    filteredTimeline.map((item) => (
+                      <CashTimelineItemRow key={item.id} item={item} currency={currency} />
+                    ))
                   )}
                 </div>
 
@@ -1810,61 +1887,14 @@ export default function CashRegisterModule({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-150 dark:divide-zinc-850">
-                {closuresHistory.map(hist => {
-                  const hasDiscrepancy = hist.difference !== 0;
-                  
-                  return (
-                    <tr key={hist.id} className="hover:bg-slate-50/40 dark:hover:bg-zinc-950/20">
-                      <td className="p-3.5 font-mono text-slate-500 font-bold">
-                        {new Date(hist.timestamp).toLocaleString()}
-                      </td>
-                      <td className="p-3.5 font-semibold text-slate-800 dark:text-zinc-200">
-                        {hist.operator}
-                      </td>
-                      <td className="p-3.5 text-slate-600 dark:text-zinc-400 font-medium">
-                        {hist.authorizedSupervisor}
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-slate-650 font-bold dark:text-zinc-350">
-                        {hist.theoreticalBalance.toLocaleString()} MT
-                      </td>
-                      <td className="p-3.5 text-right font-mono text-slate-800 font-bold dark:text-zinc-100">
-                        {hist.physicalBalance.toLocaleString()} MT
-                      </td>
-                      <td className="p-3.5 text-center">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                          hist.difference === 0 
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30" 
-                            : "bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30"
-                        }`}>
-                          {hist.difference > 0 ? "+" : ""}{hist.difference.toLocaleString()} MT
-                        </span>
-                      </td>
-                      <td className="p-3.5 text-slate-500 italic font-medium max-w-[200px] truncate">
-                        {hist.observations}
-                      </td>
-                      <td className="p-3.5 text-center flex items-center justify-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleExportSingleClosurePDF(hist)}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/20 dark:hover:bg-orange-900/30 dark:text-orange-400 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                          title="Exportar Comprovante de Fecho PDF"
-                        >
-                          <Download className="w-3 h-3" />
-                          <span>PDF</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handlePrintThermalReceipt(hist)}
-                          className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 rounded-lg flex items-center gap-1 transition cursor-pointer"
-                          title="Imprimir Talão Térmico 80mm"
-                        >
-                          <Printer className="w-3 h-3" />
-                          <span>Talão</span>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {closuresHistory.map(hist => (
+                  <CashClosureTableRow
+                    key={hist.id}
+                    hist={hist}
+                    onExportPDF={handleExportSingleClosurePDF}
+                    onPrintThermal={handlePrintThermalReceipt}
+                  />
+                ))}
               </tbody>
             </table>
           </div>

@@ -47,6 +47,20 @@ export const SystemInfoHub: React.FC<SystemInfoHubProps> = ({
   onOpenTutorial,
   theme = "daily"
 }) => {
+  const [currentSessionSecs, setCurrentSessionSecs] = React.useState(sessionSeconds);
+
+  React.useEffect(() => {
+    setCurrentSessionSecs(sessionSeconds);
+  }, [sessionSeconds, isOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const timer = setInterval(() => {
+      setCurrentSessionSecs(prev => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const isNight = theme === "night";
@@ -252,7 +266,7 @@ export const SystemInfoHub: React.FC<SystemInfoHubProps> = ({
               </div>
               <div className="mt-3">
                 <p className="font-extrabold text-xs font-mono">
-                  {formatSessionTime(sessionSeconds)}
+                  {formatSessionTime(currentSessionSecs)}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Tempo decorrido no terminal

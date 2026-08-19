@@ -7,7 +7,9 @@
  * Utiliza 'VITE_SUPABASE_URL' e 'VITE_SUPABASE_ANON_KEY' para autenticação.
  */
 
-import { createClient, SupabaseClient, User, Session, RealtimeChannel } from "@supabase/supabase-js";
+import { SupabaseClient, User, Session, RealtimeChannel } from "@supabase/supabase-js";
+import { supabase, getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY } from "./supabase";
+export { supabase, getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY };
 import { 
   Product, 
   Customer, 
@@ -21,31 +23,8 @@ import {
 import { 
   SupabaseSyncService, 
   getSupabaseConfig, 
-  saveSupabaseConfig, 
-  getSupabaseClient as getExistingSupabaseClient 
+  saveSupabaseConfig 
 } from "../services/supabaseService";
-
-// Resolução das variáveis de ambiente para o Supabase
-const env = (import.meta as any).env || {};
-export const SUPABASE_URL: string = env.VITE_SUPABASE_URL || "https://ost-vendas-db.supabase.co";
-export const SUPABASE_ANON_KEY: string = env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon-key";
-
-/**
- * Inicialização Centralizada do Cliente Supabase
- */
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-  }
-});
-
-// Getter central do cliente Supabase
-export function getSupabaseClient(): SupabaseClient {
-  return supabase;
-}
 
 // ----------------------------------------------------
 // TIPOS E MODELOS DE DADOS

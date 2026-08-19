@@ -1,15 +1,4524 @@
 [
   {
-    "id": "log-reset-1786044068222",
-    "timestamp": "2026-08-06T19:21:08.222Z",
-    "user": "Sistema / Administrador",
-    "action": "RESET COMPLETO DO SISTEMA",
-    "details": "Backup executado com sucesso (backup_pre_reset_mandatory_2026-08-06T19-21-08-221Z.json, 15.57 KB). Todos os dados de teste foram eliminados. Conta de Administrador Mestre ativa.",
-    "device": "Servidor Cloud Run",
-    "ownerId": "emp-master-admin-001",
-    "companyId": "OST Comércio Geral",
-    "createdBy": "SYSTEM",
-    "createdAt": "2026-08-06T19:21:08.222Z",
-    "updatedAt": "2026-08-06T19:21:08.222Z"
+    "id": "log-1787149295104-7mscbn",
+    "timestamp": "2026-08-19T14:21:35.104Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295104-di69cj",
+    "timestamp": "2026-08-19T14:21:35.104Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295105-m6rjg4",
+    "timestamp": "2026-08-19T14:21:35.105Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295105-rukhl6",
+    "timestamp": "2026-08-19T14:21:35.105Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295105-q4ovto",
+    "timestamp": "2026-08-19T14:21:35.105Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295106-exkl3v",
+    "timestamp": "2026-08-19T14:21:35.106Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295106-tjgm60",
+    "timestamp": "2026-08-19T14:21:35.106Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295106-0u6tky",
+    "timestamp": "2026-08-19T14:21:35.106Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295107-tu56q2",
+    "timestamp": "2026-08-19T14:21:35.107Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295107-0abcq9",
+    "timestamp": "2026-08-19T14:21:35.107Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295108-2qexkg",
+    "timestamp": "2026-08-19T14:21:35.108Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295108-ubztvy",
+    "timestamp": "2026-08-19T14:21:35.108Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295109-7e2nzt",
+    "timestamp": "2026-08-19T14:21:35.109Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295109-1skrs9",
+    "timestamp": "2026-08-19T14:21:35.109Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295111-g1va5u",
+    "timestamp": "2026-08-19T14:21:35.111Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295111-fy9v1f",
+    "timestamp": "2026-08-19T14:21:35.111Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295113-dco7ad",
+    "timestamp": "2026-08-19T14:21:35.114Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295114-wcegqx",
+    "timestamp": "2026-08-19T14:21:35.114Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295114-5bjgq9",
+    "timestamp": "2026-08-19T14:21:35.114Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295114-0i7w40",
+    "timestamp": "2026-08-19T14:21:35.114Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295115-490zi6",
+    "timestamp": "2026-08-19T14:21:35.115Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295115-xverrl",
+    "timestamp": "2026-08-19T14:21:35.115Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295116-ue11jx",
+    "timestamp": "2026-08-19T14:21:35.116Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295116-m5drke",
+    "timestamp": "2026-08-19T14:21:35.116Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295117-3wpno4",
+    "timestamp": "2026-08-19T14:21:35.117Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295117-ewea6c",
+    "timestamp": "2026-08-19T14:21:35.117Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295117-hvt4xo",
+    "timestamp": "2026-08-19T14:21:35.117Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295117-ib6tcn",
+    "timestamp": "2026-08-19T14:21:35.117Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295119-owvd0s",
+    "timestamp": "2026-08-19T14:21:35.119Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295119-ck2cre",
+    "timestamp": "2026-08-19T14:21:35.119Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295120-q9210g",
+    "timestamp": "2026-08-19T14:21:35.120Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295120-28ksxf",
+    "timestamp": "2026-08-19T14:21:35.120Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295121-clfpo9",
+    "timestamp": "2026-08-19T14:21:35.121Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295121-jprfuf",
+    "timestamp": "2026-08-19T14:21:35.121Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295122-st6kso",
+    "timestamp": "2026-08-19T14:21:35.122Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295122-xbicxn",
+    "timestamp": "2026-08-19T14:21:35.122Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295123-rtaoxz",
+    "timestamp": "2026-08-19T14:21:35.123Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295123-g07ht1",
+    "timestamp": "2026-08-19T14:21:35.123Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295123-9tryx4",
+    "timestamp": "2026-08-19T14:21:35.123Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295123-nnccc5",
+    "timestamp": "2026-08-19T14:21:35.123Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295124-85268j",
+    "timestamp": "2026-08-19T14:21:35.124Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295124-3oy9zx",
+    "timestamp": "2026-08-19T14:21:35.124Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295124-6thg3h",
+    "timestamp": "2026-08-19T14:21:35.124Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295124-6ark2r",
+    "timestamp": "2026-08-19T14:21:35.124Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295125-2pfc0l",
+    "timestamp": "2026-08-19T14:21:35.125Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295125-vcyjof",
+    "timestamp": "2026-08-19T14:21:35.125Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295125-rifdk8",
+    "timestamp": "2026-08-19T14:21:35.125Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295125-4pzakk",
+    "timestamp": "2026-08-19T14:21:35.125Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295126-00lk5n",
+    "timestamp": "2026-08-19T14:21:35.126Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295126-c5w436",
+    "timestamp": "2026-08-19T14:21:35.126Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295126-6hlova",
+    "timestamp": "2026-08-19T14:21:35.126Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295126-vnqq6l",
+    "timestamp": "2026-08-19T14:21:35.126Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-o44dr6",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-r2fxph",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-3knx63",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-1e47hs",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-gdzzfo",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295127-lruyrq",
+    "timestamp": "2026-08-19T14:21:35.127Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295128-dny3l6",
+    "timestamp": "2026-08-19T14:21:35.128Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295128-m7cbi4",
+    "timestamp": "2026-08-19T14:21:35.128Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295131-0y2ejc",
+    "timestamp": "2026-08-19T14:21:35.131Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295131-bbbx1n",
+    "timestamp": "2026-08-19T14:21:35.131Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295133-ymrpvk",
+    "timestamp": "2026-08-19T14:21:35.133Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295133-ciwh7c",
+    "timestamp": "2026-08-19T14:21:35.133Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295149-27d30x",
+    "timestamp": "2026-08-19T14:21:35.149Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295149-as4mu7",
+    "timestamp": "2026-08-19T14:21:35.149Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295151-w8bvli",
+    "timestamp": "2026-08-19T14:21:35.151Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295151-3gm1ut",
+    "timestamp": "2026-08-19T14:21:35.151Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295153-iypfnt",
+    "timestamp": "2026-08-19T14:21:35.153Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295153-we38mk",
+    "timestamp": "2026-08-19T14:21:35.153Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295154-q1a5en",
+    "timestamp": "2026-08-19T14:21:35.154Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295154-h1tsri",
+    "timestamp": "2026-08-19T14:21:35.154Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295155-1hx69x",
+    "timestamp": "2026-08-19T14:21:35.155Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295155-zkoq5k",
+    "timestamp": "2026-08-19T14:21:35.155Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295156-o2ipyy",
+    "timestamp": "2026-08-19T14:21:35.156Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295156-db8boe",
+    "timestamp": "2026-08-19T14:21:35.156Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295157-xw8lad",
+    "timestamp": "2026-08-19T14:21:35.157Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295157-porzyb",
+    "timestamp": "2026-08-19T14:21:35.157Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295158-xcf926",
+    "timestamp": "2026-08-19T14:21:35.158Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295158-63e1js",
+    "timestamp": "2026-08-19T14:21:35.158Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295159-wpwzq0",
+    "timestamp": "2026-08-19T14:21:35.159Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295159-fjiqzr",
+    "timestamp": "2026-08-19T14:21:35.159Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295160-numx4q",
+    "timestamp": "2026-08-19T14:21:35.160Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295160-v6lwnh",
+    "timestamp": "2026-08-19T14:21:35.160Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295161-s09awj",
+    "timestamp": "2026-08-19T14:21:35.161Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295161-fl4go6",
+    "timestamp": "2026-08-19T14:21:35.161Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295162-43mb0m",
+    "timestamp": "2026-08-19T14:21:35.162Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295162-cwcjqe",
+    "timestamp": "2026-08-19T14:21:35.162Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295163-b2q1c0",
+    "timestamp": "2026-08-19T14:21:35.164Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295164-spm3zo",
+    "timestamp": "2026-08-19T14:21:35.164Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295165-0gem71",
+    "timestamp": "2026-08-19T14:21:35.165Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295165-lssmou",
+    "timestamp": "2026-08-19T14:21:35.165Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295166-f0o190",
+    "timestamp": "2026-08-19T14:21:35.166Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295166-ge9mad",
+    "timestamp": "2026-08-19T14:21:35.166Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295167-iscvkb",
+    "timestamp": "2026-08-19T14:21:35.167Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295167-qidn0p",
+    "timestamp": "2026-08-19T14:21:35.167Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295168-9nc6d0",
+    "timestamp": "2026-08-19T14:21:35.168Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295168-nfov8r",
+    "timestamp": "2026-08-19T14:21:35.168Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295169-nfuls1",
+    "timestamp": "2026-08-19T14:21:35.169Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295169-0i19iz",
+    "timestamp": "2026-08-19T14:21:35.169Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295170-v09r7e",
+    "timestamp": "2026-08-19T14:21:35.170Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295170-f9wyub",
+    "timestamp": "2026-08-19T14:21:35.170Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295171-ajf2dc",
+    "timestamp": "2026-08-19T14:21:35.171Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295171-te9ml0",
+    "timestamp": "2026-08-19T14:21:35.171Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295172-35whf9",
+    "timestamp": "2026-08-19T14:21:35.172Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295172-ujz44w",
+    "timestamp": "2026-08-19T14:21:35.172Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295173-18bz40",
+    "timestamp": "2026-08-19T14:21:35.173Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295173-rb94om",
+    "timestamp": "2026-08-19T14:21:35.173Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295174-9r901p",
+    "timestamp": "2026-08-19T14:21:35.174Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295174-wiixla",
+    "timestamp": "2026-08-19T14:21:35.174Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295175-ofsmm7",
+    "timestamp": "2026-08-19T14:21:35.175Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295175-rtxwxg",
+    "timestamp": "2026-08-19T14:21:35.175Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295177-2f95zd",
+    "timestamp": "2026-08-19T14:21:35.177Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295177-3vfn3t",
+    "timestamp": "2026-08-19T14:21:35.177Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295179-43udus",
+    "timestamp": "2026-08-19T14:21:35.179Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295179-b3wpk1",
+    "timestamp": "2026-08-19T14:21:35.179Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295181-gev57e",
+    "timestamp": "2026-08-19T14:21:35.181Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295181-4afiyq",
+    "timestamp": "2026-08-19T14:21:35.181Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295182-2o65pp",
+    "timestamp": "2026-08-19T14:21:35.182Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295182-3pjt9s",
+    "timestamp": "2026-08-19T14:21:35.182Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295183-c3kud8",
+    "timestamp": "2026-08-19T14:21:35.183Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295184-g1peil",
+    "timestamp": "2026-08-19T14:21:35.184Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295184-w6a7jv",
+    "timestamp": "2026-08-19T14:21:35.184Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295184-abczsg",
+    "timestamp": "2026-08-19T14:21:35.184Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295185-lvltp9",
+    "timestamp": "2026-08-19T14:21:35.185Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295185-8ecl5e",
+    "timestamp": "2026-08-19T14:21:35.185Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295186-x2g97x",
+    "timestamp": "2026-08-19T14:21:35.186Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295186-nzfa18",
+    "timestamp": "2026-08-19T14:21:35.186Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295187-bsu8jg",
+    "timestamp": "2026-08-19T14:21:35.187Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295187-dwhzxk",
+    "timestamp": "2026-08-19T14:21:35.187Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295188-unpsqa",
+    "timestamp": "2026-08-19T14:21:35.188Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295188-a0vudr",
+    "timestamp": "2026-08-19T14:21:35.188Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295189-g80hhj",
+    "timestamp": "2026-08-19T14:21:35.189Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295189-yplfji",
+    "timestamp": "2026-08-19T14:21:35.189Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295190-jheoy4",
+    "timestamp": "2026-08-19T14:21:35.190Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295190-q8ylyz",
+    "timestamp": "2026-08-19T14:21:35.190Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295190-quhgb7",
+    "timestamp": "2026-08-19T14:21:35.190Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295191-hqgkvx",
+    "timestamp": "2026-08-19T14:21:35.191Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295191-v7i984",
+    "timestamp": "2026-08-19T14:21:35.191Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295192-5m1r08",
+    "timestamp": "2026-08-19T14:21:35.192Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295193-5r9efz",
+    "timestamp": "2026-08-19T14:21:35.193Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295193-coh3c4",
+    "timestamp": "2026-08-19T14:21:35.193Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295199-qzrlbf",
+    "timestamp": "2026-08-19T14:21:35.199Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295199-xbu1dm",
+    "timestamp": "2026-08-19T14:21:35.199Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295200-cjbskd",
+    "timestamp": "2026-08-19T14:21:35.200Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295200-6uotcq",
+    "timestamp": "2026-08-19T14:21:35.200Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295201-3r1tc2",
+    "timestamp": "2026-08-19T14:21:35.201Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295201-lh0vs3",
+    "timestamp": "2026-08-19T14:21:35.201Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295202-1fl9bo",
+    "timestamp": "2026-08-19T14:21:35.202Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295202-lj8ufl",
+    "timestamp": "2026-08-19T14:21:35.202Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295203-zg8rcy",
+    "timestamp": "2026-08-19T14:21:35.203Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295203-8qser4",
+    "timestamp": "2026-08-19T14:21:35.203Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295204-ksa315",
+    "timestamp": "2026-08-19T14:21:35.205Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295205-7urgdb",
+    "timestamp": "2026-08-19T14:21:35.205Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295206-e5wvqd",
+    "timestamp": "2026-08-19T14:21:35.206Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295206-jepud7",
+    "timestamp": "2026-08-19T14:21:35.206Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295206-9twfsv",
+    "timestamp": "2026-08-19T14:21:35.206Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/usuarios?select=*&id=eq.google-1787078556228",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295206-2vyass",
+    "timestamp": "2026-08-19T14:21:35.206Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/usuarios?select=*&id=eq.google-1787078556228",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295207-czt40s",
+    "timestamp": "2026-08-19T14:21:35.207Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295208-j726on",
+    "timestamp": "2026-08-19T14:21:35.208Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295210-3y7r3u",
+    "timestamp": "2026-08-19T14:21:35.210Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295210-5qcsh4",
+    "timestamp": "2026-08-19T14:21:35.210Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295211-xbzgfu",
+    "timestamp": "2026-08-19T14:21:35.211Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295211-gpt6un",
+    "timestamp": "2026-08-19T14:21:35.211Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295211-izbat1",
+    "timestamp": "2026-08-19T14:21:35.211Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295212-5x25gf",
+    "timestamp": "2026-08-19T14:21:35.212Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295212-kmscmk",
+    "timestamp": "2026-08-19T14:21:35.212Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295212-amfrd3",
+    "timestamp": "2026-08-19T14:21:35.212Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295213-unu2c1",
+    "timestamp": "2026-08-19T14:21:35.213Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295213-9wsxot",
+    "timestamp": "2026-08-19T14:21:35.213Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149295217-c0e1x4",
+    "timestamp": "2026-08-19T14:21:35.217Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 429 () ao acessar a rota: /api/db/save",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297917-4s6ize",
+    "timestamp": "2026-08-19T14:21:37.917Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297917-7s0maj",
+    "timestamp": "2026-08-19T14:21:37.917Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297984-knzgn6",
+    "timestamp": "2026-08-19T14:21:37.984Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297984-5fgijp",
+    "timestamp": "2026-08-19T14:21:37.984Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297984-zslqqr",
+    "timestamp": "2026-08-19T14:21:37.984Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297985-n03t7w",
+    "timestamp": "2026-08-19T14:21:37.985Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297985-eja6y2",
+    "timestamp": "2026-08-19T14:21:37.985Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297985-zwpl9d",
+    "timestamp": "2026-08-19T14:21:37.985Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297986-c2vwj5",
+    "timestamp": "2026-08-19T14:21:37.986Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297986-t2wo55",
+    "timestamp": "2026-08-19T14:21:37.986Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297986-mfsj7r",
+    "timestamp": "2026-08-19T14:21:37.986Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297986-2g9yhy",
+    "timestamp": "2026-08-19T14:21:37.986Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297986-pmtnlw",
+    "timestamp": "2026-08-19T14:21:37.986Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297987-pfko25",
+    "timestamp": "2026-08-19T14:21:37.987Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297987-g066jz",
+    "timestamp": "2026-08-19T14:21:37.987Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297987-xhk5mu",
+    "timestamp": "2026-08-19T14:21:37.987Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297987-q6w3bz",
+    "timestamp": "2026-08-19T14:21:37.987Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297987-360su3",
+    "timestamp": "2026-08-19T14:21:37.987Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297988-n4pp6h",
+    "timestamp": "2026-08-19T14:21:37.988Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787149297988-mwy16p",
+    "timestamp": "2026-08-19T14:21:37.988Z",
+    "user": "Administrador Geral (Google)",
+    "userRole": "ADMIN",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126445-vbhylf",
+    "timestamp": "2026-08-19T14:35:26.446Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "102.81.12.94 (Maputo, Moçambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126449-9krpqc",
+    "timestamp": "2026-08-19T14:35:26.449Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "102.81.12.94 (Maputo, Moçambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126497-wkvfmh",
+    "timestamp": "2026-08-19T14:35:26.497Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/produtos?select=id&limit=1",
+    "ip": "102.81.12.94 (Maputo, Moçambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126497-s10iyh",
+    "timestamp": "2026-08-19T14:35:26.497Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/produtos?select=id&limit=1",
+    "ip": "102.81.12.94 (Maputo, Moçambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126717-x3sylb",
+    "timestamp": "2026-08-19T14:35:26.717Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126718-njvb2b",
+    "timestamp": "2026-08-19T14:35:26.718Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system?select=*&id=eq.version",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126759-8jeoco",
+    "timestamp": "2026-08-19T14:35:26.759Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/produtos?select=id&limit=1",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126759-1b78dc",
+    "timestamp": "2026-08-19T14:35:26.759Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/produtos?select=id&limit=1",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150126849-p0bbnf",
+    "timestamp": "2026-08-19T14:35:26.849Z",
+    "user": "Sistema / Visitante",
+    "userRole": "CASHIER",
+    "action": "FALHA_API",
+    "module": "Erros do Sistema",
+    "details": "API respondeu com status 404 () ao acessar a rota: https://xjpvaxxjxtozzylaujkp.supabase.co/rest/v1/system",
+    "ip": "197.235.156.101 (Maxixe, Mozambique)",
+    "device": "Desktop (Chrome)"
+  },
+  {
+    "id": "log-1787150130324-0.37375957510570545",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.324Z"
+  },
+  {
+    "id": "log-1787150130330-0.1855255496690631",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.330Z"
+  },
+  {
+    "id": "log-1787150130391-0.18941576742391675",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.391Z"
+  },
+  {
+    "id": "log-1787150130411-0.44207470686807215",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.411Z"
+  },
+  {
+    "id": "log-1787150130505-0.024863108449387106",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.505Z"
+  },
+  {
+    "id": "log-1787150130520-0.058602432616109645",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.520Z"
+  },
+  {
+    "id": "log-1787150130538-0.3778972620388128",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.538Z"
+  },
+  {
+    "id": "log-1787150130570-0.2782126270732326",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.570Z"
+  },
+  {
+    "id": "log-1787150130607-0.1472824339448353",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.607Z"
+  },
+  {
+    "id": "log-1787150130622-0.1150256701836887",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.622Z"
+  },
+  {
+    "id": "log-1787150130627-0.9309834926724609",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.627Z"
+  },
+  {
+    "id": "log-1787150130653-0.378982807894352",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.653Z"
+  },
+  {
+    "id": "log-1787150130665-0.8858169699151015",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.665Z"
+  },
+  {
+    "id": "log-1787150130670-0.4497410699674924",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.670Z"
+  },
+  {
+    "id": "log-1787150130677-0.5293393895603651",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.677Z"
+  },
+  {
+    "id": "log-1787150130681-0.6044214261953103",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.681Z"
+  },
+  {
+    "id": "log-1787150130704-0.35163004463222247",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.704Z"
+  },
+  {
+    "id": "log-1787150130715-0.7742172233940081",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.715Z"
+  },
+  {
+    "id": "log-1787150130725-0.7546015191364837",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.725Z"
+  },
+  {
+    "id": "log-1787150130729-0.9709826231741194",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.729Z"
+  },
+  {
+    "id": "log-1787150130733-0.5773577674143897",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.733Z"
+  },
+  {
+    "id": "log-1787150130736-0.830467038919793",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.736Z"
+  },
+  {
+    "id": "log-1787150130916-0.808237456007705",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:30.916Z"
+  },
+  {
+    "id": "log-1787150131280-0.8009465007675909",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:31.280Z"
+  },
+  {
+    "id": "log-1787150131849-0.13844007886555088",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:31.849Z"
+  },
+  {
+    "id": "log-1787150132051-0.5776632560904407",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:32.051Z"
+  },
+  {
+    "id": "log-1787150132079-0.04219884960552389",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:32.079Z"
+  },
+  {
+    "id": "log-1787150132657-0.5426355976288819",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:32.657Z"
+  },
+  {
+    "id": "log-1787150133157-0.803172767479365",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.157Z"
+  },
+  {
+    "id": "log-1787150133222-0.1819132448599965",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.222Z"
+  },
+  {
+    "id": "log-1787150133485-0.6063519851924597",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.485Z"
+  },
+  {
+    "id": "log-1787150133560-0.4541728694772107",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.560Z"
+  },
+  {
+    "id": "log-1787150133594-0.46346487545364434",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.594Z"
+  },
+  {
+    "id": "log-1787150133717-0.17763184626322692",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.717Z"
+  },
+  {
+    "id": "log-1787150133778-0.46000558698540694",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.778Z"
+  },
+  {
+    "id": "log-1787150133819-0.6564660686837558",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.819Z"
+  },
+  {
+    "id": "log-1787150133828-0.8100345995569129",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.828Z"
+  },
+  {
+    "id": "log-1787150133833-0.8546982134977745",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.833Z"
+  },
+  {
+    "id": "log-1787150133852-0.898462004038761",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.852Z"
+  },
+  {
+    "id": "log-1787150133869-0.8495494159107868",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.869Z"
+  },
+  {
+    "id": "log-1787150133876-0.8167677145872358",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:33.876Z"
+  },
+  {
+    "id": "log-1787150142027-0.38749301563527183",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.027Z"
+  },
+  {
+    "id": "log-1787150142395-0.9079661338622325",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.395Z"
+  },
+  {
+    "id": "log-1787150142622-0.8488921833898175",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.622Z"
+  },
+  {
+    "id": "log-1787150142698-0.19844458206035331",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.698Z"
+  },
+  {
+    "id": "log-1787150142813-0.38590547210034587",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.813Z"
+  },
+  {
+    "id": "log-1787150142914-0.5862664335104384",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:42.914Z"
+  },
+  {
+    "id": "log-1787150143125-0.036345464231830604",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:43.125Z"
+  },
+  {
+    "id": "log-1787150144752-0.9729214674946811",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.752Z"
+  },
+  {
+    "id": "log-1787150144847-0.15308519283676958",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.847Z"
+  },
+  {
+    "id": "log-1787150144853-0.11435198963022764",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.853Z"
+  },
+  {
+    "id": "log-1787150144937-0.9609846746799198",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.937Z"
+  },
+  {
+    "id": "log-1787150144960-0.40702071666855155",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.960Z"
+  },
+  {
+    "id": "log-1787150144966-0.2686917579040071",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:44.966Z"
+  },
+  {
+    "id": "log-1787150145081-0.9259500156820462",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.081Z"
+  },
+  {
+    "id": "log-1787150145266-0.664627973489812",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.266Z"
+  },
+  {
+    "id": "log-1787150145288-0.6827968161413358",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.288Z"
+  },
+  {
+    "id": "log-1787150145337-0.1701183360007963",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.337Z"
+  },
+  {
+    "id": "log-1787150145341-0.34457276801461423",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.341Z"
+  },
+  {
+    "id": "log-1787150145356-0.614354951963888",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.356Z"
+  },
+  {
+    "id": "log-1787150145543-0.8889795990147091",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.543Z"
+  },
+  {
+    "id": "log-1787150145598-0.5812475281619773",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.598Z"
+  },
+  {
+    "id": "log-1787150145614-0.9777977993664326",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.614Z"
+  },
+  {
+    "id": "log-1787150145792-0.04313978805801311",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:45.792Z"
+  },
+  {
+    "id": "log-1787150146107-0.8407257314892551",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.107Z"
+  },
+  {
+    "id": "log-1787150146135-0.3407538248887487",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.135Z"
+  },
+  {
+    "id": "log-1787150146147-0.9545751138831029",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.147Z"
+  },
+  {
+    "id": "log-1787150146267-0.33843835419430235",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.267Z"
+  },
+  {
+    "id": "log-1787150146282-0.5211357122202496",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.282Z"
+  },
+  {
+    "id": "log-1787150146545-0.6296028676729564",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.545Z"
+  },
+  {
+    "id": "log-1787150146560-0.3174490375082175",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.560Z"
+  },
+  {
+    "id": "log-1787150146566-0.4089239129056452",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.566Z"
+  },
+  {
+    "id": "log-1787150146601-0.6275099260100483",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.601Z"
+  },
+  {
+    "id": "log-1787150146680-0.4884840296984323",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.680Z"
+  },
+  {
+    "id": "log-1787150146716-0.6101323882040066",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.716Z"
+  },
+  {
+    "id": "log-1787150146809-0.8220216728377152",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.809Z"
+  },
+  {
+    "id": "log-1787150146840-0.4006950242288596",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.840Z"
+  },
+  {
+    "id": "log-1787150146883-0.49586647127918315",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.883Z"
+  },
+  {
+    "id": "log-1787150146912-0.5925771056018956",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.912Z"
+  },
+  {
+    "id": "log-1787150146931-0.2035713450737744",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.931Z"
+  },
+  {
+    "id": "log-1787150146934-0.01796601910036455",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.934Z"
+  },
+  {
+    "id": "log-1787150146946-0.15179049805781508",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.946Z"
+  },
+  {
+    "id": "log-1787150146953-0.43301745222532295",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.953Z"
+  },
+  {
+    "id": "log-1787150146974-0.9154860146990351",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.974Z"
+  },
+  {
+    "id": "log-1787150146979-0.24907510136524347",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:46.979Z"
+  },
+  {
+    "id": "log-1787150147048-0.5549280661620231",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.048Z"
+  },
+  {
+    "id": "log-1787150147073-0.7733856116274991",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.073Z"
+  },
+  {
+    "id": "log-1787150147138-0.7143889631660794",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.138Z"
+  },
+  {
+    "id": "log-1787150147184-0.6814227650140623",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.184Z"
+  },
+  {
+    "id": "log-1787150147229-0.38234589350805304",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.229Z"
+  },
+  {
+    "id": "log-1787150147246-0.3969506324518026",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.246Z"
+  },
+  {
+    "id": "log-1787150147275-0.18773475569092146",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.275Z"
+  },
+  {
+    "id": "log-1787150147280-0.5293791508601331",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.280Z"
+  },
+  {
+    "id": "log-1787150147299-0.06090604153270274",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.299Z"
+  },
+  {
+    "id": "log-1787150147405-0.9391700427059841",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.405Z"
+  },
+  {
+    "id": "log-1787150147422-0.300672680516195",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.422Z"
+  },
+  {
+    "id": "log-1787150147452-0.5933415201817074",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.452Z"
+  },
+  {
+    "id": "log-1787150147478-0.09582135536901992",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.478Z"
+  },
+  {
+    "id": "log-1787150147482-0.8652673972969127",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.482Z"
+  },
+  {
+    "id": "log-1787150147491-0.6611193249510996",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.491Z"
+  },
+  {
+    "id": "log-1787150147506-0.00006776416088816184",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.506Z"
+  },
+  {
+    "id": "log-1787150147520-0.36222193285798765",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.520Z"
+  },
+  {
+    "id": "log-1787150147524-0.554669282049616",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.524Z"
+  },
+  {
+    "id": "log-1787150147544-0.8314006993527925",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.544Z"
+  },
+  {
+    "id": "log-1787150147567-0.29811957432614844",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.567Z"
+  },
+  {
+    "id": "log-1787150147587-0.40987574722954756",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.587Z"
+  },
+  {
+    "id": "log-1787150147592-0.6269966674188383",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.592Z"
+  },
+  {
+    "id": "log-1787150147599-0.036778561476882965",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.599Z"
+  },
+  {
+    "id": "log-1787150147614-0.47220610584129874",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.614Z"
+  },
+  {
+    "id": "log-1787150147621-0.8203728245888824",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.621Z"
+  },
+  {
+    "id": "log-1787150147627-0.24386929568680848",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.627Z"
+  },
+  {
+    "id": "log-1787150147633-0.09205988279348043",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.633Z"
+  },
+  {
+    "id": "log-1787150147642-0.8257048094169221",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.642Z"
+  },
+  {
+    "id": "log-1787150147647-0.5579819431390598",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.647Z"
+  },
+  {
+    "id": "log-1787150147672-0.6531910147499922",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.672Z"
+  },
+  {
+    "id": "log-1787150147678-0.6053454867518382",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.678Z"
+  },
+  {
+    "id": "log-1787150147684-0.8509691225070164",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.684Z"
+  },
+  {
+    "id": "log-1787150147708-0.6542662421484828",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.708Z"
+  },
+  {
+    "id": "log-1787150147716-0.2593643329765216",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.716Z"
+  },
+  {
+    "id": "log-1787150147746-0.20962423838296718",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.746Z"
+  },
+  {
+    "id": "log-1787150147750-0.8967502180405451",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.750Z"
+  },
+  {
+    "id": "log-1787150147757-0.1433303526610228",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.757Z"
+  },
+  {
+    "id": "log-1787150147819-0.016607451703057663",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.819Z"
+  },
+  {
+    "id": "log-1787150147837-0.40748454396104594",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.837Z"
+  },
+  {
+    "id": "log-1787150147852-0.6444716371752206",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.852Z"
+  },
+  {
+    "id": "log-1787150147856-0.8577086096388247",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.856Z"
+  },
+  {
+    "id": "log-1787150147864-0.5927169303580782",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.864Z"
+  },
+  {
+    "id": "log-1787150147896-0.27125031767204444",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.896Z"
+  },
+  {
+    "id": "log-1787150147958-0.6266835656547016",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.958Z"
+  },
+  {
+    "id": "log-1787150147976-0.24104922898481784",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.977Z"
+  },
+  {
+    "id": "log-1787150147986-0.9295812372006027",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.986Z"
+  },
+  {
+    "id": "log-1787150147995-0.8347030674852276",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:47.995Z"
+  },
+  {
+    "id": "log-1787150148028-0.08071331442463747",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.028Z"
+  },
+  {
+    "id": "log-1787150148033-0.29534651104851894",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.033Z"
+  },
+  {
+    "id": "log-1787150148039-0.0027164438654068146",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.039Z"
+  },
+  {
+    "id": "log-1787150148053-0.2673572132422477",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.053Z"
+  },
+  {
+    "id": "log-1787150148063-0.909399559209749",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.063Z"
+  },
+  {
+    "id": "log-1787150148093-0.8480182032117667",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.093Z"
+  },
+  {
+    "id": "log-1787150148106-0.05600049835097076",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.106Z"
+  },
+  {
+    "id": "log-1787150148111-0.8274605548599727",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.111Z"
+  },
+  {
+    "id": "log-1787150148116-0.2599673868017647",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.116Z"
+  },
+  {
+    "id": "log-1787150148121-0.2287285799294987",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.121Z"
+  },
+  {
+    "id": "log-1787150148126-0.6373057627412788",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.126Z"
+  },
+  {
+    "id": "log-1787150148131-0.5175376656691184",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.131Z"
+  },
+  {
+    "id": "log-1787150148139-0.355255232542141",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.139Z"
+  },
+  {
+    "id": "log-1787150148156-0.9977439045531908",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.156Z"
+  },
+  {
+    "id": "log-1787150148160-0.028604781283652514",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.160Z"
+  },
+  {
+    "id": "log-1787150148195-0.6090400553530266",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.195Z"
+  },
+  {
+    "id": "log-1787150148208-0.03425879244792185",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.208Z"
+  },
+  {
+    "id": "log-1787150148232-0.7158860926365738",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.232Z"
+  },
+  {
+    "id": "log-1787150148252-0.07245136780959083",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.252Z"
+  },
+  {
+    "id": "log-1787150148266-0.18316982133630888",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.266Z"
+  },
+  {
+    "id": "log-1787150148271-0.6309965427410111",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.272Z"
+  },
+  {
+    "id": "log-1787150148297-0.04557987648851314",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.297Z"
+  },
+  {
+    "id": "log-1787150148321-0.814248620181562",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.321Z"
+  },
+  {
+    "id": "log-1787150148326-0.5052291473092096",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.326Z"
+  },
+  {
+    "id": "log-1787150148334-0.3280759567308411",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.334Z"
+  },
+  {
+    "id": "log-1787150148340-0.7358372872671535",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.340Z"
+  },
+  {
+    "id": "log-1787150148346-0.6232548065269155",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.346Z"
+  },
+  {
+    "id": "log-1787150148357-0.018031941503138027",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.357Z"
+  },
+  {
+    "id": "log-1787150148369-0.6485468806459371",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.369Z"
+  },
+  {
+    "id": "log-1787150148374-0.6268718799871631",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:48.375Z"
+  },
+  {
+    "id": "log-1787150149574-0.07278107321875726",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:49.574Z"
+  },
+  {
+    "id": "log-1787150149655-0.9662200755392354",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:49.655Z"
+  },
+  {
+    "id": "log-1787150149719-0.18495297533287025",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:49.719Z"
+  },
+  {
+    "id": "log-1787150149996-0.08448337540457995",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:49.996Z"
+  },
+  {
+    "id": "log-1787150150002-0.3276291340410662",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:50.002Z"
+  },
+  {
+    "id": "log-1787150150102-0.7668548607360308",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:50.102Z"
+  },
+  {
+    "id": "log-1787150150125-0.43885536851226603",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:50.125Z"
+  },
+  {
+    "id": "log-1787150151034-0.1612922479379073",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:51.034Z"
+  },
+  {
+    "id": "log-1787150151945-0.06692038850168691",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:51.945Z"
+  },
+  {
+    "id": "log-1787150152094-0.4847719066015208",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:52.094Z"
+  },
+  {
+    "id": "log-1787150152716-0.6666271237702048",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:52.716Z"
+  },
+  {
+    "id": "log-1787150152866-0.9664854222369983",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:52.866Z"
+  },
+  {
+    "id": "log-1787150152937-0.22297968387015032",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:52.937Z"
+  },
+  {
+    "id": "log-1787150153180-0.6565991356960785",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.180Z"
+  },
+  {
+    "id": "log-1787150153225-0.26897295761761897",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.225Z"
+  },
+  {
+    "id": "log-1787150153253-0.5381896491513605",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.253Z"
+  },
+  {
+    "id": "log-1787150153338-0.9297197139705855",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.338Z"
+  },
+  {
+    "id": "log-1787150153405-0.5029276996873904",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.405Z"
+  },
+  {
+    "id": "log-1787150153508-0.5145705148056208",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.508Z"
+  },
+  {
+    "id": "log-1787150153548-0.3793800366403337",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.548Z"
+  },
+  {
+    "id": "log-1787150153633-0.3912382396301133",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.633Z"
+  },
+  {
+    "id": "log-1787150153648-0.10965946559236284",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.648Z"
+  },
+  {
+    "id": "log-1787150153703-0.8776357297093567",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.703Z"
+  },
+  {
+    "id": "log-1787150153739-0.09214979440560223",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.739Z"
+  },
+  {
+    "id": "log-1787150153748-0.8022178472686965",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.748Z"
+  },
+  {
+    "id": "log-1787150153765-0.7076582387325234",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.765Z"
+  },
+  {
+    "id": "log-1787150153771-0.30427547122458587",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.771Z"
+  },
+  {
+    "id": "log-1787150153781-0.4574072680082326",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.781Z"
+  },
+  {
+    "id": "log-1787150153964-0.6078836841444772",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:53.964Z"
+  },
+  {
+    "id": "log-1787150154027-0.2468576620742926",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.027Z"
+  },
+  {
+    "id": "log-1787150154091-0.7027224580558173",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.091Z"
+  },
+  {
+    "id": "log-1787150154113-0.9956050052094116",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.113Z"
+  },
+  {
+    "id": "log-1787150154119-0.7584548230990942",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.119Z"
+  },
+  {
+    "id": "log-1787150154151-0.5389249012926822",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.151Z"
+  },
+  {
+    "id": "log-1787150154161-0.6733542568713928",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.161Z"
+  },
+  {
+    "id": "log-1787150154358-0.5524905701472231",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.358Z"
+  },
+  {
+    "id": "log-1787150154384-0.4636523182601877",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.384Z"
+  },
+  {
+    "id": "log-1787150154413-0.5317320052490397",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.413Z"
+  },
+  {
+    "id": "log-1787150154427-0.1304373949085933",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.427Z"
+  },
+  {
+    "id": "log-1787150154445-0.5342018637442543",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.445Z"
+  },
+  {
+    "id": "log-1787150154553-0.030352205001870303",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.553Z"
+  },
+  {
+    "id": "log-1787150154640-0.004000098437539901",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.640Z"
+  },
+  {
+    "id": "log-1787150154664-0.1542773241214992",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.664Z"
+  },
+  {
+    "id": "log-1787150154733-0.233545405488373",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.733Z"
+  },
+  {
+    "id": "log-1787150154739-0.6805425117214239",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.739Z"
+  },
+  {
+    "id": "log-1787150154782-0.8747323119005546",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.782Z"
+  },
+  {
+    "id": "log-1787150154792-0.8259960773001627",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.792Z"
+  },
+  {
+    "id": "log-1787150154796-0.6090723275104684",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.796Z"
+  },
+  {
+    "id": "log-1787150154940-0.6199355067500181",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.940Z"
+  },
+  {
+    "id": "log-1787150154978-0.31018184495723355",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:54.978Z"
+  },
+  {
+    "id": "log-1787150155016-0.35590741703347484",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.016Z"
+  },
+  {
+    "id": "log-1787150155027-0.4259656012711288",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.027Z"
+  },
+  {
+    "id": "log-1787150155044-0.08695467173209082",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.044Z"
+  },
+  {
+    "id": "log-1787150155070-0.7538909070462589",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.070Z"
+  },
+  {
+    "id": "log-1787150155080-0.4327194116694262",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.080Z"
+  },
+  {
+    "id": "log-1787150155101-0.8763203480298947",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.101Z"
+  },
+  {
+    "id": "log-1787150155110-0.3703902644685746",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.111Z"
+  },
+  {
+    "id": "log-1787150155116-0.12462381330182493",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.116Z"
+  },
+  {
+    "id": "log-1787150155134-0.6944642570316637",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.134Z"
+  },
+  {
+    "id": "log-1787150155142-0.5834052601065252",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.142Z"
+  },
+  {
+    "id": "log-1787150155149-0.1651820625095306",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.149Z"
+  },
+  {
+    "id": "log-1787150155155-0.7196699812543732",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.155Z"
+  },
+  {
+    "id": "log-1787150155205-0.9050671684745832",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.205Z"
+  },
+  {
+    "id": "log-1787150155213-0.8264800867991307",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.213Z"
+  },
+  {
+    "id": "log-1787150155256-0.12145028416849235",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.256Z"
+  },
+  {
+    "id": "log-1787150155262-0.06460667113767515",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.262Z"
+  },
+  {
+    "id": "log-1787150155273-0.31896295447067",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.273Z"
+  },
+  {
+    "id": "log-1787150155323-0.8665526742046348",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.323Z"
+  },
+  {
+    "id": "log-1787150155372-0.9254978572554349",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.373Z"
+  },
+  {
+    "id": "log-1787150155407-0.5035310745978254",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.407Z"
+  },
+  {
+    "id": "log-1787150155430-0.8448630350805588",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.430Z"
+  },
+  {
+    "id": "log-1787150155436-0.23417952841359768",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.436Z"
+  },
+  {
+    "id": "log-1787150155451-0.9380214443435375",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.451Z"
+  },
+  {
+    "id": "log-1787150155472-0.30710141676410574",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.472Z"
+  },
+  {
+    "id": "log-1787150155510-0.09313493753217728",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.510Z"
+  },
+  {
+    "id": "log-1787150155537-0.8788930761730682",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.537Z"
+  },
+  {
+    "id": "log-1787150155552-0.2655557809987954",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.552Z"
+  },
+  {
+    "id": "log-1787150155559-0.5341463013559595",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.559Z"
+  },
+  {
+    "id": "log-1787150155574-0.5277983442848317",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.574Z"
+  },
+  {
+    "id": "log-1787150155582-0.2296763654210321",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.582Z"
+  },
+  {
+    "id": "log-1787150155593-0.9122465716350918",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.593Z"
+  },
+  {
+    "id": "log-1787150155599-0.45022888468651856",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.599Z"
+  },
+  {
+    "id": "log-1787150155615-0.9887847705404009",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.615Z"
+  },
+  {
+    "id": "log-1787150155681-0.2971848024633934",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.681Z"
+  },
+  {
+    "id": "log-1787150155691-0.4342099243873756",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.691Z"
+  },
+  {
+    "id": "log-1787150155697-0.9903840521258751",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.697Z"
+  },
+  {
+    "id": "log-1787150155705-0.638623067380556",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.705Z"
+  },
+  {
+    "id": "log-1787150155719-0.9512622545902818",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.719Z"
+  },
+  {
+    "id": "log-1787150155726-0.3318070827805728",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.726Z"
+  },
+  {
+    "id": "log-1787150155732-0.8315450742852328",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.732Z"
+  },
+  {
+    "id": "log-1787150155761-0.3821287564864182",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.761Z"
+  },
+  {
+    "id": "log-1787150155772-0.10392127874488266",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.772Z"
+  },
+  {
+    "id": "log-1787150155781-0.8303849481240473",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.781Z"
+  },
+  {
+    "id": "log-1787150155870-0.0983175782080743",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.870Z"
+  },
+  {
+    "id": "log-1787150155878-0.34925865011842694",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.878Z"
+  },
+  {
+    "id": "log-1787150155964-0.7422321905764935",
+    "userId": null,
+    "userName": "Sistema (Scheduler)",
+    "action": "Rate Limit Excedido (Bloqueio 429)",
+    "module": "SEGURANÇA",
+    "details": "IP 197.235.156.101, 169.254.169.126 excedeu o limite de requisições [Categoria: DB] na rota POST /api/db/save. Acesso suspenso temporariamente.",
+    "timestamp": "2026-08-19T14:35:55.964Z"
   }
 ]

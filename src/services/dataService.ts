@@ -13,7 +13,9 @@
  * - Armazenamento de Backups em Nuvem (StorageService)
  */
 
-import { createClient, SupabaseClient, Session, User } from "@supabase/supabase-js";
+import { Session, User } from "@supabase/supabase-js";
+import { supabase as supabaseClient, getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY } from "../lib/supabase";
+export { supabaseClient, getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY };
 import {
   SupabaseSyncService,
   getSupabaseConfig,
@@ -33,33 +35,6 @@ import {
   AuditLog, 
   SystemSettings 
 } from "../types";
-
-// ==========================================
-// INICIALIZAÇÃO CENTRALIZADA DO SUPABASE-JS
-// ==========================================
-
-const metaEnv = (import.meta as any).env || {};
-export const SUPABASE_URL: string = metaEnv.VITE_SUPABASE_URL || "https://ost-vendas-db.supabase.co";
-export const SUPABASE_ANON_KEY: string = metaEnv.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon-key";
-
-/**
- * Cliente centralizado do Supabase instanciado com as variáveis de ambiente oficiais.
- */
-export const supabaseClient: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-  }
-});
-
-/**
- * Retorna o cliente Supabase ativo
- */
-export function getSupabaseClient(): SupabaseClient {
-  return supabaseClient;
-}
 
 /**
  * Sanitização e normalização de mensagens de erro para proteção de dados e logs amigáveis.

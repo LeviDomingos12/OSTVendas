@@ -7,6 +7,7 @@
  */
 
 import { createClient, SupabaseClient, Session, User, RealtimeChannel } from "@supabase/supabase-js";
+import { supabase as singletonClient } from "../lib/supabase";
 import { 
   Product, 
   Customer, 
@@ -105,7 +106,7 @@ let cachedClient: SupabaseClient | null = null;
 export function getSupabaseClient(): SupabaseClient | null {
   const config = getSupabaseConfig();
   if (!config.url || !config.anonKey || !config.enabled) {
-    return null;
+    return singletonClient;
   }
 
   if (!cachedClient) {
@@ -118,12 +119,12 @@ export function getSupabaseClient(): SupabaseClient | null {
         }
       });
     } catch (err) {
-      console.warn("Falha ao inicializar cliente Supabase:", err);
-      return null;
+      console.warn("Falha ao inicializar cliente Supabase personalizado, usando singleton:", err);
+      return singletonClient;
     }
   }
 
-  return cachedClient;
+  return cachedClient || singletonClient;
 }
 
 /**
@@ -137,7 +138,7 @@ export async function measureSupabaseLatency(customUrl?: string, customKey?: str
     return {
       latencyMs: 0,
       status: "error",
-      message: "Credenciais do servidor Supabase não configuradas.",
+      message: "Credenciais do servidor de dados não configuradas.",
       timestamp: new Date().toISOString()
     };
   }
@@ -159,13 +160,13 @@ export async function measureSupabaseLatency(customUrl?: string, customKey?: str
     }
 
     let status: "optimal" | "good" | "slow" = "optimal";
-    let message = `Excelente conexão com Supabase PostgreSQL (${latencyMs}ms)`;
+    let message = `Excelente conexão com o Servidor Backend (${latencyMs}ms)`;
     if (latencyMs > 350) {
       status = "slow";
       message = `Latência elevada (${latencyMs}ms) - Verifique a sua ligação de rede.`;
     } else if (latencyMs > 150) {
       status = "good";
-      message = `Boa conexão estável com Supabase (${latencyMs}ms)`;
+      message = `Boa conexão estável com o Servidor Backend (${latencyMs}ms)`;
     }
 
     return {
@@ -198,7 +199,7 @@ export async function validateSupabaseSession(): Promise<SessionValidationResult
       expiresAt: null,
       email: null,
       role: null,
-      message: "Servidor Supabase inativo ou não configurado."
+      message: "Servidor de dados inativo ou não configurado."
     };
   }
 

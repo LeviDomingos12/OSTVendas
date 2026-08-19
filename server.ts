@@ -32,16 +32,16 @@ const rateLimitMetrics = {
   recentViolations: [] as RateLimitViolation[],
 };
 
-// Dynamic Rate Limit Configurations
+// Dynamic Rate Limit Configurations with High-Throughput Commercial Thresholds
 const defaultRateLimitConfig = {
-  profile: "balanced" as "strict" | "balanced" | "tolerant" | "custom",
-  generalMax: 120,      // 120 requests per 15 min
+  profile: "tolerant" as "strict" | "balanced" | "tolerant" | "custom",
+  generalMax: 10000,     // 10,000 requests per 15 min
   generalWindowMs: 15 * 60 * 1000,
-  aiMax: 20,           // 20 requests per 1 min
+  aiMax: 300,           // 300 requests per 1 min
   aiWindowMs: 60 * 1000,
-  emailMax: 10,        // 10 requests per 5 min
+  emailMax: 150,        // 150 requests per 5 min
   emailWindowMs: 5 * 60 * 1000,
-  dbMax: 15,           // 15 requests per 1 min
+  dbMax: 3000,          // 3,000 requests per 1 min (ensures fast batch POS operations and multi-register syncing)
   dbWindowMs: 60 * 1000,
   enabled: true
 };
@@ -477,22 +477,25 @@ async function startServer() {
   };
 
   const generalLimiter = rateLimit({
-    windowMs: currentConfig.generalWindowMs || 15 * 60 * 1000,
-    max: currentConfig.generalMax || 120,
+    windowMs: 15 * 60 * 1000,
+    max: () => getRateLimitConfig().generalMax || 10000,
     standardHeaders: true,
     legacyHeaders: true,
     validate: false,
     keyGenerator: getClientIpKey,
-    skip: () => {
+    skip: (req) => {
       const cfg = getRateLimitConfig();
-      return !cfg.enabled;
+      if (!cfg.enabled) return true;
+      // Skip healthchecks and static checks
+      if (req.path === "/health" || req.path === "/api/health") return true;
+      return false;
     },
     handler: handleLimitExceeded("general")
   });
 
   const aiLimiter = rateLimit({
-    windowMs: currentConfig.aiWindowMs || 60 * 1000,
-    max: currentConfig.aiMax || 20,
+    windowMs: 60 * 1000,
+    max: () => getRateLimitConfig().aiMax || 300,
     standardHeaders: true,
     legacyHeaders: true,
     validate: false,
@@ -505,8 +508,8 @@ async function startServer() {
   });
 
   const emailLimiter = rateLimit({
-    windowMs: currentConfig.emailWindowMs || 5 * 60 * 1000,
-    max: currentConfig.emailMax || 10,
+    windowMs: 5 * 60 * 1000,
+    max: () => getRateLimitConfig().emailMax || 150,
     standardHeaders: true,
     legacyHeaders: true,
     validate: false,
@@ -519,15 +522,18 @@ async function startServer() {
   });
 
   const dbLimiter = rateLimit({
-    windowMs: currentConfig.dbWindowMs || 60 * 1000,
-    max: currentConfig.dbMax || 15,
+    windowMs: 60 * 1000,
+    max: () => getRateLimitConfig().dbMax || 3000,
     standardHeaders: true,
     legacyHeaders: true,
     validate: false,
     keyGenerator: getClientIpKey,
-    skip: () => {
+    skip: (req) => {
       const cfg = getRateLimitConfig();
-      return !cfg.enabled;
+      if (!cfg.enabled) return true;
+      // Never block internal data hydration/bulk synchronization routes
+      if (req.path === "/load" || req.path === "/save") return false;
+      return false;
     },
     handler: handleLimitExceeded("db")
   });
@@ -572,22 +578,22 @@ async function startServer() {
 
       if (profile === "strict") {
         newConfig.profile = "strict";
-        newConfig.generalMax = 60;
-        newConfig.aiMax = 10;
-        newConfig.emailMax = 5;
-        newConfig.dbMax = 10;
+        newConfig.generalMax = 2000;
+        newConfig.aiMax = 60;
+        newConfig.emailMax = 30;
+        newConfig.dbMax = 500;
       } else if (profile === "balanced") {
         newConfig.profile = "balanced";
-        newConfig.generalMax = 120;
-        newConfig.aiMax = 20;
-        newConfig.emailMax = 10;
-        newConfig.dbMax = 15;
+        newConfig.generalMax = 5000;
+        newConfig.aiMax = 150;
+        newConfig.emailMax = 60;
+        newConfig.dbMax = 1500;
       } else if (profile === "tolerant") {
         newConfig.profile = "tolerant";
-        newConfig.generalMax = 300;
-        newConfig.aiMax = 50;
-        newConfig.emailMax = 30;
-        newConfig.dbMax = 30;
+        newConfig.generalMax = 10000;
+        newConfig.aiMax = 300;
+        newConfig.emailMax = 150;
+        newConfig.dbMax = 3000;
       } else if (profile === "custom") {
         newConfig.profile = "custom";
         if (typeof generalMax === "number" && generalMax > 0) newConfig.generalMax = generalMax;

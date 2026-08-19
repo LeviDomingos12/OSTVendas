@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { 
@@ -10,16 +10,16 @@ import {
   Send, 
   TrendingUp, 
   DollarSign, 
-  Calculator,
-  Percent,
-  Play,
-  Printer,
-  Calendar,
-  Activity,
-  User,
-  ShieldAlert,
-  AlertTriangle,
-  Flame
+  Calculator, 
+  Percent, 
+  Play, 
+  Printer, 
+  Calendar, 
+  Activity, 
+  User, 
+  ShieldAlert, 
+  AlertTriangle, 
+  Flame 
 } from "lucide-react";
 import {
   BarChart,
@@ -35,6 +35,117 @@ import { sendEmail } from "../lib/gmail";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { printInvoiceHTML } from "../lib/printHelper";
+
+interface ReportTransactionRowProps {
+  transaction: Transaction;
+  currency: string;
+  onOpenEmail: (t: Transaction) => void;
+  onOpenPrint: (t: Transaction) => void;
+  formatMZ: (val: number) => string;
+}
+
+const ReportTransactionRow = React.memo(({
+  transaction,
+  currency,
+  onOpenEmail,
+  onOpenPrint,
+  formatMZ
+}: ReportTransactionRowProps) => {
+  return (
+    <tr className="hover:bg-slate-50/50 transition">
+      <td className="p-3 font-bold font-mono text-slate-800">{transaction.invoiceNumber}</td>
+      <td className="p-3 text-[11px] whitespace-nowrap">{new Date(transaction.timestamp).toLocaleString()}</td>
+      <td className="p-3 font-semibold text-slate-700">{transaction.customerName || "Consumidor Geral"}</td>
+      <td className="p-3">
+        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+          transaction.paymentMethod === "CASH" ? "bg-amber-50 text-amber-700" :
+          (transaction.paymentMethod as string) === "MPESA_PAGA_FACIL" || (transaction.paymentMethod as string) === "M-PESA" ? "bg-red-50 text-red-600" :
+          "bg-sky-50 text-sky-700"
+        }`}>{transaction.paymentMethod}</span>
+      </td>
+      <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(transaction.subtotal)}</td>
+      <td className="p-3 text-right font-mono text-red-500 font-medium">-{formatMZ(transaction.discountTotal)}</td>
+      <td className="p-3 text-right font-mono text-slate-500 font-medium">{formatMZ(transaction.vatTotal)}</td>
+      <td className="p-3 text-right font-mono font-bold text-slate-800">{formatMZ(transaction.grandTotal)}</td>
+      <td className="p-3 text-center flex items-center justify-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onOpenEmail(transaction)}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
+          title="Enviar Fatura por E-mail"
+        >
+          <Mail className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onOpenPrint(transaction)}
+          className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
+          title="Imprimir Fatura / Recibo"
+        >
+          <Printer className="w-4 h-4" />
+        </button>
+      </td>
+    </tr>
+  );
+});
+ReportTransactionRow.displayName = "ReportTransactionRow";
+
+interface ReportVatRowProps {
+  transaction: Transaction;
+  formatMZ: (val: number) => string;
+}
+
+const ReportVatRow = React.memo(({
+  transaction,
+  formatMZ
+}: ReportVatRowProps) => {
+  return (
+    <tr className="hover:bg-slate-50/50 transition">
+      <td className="p-3 font-bold font-mono text-slate-800">{transaction.invoiceNumber}</td>
+      <td className="p-3 text-[11px] whitespace-nowrap">{new Date(transaction.timestamp).toLocaleString()}</td>
+      <td className="p-3 font-semibold text-slate-700">{transaction.customerName || "Consumidor Geral"}</td>
+      <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(transaction.subtotal)}</td>
+      <td className="p-3 text-center font-bold">
+        <span className={`px-2 py-0.5 rounded text-[10px] ${
+          transaction.vatTotal > 0 ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"
+        }`}>
+          {transaction.vatTotal > 0 ? "16%" : "0% (Isento)"}
+        </span>
+      </td>
+      <td className="p-3 text-right font-mono font-medium text-slate-800">{formatMZ(transaction.vatTotal)}</td>
+      <td className="p-3 text-right font-mono font-bold text-slate-900">{formatMZ(transaction.grandTotal)}</td>
+    </tr>
+  );
+});
+ReportVatRow.displayName = "ReportVatRow";
+
+interface ReportAuditLogRowProps {
+  log: AuditLog;
+}
+
+const ReportAuditLogRow = React.memo(({ log }: ReportAuditLogRowProps) => {
+  return (
+    <tr className="hover:bg-slate-50/50 transition">
+      <td className="p-3 text-slate-500 font-mono text-[10px] whitespace-nowrap">
+        {new Date(log.timestamp).toLocaleString("pt-MZ")}
+      </td>
+      <td className="p-3 font-semibold text-slate-800">{log.user || "Sistema"}</td>
+      <td className="p-3">
+        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-150 text-slate-600 uppercase">
+          {log.module}
+        </span>
+      </td>
+      <td className="p-3 font-bold text-slate-800">{log.action}</td>
+      <td className="p-3 text-slate-500 max-w-xs truncate" title={log.details}>
+        {log.details}
+      </td>
+      <td className="p-3 text-right font-mono text-[10px] text-slate-400">
+        {log.ip || "127.0.0.1"}
+      </td>
+    </tr>
+  );
+});
+ReportAuditLogRow.displayName = "ReportAuditLogRow";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   if (!imageUrl) return "";
@@ -116,6 +227,14 @@ export default function ReportsModule({
   const [targetEmail, setTargetEmail] = useState("");
   const [showEmailModal, setShowEmailModal] = useState<Transaction | null>(null);
   const [showPrintModal, setShowPrintModal] = useState<Transaction | null>(null);
+
+  const handleOpenEmailModal = useCallback((t: Transaction) => {
+    setShowEmailModal(t);
+  }, []);
+
+  const handleOpenPrintModal = useCallback((t: Transaction) => {
+    setShowPrintModal(t);
+  }, []);
 
   // Monthly summary state & calculations
   const [showMonthlySummaryModal, setShowMonthlySummaryModal] = useState(false);
@@ -370,15 +489,15 @@ export default function ReportsModule({
     }
   }, [activityGrouping, activityAnalytics]);
 
-  const formatMZ = (val: number) => {
+  const formatMZ = useCallback((val: number) => {
     return new Intl.NumberFormat('pt-MZ', { 
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
     }).format(val) + " MT";
-  };
+  }, []);
 
   // Handle saving configurations
-  const handleSaveEmailConfig = (e: React.FormEvent) => {
+  const handleSaveEmailConfig = useCallback((e: React.FormEvent) => {
     e.preventDefault();
     if (!recipientEmail.includes("@")) {
       setLocalError("Por favor introduza um endereço de e-mail institucional válido.");
@@ -400,10 +519,10 @@ export default function ReportsModule({
     );
 
     setTimeout(() => setSaveSettingsSuccess(false), 2000);
-  };
+  }, [recipientEmail, reportHour, reportFrequency, onUpdateSettings, onAddAuditLog]);
 
   // Test Dispatch simulated emails via Express Server `/api/email/send-report`
-  const handleTriggerTestEmail = async () => {
+  const handleTriggerTestEmail = useCallback(async () => {
     setTestSendStatus("sending");
 
     try {
@@ -442,9 +561,9 @@ export default function ReportsModule({
         onShowToast(errMsg, "error", "Falha de Envio");
       }
     }
-  };
+  }, [recipientEmail, reportFrequency, financialTotals, onAddAuditLog, onShowToast]);
 
-  const handleSendInvoiceEmail = async (e: React.FormEvent) => {
+  const handleSendInvoiceEmail = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!showEmailModal || !targetEmail.includes("@")) return;
 
@@ -519,10 +638,10 @@ export default function ReportsModule({
     } finally {
       setSendingInvoiceId(null);
     }
-  };
+  }, [showEmailModal, targetEmail, settings, onShowToast, onAddAuditLog]);
 
   // Real exports compilation
-  const handlePerformExport = () => {
+  const handlePerformExport = useCallback(() => {
     setIsExporting(true);
     setExportMessage("");
 
@@ -693,7 +812,7 @@ export default function ReportsModule({
         `Relatório do tipo ${reportType} criado de ${startDate} até ${endDate} no formato ${exportFormat}.`
       );
     }, 1500);
-  };
+  }, [exportFormat, reportType, startDate, endDate, financialTotals, filteredTransactions, settings, formatMZ, onAddAuditLog]);
 
   const handlePerformExecutivePrintPDF = async () => {
     setIsExporting(true);
@@ -2600,40 +2719,14 @@ export default function ReportsModule({
                 </tr>
               ) : (
                 filteredTransactions.slice(0, 10).map((t) => (
-                  <tr key={t.id} className="hover:bg-slate-50/50 transition">
-                    <td className="p-3 font-bold font-mono text-slate-800">{t.invoiceNumber}</td>
-                    <td className="p-3 text-[11px] whitespace-nowrap">{new Date(t.timestamp).toLocaleString()}</td>
-                    <td className="p-3 font-semibold text-slate-700">{t.customerName || "Consumidor Geral"}</td>
-                    <td className="p-3">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                        t.paymentMethod === "CASH" ? "bg-amber-50 text-amber-700" :
-                        t.paymentMethod === "M-PESA" ? "bg-red-50 text-red-600" :
-                        "bg-sky-50 text-sky-700"
-                      }`}>{t.paymentMethod}</span>
-                    </td>
-                    <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(t.subtotal)}</td>
-                    <td className="p-3 text-right font-mono text-red-500 font-medium">-{formatMZ(t.discountTotal)}</td>
-                    <td className="p-3 text-right font-mono text-slate-500 font-medium">{formatMZ(t.vatTotal)}</td>
-                    <td className="p-3 text-right font-mono font-bold text-slate-800">{formatMZ(t.grandTotal)}</td>
-                    <td className="p-3 text-center flex items-center justify-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setShowEmailModal(t)}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
-                        title="Enviar Fatura por E-mail"
-                      >
-                        <Mail className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShowPrintModal(t)}
-                        className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
-                        title="Imprimir Fatura / Recibo"
-                      >
-                        <Printer className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
+                  <ReportTransactionRow
+                    key={t.id}
+                    transaction={t}
+                    currency={currency}
+                    onOpenEmail={handleOpenEmailModal}
+                    onOpenPrint={handleOpenPrintModal}
+                    formatMZ={formatMZ}
+                  />
                 ))
               )}
               {filteredTransactions.length > 10 && (
@@ -3021,21 +3114,7 @@ export default function ReportsModule({
                       })
                       .slice(0, 15)
                       .map((t) => (
-                        <tr key={t.id} className="hover:bg-slate-50/50 transition">
-                          <td className="p-3 font-bold font-mono text-slate-800">{t.invoiceNumber}</td>
-                          <td className="p-3 text-[11px] whitespace-nowrap">{new Date(t.timestamp).toLocaleString()}</td>
-                          <td className="p-3 font-semibold text-slate-700">{t.customerName || "Consumidor Geral"}</td>
-                          <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(t.subtotal)}</td>
-                          <td className="p-3 text-center font-bold">
-                            <span className={`px-2 py-0.5 rounded text-[10px] ${
-                              t.vatTotal > 0 ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"
-                            }`}>
-                              {t.vatTotal > 0 ? "16%" : "0% (Isento)"}
-                            </span>
-                          </td>
-                          <td className="p-3 text-right font-mono font-medium text-slate-800">{formatMZ(t.vatTotal)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-slate-900">{formatMZ(t.grandTotal)}</td>
-                        </tr>
+                        <ReportVatRow key={t.id} transaction={t} formatMZ={formatMZ} />
                       ))
                   )}
                 </tbody>
@@ -3205,24 +3284,7 @@ export default function ReportsModule({
                     </tr>
                   ) : (
                     [...filteredLogs].reverse().slice(0, 15).map((log, idx) => (
-                      <tr key={`${log.id || 'log'}-${idx}`} className="hover:bg-slate-50/50 transition">
-                        <td className="p-3 text-slate-500 font-mono text-[10px] whitespace-nowrap">
-                          {new Date(log.timestamp).toLocaleString("pt-MZ")}
-                        </td>
-                        <td className="p-3 font-semibold text-slate-800">{log.user || "Sistema"}</td>
-                        <td className="p-3">
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-150 text-slate-600 uppercase">
-                            {log.module}
-                          </span>
-                        </td>
-                        <td className="p-3 font-bold text-slate-800">{log.action}</td>
-                        <td className="p-3 text-slate-500 max-w-xs truncate" title={log.details}>
-                          {log.details}
-                        </td>
-                        <td className="p-3 text-right font-mono text-[10px] text-slate-400">
-                          {log.ip || "127.0.0.1"}
-                        </td>
-                      </tr>
+                      <ReportAuditLogRow key={`${log.id || 'log'}-${idx}`} log={log} />
                     ))
                   )}
                 </tbody>
