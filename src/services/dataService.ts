@@ -33,7 +33,9 @@ import {
   CashFlowEntry, 
   Employee, 
   AuditLog, 
-  SystemSettings 
+  SystemSettings,
+  CashClosure,
+  CashShift
 } from "../types";
 
 /**
@@ -218,6 +220,10 @@ export const OfflineQueueService = {
           else remaining.push(item);
         } else if (item.type === "CASHFLOW") {
           const ok = await SupabaseSyncService.saveCashFlowEntry(item.payload);
+          if (ok) processed++;
+          else remaining.push(item);
+        } else if (item.type === "CASH_CLOSURE") {
+          const ok = await SupabaseSyncService.saveCashClosure(item.payload);
           if (ok) processed++;
           else remaining.push(item);
         }
@@ -423,6 +429,63 @@ export const CommercialDataService = {
     } catch (err) {
       console.warn("Erro ao salvar lote de movimentos de caixa:", err);
     }
+  },
+
+  // --- FECHAMENTOS DE CAIXA / BALANCETES ---
+  async fetchCashClosures(): Promise<CashClosure[]> {
+    try {
+      return await SupabaseSyncService.fetchCashClosures();
+    } catch (err) {
+      console.warn("Erro ao buscar fechamentos de caixa do Supabase:", err);
+      return [];
+    }
+  },
+
+  async saveCashClosure(closure: CashClosure): Promise<void> {
+    try {
+      const ok = await SupabaseSyncService.saveCashClosure(closure);
+      if (!ok) {
+        OfflineQueueService.enqueue({ type: "CASH_CLOSURE", payload: closure, timestamp: new Date().toISOString() });
+      }
+    } catch {
+      OfflineQueueService.enqueue({ type: "CASH_CLOSURE", payload: closure, timestamp: new Date().toISOString() });
+    }
+  },
+
+  async saveCashClosuresBatch(closures: CashClosure[]): Promise<void> {
+    try {
+      await SupabaseSyncService.syncCashClosures(closures);
+    } catch (err) {
+      console.warn("Erro ao salvar lote de fechamentos de caixa:", err);
+    }
+  },
+
+  async fetchActiveCashShift() {
+    try {
+      return await SupabaseSyncService.fetchActiveCashShift();
+    } catch (err) {
+      console.warn("Erro ao buscar turno ativo do Supabase:", err);
+      return null;
+    }
+  },
+
+  async saveActiveCashShift(shiftData: {
+    status: "OPEN" | "CLOSED";
+    openingBalance: number;
+    openedAt: string;
+    openedBy: string;
+    openingSupervisor?: string;
+    openingNotes?: string;
+  }): Promise<void> {
+    try {
+      await SupabaseSyncService.saveActiveCashShift(shiftData);
+    } catch (err) {
+      console.warn("Erro ao salvar turno ativo no Supabase:", err);
+    }
+  },
+
+  subscribeCashClosures(onUpdate: () => void) {
+    return SupabaseSyncService.subscribeToTableChanges("cash_closures", onUpdate);
   },
 
   // --- COLABORADORES / STAFF ---

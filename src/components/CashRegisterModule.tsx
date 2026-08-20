@@ -1,190 +1,51 @@
-import React, { useState, useMemo, useCallback } from "react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { 
   PiggyBank, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  AlertOctagon, 
-  Plus, 
+  LayoutDashboard, 
+  BookOpen, 
   History, 
-  User,
-  Calculator,
-  CheckCircle,
-  FileText,
-  Printer,
-  Calendar,
-  Search,
+  BarChart3, 
+  AlertTriangle, 
+  ShieldCheck, 
+  Coins, 
+  Printer, 
   Download,
-  FileSpreadsheet,
-  Coins,
-  ShieldCheck,
-  Filter,
-  Users,
-  AlertTriangle,
-  Clock,
-  Check,
-  RotateCcw,
-  UserCheck
+  Lock,
+  Unlock,
+  Plus
 } from "lucide-react";
-import { CashFlowEntry, Transaction, UserRole, SystemSettings } from "../types";
+import { 
+  CashFlowEntry, 
+  Transaction, 
+  UserRole, 
+  SystemSettings, 
+  Employee, 
+  CashClosure 
+} from "../types";
+import { CommercialDataService } from "../services/dataService";
+import { CashKpiCards } from "./cash/CashKpiCards";
+import { CashQuickActions } from "./cash/CashQuickActions";
+import { CashReconciliationPanel } from "./cash/CashReconciliationPanel";
+import { CashbookLedger } from "./cash/CashbookLedger";
+import { CashClosuresHistory } from "./cash/CashClosuresHistory";
+import { CashShiftModals } from "./cash/CashShiftModals";
+import { exportCashbookPdf, exportSingleClosurePdf, printThermalSlip } from "./cash/cashPdfService";
 import CashAnalyticalCharts from "./CashAnalyticalCharts";
-import DenominationCounter, { DENOMINATIONS } from "./DenominationCounter";
-
-// ============================================================================
-// COMPONENTES DE LINHA MEMOIZADOS (React.memo) PARA MÁXIMA PERFORMANCE
-// ============================================================================
-
-interface CashTimelineItemRowProps {
-  item: any;
-  currency: string;
-}
-
-const CashTimelineItemRow: React.FC<CashTimelineItemRowProps> = React.memo(({ item, currency }) => {
-  let textAmountColor = "";
-  if (item.type === "SALE" || item.type === "INPUT") textAmountColor = "text-emerald-600 dark:text-emerald-400";
-  else if (item.type === "REINFORCEMENT") textAmountColor = "text-blue-600 dark:text-blue-400";
-  else if ((item.reason || "").toLowerCase().includes("sangria")) textAmountColor = "text-orange-500 dark:text-orange-400";
-  else if (item.type === "EXPENSE") textAmountColor = "text-rose-600 dark:text-rose-400";
-  else textAmountColor = "text-purple-650 dark:text-purple-400";
-
-  return (
-    <div className="relative group animate-in fade-in duration-200">
-      {/* Bullet node */}
-      <div className={`absolute -left-[35px] top-1.5 w-6 h-6 rounded-full flex items-center justify-center text-xs border bg-white dark:bg-zinc-900 ${item.badgeColor}`}>
-        {item.iconText}
-      </div>
-
-      <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-1 p-3 rounded-xl hover:bg-slate-50/50 dark:hover:bg-zinc-950/20 transition">
-        {/* Visual Timeline detailed item */}
-        <div className="space-y-1">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <h4 className="text-xs font-bold text-slate-800 dark:text-zinc-200">{item.reason}</h4>
-            <span className="text-[9px] text-slate-400">•</span>
-            <span className="text-[10px] font-mono text-slate-400">
-              {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 text-[10px] text-slate-450">
-            {item.supplier && (
-              <span className="flex items-center gap-0.5">
-                <span className="font-bold text-slate-500">Credor/Dest:</span> {item.supplier}
-              </span>
-            )}
-            <span className="hidden sm:inline text-slate-300">•</span>
-            <span className="flex items-center gap-0.5">
-              <User className="w-3 h-3" />
-              {item.responsibleUser}
-            </span>
-          </div>
-        </div>
-
-        {/* Timeline Amount visual */}
-        <div className="text-right shrink-0">
-          <span className={`text-xs font-bold font-mono ${textAmountColor}`}>
-            {item.isInput ? "+" : "-"} {item.amount.toLocaleString()} {currency}
-          </span>
-          <p className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider mt-0.5">
-            {item.type === "SALE" ? "Venda" : item.type === "INPUT" ? "Entrada" : item.type === "REINFORCEMENT" ? "Reforço" : (item.reason || "").toLowerCase().includes("sangria") ? "Sangria" : item.type === "EXPENSE" ? "Despesa" : "Quebra"}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-});
-CashTimelineItemRow.displayName = "CashTimelineItemRow";
-
-interface CashClosureTableRowProps {
-  hist: any;
-  onExportPDF: (closure: any) => void;
-  onPrintThermal: (closure: any) => void;
-}
-
-const CashClosureTableRow: React.FC<CashClosureTableRowProps> = React.memo(({
-  hist,
-  onExportPDF,
-  onPrintThermal
-}) => {
-  return (
-    <tr key={hist.id} className="hover:bg-slate-50/40 dark:hover:bg-zinc-950/20">
-      <td className="p-3.5 font-mono text-slate-500 font-bold">
-        {new Date(hist.timestamp).toLocaleString()}
-      </td>
-      <td className="p-3.5 font-semibold text-slate-800 dark:text-zinc-200">
-        {hist.operator}
-      </td>
-      <td className="p-3.5 text-slate-600 dark:text-zinc-400 font-medium">
-        {hist.authorizedSupervisor}
-      </td>
-      <td className="p-3.5 text-right font-mono text-slate-650 font-bold dark:text-zinc-350">
-        {hist.theoreticalBalance.toLocaleString()} MT
-      </td>
-      <td className="p-3.5 text-right font-mono text-slate-800 font-bold dark:text-zinc-100">
-        {hist.physicalBalance.toLocaleString()} MT
-      </td>
-      <td className="p-3.5 text-center">
-        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-          hist.difference === 0 
-            ? "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/30" 
-            : "bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/30"
-        }`}>
-          {hist.difference > 0 ? "+" : ""}{hist.difference.toLocaleString()} MT
-        </span>
-      </td>
-      <td className="p-3.5 text-slate-500 italic font-medium max-w-[200px] truncate">
-        {hist.observations}
-      </td>
-      <td className="p-3.5 text-center flex items-center justify-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => onExportPDF(hist)}
-          className="px-2.5 py-1 text-[10px] font-bold bg-orange-50 hover:bg-orange-100 text-orange-600 dark:bg-orange-950/20 dark:hover:bg-orange-900/30 dark:text-orange-400 rounded-lg flex items-center gap-1 transition cursor-pointer"
-          title="Exportar Comprovante de Fecho PDF"
-        >
-          <Download className="w-3 h-3" />
-          <span>PDF</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onPrintThermal(hist)}
-          className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 rounded-lg flex items-center gap-1 transition cursor-pointer"
-          title="Imprimir Talão Térmico 80mm"
-        >
-          <Printer className="w-3 h-3" />
-          <span>Talão</span>
-        </button>
-      </td>
-    </tr>
-  );
-});
-CashClosureTableRow.displayName = "CashClosureTableRow";
-
-const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
-  try {
-    const res = await fetch(imageUrl);
-    const blob = await res.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch (err) {
-    console.error("Error loading logo for PDF:", err);
-    return "";
-  }
-};
+import { DENOMINATIONS } from "./DenominationCounter";
 
 interface CashRegisterModuleProps {
   cashFlow: CashFlowEntry[];
   transactions: Transaction[];
   onAddCashFlowEntry: (entry: CashFlowEntry) => void;
   activeUsername: string;
+  activeUser?: Employee;
+  employees?: Employee[];
   currentRole: UserRole;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currency: string;
   settings?: SystemSettings;
+  theme?: string;
+  onShowToast?: (msg: string, type?: "success" | "error" | "warning" | "info") => void;
 }
 
 export default function CashRegisterModule({
@@ -192,50 +53,100 @@ export default function CashRegisterModule({
   transactions,
   onAddCashFlowEntry,
   activeUsername,
+  activeUser,
+  employees = [],
   currentRole,
   onAddAuditLog,
-  currency,
-  settings = {} as any
+  currency = "MT",
+  settings = {} as SystemSettings,
+  theme = "light",
+  onShowToast
 }: CashRegisterModuleProps) {
-  
-  // Tabs: "active" (Painel Analítico) | "closures" (Histórico de Fechamento)
-  const [activeModuleTab, setActiveModuleTab] = useState<"active" | "closures">("active");
+  // Main Module Tab Navigation
+  const [activeTab, setActiveTab] = useState<"dashboard" | "cashbook" | "closures" | "analytics">("dashboard");
 
-  // Shift management state (Abertura / Fechamento)
-  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("OPEN");
-  const [openingBalance, setOpeningBalance] = useState<number>(5000);
-  const [showOpeningModal, setShowOpeningModal] = useState<boolean>(false);
-  const [openingOperator, setOpeningOperator] = useState(activeUsername);
-  const [openingSupervisor, setOpeningSupervisor] = useState("Inácio Macamo");
-  const [openingObs, setOpeningObs] = useState("");
+  // Shift Status & Float
+  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">(() => {
+    const saved = localStorage.getItem("ost_pos_shift_status");
+    return saved === "CLOSED" ? "CLOSED" : "OPEN";
+  });
 
-  // Sangria Rápida modal state
-  const [showSangriaModal, setShowSangriaModal] = useState<boolean>(false);
-  const [sangriaAmount, setSangriaAmount] = useState<number>(0);
-  const [sangriaDestination, setSangriaDestination] = useState("Cofre Central");
-  const [sangriaReason, setSangriaReason] = useState("");
-  const [sangriaSupervisor, setSangriaSupervisor] = useState("Inácio Macamo");
+  const [openingBalance, setOpeningBalance] = useState<number>(() => {
+    const saved = localStorage.getItem("ost_pos_opening_balance");
+    return saved ? Number(saved) : 5000;
+  });
 
-  // Local state for registering new cash activity
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [entryType, setEntryType] = useState<"REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "INPUT" | "SANGRIA" | "DEVOLUTION">("REINFORCEMENT");
-  const [entryAmount, setEntryAmount] = useState<number>(0);
-  const [entryReason, setEntryReason] = useState("");
-  const [entryResponsible, setEntryResponsible] = useState(activeUsername);
-  const [entrySupplier, setEntrySupplier] = useState(""); // Supplier/Destinatário field
-  const [localError, setLocalError] = useState("");
-  const [isSimulatingPrint, setIsSimulatingPrint] = useState(false);
+  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>(() => {
+    return localStorage.getItem("ost_pos_shift_opened_at") || new Date().toISOString();
+  });
 
-  // Closing drawer workflow states
-  const [isOpenClosingPanel, setIsOpenClosingPanel] = useState(false);
-  const [closingSupervisor, setClosingSupervisor] = useState("Inácio Macamo");
-  const [supervisorPin, setSupervisorPin] = useState("");
-  const [pinError, setPinError] = useState("");
-  const [closingObservation, setClosingObservation] = useState("");
-  const [operatorSignature, setOperatorSignature] = useState("");
-  const [showDenomCalculator, setShowDenomCalculator] = useState(false);
+  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>(() => {
+    return localStorage.getItem("ost_pos_shift_opened_by") || activeUsername;
+  });
 
-  // Denominations count state (for the counter)
+  // Closures History State (Database-backed via Supabase)
+  const [closuresHistory, setClosuresHistory] = useState<CashClosure[]>(() => {
+    const saved = localStorage.getItem("ost_pos_cash_closures");
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return [];
+  });
+
+  // Fetch real closures and active shift from Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    // Load active shift status from Supabase
+    CommercialDataService.fetchActiveCashShift().then((shift) => {
+      if (isMounted && shift) {
+        setShiftStatus(shift.status);
+        setOpeningBalance(shift.openingBalance);
+        setShiftOpenedAt(shift.openedAt);
+        setShiftOpenedBy(shift.openedBy || activeUsername);
+      }
+    });
+
+    // Load historical closures from Supabase
+    CommercialDataService.fetchCashClosures().then((closures) => {
+      if (isMounted && closures && closures.length > 0) {
+        setClosuresHistory(closures);
+        localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closures));
+      }
+    });
+
+    // Subscribe to realtime cash closure events
+    const sub = CommercialDataService.subscribeCashClosures(() => {
+      CommercialDataService.fetchCashClosures().then((closures) => {
+        if (isMounted && closures) {
+          setClosuresHistory(closures);
+          localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closures));
+        }
+      });
+    });
+
+    return () => {
+      isMounted = false;
+      sub?.unsubscribe?.();
+    };
+  }, [activeUsername]);
+
+  // Save Closures to LocalStorage Cache
+  useEffect(() => {
+    localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closuresHistory));
+  }, [closuresHistory]);
+
+  // Save Shift Status to LocalStorage Cache
+  useEffect(() => {
+    localStorage.setItem("ost_pos_shift_status", shiftStatus);
+    localStorage.setItem("ost_pos_opening_balance", openingBalance.toString());
+    localStorage.setItem("ost_pos_shift_opened_at", shiftOpenedAt);
+    localStorage.setItem("ost_pos_shift_opened_by", shiftOpenedBy);
+  }, [shiftStatus, openingBalance, shiftOpenedAt, shiftOpenedBy]);
+
+  // Denominations Counter State
   const [denomCounts, setDenomCounts] = useState<{ [key: string]: number }>({
     "1000": 20,
     "500": 18,
@@ -250,13 +161,6 @@ export default function CashRegisterModule({
     "0.5": 10
   });
 
-  const handleDenomChange = (value: number, count: number) => {
-    setDenomCounts(prev => ({
-      ...prev,
-      [value.toString()]: count
-    }));
-  };
-
   const calculatedFromDenoms = useMemo(() => {
     return DENOMINATIONS.reduce((sum, d) => {
       const count = denomCounts[d.value.toString()] || 0;
@@ -264,251 +168,136 @@ export default function CashRegisterModule({
     }, 0);
   }, [denomCounts]);
 
-  // Physical count manual field state or linked
-  const [physicalCount, setPhysicalCount] = useState<number>(136200);
+  const [physicalCount, setPhysicalCount] = useState<number>(() => calculatedFromDenoms);
 
-  // Sync physical count with denoms
-  const handleApplyDenomsToPhysicalCount = () => {
-    setPhysicalCount(calculatedFromDenoms);
-    setShowDenomCalculator(false);
+  const handleDenomChange = (val: number, count: number) => {
+    setDenomCounts(prev => ({
+      ...prev,
+      [val.toString()]: count
+    }));
   };
 
-  // Past closures history (initial seed)
-  const [closuresHistory, setClosuresHistory] = useState<any[]>([
-    {
-      id: "close-1",
-      timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(), // Yesterday
-      openingValue: 5000,
-      cashSales: 132450,
-      digitalSales: 45000,
-      totalSales: 177450,
-      reinforcements: 5000,
-      inputs: 1500,
-      sangrias: 10000,
-      expenses: 2450,
-      devolutions: 0,
-      quebras: 150,
-      theoreticalBalance: 131350,
-      physicalBalance: 131200,
-      difference: -150,
-      status: "SHORTAGE",
-      operator: "Levi Domingos",
-      authorizedSupervisor: "Inácio Macamo",
-      observations: "Diferença pontual por falta de trocos físicos em moedas."
-    },
-    {
-      id: "close-2",
-      timestamp: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(), // Day before yesterday
-      openingValue: 5000,
-      cashSales: 122350,
-      digitalSales: 38000,
-      totalSales: 160350,
-      reinforcements: 5000,
-      inputs: 500,
-      sangrias: 20000,
-      expenses: 450,
-      devolutions: 0,
-      quebras: 0,
-      theoreticalBalance: 112400,
-      physicalBalance: 112400,
-      difference: 0,
-      status: "CORRECT",
-      operator: "Marta Ubisse",
-      authorizedSupervisor: "Inácio Macamo",
-      observations: "Balanço 100% correto de fechamento."
-    }
-  ]);
-
-  // Date selectors for analytics
-  const [startDate, setStartDate] = useState(() => {
-    const today = new Date();
-    const past = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000));
-    return past.toISOString().split("T")[0];
-  });
-  const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
-  });
-
-  // Timeline list state for quick filters & search
-  const [filterChip, setFilterChip] = useState<"TODOS" | "ENTRADAS" | "SAIDAS" | "REFORCOS" | "SANGRIAS" | "DESPESAS" | "DEVOLUCOES" | "QUEBRAS">("TODOS");
-  const [timelineSearch, setTimelineSearch] = useState("");
-
-  // Memoized filtered cashflow entries & transactions
-  const filteredCashFlow = useMemo(() => {
-    return cashFlow.filter(f => {
-      if (!f.timestamp) return false;
-      const dateStr = f.timestamp.split("T")[0];
-      return dateStr >= startDate && dateStr <= endDate;
+  const handleResetDenoms = () => {
+    const empty: { [key: string]: number } = {};
+    DENOMINATIONS.forEach(d => {
+      empty[d.value.toString()] = 0;
     });
-  }, [cashFlow, startDate, endDate]);
+    setDenomCounts(empty);
+  };
 
+  // Date Range for Cashbook
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split("T")[0];
+  });
+  const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+
+  // Modals Visibility
+  const [showOpenModal, setShowOpenModal] = useState(false);
+  const [showCloseModal, setShowCloseModal] = useState(false);
+  const [showSangriaModal, setShowSangriaModal] = useState(false);
+  const [showEntryModal, setShowEntryModal] = useState(false);
+  const [entryModalType, setEntryModalType] = useState<"REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA">("REINFORCEMENT");
+  const [showDenomModal, setShowDenomModal] = useState(false);
+
+  // Filtered transactions in date range
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.timestamp) return false;
-      const dateStr = t.timestamp.split("T")[0];
-      return dateStr >= startDate && dateStr <= endDate;
+      const d = t.timestamp.split("T")[0];
+      return d >= startDate && d <= endDate;
     });
   }, [transactions, startDate, endDate]);
 
-  // Breakdown by payment method (Dinheiro, M-Pesa, E-Mola, POS/Cartão, Transferência)
-  const paymentMethodBreakdown = useMemo(() => {
-    let cash = 0;
-    let mpesa = 0;
-    let emola = 0;
-    let card = 0;
-    let transfer = 0;
+  // Filtered cashflow in date range
+  const filteredCashFlow = useMemo(() => {
+    return cashFlow.filter(f => {
+      if (!f.timestamp) return false;
+      const d = f.timestamp.split("T")[0];
+      return d >= startDate && d <= endDate;
+    });
+  }, [cashFlow, startDate, endDate]);
+
+  // Cash Calculations Engine
+  const cashMetrics = useMemo(() => {
+    // 1. Sales by payment method
+    let cashSales = 0;
+    let mpesaSales = 0;
+    let emolaSales = 0;
+    let posCardSales = 0;
+    let transferSales = 0;
 
     filteredTransactions.forEach(t => {
-      const amt = t.grandTotal || 0;
-      if (t.paymentMethod === "CASH") cash += amt;
-      else if (t.paymentMethod === "MPESA") mpesa += amt;
-      else if (t.paymentMethod === "EMOLA") emola += amt;
-      else if (t.paymentMethod === "CARD") card += amt;
-      else if (t.paymentMethod === "TRANSFER") transfer += amt;
+      if ((t.status as string) === "CANCELLED") return;
+      const amt = Number(t.grandTotal || 0);
+      if (t.paymentMethod === "CASH") cashSales += amt;
+      else if (t.paymentMethod === "MPESA") mpesaSales += amt;
+      else if (t.paymentMethod === "EMOLA") emolaSales += amt;
+      else if (t.paymentMethod === "CARD") posCardSales += amt;
+      else if (t.paymentMethod === "TRANSFER") transferSales += amt;
     });
 
-    const totalSales = cash + mpesa + emola + card + transfer;
+    const digitalSales = mpesaSales + emolaSales + posCardSales + transferSales;
+    const totalSales = cashSales + digitalSales;
 
-    return { cash, mpesa, emola, card, transfer, totalSales };
-  }, [filteredTransactions]);
+    // 2. Cash Flow Movements
+    let reinforcements = 0;
+    let inputs = 0;
+    let sangrias = 0;
+    let expenses = 0;
+    let devolutions = 0;
+    let quebras = 0;
 
-  // Calculations for cashier metrics according to exact formula:
-  // Saldo Teórico = Fundo de Abertura + Vendas em Dinheiro + Reforços + Recebimentos − Sangrias − Despesas − Devoluções
-  const cashCalculation = useMemo(() => {
-    // 1. Vendas em Dinheiro Físico
-    const cashSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "CASH" && (t.status as string) !== "CANCELLED")
-      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+    filteredCashFlow.forEach(f => {
+      const amt = Number(f.amount || 0);
+      const r = (f.reason || "").toLowerCase();
+      if (f.type === "REINFORCEMENT") {
+        reinforcements += amt;
+      } else if (f.type === "INPUT") {
+        inputs += amt;
+      } else if (f.type === "SANGRIA" || (f.type === "EXPENSE" && (r.includes("sangria") || r.includes("retirada") || r.includes("cofre")))) {
+        sangrias += amt;
+      } else if (f.type === "DEVOLUTION" || r.includes("devolução") || r.includes("reembolso")) {
+        devolutions += amt;
+      } else if (f.type === "QUEBRA") {
+        quebras += amt;
+      } else if (f.type === "EXPENSE") {
+        expenses += amt;
+      }
+    });
 
-    // 2. Pagamentos Digitais (Entram no faturamento, mas NÃO no caixa físico)
-    const mpesaSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "MPESA" && (t.status as string) !== "CANCELLED")
-      .reduce((s, t) => s + (t.grandTotal || 0), 0);
+    // 3. Fundo de Abertura
+    const currentOpening = shiftStatus === "OPEN" ? openingBalance : 0;
 
-    const emolaSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "EMOLA" && (t.status as string) !== "CANCELLED")
-      .reduce((s, t) => s + (t.grandTotal || 0), 0);
-
-    const cardSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "CARD" && (t.status as string) !== "CANCELLED")
-      .reduce((s, t) => s + (t.grandTotal || 0), 0);
-
-    const transferSalesAmount = filteredTransactions
-      .filter(t => t.paymentMethod === "TRANSFER" && (t.status as string) !== "CANCELLED")
-      .reduce((s, t) => s + (t.grandTotal || 0), 0);
-
-    const digitalSalesAmount = mpesaSalesAmount + emolaSalesAmount + cardSalesAmount + transferSalesAmount;
-    
-    // Vendas Totais / Faturamento Total
-    const totalSalesAmount = cashSalesAmount + digitalSalesAmount;
-
-    // 3. Reforços de Caixa
-    const reinforcements = filteredCashFlow
-      .filter(f => f.type === "REINFORCEMENT")
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 4. Recebimentos / Entradas Diversas
-    const inputs = filteredCashFlow
-      .filter(f => f.type === "INPUT")
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 5. Sangrias
-    const sangrias = filteredCashFlow
-      .filter(f => f.type === "SANGRIA" || (f.type === "EXPENSE" && ((f.reason || "").toLowerCase().includes("sangria") || (f.reason || "").toLowerCase().includes("retirada"))))
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 6. Despesas Operacionais em Dinheiro
-    const expenses = filteredCashFlow
-      .filter(f => f.type === "EXPENSE" && !((f.reason || "").toLowerCase().includes("sangria") || (f.reason || "").toLowerCase().includes("retirada")))
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 7. Devoluções / Reembolsos a Clientes
-    const devolutions = filteredCashFlow
-      .filter(f => f.type === "DEVOLUTION" || ((f.reason || "").toLowerCase().includes("devolução") || (f.reason || "").toLowerCase().includes("devolucao") || (f.reason || "").toLowerCase().includes("reembolso")))
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 8. Quebras de Caixa
-    const quebras = filteredCashFlow
-      .filter(f => f.type === "QUEBRA")
-      .reduce((s, f) => s + (f.amount || 0), 0);
-
-    // 9. Fundo de Abertura (Trocos base - contabilizado apenas uma vez, NÃO é faturamento nem venda)
-    const openingValue = shiftStatus === "OPEN" ? openingBalance : 0;
-
-    // 10. Totais de Entradas e Saídas em Dinheiro
-    const totalEntradas = cashSalesAmount + reinforcements + inputs;
-    const totalSaidas = sangrias + expenses + devolutions;
-
-    // FORMULA OFICIAL
-    // Saldo Teórico = Fundo de Abertura + Vendas em Dinheiro + Reforços + Recebimentos − Sangrias − Despesas − Devoluções
-    const theoreticalTotal = openingValue + cashSalesAmount + reinforcements + inputs - sangrias - expenses - devolutions - quebras;
-
-    // Active Movements Count
-    const movementsCount = filteredTransactions.length + filteredCashFlow.length;
+    // 4. Saldo Teórico em Dinheiro (Gaveta)
+    // Formula: Fundo + Vendas Dinheiro + Reforços + Outras Entradas − Sangrias − Despesas − Devoluções − Quebras
+    const theoreticalTotal = currentOpening + cashSales + reinforcements + inputs - sangrias - expenses - devolutions - quebras;
 
     return {
-      openingValue,
-      cashSalesAmount,
-      mpesaSalesAmount,
-      emolaSalesAmount,
-      cardSalesAmount,
-      transferSalesAmount,
-      digitalSalesAmount,
-      totalSalesAmount,
+      openingValue: currentOpening,
+      cashSales,
+      mpesaSales,
+      emolaSales,
+      posCardSales,
+      transferSales,
+      digitalSales,
+      totalSales,
       reinforcements,
       inputs,
       sangrias,
       expenses,
       devolutions,
       quebras,
-      totalEntradas,
-      totalSaidas,
-      theoreticalTotal,
-      movementsCount
+      theoreticalTotal
     };
-  }, [filteredCashFlow, filteredTransactions, openingBalance, shiftStatus]);
+  }, [filteredTransactions, filteredCashFlow, shiftStatus, openingBalance]);
 
-  // Active Discrepancy Status
-  const lastDiscrepancy = useMemo(() => {
-    const lastClose = closuresHistory[0];
-    return lastClose ? lastClose.difference : 0;
-  }, [closuresHistory]);
-
-  const registerStateBadge = useMemo(() => {
-    if (shiftStatus === "CLOSED") {
-      return {
-        label: "Turno Encerrado (Caixa Fechado)",
-        color: "bg-slate-100 text-slate-700 border border-slate-300 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700",
-        bullet: "🔒"
-      };
-    }
-    if (lastDiscrepancy !== 0) {
-      return {
-        label: "Caixa com Divergência",
-        color: "bg-rose-50 text-rose-600 border border-rose-200 dark:bg-rose-950/20 dark:text-rose-400 dark:border-rose-900/40",
-        bullet: "🔴"
-      };
-    }
-    const totalCurrentCash = cashCalculation.theoreticalTotal;
-    if (totalCurrentCash > 15000) {
-      return {
-        label: "Excesso de Caixa (Recomendado Sangria)",
-        color: "bg-amber-50 text-amber-650 border border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/40",
-        bullet: "⚠️"
-      };
-    }
-    return {
-      label: "Turno Ativo & Equilibrado",
-      color: "bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/20 dark:text-emerald-400 dark:border-emerald-900/40",
-      bullet: "🟢"
-    };
-  }, [shiftStatus, lastDiscrepancy, cashCalculation.theoreticalTotal]);
-
-  // Compile unified chronology timeline (Item 13)
+  // Unified Chronological Timeline
   const unifiedTimeline = useMemo(() => {
     const items: any[] = [];
 
-    // Add all transactions (sales)
+    // Transactions
     filteredTransactions.forEach(t => {
       const isCash = t.paymentMethod === "CASH";
       items.push({
@@ -517,107 +306,38 @@ export default function CashRegisterModule({
         type: isCash ? "SALE" : "DIGITAL_SALE",
         paymentMethod: t.paymentMethod,
         amount: t.grandTotal,
-        reason: isCash ? `Venda Dinheiro #${t.invoiceNumber}` : `Venda Digital (${t.paymentMethod}) #${t.invoiceNumber}`,
+        reason: isCash ? `Venda em Dinheiro #${t.invoiceNumber || t.id}` : `Venda Digital (${t.paymentMethod}) #${t.invoiceNumber || t.id}`,
         responsibleUser: t.cashierName || activeUsername,
         supplier: t.customerName || "Consumidor Final",
-        isInput: true,
-        badgeColor: isCash 
-          ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-900/30"
-          : "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:border-blue-900/30",
-        iconText: isCash ? "💵" : "📲"
+        isInput: true
       });
     });
 
-    // Add cashflow entries
+    // Cashflow entries
     filteredCashFlow.forEach(f => {
-      const reasonStr = f.reason || "";
+      const r = (f.reason || "").toLowerCase();
       const isInput = f.type === "REINFORCEMENT" || f.type === "INPUT";
-      const isSangria = f.type === "SANGRIA" || (f.type === "EXPENSE" && (reasonStr.toLowerCase().includes("sangria") || reasonStr.toLowerCase().includes("retirada")));
-      const isDevolution = f.type === "DEVOLUTION" || reasonStr.toLowerCase().includes("devolução") || reasonStr.toLowerCase().includes("devolucao") || reasonStr.toLowerCase().includes("reembolso");
-
-      let badgeColor = "";
-      let iconText = "";
-
-      if (f.type === "REINFORCEMENT") {
-        badgeColor = "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/25 dark:text-blue-400 dark:border-blue-900/30";
-        iconText = "➕";
-      } else if (f.type === "INPUT") {
-        badgeColor = "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-900/30";
-        iconText = "💰";
-      } else if (isSangria) {
-        badgeColor = "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/25 dark:text-amber-400 dark:border-amber-900/30";
-        iconText = "⚡";
-      } else if (isDevolution) {
-        badgeColor = "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-950/25 dark:text-orange-400 dark:border-orange-900/30";
-        iconText = "🔄";
-      } else if (f.type === "EXPENSE") {
-        badgeColor = "bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/25 dark:text-rose-400 dark:border-rose-900/30";
-        iconText = "❌";
-      } else { // QUEBRA
-        badgeColor = "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/25 dark:text-purple-400 dark:border-purple-900/30";
-        iconText = "⚠️";
-      }
-
       items.push({
         id: f.id,
         timestamp: f.timestamp,
-        type: isSangria ? "SANGRIA" : isDevolution ? "DEVOLUTION" : f.type,
+        type: f.type,
         amount: f.amount,
-        reason: reasonStr,
-        responsibleUser: f.responsibleUser,
-        supplier: reasonStr.toLowerCase().includes("papel") ? "Papelaria Central" : 
-                  reasonStr.toLowerCase().includes("limpeza") ? "Serviços Limpeza" : "Boca de Caixa",
-        isInput,
-        badgeColor,
-        iconText
+        reason: f.reason || "Lançamento manual de caixa",
+        responsibleUser: f.responsibleUser || activeUsername,
+        supplier: r.includes("fornecedor") || r.includes("papelaria") ? "Fornecedor Local" : "Gaveta de Caixa",
+        isInput
       });
     });
 
-    // Sort descending chronologically
+    // Sort descending by timestamp
     items.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     return items;
   }, [filteredTransactions, filteredCashFlow, activeUsername]);
 
-  // Filtered timeline items based on search and chip selector
-  const filteredTimeline = useMemo(() => {
-    let result = unifiedTimeline;
-
-    // Search query
-    if (timelineSearch.trim() !== "") {
-      const q = timelineSearch.toLowerCase();
-      result = result.filter(item => 
-        (item.reason || "").toLowerCase().includes(q) ||
-        (item.responsibleUser || "").toLowerCase().includes(q) ||
-        (item.supplier && item.supplier.toLowerCase().includes(q)) ||
-        (item.amount || 0).toString().includes(q)
-      );
-    }
-
-    // Filter chip
-    if (filterChip === "ENTRADAS") {
-      result = result.filter(item => item.isInput);
-    } else if (filterChip === "SAIDAS") {
-      result = result.filter(item => !item.isInput);
-    } else if (filterChip === "REFORCOS") {
-      result = result.filter(item => item.type === "REINFORCEMENT");
-    } else if (filterChip === "SANGRIAS") {
-      result = result.filter(item => item.type === "SANGRIA" || (item.reason || "").toLowerCase().includes("sangria"));
-    } else if (filterChip === "DESPESAS") {
-      result = result.filter(item => item.type === "EXPENSE");
-    } else if (filterChip === "DEVOLUCOES") {
-      result = result.filter(item => item.type === "DEVOLUTION" || (item.reason || "").toLowerCase().includes("devolução"));
-    } else if (filterChip === "QUEBRAS") {
-      result = result.filter(item => item.type === "QUEBRA");
-    }
-
-    return result;
-  }, [unifiedTimeline, timelineSearch, filterChip]);
-
-  // Hourly analytical bar data
+  // Hourly Analytics Data
   const hourlyData = useMemo(() => {
     const hours = ["08h", "09h", "10h", "11h", "12h", "13h", "14h", "15h", "16h", "17h", "18h", "19h", "20h"];
     const chartMap: { [hour: string]: { Entradas: number; Saídas: number } } = {};
-    
     hours.forEach(h => {
       chartMap[h] = { Entradas: 0, Saídas: 0 };
     });
@@ -627,30 +347,28 @@ export default function CashRegisterModule({
         const d = new Date(ts);
         const hr = d.getHours();
         if (hr >= 8 && hr <= 20) {
-          return `${String(hr).padStart(2, '0')}h`;
+          return `${String(hr).padStart(2, "0")}h`;
         }
       } catch (e) {}
       return null;
     };
 
-    // Cash sales
     filteredTransactions.forEach(t => {
       if (t.paymentMethod === "CASH") {
-        const hrStr = parseHour(t.timestamp);
-        if (hrStr && chartMap[hrStr]) {
-          chartMap[hrStr].Entradas += t.grandTotal;
+        const h = parseHour(t.timestamp);
+        if (h && chartMap[h]) {
+          chartMap[h].Entradas += Number(t.grandTotal || 0);
         }
       }
     });
 
-    // Cash flow items
     filteredCashFlow.forEach(f => {
-      const hrStr = parseHour(f.timestamp);
-      if (hrStr && chartMap[hrStr]) {
+      const h = parseHour(f.timestamp);
+      if (h && chartMap[h]) {
         if (f.type === "INPUT" || f.type === "REINFORCEMENT") {
-          chartMap[hrStr].Entradas += f.amount;
+          chartMap[h].Entradas += Number(f.amount || 0);
         } else {
-          chartMap[hrStr].Saídas += f.amount;
+          chartMap[h].Saídas += Number(f.amount || 0);
         }
       }
     });
@@ -662,1684 +380,388 @@ export default function CashRegisterModule({
     }));
   }, [filteredTransactions, filteredCashFlow]);
 
-  // Operator handled cash sums
-  const operatorsSummary = useMemo(() => {
-    const map: { [name: string]: number } = {};
-
-    filteredTransactions.forEach(t => {
-      const name = t.cashierName || "Outro";
-      if (!map[name]) map[name] = 0;
-      if (t.paymentMethod === "CASH") {
-        map[name] += t.grandTotal;
-      }
-    });
-
-    filteredCashFlow.forEach(f => {
-      const name = f.responsibleUser || "Outro";
-      if (!map[name]) map[name] = 0;
-      if (f.type === "REINFORCEMENT" || f.type === "INPUT") {
-        map[name] += f.amount;
-      } else {
-        map[name] -= f.amount;
-      }
-    });
-
-    return Object.entries(map).map(([name, val]) => ({
-      name,
-      value: val
-    })).sort((a, b) => b.value - a.value);
-  }, [filteredTransactions, filteredCashFlow]);
-
-  // Active alerts list for quebras, excessos, sangrias elevadas e limite de caixa
-  const activeAlerts = useMemo(() => {
-    const alerts: { type: "QUEBRA" | "EXCESSO" | "SANGRIA_ELEVADA" | "DESPESA_ELEVADA" | "TURNO"; title: string; message: string; color: string; icon: string }[] = [];
-
-    // 1. Alerta de Quebra / Excesso do último fechamento
-    if (lastDiscrepancy < 0) {
-      alerts.push({
-        type: "QUEBRA",
-        title: "🔴 ALERTA DE QUEBRA DE CAIXA REGISTADA",
-        message: `Identificada falta de dinheiro de ${Math.abs(lastDiscrepancy).toLocaleString()} ${currency} no último fechamento. Requer homologação do supervisor.`,
-        color: "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-900/40 dark:text-rose-300",
-        icon: "🔴"
-      });
-    } else if (lastDiscrepancy > 0) {
-      alerts.push({
-        type: "EXCESSO",
-        title: "🟠 ALERTA DE EXCESSO DE CAIXA REGISTADO",
-        message: `Identificado excesso de dinheiro de +${lastDiscrepancy.toLocaleString()} ${currency} acima do saldo teórico no último fechamento.`,
-        color: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300",
-        icon: "🟠"
-      });
-    }
-
-    // 2. Alerta de Excesso de Dinheiro Físico na Gaveta (Sangria Recomendada)
-    if (cashCalculation.theoreticalTotal > 15000) {
-      alerts.push({
-        type: "SANGRIA_ELEVADA",
-        title: "⚡ SANGRIA DE SEGURANÇA RECOMENDADA",
-        message: `O saldo físico em gaveta (${cashCalculation.theoreticalTotal.toLocaleString()} ${currency}) ultrapassou o limite operacional de 15.000 ${currency}. Realize uma Sangria Rápida para o cofre.`,
-        color: "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900/40 dark:text-amber-300",
-        icon: "⚡"
-      });
-    }
-
-    // 3. Alerta de Despesas Elevadas em Dinheiro
-    if (cashCalculation.expenses > 3000) {
-      alerts.push({
-        type: "DESPESA_ELEVADA",
-        title: "⚠️ DESPESAS ELEVADAS EM DINHEIRO",
-        message: `Total de despesas operacionais pagas em dinheiro atingiu ${cashCalculation.expenses.toLocaleString()} ${currency}. Verifique os recibos/comprovantes.`,
-        color: "bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-950/30 dark:border-purple-900/40 dark:text-purple-300",
-        icon: "⚠️"
-      });
-    }
-
-    // 4. Quebras Registradas no Turno Atual
-    if (cashCalculation.quebras > 0) {
-      alerts.push({
-        type: "QUEBRA",
-        title: "🔴 QUEBRAS REGISTADAS NO TURNO ATUAL",
-        message: `Foram registados ${cashCalculation.quebras.toLocaleString()} ${currency} em quebras/perdas no turno ativo.`,
-        color: "bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-900/40 dark:text-rose-300",
-        icon: "🔴"
-      });
-    }
-
-    return alerts;
-  }, [cashCalculation, lastDiscrepancy, currency]);
-
-  // Handle Open Shift Action
-  const handleOpenShiftSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
+  // Handlers for Operational Actions
+  const handleOpenShift = useCallback((floatVal: number, supervisor: string, notes: string) => {
+    setOpeningBalance(floatVal);
     setShiftStatus("OPEN");
-    setShowOpeningModal(false);
+    const now = new Date().toISOString();
+    setShiftOpenedAt(now);
+    setShiftOpenedBy(activeUsername);
+
+    // Persist active shift in Supabase
+    CommercialDataService.saveActiveCashShift({
+      status: "OPEN",
+      openingBalance: floatVal,
+      openedAt: now,
+      openedBy: activeUsername,
+      openingSupervisor: supervisor,
+      openingNotes: notes
+    });
 
     onAddAuditLog(
       "Abertura Turno Caixa",
       "CAIXA",
-      `Caixa aberto por ${openingOperator || activeUsername} com Fundo de Maneio de ${openingBalance} ${currency}. Supervisor responsável: ${openingSupervisor}.`
+      `Turno aberto por ${activeUsername} com fundo inicial de ${floatVal.toLocaleString()} ${currency}. Homologado por: ${supervisor}. Obs: ${notes || "N/A"}`
     );
-  }, [openingOperator, activeUsername, openingBalance, currency, openingSupervisor, onAddAuditLog]);
+    onShowToast?.("Turno de caixa aberto com sucesso!", "success");
+  }, [activeUsername, currency, onAddAuditLog, onShowToast]);
 
-  // Handle Quick Sangria Action
-  const handlePerformQuickSangria = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (sangriaAmount <= 0) {
-      alert("Por favor, introduza um valor positivo para a sangria.");
-      return;
-    }
+  const handleCloseShift = useCallback((physVal: number, supervisor: string, notes: string) => {
+    const diff = physVal - cashMetrics.theoreticalTotal;
+    const now = new Date().toISOString();
 
-    const sangriaEntry: CashFlowEntry = {
-      id: `flow-sangria-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      type: "EXPENSE",
-      amount: sangriaAmount,
-      reason: `Sangria Rápida: Destino [${sangriaDestination}] - ${sangriaReason || "Fundo excedente recolhido ao cofre"}`,
-      responsibleUser: activeUsername
-    };
-
-    onAddCashFlowEntry(sangriaEntry);
-    onAddAuditLog(
-      "Sangria de Caixa",
-      "CAIXA",
-      `Sangria Rápida de ${sangriaAmount} ${currency} efetuada por ${activeUsername}. Destino: ${sangriaDestination}. Autorizado por: ${sangriaSupervisor}`
-    );
-
-    setShowSangriaModal(false);
-    setSangriaAmount(0);
-    setSangriaReason("");
-  }, [sangriaAmount, sangriaDestination, sangriaReason, activeUsername, onAddCashFlowEntry, onAddAuditLog, currency, sangriaSupervisor]);
-
-  // Print 80mm Thermal Receipt
-  const handlePrintThermalReceipt = useCallback((closure: any) => {
-    const printWindow = window.open("", "_blank", "width=380,height=600");
-    if (!printWindow) return;
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Talão de Fecho - 80mm</title>
-          <style>
-            body {
-              font-family: 'Courier New', Courier, monospace;
-              width: 72mm;
-              margin: 0 auto;
-              padding: 5px;
-              font-size: 11px;
-              color: #000;
-            }
-            .text-center { text-align: center; }
-            .bold { font-weight: bold; }
-            .line { border-top: 1px dashed #000; margin: 6px 0; }
-            .flex { display: flex; justify-content: space-between; }
-            .title { font-size: 13px; font-weight: bold; text-transform: uppercase; }
-          </style>
-        </head>
-        <body>
-          <div class="text-center">
-            <div class="title">${settings?.companyName || "OST COMÉRCIO CENTRAL"}</div>
-            <div>NUIT: ${settings?.companyNuit || "400293112"}</div>
-            <div>${settings?.storeAddress || "Av. Marginal, Maputo"}</div>
-            <div class="line"></div>
-            <div class="bold">COMPROVANTE DE FECHO DE CAIXA</div>
-            <div>ID: ${closure.id}</div>
-            <div>${new Date(closure.timestamp).toLocaleString("pt-MZ")}</div>
-          </div>
-
-          <div class="line"></div>
-          <div>OPERADOR: ${closure.operator || activeUsername}</div>
-          <div>SUPERVISOR: ${closure.authorizedSupervisor || "Inácio Macamo"}</div>
-          
-          <div class="line"></div>
-          <div class="flex"><span>FUNDO ABERTURA:</span><span class="bold">${(closure.reinforcements || 0).toLocaleString()} MT</span></div>
-          <div class="flex"><span>VENDAS EM DINHEIRO:</span><span class="bold">+${(closure.cashSales || 0).toLocaleString()} MT</span></div>
-          <div class="flex"><span>OUTRAS ENTRADAS:</span><span class="bold">+${(closure.inputs || 0).toLocaleString()} MT</span></div>
-          <div class="flex"><span>SAÍDAS / SANGRIAS:</span><span class="bold">-${((closure.expenses || 0) + (closure.quebras || 0)).toLocaleString()} MT</span></div>
-          
-          <div class="line"></div>
-          <div class="flex bold"><span>SALDO TEÓRICO:</span><span>${(closure.theoreticalBalance || 0).toLocaleString()} MT</span></div>
-          <div class="flex bold"><span>SALDO FÍSICO:</span><span>${(closure.physicalBalance || 0).toLocaleString()} MT</span></div>
-          <div class="flex bold"><span>DIFERENÇA:</span><span>${(closure.difference || 0).toLocaleString()} MT</span></div>
-
-          <div class="line"></div>
-          <div style="font-size: 10px; font-style: italic;">Obs: ${closure.observations || "Sem observações."}</div>
-
-          <div style="margin-top: 25px;" class="text-center">
-            __________________________<br/>
-            Assinatura do Operador
-          </div>
-          <div style="margin-top: 20px;" class="text-center">
-            __________________________<br/>
-            Visto do Supervisor
-          </div>
-          <div class="line"></div>
-          <div class="text-center" style="font-size: 9px; margin-top: 8px;">OST VENDAS - Sistema Comercial Certificado</div>
-        </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      printWindow.print();
-    }, 500);
-  }, [settings?.companyName, settings?.companyNuit, settings?.storeAddress, activeUsername]);
-
-  // Create individual cash-flow launching
-  const handleSubmitEntry = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (entryAmount <= 0 || !entryReason.trim()) {
-      setLocalError("Por favor, introduza um valor positivo e especifique o motivo.");
-      return;
-    }
-    setLocalError("");
-
-    let finalReason = entryReason;
-    if (entryType === "EXPENSE" && entrySupplier.trim() !== "") {
-      finalReason = `Compra: ${entryReason} (Fornecedor: ${entrySupplier})`;
-    }
-
-    const newEntry: CashFlowEntry = {
-      id: `flow-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      type: entryType,
-      amount: entryAmount,
-      reason: finalReason,
-      responsibleUser: entryResponsible
-    };
-
-    onAddCashFlowEntry(newEntry);
-    onAddAuditLog(
-      `Lançamento Caixa (${entryType})`,
-      "CAIXA",
-      `Lançamento de ${entryType} de ${entryAmount} ${currency} por ${entryResponsible}. Motivo: ${finalReason}`
-    );
-
-    setEntryAmount(0);
-    setEntryReason("");
-    setEntrySupplier("");
-    setShowAddForm(false);
-  }, [entryAmount, entryReason, entryType, entrySupplier, entryResponsible, onAddCashFlowEntry, onAddAuditLog, currency]);
-
-  // Submit Closure Workflow (Item 11)
-  const handlePerformClosure = useCallback(() => {
-    if (supervisorPin !== "1234") {
-      setPinError("PIN do Supervisor incorreto! Use 1234 para homologar.");
-      return;
-    }
-    setPinError("");
-
-    const diff = physicalCount - cashCalculation.theoreticalTotal;
-
-    const newClosure = {
-      id: `close-${Date.now()}`,
-      timestamp: new Date().toISOString(),
-      reinforcements: cashCalculation.reinforcements,
-      cashSales: cashCalculation.cashSalesAmount,
-      inputs: cashCalculation.inputs,
-      expenses: cashCalculation.expenses,
-      quebras: cashCalculation.quebras,
-      theoreticalBalance: cashCalculation.theoreticalTotal,
-      physicalBalance: physicalCount,
+    const newClosure: CashClosure = {
+      id: `FECHO-${Date.now()}`,
+      shiftId: `TURNO-${Date.now()}`,
+      openedAt: shiftOpenedAt,
+      closedAt: now,
+      openedBy: shiftOpenedBy,
+      closedBy: activeUsername,
+      openingSupervisor: supervisor,
+      closingSupervisor: supervisor,
+      openingBalance,
+      theoreticalBalance: cashMetrics.theoreticalTotal,
+      physicalBalance: physVal,
       difference: diff,
-      operator: activeUsername,
-      authorizedSupervisor: closingSupervisor,
-      observations: closingObservation || "Fechamento regular homologado."
+      differenceType: diff === 0 ? "EXACT" : diff > 0 ? "SURPLUS" : "SHORTAGE",
+      reconciliation: {
+        cashSales: cashMetrics.cashSales,
+        mpesaSales: cashMetrics.mpesaSales,
+        emolaSales: cashMetrics.emolaSales,
+        posCardSales: cashMetrics.posCardSales,
+        transferSales: cashMetrics.transferSales,
+        reinforcements: cashMetrics.reinforcements,
+        inputs: cashMetrics.inputs,
+        sangrias: cashMetrics.sangrias,
+        expenses: cashMetrics.expenses,
+        devolutions: cashMetrics.devolutions,
+        quebras: cashMetrics.quebras,
+        totalSales: cashMetrics.totalSales
+      },
+      closingNotes: notes || "Fechamento regular de turno homologado com sucesso."
     };
 
     setClosuresHistory(prev => [newClosure, ...prev]);
     setShiftStatus("CLOSED");
 
+    // Persist closure and shift status to Supabase
+    CommercialDataService.saveCashClosure(newClosure);
+    CommercialDataService.saveActiveCashShift({
+      status: "CLOSED",
+      openingBalance,
+      openedAt: shiftOpenedAt,
+      openedBy: shiftOpenedBy,
+      openingSupervisor: supervisor,
+      openingNotes: notes
+    });
+
     onAddAuditLog(
       "Fechamento Turno Caixa",
       "CAIXA",
-      `Turno de caixa fechado. Teórico: ${newClosure.theoreticalBalance} MT, Contado: ${newClosure.physicalBalance} MT. Diferença: ${newClosure.difference} MT. Autorizado por: ${closingSupervisor}`
+      `Turno de caixa encerrado. Teórico: ${cashMetrics.theoreticalTotal} ${currency}, Contado: ${physVal} ${currency}, Desvio: ${diff} ${currency}. Homologado por: ${supervisor}`
     );
 
-    // Export PDF on closure
-    handleExportSingleClosurePDF(newClosure);
+    // Auto-generate closing document PDF
+    exportSingleClosurePdf(newClosure, currency, settings);
+    onShowToast?.(`Caixa fechado com sucesso! Desvio: ${diff.toLocaleString()} ${currency}`, diff === 0 ? "success" : "warning");
+  }, [cashMetrics, openingBalance, shiftOpenedAt, shiftOpenedBy, activeUsername, currency, settings, onAddAuditLog, onShowToast]);
 
-    // Show simulation visualizer
-    setIsSimulatingPrint(true);
-    setTimeout(() => {
-      setIsSimulatingPrint(false);
-      setIsOpenClosingPanel(false);
-      // Reset Pin, signature
-      setSupervisorPin("");
-      setClosingObservation("");
-      setOperatorSignature("");
-    }, 4500);
-  }, [supervisorPin, physicalCount, cashCalculation, activeUsername, closingSupervisor, closingObservation, onAddAuditLog]);
+  const handleSangria = useCallback((amt: number, dest: string, reason: string, supervisor: string) => {
+    const entry: CashFlowEntry = {
+      id: `flow-sangria-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type: "EXPENSE",
+      amount: amt,
+      reason: `Sangria: [${dest}] - ${reason || "Retirada de segurança para cofre"}`,
+      responsibleUser: activeUsername
+    };
 
-  // Export functions (Item 12)
-  const handleExportPDF = useCallback(async () => {
-    const doc = new jsPDF();
-    
-    const logoData = await getBase64ImageFromUrl(settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
-    if (logoData) {
-      doc.addImage(logoData, "JPEG", 165, 8, 30, 30);
+    onAddCashFlowEntry(entry);
+    onAddAuditLog(
+      "Sangria de Caixa",
+      "CAIXA",
+      `Sangria de ${amt.toLocaleString()} ${currency} executada por ${activeUsername} para ${dest}. Autorizada por: ${supervisor}`
+    );
+    onShowToast?.(`Sangria de ${amt.toLocaleString()} ${currency} registada com sucesso!`, "success");
+  }, [activeUsername, currency, onAddCashFlowEntry, onAddAuditLog, onShowToast]);
+
+  const handleGenericEntry = useCallback((type: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA", amt: number, reason: string, supplier: string) => {
+    let finalReason = reason;
+    if (supplier.trim()) {
+      finalReason = `${reason} (Credor/Fornecedor: ${supplier})`;
     }
 
-    doc.setFontSize(16);
-    doc.text("OST VENDAS - RELATÓRIO DO LIVRO DE CAIXA", 14, 15);
-    
-    doc.setFontSize(10);
-    doc.text(`Período: ${startDate} a ${endDate}`, 14, 22);
-    doc.text(`Gerado por: ${activeUsername} em ${new Date().toLocaleString()}`, 14, 27);
+    const entry: CashFlowEntry = {
+      id: `flow-${type.toLowerCase()}-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      type,
+      amount: amt,
+      reason: finalReason,
+      responsibleUser: activeUsername
+    };
 
-    const headers = [["Data/Hora", "Tipo", "Operador", "Descrição", "Valor"]];
-    const dataRows = filteredTimeline.map(item => [
-      new Date(item.timestamp).toLocaleString(),
-      item.type,
-      item.responsibleUser,
-      item.reason,
-      `${item.isInput ? "+" : "-"}${item.amount.toLocaleString()} ${currency}`
-    ]);
+    onAddCashFlowEntry(entry);
+    onAddAuditLog(
+      `Lançamento Caixa (${type})`,
+      "CAIXA",
+      `Lançamento de ${type} no valor de ${amt.toLocaleString()} ${currency} por ${activeUsername}. Motivo: ${finalReason}`
+    );
+    onShowToast?.(`Operação de ${type} registada com sucesso!`, "success");
+  }, [activeUsername, currency, onAddCashFlowEntry, onAddAuditLog, onShowToast]);
 
-    autoTable(doc, {
-      startY: 33,
-      head: headers,
-      body: dataRows,
-      theme: "striped",
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [249, 115, 22] }
-    });
+  // Export Livro de Caixa PDF
+  const handleExportCashbookPdf = () => {
+    exportCashbookPdf(unifiedTimeline, startDate, endDate, activeUsername, currency, settings);
+    onAddAuditLog("Exportar Livro Caixa PDF", "CAIXA", `Relatório PDF de Livro de Caixa exportado por ${activeUsername}.`);
+    onShowToast?.("Relatório PDF do Livro de Caixa gerado!", "info");
+  };
 
-    doc.save(`OST_Livro_Caixa_${Date.now()}.pdf`);
-    onAddAuditLog("Exportar Relatório PDF", "CAIXA", `Relatório PDF de caixa exportado por ${activeUsername}.`);
-  }, [settings?.logoUrl, startDate, endDate, activeUsername, filteredTimeline, currency, onAddAuditLog]);
+  // Export CSV / Excel
+  const handleExportCashbookCsv = () => {
+    const headers = "ID,Data/Hora,Tipo,Operador,Descricao,Valor,Moeda\n";
+    const rows = unifiedTimeline.map(item => {
+      const isPositive = item.isInput || item.type === "SALE" || item.type === "REINFORCEMENT";
+      const val = `${isPositive ? "" : "-"}${item.amount}`;
+      const cleanReason = (item.reason || "").replace(/"/g, '""');
+      return `"${item.id}","${item.timestamp}","${item.type}","${item.responsibleUser}","${cleanReason}",${val},"${currency}"`;
+    }).join("\n");
 
-  const handleExportSingleClosurePDF = useCallback(async (closure: any) => {
-    try {
-      const doc = new jsPDF();
-      
-      const logoData = await getBase64ImageFromUrl(settings?.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
-      if (logoData) {
-        doc.addImage(logoData, "JPEG", 165, 8, 30, 30);
-      }
-
-      // Header Style
-      doc.setFontSize(18);
-      doc.setFont("helvetica", "bold");
-      doc.text(settings?.companyName || "OST COMÉRCIO CENTRAL", 14, 20);
-      
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text(`NUIT: ${settings?.companyNuit || "400293112"} | ${settings?.storeAddress || "Av. Marginal, Maputo"}`, 14, 26);
-      
-      doc.setDrawColor(220, 220, 220);
-      doc.line(14, 30, 196, 30);
-      
-      // Title
-      doc.setFontSize(13);
-      doc.setFont("helvetica", "bold");
-      doc.text("COMPROVATIVO DE FECHO DE CAIXA DE TURNO", 14, 38);
-      
-      // Info Block
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.text(`ID de Fechamento: ${closure.id}`, 14, 46);
-      doc.text(`Data/Hora: ${new Date(closure.timestamp).toLocaleString()}`, 14, 52);
-      doc.text(`Operador de Caixa: ${closure.operator || activeUsername}`, 14, 58);
-      doc.text(`Supervisor Responsável: ${closure.authorizedSupervisor || "Não informado"}`, 14, 64);
-      
-      // Balancete Status Badge
-      doc.setFont("helvetica", "bold");
-      const diffVal = closure.difference || 0;
-      const diffText = diffVal === 0 
-        ? "CONSOLIDADO SEM DESVIOS (100% REGULAR)" 
-        : diffVal > 0 
-          ? `DESVIO POSITIVO DE +${diffVal.toLocaleString()} ${currency}`
-          : `DESVIO NEGATIVO DE ${diffVal.toLocaleString()} ${currency} (QUEBRA DE CAIXA)`;
-      doc.text(`Estado do Balancete: ${diffText}`, 14, 72);
-      
-      // Table of Cash balance details
-      const headers = [["Rubrica de Caixa (Descrição)", "Valor Reconhecido"]];
-      const dataRows = [
-        ["(+) Fundo de Maneio / Saldo de Abertura", `${(closure.reinforcements || 0).toLocaleString()} ${currency}`],
-        ["(+) Vendas em Dinheiro Registradas (POS)", `${(closure.cashSales || 0).toLocaleString()} ${currency}`],
-        ["(+) Outras Entradas (Reforços de Caixa)", `${(closure.inputs || 0).toLocaleString()} ${currency}`],
-        ["(-) Saídas de Caixa (Sangrias / Despesas)", `${((closure.expenses || 0) + (closure.quebras || 0)).toLocaleString()} ${currency}`],
-        ["(=) Saldo Teórico Esperado", `${(closure.theoreticalBalance || 0).toLocaleString()} ${currency}`],
-        ["(≡) Saldo Físico Contado", `${(closure.physicalBalance || 0).toLocaleString()} ${currency}`],
-        ["(±) Diferença de Fechamento (Desvio)", `${(closure.difference || 0).toLocaleString()} ${currency}`]
-      ];
-      
-      autoTable(doc, {
-        startY: 78,
-        head: headers,
-        body: dataRows,
-        theme: "grid",
-        styles: { fontSize: 9, cellPadding: 4 },
-        headStyles: { fillColor: [249, 115, 22] }, // orange theme
-        columnStyles: {
-          0: { fontStyle: "bold" },
-          1: { halign: "right", fontStyle: "bold" }
-        }
-      });
-      
-      // Observations
-      const finalY = (doc as any).lastAutoTable?.finalY || 140;
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Observações de Fecho:", 14, finalY + 12);
-      doc.setFont("helvetica", "italic");
-      doc.setFontSize(9);
-      doc.text(closure.observations || "Nenhuma observação reportada.", 14, finalY + 18, { maxWidth: 182 });
-      
-      // Signatures Line
-      doc.setDrawColor(180, 180, 180);
-      doc.line(14, finalY + 45, 90, finalY + 45);
-      doc.line(120, finalY + 45, 196, finalY + 45);
-      
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8);
-      doc.text("Assinatura do Operador (Caixa)", 14, finalY + 50);
-      doc.text("Homologação do Supervisor (Assinatura)", 120, finalY + 50);
-      
-      doc.save(`Fecho_Caixa_${closure.id}.pdf`);
-      onAddAuditLog("Exportar Fecho PDF", "CAIXA", `Comprovativo de fecho de caixa ${closure.id} exportado em PDF por ${activeUsername}.`);
-    } catch (err) {
-      console.error("Erro ao gerar PDF do fecho:", err);
-    }
-  }, [settings?.logoUrl, settings?.companyName, settings?.companyNuit, settings?.storeAddress, activeUsername, currency, onAddAuditLog]);
-
-  const handleExportCSV = useCallback(() => {
-    const headers = ["DATA_HORA", "TIPO", "OPERADOR", "MOTIVO_LANÇAMENTO", "VALOR"];
-    const rows = filteredTimeline.map(item => [
-      item.timestamp,
-      item.type,
-      item.responsibleUser,
-      item.reason.replace(/,/g, " "),
-      `${item.isInput ? "" : "-"}${item.amount}`
-    ]);
-
-    const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
-      + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
-    
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `OST_Livro_Caixa_${Date.now()}.csv`);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Livro_Caixa_${startDate}_${endDate}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  }, [filteredTimeline]);
+
+    onAddAuditLog("Exportar Livro Caixa CSV", "CAIXA", `Exportação CSV do Livro de Caixa efetuada por ${activeUsername}.`);
+    onShowToast?.("Arquivo CSV do Livro de Caixa exportado!", "info");
+  };
+
+  const isManagerOrAdmin = currentRole === "ADMIN" || currentRole === "SUPERVISOR" || currentRole === "FINANCEIRO" || (currentRole as string) === "GERENTE";
 
   return (
-    <div className="space-y-6">
-      
-      {/* Indicador de Saldo Consolidado no Topo */}
-      <div className="bg-gradient-to-r from-orange-500/10 via-orange-500/5 to-transparent border border-orange-500/20 rounded-2xl p-4 md:p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Coins className="w-5 h-5 text-orange-500" />
-            <span className="text-xs font-black uppercase tracking-wider text-orange-600 dark:text-orange-400">
-              Saldo Atual Consolidado
-            </span>
+    <div className="space-y-5">
+      {/* Top Header Bar & Module Navigation */}
+      <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-orange-500 text-white flex items-center justify-center shadow-md shadow-orange-500/20 font-bold">
+            <PiggyBank className="w-6 h-6" />
           </div>
-          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300">
-            {currentRole === "ADMIN" ? (
-              <span>Fluxo Total Consolidado do Sistema <strong className="text-orange-600 dark:text-orange-400">(Acesso de Admin)</strong></span>
-            ) : (
-              <span>Movimentos Filtrados do Usuário: <strong className="text-orange-600 dark:text-orange-400">{activeUsername}</strong></span>
-            )}
-          </h3>
-          <p className="text-[11px] text-slate-400">
-            Calculado com base no saldo de abertura (5.000,00 {currency}) + entradas (vendas em dinheiro, reforços) - saídas e quebras no período filtrado.
-          </p>
-        </div>
-        <div className="text-right shrink-0">
-          <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 block mb-1">
-            Saldo Disponível em Caixa
-          </span>
-          <span className="text-3xl font-black text-slate-800 dark:text-white tracking-tight">
-            {cashCalculation.theoreticalTotal.toLocaleString("pt-MZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} <span className="text-lg font-bold text-orange-500">{currency}</span>
-          </span>
-        </div>
-      </div>
-
-      {/* Header with quick status state indicator */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3.5 border-b border-slate-100 pb-4 dark:border-zinc-850">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-black text-slate-800 dark:text-zinc-100 tracking-tight flex items-center gap-1.5">
-              <PiggyBank className="w-6 h-6 text-orange-500" />
-              Gestão de Caixa Comercial
-            </h2>
-            <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ${registerStateBadge.color}`}>
-              <span className="text-[8px]">{registerStateBadge.bullet}</span>
-              {registerStateBadge.label}
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Controle analítico de entradas em numerário, sangrias de segurança, quebras diárias e fechamento homologado de turnos.
-          </p>
-        </div>
-
-        {/* Export & Quick Actions Bar */}
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => setShowSangriaModal(true)}
-            className="px-3 py-1.5 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
-            title="Efetuar Sangria Rápida de Segurança"
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>⚡ Sangria Rápida</span>
-          </button>
-
-          {shiftStatus === "CLOSED" ? (
-            <button
-              onClick={() => setShowOpeningModal(true)}
-              className="px-3 py-1.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
-            >
-              <Calculator className="w-3.5 h-3.5" />
-              <span>🔓 Abrir Caixa</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => {
-                setPhysicalCount(cashCalculation.theoreticalTotal);
-                setIsOpenClosingPanel(true);
-              }}
-              className="px-3 py-1.5 text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm transition"
-            >
-              <Calculator className="w-3.5 h-3.5" />
-              <span>🔒 Fechar Caixa</span>
-            </button>
-          )}
-
-          <div className="h-4 w-[1px] bg-slate-200 dark:bg-zinc-800 mx-1 hidden sm:block" />
-
-          <button
-            onClick={handleExportPDF}
-            className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center gap-1 cursor-pointer dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 transition"
-          >
-            <Download className="w-3.5 h-3.5" />
-            PDF
-          </button>
-          <button
-            onClick={handleExportCSV}
-            className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center gap-1 cursor-pointer dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 transition"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Excel
-          </button>
-          <button
-            onClick={() => window.print()}
-            className="px-3 py-1.5 text-[11px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl flex items-center gap-1 cursor-pointer dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:text-zinc-200 transition"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            Imprimir
-          </button>
-        </div>
-      </div>
-
-      {/* Date filter & Module tabs navigation */}
-      <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 dark:bg-zinc-900 dark:border-zinc-800">
-        
-        {/* Module Sub-Tabs (Dashboard vs Closures History) */}
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200/30 dark:bg-zinc-950 dark:border-zinc-850 w-full md:w-auto">
-          <button
-            onClick={() => setActiveModuleTab("active")}
-            className={`flex-1 md:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition ${
-              activeModuleTab === "active"
-                ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                : "text-slate-400 hover:text-slate-600 dark:text-zinc-400"
-            }`}
-          >
-            Painel Analítico de Fluxo
-          </button>
-          <button
-            onClick={() => setActiveModuleTab("closures")}
-            className={`flex-1 md:flex-initial px-4 py-1.5 text-xs font-bold rounded-lg cursor-pointer transition ${
-              activeModuleTab === "closures"
-                ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                : "text-slate-400 hover:text-slate-600 dark:text-zinc-400"
-            }`}
-          >
-            Histórico de Fechamentos ({closuresHistory.length})
-          </button>
-        </div>
-
-        {/* Date Filters selector */}
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto justify-end">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Início:</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold text-slate-700 outline-none focus:ring-1 focus:ring-orange-400/50 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] uppercase font-bold text-slate-400 font-mono">Fim:</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 text-xs font-semibold text-slate-700 outline-none focus:ring-1 focus:ring-orange-400/50 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300"
-            />
-          </div>
-        </div>
-
-      </div>
-
-      {/* ACTIVE SYSTEM ALERTS BANNER */}
-      {activeAlerts.length > 0 && (
-        <div className="space-y-2">
-          {activeAlerts.map((alert, idx) => (
-            <div 
-              key={idx} 
-              className={`p-3.5 rounded-2xl border flex items-start justify-between gap-3 shadow-sm ${alert.color}`}
-            >
-              <div className="flex items-start gap-2.5 text-xs">
-                <span className="text-base shrink-0 mt-0.5">{alert.icon}</span>
-                <div>
-                  <h4 className="font-extrabold tracking-tight uppercase text-[11px]">{alert.title}</h4>
-                  <p className="text-xs mt-0.5 opacity-90 leading-relaxed font-medium">{alert.message}</p>
-                </div>
-              </div>
-              {alert.type === "SANGRIA_ELEVADA" && (
-                <button
-                  type="button"
-                  onClick={() => setShowSangriaModal(true)}
-                  className="shrink-0 px-3 py-1.5 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow cursor-pointer transition"
-                >
-                  Fazer Sangria
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* KPI INDICATORS SUPERIOR - SEPARATED METRICS */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-        
-        {/* Saldo Teórico Físico */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Saldo Teórico</span>
-          <h4 className="text-sm font-black font-mono text-orange-600 dark:text-orange-400 mt-1">
-            {cashCalculation.theoreticalTotal.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Dinheiro em gaveta</span>
-        </div>
-
-        {/* Vendas Totais / Faturamento */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Totais</span>
-          <h4 className="text-sm font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
-            {cashCalculation.totalSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Faturamento total</span>
-        </div>
-
-        {/* Vendas em Dinheiro */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Dinheiro</span>
-          <h4 className="text-sm font-black font-mono text-emerald-700 dark:text-emerald-300 mt-1">
-            {cashCalculation.cashSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Entra na gaveta</span>
-        </div>
-
-        {/* Pagamentos Digitais */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Vendas Digitais</span>
-          <h4 className="text-sm font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
-            {cashCalculation.digitalSalesAmount.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-blue-500/80 block mt-1">M-Pesa/e-Mola/POS</span>
-        </div>
-
-        {/* Fundo de Abertura */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Fundo Abertura</span>
-          <h4 className="text-sm font-black font-mono text-slate-800 dark:text-zinc-200 mt-1">
-            {cashCalculation.openingValue.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Trocos (1x)</span>
-        </div>
-
-        {/* Reforços & Recebimentos */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Reforços/Entradas</span>
-          <h4 className="text-sm font-black font-mono text-teal-600 dark:text-teal-400 mt-1">
-            +{(cashCalculation.reinforcements + cashCalculation.inputs).toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Ref: {cashCalculation.reinforcements} MT</span>
-        </div>
-
-        {/* Sangrias */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Sangrias</span>
-          <h4 className="text-sm font-black font-mono text-amber-600 dark:text-amber-400 mt-1">
-            -{cashCalculation.sangrias.toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Retiradas para cofre</span>
-        </div>
-
-        {/* Despesas & Devoluções */}
-        <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm">
-          <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Despesas/Devol.</span>
-          <h4 className="text-sm font-black font-mono text-rose-600 dark:text-rose-400 mt-1">
-            -{(cashCalculation.expenses + cashCalculation.devolutions).toLocaleString()} <span className="text-[10px] font-normal">{currency}</span>
-          </h4>
-          <span className="text-[9px] text-slate-400 block mt-1">Desp: {cashCalculation.expenses} | Dev: {cashCalculation.devolutions}</span>
-        </div>
-
-      </div>
-
-      {/* RENDER ACTIVE ANALYTICAL DASHBOARD OR CLOSURES */}
-      {activeModuleTab === "active" ? (
-        <>
-          {/* Main Grid: Interactive Cash summaries & Graphs */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            
-            {/* LEFT 2 COLUMNS: Main detail cards, Hour graph, Timeline */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              {/* CARTÃO PRINCIPAL BOCA DE CAIXA */}
-              <div className="bg-slate-900 text-white p-6 rounded-3xl border border-slate-800 shadow-xl relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/10 rounded-full blur-3xl pointer-events-none" />
-                
-                <div className="flex flex-col sm:flex-row justify-between items-start border-b border-slate-800 pb-4 mb-4 gap-4">
-                  <div>
-                    <span className="text-[10px] text-slate-400 uppercase tracking-widest font-mono block">Boca de Caixa (Dinheiro Físico Esperado)</span>
-                    <h2 className="text-3xl font-black font-mono text-orange-400 mt-1">
-                      {cashCalculation.theoreticalTotal.toLocaleString()} <span className="text-sm font-mono font-medium text-slate-300">{currency}</span>
-                    </h2>
-                    <p className="text-[11px] text-slate-400 mt-1 font-sans leading-relaxed">
-                      Fundo Abertura ({cashCalculation.openingValue.toLocaleString()}) + Vendas Dinheiro ({cashCalculation.cashSalesAmount.toLocaleString()}) + Reforços ({cashCalculation.reinforcements.toLocaleString()}) + Recebimentos ({cashCalculation.inputs.toLocaleString()}) − Sangrias ({cashCalculation.sangrias.toLocaleString()}) − Despesas ({cashCalculation.expenses.toLocaleString()}) − Devoluções ({cashCalculation.devolutions.toLocaleString()})
-                    </p>
-                  </div>
-                  <div className="text-right text-xs text-slate-400 font-mono space-y-0.5 shrink-0">
-                    <p><span className="text-slate-500">Operador:</span> {activeUsername}</p>
-                    <p><span className="text-slate-500">Estado:</span> <span className={shiftStatus === "OPEN" ? "text-emerald-400 font-bold" : "text-slate-400 font-bold"}>{shiftStatus === "OPEN" ? "Turno Aberto 🟢" : "Caixa Fechado 🔒"}</span></p>
-                  </div>
-                </div>
-
-                {/* Formula Breakdown Badges */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2 font-mono text-xs leading-relaxed">
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-slate-400 uppercase font-sans font-bold">1. Abertura</p>
-                    <p className="font-bold text-slate-200 mt-0.5">{cashCalculation.openingValue.toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-emerald-400 uppercase font-sans font-bold">2. Dinheiro</p>
-                    <p className="font-bold text-emerald-400 mt-0.5">+{cashCalculation.cashSalesAmount.toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-blue-400 uppercase font-sans font-bold">3. Reforços</p>
-                    <p className="font-bold text-blue-400 mt-0.5">+{cashCalculation.reinforcements.toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-teal-400 uppercase font-sans font-bold">4. Recebimentos</p>
-                    <p className="font-bold text-teal-400 mt-0.5">+{cashCalculation.inputs.toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-amber-400 uppercase font-sans font-bold">5. Sangrias</p>
-                    <p className="font-bold text-amber-400 mt-0.5">-{cashCalculation.sangrias.toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
-                    <p className="text-[9px] text-rose-400 uppercase font-sans font-bold">6. Desp. / Dev.</p>
-                    <p className="font-bold text-rose-400 mt-0.5">-{(cashCalculation.expenses + cashCalculation.devolutions).toLocaleString()} MT</p>
-                  </div>
-                  <div className="bg-orange-950/50 p-2.5 rounded-xl border border-orange-900/60 col-span-2 sm:col-span-1">
-                    <p className="text-[9px] text-orange-400 uppercase font-sans font-bold">7. Saldo Teórico</p>
-                    <p className="font-bold text-orange-400 mt-0.5">{cashCalculation.theoreticalTotal.toLocaleString()} MT</p>
-                  </div>
-                </div>
-
-                {/* Closing Shift Action Button */}
-                <div className="mt-5 pt-4 border-t border-slate-800/60 flex flex-col sm:flex-row gap-3 items-center justify-between">
-                  <span className="text-[11px] text-slate-400 italic">As transações realizadas em POS e carteiras digitais (M-Pesa) são integradas automaticamente.</span>
-                  <button
-                    onClick={() => {
-                      setPhysicalCount(cashCalculation.theoreticalTotal); // prefill with theoretical
-                      setIsOpenClosingPanel(true);
-                    }}
-                    className="w-full sm:w-auto bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs py-2.5 px-5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-lg shadow-orange-500/20 active:scale-95"
-                  >
-                    <Calculator className="w-4 h-4" />
-                    Fechar Caixa
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Bar Chart section (Item 3) */}
-              <CashAnalyticalCharts data={hourlyData} currency={currency} />
-
-              {/* Chronological Timeline visual (Item 13) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
-                
-                {/* Visual Title and Quick Filters */}
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 border-b border-slate-100 pb-3 mb-4 dark:border-zinc-850">
-                  <div className="flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-slate-500" />
-                    <h3 className="font-bold text-slate-800 text-xs uppercase tracking-wider dark:text-zinc-300">
-                      Linha do Tempo de Movimentações
-                    </h3>
-                  </div>
-                  
-                  {/* Search box (Item 7) */}
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Pesquisar movimentação..."
-                      value={timelineSearch}
-                      onChange={(e) => setTimelineSearch(e.target.value)}
-                      className="bg-slate-50 border border-slate-200 rounded-xl py-1.5 pl-8 pr-3 text-xs outline-none focus:border-orange-500 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-200 w-full sm:w-48 font-medium"
-                    />
-                  </div>
-                </div>
-
-                {/* Quick Filters row (Item 6) */}
-                <div className="flex flex-wrap gap-1.5 mb-4 border-b border-slate-100 pb-3 dark:border-zinc-850">
-                  {(["TODOS", "ENTRADAS", "SAIDAS", "REFORCOS", "SANGRIAS", "DESPESAS", "DEVOLUCOES", "QUEBRAS"] as const).map(chip => (
-                    <button
-                      key={chip}
-                      type="button"
-                      onClick={() => setFilterChip(chip)}
-                      className={`px-3 py-1 text-[10px] font-bold rounded-lg cursor-pointer transition ${
-                        filterChip === chip
-                          ? "bg-orange-500 text-white shadow-sm"
-                          : "bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-850"
-                      }`}
-                    >
-                      {chip}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Vertical Timeline Ledger */}
-                <div className="relative pl-6 border-l-2 border-slate-100 dark:border-zinc-800 space-y-5 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                  {filteredTimeline.length === 0 ? (
-                    <div className="p-8 text-center text-xs text-slate-400 italic">
-                      Nenhuma atividade encontrada para os filtros aplicados.
-                    </div>
-                  ) : (
-                    filteredTimeline.map((item) => (
-                      <CashTimelineItemRow key={item.id} item={item} currency={currency} />
-                    ))
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* RIGHT COLUMN: Multimeios card, Entry launcher form, Small denomination counter, Operator lists, alerts */}
-            <div className="space-y-6">
-              
-              {/* Conciliação Multimeios de Pagamento Card */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-zinc-850">
-                  <div className="flex items-center gap-2">
-                    <Coins className="w-4 h-4 text-orange-500" />
-                    <span className="text-xs font-extrabold text-slate-800 dark:text-zinc-200 uppercase tracking-wider">
-                      Conciliação Multimeios
-                    </span>
-                  </div>
-                  <span className="text-[10px] font-mono font-bold text-slate-400">
-                    Total: {paymentMethodBreakdown.totalSales.toLocaleString()} {currency}
-                  </span>
-                </div>
-
-                <div className="space-y-2.5 text-xs font-mono">
-                  {/* Dinheiro */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
-                        💵 Dinheiro Físico:
-                      </span>
-                      <span className="font-bold text-slate-800 dark:text-zinc-200">
-                        {paymentMethodBreakdown.cash.toLocaleString()} {currency}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-emerald-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.cash / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* M-Pesa */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
-                        📱 M-Pesa (Vodacom):
-                      </span>
-                      <span className="font-bold text-slate-800 dark:text-zinc-200">
-                        {paymentMethodBreakdown.mpesa.toLocaleString()} {currency}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-red-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.mpesa / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* E-Mola */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
-                        📲 E-Mola (Movitel):
-                      </span>
-                      <span className="font-bold text-slate-800 dark:text-zinc-200">
-                        {paymentMethodBreakdown.emola.toLocaleString()} {currency}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-orange-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.emola / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Cartão POS */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
-                        💳 POS / Cartão Bancário:
-                      </span>
-                      <span className="font-bold text-slate-800 dark:text-zinc-200">
-                        {paymentMethodBreakdown.card.toLocaleString()} {currency}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-blue-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.card / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Transferência */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-slate-600 dark:text-zinc-400 font-sans font-bold flex items-center gap-1">
-                        🏦 Transferência Bancária:
-                      </span>
-                      <span className="font-bold text-slate-800 dark:text-zinc-200">
-                        {paymentMethodBreakdown.transfer.toLocaleString()} {currency}
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                      <div 
-                        className="bg-purple-500 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${paymentMethodBreakdown.totalSales > 0 ? (paymentMethodBreakdown.transfer / paymentMethodBreakdown.totalSales) * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Launcher Form Trigger or Box */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4 dark:border-zinc-850">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Plus className="w-4 h-4 text-orange-500" />
-                    Registrar Lançamento Avulso
-                  </span>
-                  <button
-                    onClick={() => setShowAddForm(!showAddForm)}
-                    className="text-[10px] text-orange-500 hover:underline font-bold"
-                  >
-                    {showAddForm ? "Fechar Form" : "Abrir Form"}
-                  </button>
-                </div>
-
-                {showAddForm ? (
-                  <form onSubmit={handleSubmitEntry} className="space-y-4 animate-in slide-in-from-top duration-200">
-                    {localError && (
-                      <div className="bg-rose-50 border border-rose-200 text-rose-600 p-2 rounded-lg text-[11px] font-bold">
-                        {localError}
-                      </div>
-                    )}
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Tipo de Registro</label>
-                      <div className="grid grid-cols-4 gap-1 bg-slate-100 p-1 rounded-xl text-[10px] font-bold dark:bg-zinc-950">
-                        {(["REINFORCEMENT", "INPUT", "EXPENSE", "QUEBRA"] as const).map(type => {
-                          const label = type === "REINFORCEMENT" ? "Reforço" : type === "INPUT" ? "Entrada" : type === "EXPENSE" ? "Despesa" : "Quebra";
-                          const active = entryType === type;
-                          return (
-                            <button
-                              key={type}
-                              type="button"
-                              onClick={() => setEntryType(type)}
-                              className={`py-1 rounded-md transition cursor-pointer ${
-                                active 
-                                  ? "bg-white text-slate-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100" 
-                                  : "text-slate-400 hover:text-slate-650"
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Valor ({currency})</label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        value={entryAmount || ""}
-                        onChange={(e) => setEntryAmount(Number(e.target.value))}
-                        className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-200 rounded-xl p-2.5 text-xs font-mono font-bold outline-none focus:border-orange-500"
-                        placeholder="Ex: 500"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Justificação / Motivo</label>
-                      <textarea
-                        required
-                        rows={2}
-                        value={entryReason}
-                        onChange={(e) => setEntryReason(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-200 rounded-xl p-2 text-xs outline-none focus:border-orange-500"
-                        placeholder="Especifique o motivo..."
-                      />
-                    </div>
-
-                    {entryType === "EXPENSE" && (
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Fornecedor / Credor</label>
-                        <input
-                          type="text"
-                          value={entrySupplier}
-                          onChange={(e) => setEntrySupplier(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-200 rounded-xl p-2.5 text-xs outline-none focus:border-orange-500"
-                          placeholder="Ex: Papelaria Central"
-                        />
-                      </div>
-                    )}
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Operador Executante</label>
-                      <select
-                        value={entryResponsible}
-                        onChange={(e) => setEntryResponsible(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-200 rounded-xl p-2.5 text-xs outline-none focus:border-orange-500 cursor-pointer font-semibold"
-                      >
-                        <option value={activeUsername}>{activeUsername} (Eu)</option>
-                        <option value="Marta Ubisse">Marta Ubisse</option>
-                        <option value="Inácio Macamo">Inácio Macamo</option>
-                      </select>
-                    </div>
-
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowAddForm(false)}
-                        className="w-1/2 py-2 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-350"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        className="w-1/2 py-2 bg-slate-900 text-white hover:bg-slate-800 font-bold rounded-xl text-xs cursor-pointer dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
-                      >
-                        Salvar
-                      </button>
-                    </div>
-
-                  </form>
-                ) : (
-                  <p className="text-[11px] text-slate-400 leading-normal">
-                    Clique em registrar para inserir reforços de trocos, despesas emergenciais, retiradas para sangria, ou perdas mecânicas.
-                  </p>
-                )}
-              </div>
-
-              {/* Equilíbrio de Caixa status check card (Item 18) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800 space-y-3.5">
-                <span className="text-[10px] uppercase font-bold text-slate-450 tracking-wider block">Equilíbrio de Caixa</span>
-                
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl dark:bg-zinc-950">
-                    <span className="text-slate-600 dark:text-zinc-300">✔ Estado do Caixa</span>
-                    <span className="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold">ABERTO</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl dark:bg-zinc-950">
-                    <span className="text-slate-600 dark:text-zinc-300">✔ Última Sangria</span>
-                    <span className="font-mono text-slate-800 font-bold dark:text-zinc-200">15:00</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl dark:bg-zinc-950">
-                    <span className="text-slate-600 dark:text-zinc-300">✔ Último Reforço</span>
-                    <span className="font-mono text-slate-800 font-bold dark:text-zinc-200">08:00</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl dark:bg-zinc-950">
-                    <span className="text-slate-600 dark:text-zinc-300">✔ Diferença Ativa</span>
-                    <span className="font-mono text-slate-850 font-bold dark:text-zinc-100">0 MT</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl dark:bg-zinc-950">
-                    <span className="text-slate-600 dark:text-zinc-300">✔ Fechamento Turno</span>
-                    <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded text-[10px] font-bold">PENDENTE</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Interactive Coins breakdown overview card (Item 8) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3 dark:border-zinc-850">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <Coins className="w-4 h-4 text-orange-500" />
-                    Resumo de Cédulas
-                  </span>
-                  <span className="text-[10px] font-mono bg-slate-100 dark:bg-zinc-950 text-slate-500 px-1.5 py-0.5 rounded">Gaveta</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div className="flex justify-between border-b border-slate-100 py-1 dark:border-zinc-850 font-mono">
-                    <span className="text-slate-450">1000 MT:</span>
-                    <span className="font-bold text-slate-750 dark:text-zinc-300">20 un</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-100 py-1 dark:border-zinc-850 font-mono">
-                    <span className="text-slate-450">500 MT:</span>
-                    <span className="font-bold text-slate-750 dark:text-zinc-300">18 un</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-100 py-1 dark:border-zinc-850 font-mono">
-                    <span className="text-slate-450">200 MT:</span>
-                    <span className="font-bold text-slate-750 dark:text-zinc-300">15 un</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-100 py-1 dark:border-zinc-850 font-mono">
-                    <span className="text-slate-450">100 MT:</span>
-                    <span className="font-bold text-slate-750 dark:text-zinc-300">30 un</span>
-                  </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-slate-150 flex items-center justify-between text-[11px] font-bold text-slate-700 dark:text-zinc-300 dark:border-zinc-850">
-                  <span>Soma Total Estimada:</span>
-                  <span className="font-mono">{calculatedFromDenoms.toLocaleString()} {currency}</span>
-                </div>
-              </div>
-
-              {/* Dynamic Cashier handled by Operator (Item 9) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200/60 shadow-sm dark:bg-zinc-900 dark:border-zinc-800">
-                <span className="text-xs font-bold text-slate-850 dark:text-zinc-300 uppercase tracking-wider block mb-3">
-                  Caixa por Operador
-                </span>
-
-                <div className="space-y-2">
-                  {operatorsSummary.length === 0 ? (
-                    <p className="text-[11px] text-slate-400 italic">Nenhum operador com registros no período.</p>
-                  ) : (
-                    operatorsSummary.map(op => (
-                      <div key={op.name} className="flex justify-between items-center text-xs p-2.5 rounded-xl bg-slate-50 dark:bg-zinc-950">
-                        <div className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-slate-400" />
-                          <span className="font-semibold text-slate-750 dark:text-zinc-300">{op.name}</span>
-                        </div>
-                        <span className="font-mono font-bold text-slate-900 dark:text-zinc-100">
-                          {op.value.toLocaleString()} {currency}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              {/* Important active alerts sidebar list (Item 16) */}
-              {activeAlerts.length > 0 && (
-                <div className="bg-amber-50/80 border border-amber-200/80 p-5 rounded-2xl dark:bg-amber-950/20 dark:border-amber-900/40 space-y-3">
-                  <div className="flex items-center gap-1.5 text-amber-800 dark:text-amber-400 font-bold text-xs uppercase tracking-wider">
-                    <AlertTriangle className="w-4 h-4" />
-                    Alertas e Auditoria do Caixa
-                  </div>
-                  <div className="space-y-2.5">
-                    {activeAlerts.map((alert, idx) => (
-                      <div key={idx} className="text-xs space-y-0.5">
-                        <span className="font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1">
-                          <span>{alert.icon}</span>
-                          <span>{alert.title}</span>
-                        </span>
-                        <p className="text-[11px] text-slate-600 dark:text-zinc-400 pl-5">{alert.message}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-          </div>
-        </>
-      ) : (
-        
-        /* 10. PAST CLOSURES HISTORY LOG VIEW */
-        <div className="bg-white border border-slate-200/60 rounded-2xl shadow-sm overflow-hidden dark:bg-zinc-900 dark:border-zinc-800">
-          <div className="p-4 bg-slate-50 border-b border-slate-200/60 flex items-center justify-between dark:bg-zinc-950 dark:border-zinc-850">
-            <span className="text-xs font-bold text-slate-750 dark:text-zinc-300 flex items-center gap-1.5">
-              <History className="w-4 h-4 text-orange-500" />
-              Histórico de Fechamentos de Caixa Homologados
-            </span>
-            <span className="text-[10px] text-slate-400 font-mono">Turnos Anteriores</span>
-          </div>
-
-          <div className="overflow-x-auto max-h-[450px] overflow-y-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="bg-slate-100/50 border-b border-slate-250 dark:bg-zinc-950/60 dark:border-zinc-850">
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300">Data/Hora Fecho</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300">Operador</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300">Supervisor</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300 text-right">Saldo Teórico</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300 text-right">Físico Contado</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300 text-center">Diferença / Desvio</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300">Observações</th>
-                  <th className="p-3.5 font-bold text-slate-700 dark:text-zinc-300 text-center">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-150 dark:divide-zinc-850">
-                {closuresHistory.map(hist => (
-                  <CashClosureTableRow
-                    key={hist.id}
-                    hist={hist}
-                    onExportPDF={handleExportSingleClosurePDF}
-                    onPrintThermal={handlePrintThermalReceipt}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-        </div>
-
-      )}
-
-      {/* ABERTURA DE CAIXA MODAL */}
-      {showOpeningModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-3xl max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
-            <div className="flex items-center justify-between border-b border-slate-150 pb-3 dark:border-zinc-850">
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 dark:text-zinc-100">
-                <Calculator className="w-5 h-5 text-emerald-500" />
-                Abertura de Turno de Caixa
-              </h3>
-              <button 
-                onClick={() => setShowOpeningModal(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleOpenShiftSubmit} className="space-y-4 text-xs">
-              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl dark:bg-emerald-950/20 dark:border-emerald-900/40 text-emerald-800 dark:text-emerald-400">
-                <p className="font-bold text-[11px]">Início de Atendimento Comercial</p>
-                <p className="text-[10px] mt-0.5">Informe o Fundo de Maneio de Abertura (Trocos) para habilitar a emissão de vendas em dinheiro.</p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Fundo de Maneio / Trocos ({currency})
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="0"
-                  value={openingBalance}
-                  onChange={(e) => setOpeningBalance(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100 rounded-xl p-3 text-sm font-mono font-black outline-none focus:border-emerald-500"
-                  placeholder="Ex: 5000"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Operador do Caixa
-                </label>
-                <input
-                  type="text"
-                  value={openingOperator}
-                  onChange={(e) => setOpeningOperator(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Supervisor Responsável
-                </label>
-                <select
-                  value={openingSupervisor}
-                  onChange={(e) => setOpeningSupervisor(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
-                >
-                  <option value="Inácio Macamo">Inácio Macamo</option>
-                  <option value="Levi Domingos">Levi Domingos</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-850">
-                <button
-                  type="button"
-                  onClick={() => setShowOpeningModal(false)}
-                  className="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer dark:bg-zinc-800 dark:text-zinc-300"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-1/2 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-md"
-                >
-                  Confirmar Abertura
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SANGRIA RÁPIDA MODAL */}
-      {showSangriaModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-3xl max-w-md w-full border border-slate-100 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
-            <div className="flex items-center justify-between border-b border-slate-150 pb-3 dark:border-zinc-850">
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 dark:text-zinc-100">
-                <ShieldCheck className="w-5 h-5 text-amber-500" />
-                Sangria Rápida de Segurança
-              </h3>
-              <button 
-                onClick={() => setShowSangriaModal(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handlePerformQuickSangria} className="space-y-4 text-xs">
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl dark:bg-amber-950/20 dark:border-amber-900/40 text-amber-800 dark:text-amber-400">
-                <p className="font-bold text-[11px]">Recolha de Excesso de Trocos / Valores</p>
-                <p className="text-[10px] mt-0.5">Saldo Atual em Gaveta: <strong>{cashCalculation.theoreticalTotal.toLocaleString()} {currency}</strong></p>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Valor a Retirar ({currency})
-                </label>
-                <input
-                  type="number"
-                  required
-                  min="1"
-                  max={cashCalculation.theoreticalTotal}
-                  value={sangriaAmount || ""}
-                  onChange={(e) => setSangriaAmount(Number(e.target.value))}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100 rounded-xl p-3 text-sm font-mono font-black outline-none focus:border-amber-500"
-                  placeholder="Ex: 10000"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Destino dos Valores
-                </label>
-                <select
-                  value={sangriaDestination}
-                  onChange={(e) => setSangriaDestination(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
-                >
-                  <option value="Cofre Central">Cofre Central da Loja</option>
-                  <option value="Depósito Bancário">Depósito Bancário Directo</option>
-                  <option value="Pagamento Urgente Fornecedor">Pagamento Urgente a Fornecedor</option>
-                  <option value="Transferência para Gerência">Transferência para Gerência</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Motivo / Observação
-                </label>
-                <input
-                  type="text"
-                  value={sangriaReason}
-                  onChange={(e) => setSangriaReason(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold"
-                  placeholder="Ex: Excesso de notas de 1000 MT na gaveta"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">
-                  Supervisor Autorizador
-                </label>
-                <select
-                  value={sangriaSupervisor}
-                  onChange={(e) => setSangriaSupervisor(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 outline-none font-semibold cursor-pointer"
-                >
-                  <option value="Inácio Macamo">Inácio Macamo</option>
-                  <option value="Levi Domingos">Levi Domingos</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-850">
-                <button
-                  type="button"
-                  onClick={() => setShowSangriaModal(false)}
-                  className="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer dark:bg-zinc-800 dark:text-zinc-300"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="w-1/2 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-md"
-                >
-                  Emitir Sangria
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SHIFT CLOSE WORKFLOW OVERLAY POPUP (Item 11) */}
-      {isOpenClosingPanel && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white p-6 rounded-3xl max-w-2xl w-full border border-slate-100 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
-            
-            <div className="flex items-center justify-between border-b border-slate-150 pb-3 dark:border-zinc-850">
-              <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-2 dark:text-zinc-100">
-                <Calculator className="w-5 h-5 text-orange-500 animate-pulse" />
-                Fechamento Estruturado de Turno de Caixa
-              </h3>
-              <button 
-                onClick={() => setIsOpenClosingPanel(false)}
-                className="text-slate-400 hover:text-slate-600 font-bold"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              
-              {/* Left Column: Metrics & Signature */}
-              <div className="space-y-3.5">
-                <span className="text-[10px] uppercase font-bold text-slate-450 tracking-wider block">Resumo Teórico</span>
-                
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/50 space-y-2 text-xs dark:bg-zinc-950 dark:border-zinc-850 font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Saldo Abertura:</span>
-                    <span>{cashCalculation.openingValue.toLocaleString()} MT</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Total de Entradas:</span>
-                    <span className="text-emerald-600 font-bold">+{cashCalculation.totalEntradas.toLocaleString()} MT</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Total de Saídas:</span>
-                    <span className="text-rose-600 font-bold">-{cashCalculation.totalSaidas.toLocaleString()} MT</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Quebras Lançadas:</span>
-                    <span className="text-purple-600 font-bold">-{cashCalculation.quebras.toLocaleString()} MT</span>
-                  </div>
-                  <div className="flex justify-between border-t border-dashed border-slate-300 pt-2 font-bold text-slate-900 dark:text-zinc-200 dark:border-zinc-800">
-                    <span>Saldo Teórico:</span>
-                    <span>{cashCalculation.theoreticalTotal.toLocaleString()} MT</span>
-                  </div>
-                </div>
-
-                {/* Status difference dynamic indicator (Item 2) */}
-                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/50 space-y-2 dark:bg-zinc-950 dark:border-zinc-850">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="font-bold text-slate-600 dark:text-zinc-400">Diferença de Fecho:</span>
-                    <span className={`font-mono font-black text-sm ${(physicalCount - cashCalculation.theoreticalTotal) === 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                      {(physicalCount - cashCalculation.theoreticalTotal).toLocaleString()} MT
-                    </span>
-                  </div>
-
-                  {/* Difference indicators */}
-                  <div className="flex justify-center pt-1.5">
-                    {(physicalCount - cashCalculation.theoreticalTotal) === 0 ? (
-                      <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase rounded-full flex items-center gap-1">
-                        🟢 Correto
-                      </span>
-                    ) : Math.abs(physicalCount - cashCalculation.theoreticalTotal) <= 200 ? (
-                      <span className="px-3 py-1 bg-amber-100 text-amber-800 text-[10px] font-bold uppercase rounded-full flex items-center gap-1 animate-pulse">
-                        🟠 Atenção (Discrepância Pequena)
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-rose-100 text-rose-800 text-[10px] font-bold uppercase rounded-full flex items-center gap-1 animate-pulse">
-                        🔴 Divergência de Caixa Detectada
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider dark:text-zinc-400">Observações do Turno</label>
-                  <textarea
-                    rows={2}
-                    value={closingObservation}
-                    onChange={(e) => setClosingObservation(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-300 rounded-xl p-2.5 text-xs outline-none focus:border-orange-500"
-                    placeholder="Declare qualquer motivo para sobras ou quebras físicas de caixa..."
-                  />
-                </div>
-
-              </div>
-
-              {/* Right Column: Physical declaration counter & Operator Approval */}
-              <div className="space-y-3.5">
-                <span className="text-[10px] uppercase font-bold text-slate-450 tracking-wider block">Validação Física</span>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <label className="font-bold text-slate-500 uppercase tracking-wider">Moeda Física Contada (MT)</label>
-                    <button
-                      type="button"
-                      onClick={() => setShowDenomCalculator(!showDenomCalculator)}
-                      className="text-[10px] text-orange-500 font-bold hover:underline flex items-center gap-1"
-                    >
-                      <Coins className="w-3 h-3" />
-                      {showDenomCalculator ? "Ocultar Contador" : "Contar Cédulas"}
-                    </button>
-                  </div>
-
-                  {showDenomCalculator ? (
-                    <div className="space-y-3.5">
-                      <DenominationCounter 
-                        denomCounts={denomCounts} 
-                        onChangeCount={handleDenomChange} 
-                        currency={currency} 
-                        isInteractive={true}
-                      />
-                      <button
-                        type="button"
-                        onClick={handleApplyDenomsToPhysicalCount}
-                        className="w-full bg-orange-500 hover:bg-orange-600 text-white py-2 text-xs font-bold rounded-xl transition"
-                      >
-                        Aplicar Total Declarado ({calculatedFromDenoms.toLocaleString()} MT)
-                      </button>
-                    </div>
-                  ) : (
-                    <input
-                      type="number"
-                      required
-                      value={physicalCount || ""}
-                      onChange={(e) => setPhysicalCount(Number(e.target.value))}
-                      className="w-full bg-slate-50 border border-slate-200 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100 rounded-xl p-3 text-sm font-mono font-extrabold outline-none focus:border-orange-500"
-                      placeholder="Introduza o total contado na gaveta"
-                    />
-                  )}
-                </div>
-
-                {/* Supervisor Approval Signature */}
-                <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40 space-y-3">
-                  <span className="text-[10px] text-amber-800 dark:text-amber-400 font-bold uppercase tracking-wider block flex items-center gap-1">
-                    <ShieldCheck className="w-4 h-4 text-amber-600" />
-                    Assinatura Homologada do Supervisor
-                  </span>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-slate-450 uppercase">Supervisor</label>
-                      <select
-                        value={closingSupervisor}
-                        onChange={(e) => setClosingSupervisor(e.target.value)}
-                        className="w-full bg-white border border-slate-250 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-1.5 outline-none font-semibold cursor-pointer text-slate-700 dark:text-zinc-300"
-                      >
-                        <option value="Inácio Macamo">Inácio Macamo</option>
-                        <option value="Levi Domingos">Levi Domingos</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-slate-450 uppercase">PIN de Segurança</label>
-                      <input
-                        type="password"
-                        placeholder="PIN (1234)"
-                        value={supervisorPin}
-                        onChange={(e) => setSupervisorPin(e.target.value)}
-                        className="w-full bg-white border border-slate-250 dark:bg-zinc-900 dark:border-zinc-800 rounded-lg p-1.5 text-center font-mono font-bold tracking-widest outline-none text-slate-800 dark:text-zinc-200"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Operador handwriting simulated sign (Item 11) */}
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold text-slate-450 uppercase block">Confirmar Assinatura Digital do Operador</label>
-                    <input
-                      type="text"
-                      placeholder="Digite seu nome completo para assinar..."
-                      value={operatorSignature}
-                      onChange={(e) => setOperatorSignature(e.target.value)}
-                      className="w-full bg-white border border-slate-205 rounded-lg p-1.5 text-xs outline-none italic font-serif text-blue-800 dark:bg-zinc-900 dark:border-zinc-800 dark:text-amber-400"
-                    />
-                  </div>
-
-                  {pinError && (
-                    <p className="text-[10px] text-rose-600 font-bold animate-pulse">{pinError}</p>
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-
-            {/* Bottom Actions footer */}
-            <div className="flex gap-3 pt-3 border-t border-slate-100 dark:border-zinc-850">
-              <button
-                type="button"
-                onClick={() => setIsOpenClosingPanel(false)}
-                className="w-1/2 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-2xl text-xs transition cursor-pointer dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-              >
-                Voltar / Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={handlePerformClosure}
-                disabled={!operatorSignature.trim()}
-                className="w-1/2 py-3 bg-orange-500 hover:bg-orange-650 text-white font-extrabold rounded-2xl text-xs transition cursor-pointer shadow-lg shadow-orange-500/10 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <UserCheck className="w-4 h-4" />
-                Confirmar e Assinar Fecho
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {/* Elegant Real-time Virtual Printer Animation Overlay (Item 11 / Item 12) */}
-      {isSimulatingPrint && (
-        <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-md flex items-center justify-center z-[100] p-4 text-xs font-sans">
-          <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-2xl max-w-sm w-full shadow-2xl text-center space-y-4 text-white">
-            <div className="relative w-16 h-16 mx-auto bg-amber-500/10 rounded-full flex items-center justify-center text-amber-500">
-              <Printer className="w-8 h-8 animate-bounce" />
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
+                Gestão Profissional de Caixa & Turnos (ERP/POS)
+              </h2>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+                v{settings?.systemVersion || "2.1.0"}
               </span>
             </div>
-            
-            <div>
-              <h4 className="font-extrabold text-xs uppercase tracking-wider text-amber-500">Impressão do Balancete Fiscal</h4>
-              <p className="text-[11px] text-zinc-400 mt-1">Sincronizando com a rede comercial...</p>
-            </div>
-            
-            <div className="bg-zinc-950 p-3 rounded-lg border border-zinc-850 text-left font-mono text-[9px] text-zinc-400 max-h-32 overflow-hidden relative">
-              <div className="animate-pulse mb-1.5 flex items-center gap-1.5 text-[8px] bg-amber-500/10 border border-amber-500/20 text-amber-500 px-1.5 py-0.5 rounded w-max">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span>
-                <span>• EMISSÃO DE COMPROVANTE FISCAL</span>
-              </div>
-              <p className="font-bold border-b border-zinc-800 pb-1 mb-1 text-[10px]">OST VENDAS - FECHAMENTO DE TURNO</p>
-              <p>OPERADOR RESP: {activeUsername}</p>
-              <p>TEÓRICO BALANÇO: {cashCalculation.theoreticalTotal.toLocaleString()} MT</p>
-              <p>FÍSICO DECLARADO: {physicalCount.toLocaleString()} MT</p>
-              <p>DIFERENÇA: {(physicalCount - cashCalculation.theoreticalTotal).toLocaleString()} MT</p>
-              <p className="text-zinc-500 mt-1">Assinado: {operatorSignature}</p>
-              <div className="absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-zinc-950 to-transparent pointer-events-none"></div>
-            </div>
-
-            <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-              <div className="h-full bg-amber-500 rounded-full animate-pulse" style={{ width: "95%" }}></div>
-            </div>
-
-            <p className="text-[10px] text-zinc-500 leading-normal">
-              O turno foi encerrado e as estatísticas de caixa foram enviadas ao painel central do supervisor.
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Operador Ativo: <span className="font-bold text-slate-700 dark:text-slate-200">{activeUsername}</span> • Moeda: <span className="font-bold text-orange-600">{currency}</span>
             </p>
           </div>
         </div>
+
+        {/* Tab Buttons */}
+        <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-zinc-800/80 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setActiveTab("dashboard")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+              activeTab === "dashboard"
+                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            <span>Painel do Turno</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("cashbook")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+              activeTab === "cashbook"
+                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Livro de Caixa</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("closures")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+              activeTab === "closures"
+                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>Histórico Fechos ({closuresHistory.length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("analytics")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+              activeTab === "analytics"
+                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Gráficos Horários</span>
+          </button>
+        </div>
+      </div>
+
+      {/* TAB 1: PAINEL DO TURNO & DASHBOARD */}
+      {activeTab === "dashboard" && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          {/* Main KPI Cards */}
+          <CashKpiCards
+            shiftStatus={shiftStatus}
+            openingBalance={cashMetrics.openingValue}
+            cashSalesAmount={cashMetrics.cashSales}
+            digitalSalesAmount={cashMetrics.digitalSales}
+            reinforcements={cashMetrics.reinforcements}
+            inputs={cashMetrics.inputs}
+            sangrias={cashMetrics.sangrias}
+            expenses={cashMetrics.expenses}
+            devolutions={cashMetrics.devolutions}
+            quebras={cashMetrics.quebras}
+            theoreticalTotal={cashMetrics.theoreticalTotal}
+            physicalCount={physicalCount}
+            currency={currency}
+            onOpenDenomModal={() => setShowDenomModal(true)}
+          />
+
+          {/* Quick Operations Bar */}
+          <CashQuickActions
+            shiftStatus={shiftStatus}
+            onOpenShiftModal={() => setShowOpenModal(true)}
+            onCloseShiftModal={() => setShowCloseModal(true)}
+            onOpenSangriaModal={() => setShowSangriaModal(true)}
+            onOpenEntryModal={(type) => {
+              setEntryModalType(type);
+              setShowEntryModal(true);
+            }}
+            onOpenDenomModal={() => setShowDenomModal(true)}
+            onExportPdf={handleExportCashbookPdf}
+            onExportCsv={handleExportCashbookCsv}
+            isManagerOrAdmin={isManagerOrAdmin}
+          />
+
+          {/* Mozambique Multichannel Reconciliation Panel */}
+          <CashReconciliationPanel
+            cashSales={cashMetrics.cashSales}
+            mpesaSales={cashMetrics.mpesaSales}
+            emolaSales={cashMetrics.emolaSales}
+            posCardSales={cashMetrics.posCardSales}
+            transferSales={cashMetrics.transferSales}
+            currency={currency}
+          />
+
+          {/* Hourly Visual Charts Preview */}
+          <div className="bg-white dark:bg-zinc-900 p-5 rounded-2xl border border-slate-200/80 dark:border-zinc-800 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs uppercase font-extrabold text-slate-800 dark:text-slate-200 tracking-wider">
+                Fluxo de Caixa por Hora (Turno Ativo)
+              </span>
+              <span className="text-[11px] text-slate-400">
+                Entradas em dinheiro vs. Saídas operacionais
+              </span>
+            </div>
+            <CashAnalyticalCharts data={hourlyData} currency={currency} />
+          </div>
+        </div>
       )}
 
+      {/* TAB 2: LIVRO DE CAIXA */}
+      {activeTab === "cashbook" && (
+        <div className="animate-in fade-in duration-200">
+          <CashbookLedger
+            entries={unifiedTimeline}
+            startDate={startDate}
+            endDate={endDate}
+            onStartDateChange={setStartDate}
+            onEndDateChange={setEndDate}
+            currency={currency}
+            onExportPdf={handleExportCashbookPdf}
+            onExportCsv={handleExportCashbookCsv}
+          />
+        </div>
+      )}
+
+      {/* TAB 3: HISTÓRICO DE FECHAMENTOS */}
+      {activeTab === "closures" && (
+        <div className="animate-in fade-in duration-200">
+          <CashClosuresHistory
+            closures={closuresHistory}
+            currency={currency}
+            settings={settings}
+            onAuditLog={onAddAuditLog}
+          />
+        </div>
+      )}
+
+      {/* TAB 4: GRÁFICOS ANALÍTICOS */}
+      {activeTab === "analytics" && (
+        <div className="bg-white dark:bg-zinc-900 p-6 rounded-2xl border border-slate-200/80 dark:border-zinc-800 shadow-sm space-y-4 animate-in fade-in duration-200">
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900 dark:text-white">
+              Análise Horária de Fluxo Financeiro em Caixa
+            </h3>
+            <p className="text-xs text-slate-500">
+              Distribuição por faixa de horário dos recebimentos em dinheiro e saídas de caixa
+            </p>
+          </div>
+          <CashAnalyticalCharts data={hourlyData} currency={currency} />
+        </div>
+      )}
+
+      {/* MODALS COMPONENT */}
+      <CashShiftModals
+        activeUsername={activeUsername}
+        employees={employees}
+        settings={settings}
+        currency={currency}
+        showOpenModal={showOpenModal}
+        onCloseOpenModal={() => setShowOpenModal(false)}
+        showCloseModal={showCloseModal}
+        onCloseCloseModal={() => setShowCloseModal(false)}
+        showSangriaModal={showSangriaModal}
+        onCloseSangriaModal={() => setShowSangriaModal(false)}
+        showEntryModal={showEntryModal}
+        entryModalType={entryModalType}
+        onCloseEntryModal={() => setShowEntryModal(false)}
+        showDenomModal={showDenomModal}
+        onCloseDenomModal={() => setShowDenomModal(false)}
+        theoreticalBalance={cashMetrics.theoreticalTotal}
+        physicalBalance={physicalCount}
+        openingBalance={openingBalance}
+        cashSalesAmount={cashMetrics.cashSales}
+        digitalSalesAmount={cashMetrics.digitalSales}
+        reinforcements={cashMetrics.reinforcements}
+        inputs={cashMetrics.inputs}
+        sangrias={cashMetrics.sangrias}
+        expenses={cashMetrics.expenses}
+        devolutions={cashMetrics.devolutions}
+        quebras={cashMetrics.quebras}
+        denomCounts={denomCounts}
+        onChangeDenomCount={handleDenomChange}
+        onResetDenomCounts={handleResetDenoms}
+        onApplyDenomToPhysical={(total) => setPhysicalCount(total)}
+        onConfirmOpenShift={handleOpenShift}
+        onConfirmCloseShift={handleCloseShift}
+        onConfirmSangria={handleSangria}
+        onConfirmEntry={handleGenericEntry}
+      />
     </div>
   );
 }

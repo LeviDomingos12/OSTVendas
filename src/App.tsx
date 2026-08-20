@@ -48,6 +48,7 @@ import QuickLogoModal from "./components/QuickLogoModal";
 import TutorialModal from "./components/TutorialModal";
 import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
+import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
 import { 
   testConnection, 
   auth, 
@@ -2014,9 +2015,9 @@ export default function App() {
     });
   }, [totalSystemModifications]);
 
-  const currentSystemVersion = `v4.2.1-rev${buildVersion}-ERP`;
+  const { formattedVersion: currentSystemVersion, version: systemVersionNumber } = useSystemVersion();
 
-  // Fetch / Sync version counter with Firestore partitioned document
+  // Fetch / Sync version counter and semantic version with Firestore partitioned document
   useEffect(() => {
     const syncFirestoreVersion = async () => {
       if (isCircuitBroken() || !navigator.onLine) return;
@@ -2036,9 +2037,16 @@ export default function App() {
               return highest;
             });
           }
+          if (data && typeof data.systemVersion === "string" && data.systemVersion.trim()) {
+            setSystemVersion(data.systemVersion.trim());
+          }
         } else {
-          // Document does not exist yet, write the current local build version as initial value
-          await setDoc(docRef, { counter: buildVersion, updatedAt: new Date().toISOString() });
+          // Document does not exist yet, write the current local build version and system version as initial values
+          await setDoc(docRef, { 
+            counter: buildVersion, 
+            systemVersion: getSystemVersion(),
+            updatedAt: new Date().toISOString() 
+          });
         }
       } catch (err) {
         checkAndNotifyQuota(err);
@@ -2052,8 +2060,12 @@ export default function App() {
     }
   }, [isAuthenticated, activeUser]);
 
-  // Unified function to increment build version both locally and in Firestore
+  // Unified function to increment build version and semantic system version both locally and in Firestore
   const incrementVersionCounter = async () => {
+    // 1. Increment semantic version managed by versionManager (e.g., 1.0 -> 1.1 -> 1.2 -> ... -> 2.0)
+    const newSystemVersion = incrementSystemVersion();
+
+    // 2. Increment numeric modification counter
     let nextVal = buildVersion + 1;
     setBuildVersion(current => {
       const next = current + 1;
@@ -2064,12 +2076,14 @@ export default function App() {
       return next;
     });
 
+    // 3. Persist to Firestore
     if (navigator.onLine && !isCircuitBroken()) {
       try {
         const path = getPartitionPath("system");
         const docRef = doc(db, path, "version");
         await setDoc(docRef, { 
           counter: nextVal, 
+          systemVersion: newSystemVersion,
           updatedAt: new Date().toISOString() 
         }, { merge: true });
       } catch (err) {
@@ -2652,18 +2666,18 @@ export default function App() {
           if (json.success && json.hasData) {
             const d = json.data;
             if (d.products) setProducts(d.products);
-            else setProducts(initialProducts);
+            else setProducts([]);
 
             if (d.customers) setCustomers(d.customers);
-            else setCustomers(initialCustomers);
+            else setCustomers([]);
 
             if (d.transactions) setTransactions(d.transactions);
-            else setTransactions(generateMockTransactions());
+            else setTransactions([]);
 
             if (d.cashflow) setCashFlow(d.cashflow);
-            else setCashFlow(initialCashFlow);
+            else setCashFlow([]);
 
-            if (d.employees) {
+            if (d.employees && d.employees.length > 0) {
               setEmployees(d.employees);
               setActiveUser(d.employees[0]);
             } else {
@@ -2672,7 +2686,7 @@ export default function App() {
             }
 
             if (d.auditlogs) setAuditLogs(d.auditlogs);
-            else setAuditLogs(initialAuditLogs);
+            else setAuditLogs([]);
 
             if (d.settings) setSettings(d.settings);
             else setSettings(defaultSettings);
@@ -2696,17 +2710,10 @@ export default function App() {
             getSettingsFromFirestore().catch(() => null)
           ]);
 
-          if (fsProducts && fsProducts.length > 0) setProducts(fsProducts);
-          else setProducts(initialProducts);
-
-          if (fsCustomers && fsCustomers.length > 0) setCustomers(fsCustomers);
-          else setCustomers(initialCustomers);
-
-          if (fsTransactions && fsTransactions.length > 0) setTransactions(fsTransactions);
-          else setTransactions(generateMockTransactions());
-
-          if (fsCashflow && fsCashflow.length > 0) setCashFlow(fsCashflow);
-          else setCashFlow(initialCashFlow);
+          setProducts(fsProducts || []);
+          setCustomers(fsCustomers || []);
+          setTransactions(fsTransactions || []);
+          setCashFlow(fsCashflow || []);
 
           if (fsEmployees && fsEmployees.length > 0) {
             setEmployees(fsEmployees);
@@ -2719,14 +2726,14 @@ export default function App() {
           if (fsSettings) setSettings(fsSettings);
           else setSettings(defaultSettings);
 
-          setAuditLogs(initialAuditLogs);
+          setAuditLogs([]);
         } catch (fsErr) {
-          setProducts(initialProducts);
-          setCustomers(initialCustomers);
-          setTransactions(generateMockTransactions());
-          setCashFlow(initialCashFlow);
+          setProducts([]);
+          setCustomers([]);
+          setTransactions([]);
+          setCashFlow([]);
           setEmployees(initialEmployees);
-          setAuditLogs(initialAuditLogs);
+          setAuditLogs([]);
           setSettings(defaultSettings);
         }
       }
@@ -2950,8 +2957,8 @@ export default function App() {
             console.log(`[FIRESTORE] Recebidos ${firestoreProducts.length} produtos em tempo real.`);
             setProducts(firestoreProducts);
           } else {
-            console.log("[FIRESTORE] Coleção de produtos remota vazia ou offline. Mantendo catálogo de produtos locais.");
-            setProducts(prev => (prev && prev.length > 0 ? prev : initialProducts));
+            console.log("[FIRESTORE] Coleção de produtos vazia ou offline.");
+            setProducts(prev => prev || []);
           }
         },
         (error) => {
@@ -2967,8 +2974,8 @@ export default function App() {
             console.log(`[FIRESTORE] Carregadas ${firestoreTx.length} transações.`);
             setTransactions(firestoreTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
           } else {
-            console.log("[FIRESTORE] Sem transações no Firestore. Mantendo histórico de transações locais.");
-            setTransactions(prev => (prev && prev.length > 0 ? prev : generateMockTransactions()));
+            console.log("[FIRESTORE] Sem transações no Firestore.");
+            setTransactions(prev => prev || []);
           }
         } catch (err) {
           console.error("[FIRESTORE] Erro ao carregar transações do Firestore:", err);
@@ -4553,7 +4560,14 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
             </div>
   
             <div className="flex items-center gap-3 text-xs">
-              {/* Button to quickly switch account / alter user */}
+              {/* Admin Name */}
+              <span className={`font-bold text-xs tracking-tight ${
+                theme === "night" ? "text-slate-200" : "text-slate-800"
+              }`}>
+                {activeUser ? activeUser.name : "Administrador"}
+              </span>
+
+              {/* Botão Alterar usuário */}
               <button
                 id="quick-switch-user-btn"
                 onClick={() => {
@@ -4567,40 +4581,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
                     : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
                 }`}
-                title="Alterar Usuário"
+                title="Alterar usuário"
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Alterar Usuário</span>
-              </button>
- 
-              {/* Active user status pill */}
-              <button
-                onClick={() => {
-                  setIsUserSwitchModalOpen(true);
-                  if (activeUser) {
-                    setSwitchSelectedEmployeeId(activeUser.id);
-                  }
-                }}
-                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-xl border transition-all text-left cursor-pointer ${
-                  theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-850 text-slate-200" 
-                    : "bg-white border-slate-200 hover:bg-slate-50 text-slate-800 shadow-sm"
-                }`}
-                title="Usuário Ativo"
-              >
-                <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-[10px] shrink-0 overflow-hidden">
-                  {activeUser.fotoPerfil ? (
-                    <img src={activeUser.fotoPerfil} className="w-full h-full object-cover" alt="Perfil" referrerPolicy="no-referrer" />
-                  ) : (
-                    activeUser.name.substring(0, 2).toUpperCase()
-                  )}
-                </div>
-                <div className="leading-none hidden sm:block">
-                  <p className="font-extrabold text-xs leading-tight">{activeUser.name}</p>
-                  <p className={`text-[9px] mt-0.5 ${
-                    theme === "night" ? "text-slate-400" : "text-slate-500"
-                  }`}>{activeUser.role}</p>
-                </div>
+                <span>Alterar usuário</span>
               </button>
             </div>
           </header>
@@ -4756,10 +4740,14 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                   transactions={filteredTransactions}
                   onAddCashFlowEntry={handleAddCashFlowEntry}
                   activeUsername={activeUser.name}
+                  activeUser={activeUser}
+                  employees={employees}
                   currentRole={simplifiedRole}
                   onAddAuditLog={handleAddAuditLog}
                   currency={currency}
                   settings={settings}
+                  theme={theme}
+                  onShowToast={showToast}
                 />
               </motion.div>
             )}
@@ -5243,6 +5231,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         theme={theme}
         employees={employees}
         activeUser={activeUser}
+        settings={settings}
         onSelectEmployee={(newEmp) => {
           setActiveUser(newEmp);
           showToast(`Operador alterado para ${newEmp.name}!`, "success");

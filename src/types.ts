@@ -108,11 +108,59 @@ export interface Transaction extends MultiTenantMetadata {
 export interface CashFlowEntry extends MultiTenantMetadata {
   id: string;
   timestamp: string;
-  type: "INPUT" | "REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "SANGRIA" | "DEVOLUTION";
+  type: "INPUT" | "REINFORCEMENT" | "EXPENSE" | "QUEBRA" | "SANGRIA" | "DEVOLUTION" | "SOBRA";
   amount: number;
   reason: string;
   responsibleUser: string;
+  shiftId?: string;
+  registerId?: string;
+  paymentMethod?: "CASH" | "MPESA_PAGA_FACIL" | "EMOLA" | "POS_CARD" | "BANK_TRANSFER" | "OTHER";
+  category?: "SUPRIMENTO" | "SANGRIA" | "DESPESA_OPERACIONAL" | "PAGAMENTO_FORNECEDOR" | "DEVOLUCAO_VENDA" | "QUEBRA_CAIXA" | "SOBRA_CAIXA" | "RECEBIMENTO_DIVIDA" | "OUTRO";
+  reference?: string;
+  destination?: string;
+  supplierOrClient?: string;
+  authorizedSupervisor?: string;
+  supervisorPinVerified?: boolean;
+  notes?: string;
 }
+
+export interface CashShift extends MultiTenantMetadata {
+  id: string;
+  shiftId?: string;
+  shiftNumber?: number;
+  registerId?: string;
+  openedAt: string;
+  openedBy: string;
+  openingBalance: number;
+  openingSupervisor?: string;
+  openingNotes?: string;
+  status?: "OPEN" | "CLOSED";
+  closedAt?: string;
+  closedBy?: string;
+  closingSupervisor?: string;
+  theoreticalBalance: number;
+  physicalBalance: number;
+  difference: number;
+  differenceType?: "EXACT" | "SURPLUS" | "SHORTAGE";
+  closingNotes?: string;
+  denominations?: Record<string, number>;
+  reconciliation?: {
+    cashSales: number;
+    mpesaSales: number;
+    emolaSales: number;
+    posCardSales: number;
+    transferSales: number;
+    totalSales: number;
+    reinforcements: number;
+    inputs: number;
+    sangrias: number;
+    expenses: number;
+    devolutions: number;
+    quebras: number;
+  };
+}
+
+export interface CashClosure extends CashShift {}
 
 export interface AuditLog extends MultiTenantMetadata {
   id: string;
@@ -160,6 +208,7 @@ export interface SystemSettings extends MultiTenantMetadata {
   companyAddress: string;
   companyNuit: string;
   securityPin?: string;
+  systemVersion?: string;
   nuit?: string;
   email?: string;
   storeEmail?: string;

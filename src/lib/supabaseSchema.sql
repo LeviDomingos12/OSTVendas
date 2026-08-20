@@ -205,6 +205,41 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
   closed_at TIMESTAMPTZ
 );
 
+-- HISTÓRICO DE FECHAMENTO DE TURNOS / BALANCETES DE CAIXA
+CREATE TABLE IF NOT EXISTS public.cash_closures (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  shift_id TEXT,
+  opened_at TIMESTAMPTZ NOT NULL,
+  closed_at TIMESTAMPTZ NOT NULL,
+  opened_by TEXT NOT NULL,
+  closed_by TEXT NOT NULL,
+  opening_supervisor TEXT,
+  closing_supervisor TEXT,
+  opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  theoretical_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  physical_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  difference NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  difference_type TEXT NOT NULL DEFAULT 'EXACT', -- 'EXACT', 'SURPLUS', 'SHORTAGE'
+  reconciliation JSONB NOT NULL DEFAULT '{}'::JSONB,
+  denominations JSONB DEFAULT '{}'::JSONB,
+  closing_notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ESTADO ATIVO DO TURNO DE CAIXA
+CREATE TABLE IF NOT EXISTS public.cash_shifts (
+  id TEXT PRIMARY KEY DEFAULT 'current_shift',
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  status TEXT NOT NULL DEFAULT 'OPEN', -- 'OPEN', 'CLOSED'
+  opening_balance NUMERIC(14,2) NOT NULL DEFAULT 5000.00,
+  opened_at TIMESTAMPTZ DEFAULT NOW(),
+  opened_by TEXT NOT NULL DEFAULT 'Admin',
+  opening_supervisor TEXT,
+  opening_notes TEXT,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- COLABORADORES / UTILIZADORES DO SISTEMA
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
@@ -314,6 +349,8 @@ ALTER TABLE public.colaboradores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
 
 -- Helper policies: Permit operations for authenticated users or public anon during onboarding
 CREATE POLICY "Permit all on produtos" ON public.produtos FOR ALL USING (true) WITH CHECK (true);
@@ -322,6 +359,8 @@ CREATE POLICY "Permit all on vendas" ON public.vendas FOR ALL USING (true) WITH 
 CREATE POLICY "Permit all on venda_itens" ON public.venda_itens FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permit all on caixa" ON public.caixa FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permit all on cash_registers" ON public.cash_registers FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Permit all on cash_closures" ON public.cash_closures FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Permit all on cash_shifts" ON public.cash_shifts FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permit all on colaboradores" ON public.colaboradores FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permit all on audit_logs" ON public.audit_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permit all on settings" ON public.settings FOR ALL USING (true) WITH CHECK (true);

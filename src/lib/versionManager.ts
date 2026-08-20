@@ -1,7 +1,42 @@
-import { useState, useEffect } from "react";
+import { useSyncExternalStore } from "react";
 
 const VERSION_STORAGE_KEY = "ost_system_version";
 const VERSION_CHANGE_EVENT = "ost_version_changed";
+
+let cachedVersion: string | null = null;
+const listeners = new Set<() => void>();
+
+function notifyListeners(): void {
+  listeners.forEach((listener) => {
+    try {
+      listener();
+    } catch (e) {
+      console.error("Error in version listener:", e);
+    }
+  });
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+
+  const handleStorageOrCustomEvent = () => {
+    cachedVersion = getSystemVersion();
+    listener();
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener(VERSION_CHANGE_EVENT as any, handleStorageOrCustomEvent);
+    window.addEventListener("storage", handleStorageOrCustomEvent);
+  }
+
+  return () => {
+    listeners.delete(listener);
+    if (typeof window !== "undefined") {
+      window.removeEventListener(VERSION_CHANGE_EVENT as any, handleStorageOrCustomEvent);
+      window.removeEventListener("storage", handleStorageOrCustomEvent);
+    }
+  };
+}
 
 /**
  * Computes next system version following strict sequence:
@@ -33,14 +68,23 @@ export function getSystemVersion(): string {
   try {
     const saved = localStorage.getItem(VERSION_STORAGE_KEY);
     if (saved && saved.trim()) {
-      return saved.trim();
+      cachedVersion = saved.trim();
+      return cachedVersion;
     }
     // Initialize default version
     localStorage.setItem(VERSION_STORAGE_KEY, "1.0");
+    cachedVersion = "1.0";
     return "1.0";
   } catch {
-    return "1.0";
+    return cachedVersion || "1.0";
   }
+}
+
+/**
+ * Gets the current formatted version string (e.g. 'v1.0')
+ */
+export function getFormattedSystemVersion(): string {
+  return `v${getSystemVersion()}`;
 }
 
 /**
@@ -50,7 +94,10 @@ export function setSystemVersion(version: string): void {
   if (typeof window === "undefined") return;
   try {
     const clean = version.trim().replace(/^v/i, "");
+    if (cachedVersion === clean) return;
+    cachedVersion = clean;
     localStorage.setItem(VERSION_STORAGE_KEY, clean);
+    notifyListeners();
     window.dispatchEvent(new CustomEvent(VERSION_CHANGE_EVENT, { detail: clean }));
   } catch (e) {
     console.error("Failed to save system version:", e);
@@ -67,8 +114,11 @@ export function incrementSystemVersion(): string {
   return next;
 }
 
+const getSnapshot = () => cachedVersion ?? getSystemVersion();
+const getServerSnapshot = () => "1.0";
+
 /**
- * React hook to access and subscribe to real-time system version updates
+ * React hook to access and subscribe to real-time system version updates safely without setState-in-render side effects
  */
 export function useSystemVersion(): {
   version: string;
@@ -76,22 +126,7 @@ export function useSystemVersion(): {
   incrementVersion: () => string;
   setVersion: (v: string) => void;
 } {
-  const [version, setVersionState] = useState<string>(() => getSystemVersion());
-
-  useEffect(() => {
-    const handleVersionChange = (e: CustomEvent<string>) => {
-      if (e.detail) {
-        setVersionState(e.detail);
-      } else {
-        setVersionState(getSystemVersion());
-      }
-    };
-
-    window.addEventListener(VERSION_CHANGE_EVENT as any, handleVersionChange);
-    return () => {
-      window.removeEventListener(VERSION_CHANGE_EVENT as any, handleVersionChange);
-    };
-  }, []);
+  const version = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   return {
     version,
@@ -100,3 +135,4 @@ export function useSystemVersion(): {
     setVersion: setSystemVersion
   };
 }
+

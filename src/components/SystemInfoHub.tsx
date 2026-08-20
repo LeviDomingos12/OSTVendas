@@ -17,6 +17,7 @@ import {
   ChevronRight,
   ShieldCheck
 } from "lucide-react";
+import { useSystemVersion } from "../lib/versionManager";
 
 interface SystemInfoHubProps {
   isOpen: boolean;
@@ -47,6 +48,7 @@ export const SystemInfoHub: React.FC<SystemInfoHubProps> = ({
   onOpenTutorial,
   theme = "daily"
 }) => {
+  const { formattedVersion } = useSystemVersion();
   const [currentSessionSecs, setCurrentSessionSecs] = React.useState(sessionSeconds);
 
   React.useEffect(() => {
@@ -241,7 +243,7 @@ export const SystemInfoHub: React.FC<SystemInfoHubProps> = ({
               </div>
               <div className="mt-3">
                 <p className="font-extrabold text-xs font-mono">
-                  {version || "v2.4.0"}
+                  {version || formattedVersion}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
                   Edição Comercial Cloud + POS

@@ -61,6 +61,7 @@ import {
 import { SystemSettings, UserRole, Employee, Branch, AuditLog, Product, Transaction, Customer, SubscriptionPlan } from "../types";
 import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
 import { sendEmail } from "../lib/gmail";
+import { getFormattedSystemVersion } from "../lib/versionManager";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { canAccessModule } from "../lib/planPermissions";
 import { 
@@ -558,20 +559,27 @@ export default function SettingsModule({
 
   const fetchDriveStats = async () => {
     if (needsAuth) return;
-    setIsFetchingDrive(true);
     try {
       const token = await getAccessToken();
-      if (!token) throw new Error("Sem token");
+      if (!token || token === "local_token" || token === "mock_token") {
+        setNeedsAuth(true);
+        return;
+      }
 
+      setIsFetchingDrive(true);
       // Fetch storage quota
       const aboutRes = await fetch("https://www.googleapis.com/drive/v3/about?fields=storageQuota", {
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (aboutRes.status === 401 || aboutRes.status === 403) {
+        setNeedsAuth(true);
+        return;
+      }
       const aboutData = await aboutRes.json();
-      if (aboutData.storageQuota) {
+      if (aboutData && aboutData.storageQuota) {
         setDriveStats({
-          limit: Number(aboutData.storageQuota.limit),
-          usage: Number(aboutData.storageQuota.usage)
+          limit: Number(aboutData.storageQuota.limit || 0),
+          usage: Number(aboutData.storageQuota.usage || 0)
         });
       }
 
@@ -579,12 +587,14 @@ export default function SettingsModule({
       const filesRes = await fetch("https://www.googleapis.com/drive/v3/files?orderBy=createdTime desc&pageSize=5&fields=files(id,name,mimeType,createdTime)", {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const filesData = await filesRes.json();
-      if (filesData.files) {
-        setRecentFiles(filesData.files);
+      if (filesRes.ok) {
+        const filesData = await filesRes.json();
+        if (filesData && filesData.files) {
+          setRecentFiles(filesData.files);
+        }
       }
     } catch (e) {
-      console.error("Failed to fetch drive stats", e);
+      console.warn("Google Drive stats info:", e);
     } finally {
       setIsFetchingDrive(false);
     }
@@ -633,17 +643,16 @@ export default function SettingsModule({
   }, [canEdit, onShowToast]);
 
   const handleManualDriveBackup = async () => {
-    if (needsAuth) {
-      if (onShowToast) onShowToast("Por favor, conecte a sua conta Google primeiro.", "warning");
-      return;
-    }
-    
     setIsBackingUp(true);
     setCloudBackupLogs([]);
     
     try {
       const token = await getAccessToken();
-      if (!token) throw new Error("Sem token do Google Drive");
+      if (!token || token === "local_token" || token === "mock_token") {
+        setNeedsAuth(true);
+        if (onShowToast) onShowToast("Por favor, conecte a sua conta Google primeiro para realizar backups no Google Drive.", "warning");
+        return;
+      }
       
       setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 📦 Obtendo snapshot da base de dados local...`]);
 
@@ -1943,9 +1952,14 @@ CREATE TABLE IF NOT EXISTS caixa (
 
   useEffect(() => {
     const unsubscribe = initAuth(
-      (user) => {
-        setGmailUser(user);
-        setNeedsAuth(false);
+      (user, token) => {
+        const gToken = token || localStorage.getItem("google_access_token");
+        if (gToken && gToken !== "local_token" && gToken !== "mock_token") {
+          setGmailUser(user);
+          setNeedsAuth(false);
+        } else {
+          setNeedsAuth(true);
+        }
       },
       () => {
         setGmailUser(null);
@@ -3116,7 +3130,7 @@ CREATE TABLE IF NOT EXISTS caixa (
       const backupData = {
         app_name: "OST Vendas",
         export_date: new Date().toISOString(),
-        version: systemVersion || "3.2.0-Prod-Mozambique",
+        version: systemVersion || getFormattedSystemVersion(),
         db_signature: "SQL-LITE-OST-90A1",
         active_settings: {
           companyName,

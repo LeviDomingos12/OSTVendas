@@ -1,4 +1,5 @@
 import { Transaction, SystemSettings } from "../types";
+import { getFormattedSystemVersion } from "./versionManager";
 
 export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
   const currency = settings.currency || "MT";
@@ -490,7 +491,7 @@ export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
               ` : ""}
               <div class="fiscal-row">
                 <span>Software de Faturação:</span>
-                <span>OST VENDAS ERP v10.4.2</span>
+                <span>OST VENDAS ERP ${getFormattedSystemVersion()}</span>
               </div>
             </div>
 

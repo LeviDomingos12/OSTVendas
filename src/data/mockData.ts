@@ -18,8 +18,7 @@ export const initialEmployees: Employee[] = [
     email: "levidomingos12@gmail.com", 
     username: "admin", 
     pinCreatedAt: "2026-08-01T00:00:00.000Z", 
-    pinChanged: true,
-    isSystemAdmin: true
+    pinChanged: true
   }
 ];
 
