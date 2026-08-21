@@ -3,7 +3,16 @@ import { useSyncExternalStore } from "react";
 const VERSION_STORAGE_KEY = "ost_system_version";
 const VERSION_CHANGE_EVENT = "ost_version_changed";
 
-let cachedVersion: string | null = null;
+let cachedVersion: string = "1.0";
+if (typeof window !== "undefined") {
+  try {
+    const saved = localStorage.getItem(VERSION_STORAGE_KEY);
+    if (saved && saved.trim()) {
+      cachedVersion = saved.trim();
+    }
+  } catch (e) {}
+}
+
 const listeners = new Set<() => void>();
 
 function notifyListeners(): void {
@@ -20,7 +29,14 @@ function subscribe(listener: () => void): () => void {
   listeners.add(listener);
 
   const handleStorageOrCustomEvent = () => {
-    cachedVersion = getSystemVersion();
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem(VERSION_STORAGE_KEY);
+        if (saved && saved.trim()) {
+          cachedVersion = saved.trim();
+        }
+      } catch (e) {}
+    }
     listener();
   };
 
@@ -64,27 +80,14 @@ export function getNextVersion(currentVersion: string): string {
  * Gets the current persisted system version or initializes to '1.0'
  */
 export function getSystemVersion(): string {
-  if (typeof window === "undefined") return "1.0";
-  try {
-    const saved = localStorage.getItem(VERSION_STORAGE_KEY);
-    if (saved && saved.trim()) {
-      cachedVersion = saved.trim();
-      return cachedVersion;
-    }
-    // Initialize default version
-    localStorage.setItem(VERSION_STORAGE_KEY, "1.0");
-    cachedVersion = "1.0";
-    return "1.0";
-  } catch {
-    return cachedVersion || "1.0";
-  }
+  return cachedVersion;
 }
 
 /**
  * Gets the current formatted version string (e.g. 'v1.0')
  */
 export function getFormattedSystemVersion(): string {
-  return `v${getSystemVersion()}`;
+  return `v${cachedVersion}`;
 }
 
 /**
@@ -114,7 +117,7 @@ export function incrementSystemVersion(): string {
   return next;
 }
 
-const getSnapshot = () => cachedVersion ?? getSystemVersion();
+const getSnapshot = () => cachedVersion;
 const getServerSnapshot = () => "1.0";
 
 /**

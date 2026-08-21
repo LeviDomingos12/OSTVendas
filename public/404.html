@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <title>OST Vendas - Redirecionando...</title>
+    <script>
+      // Single Page App (SPA) Redirect for GitHub Pages
+      // Stores requested path and redirects back to base index.html
+      (function() {
+        var pathSegmentsToKeep = 0;
+        var l = window.location;
+        
+        // Detect if hosted on GitHub Pages subpath (e.g. /repo-name/)
+        var pathName = l.pathname;
+        sessionStorage.setItem('spa_redirect_path', pathName + l.search + l.hash);
+        
+        // Redirect to repository or domain root relative to current directory
+        var targetUrl = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '');
+        var segments = pathName.split('/').filter(Boolean);
+        
+        // If subfolder exists on github.io, preserve repository base path
+        if (l.hostname.endsWith('github.io') && segments.length > 0) {
+          targetUrl += '/' + segments[0] + '/';
+        } else {
+          targetUrl += '/';
+        }
+        
+        window.location.replace(targetUrl);
+      })();
+    </script>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #090d16;
+        color: #f1f5f9;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        text-align: center;
+      }
+      .card {
+        background-color: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 16px;
+        padding: 32px 24px;
+        max-width: 420px;
+        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+      }
+      .logo {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 56px;
+        height: 56px;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #f97316, #ea580c);
+        color: #fff;
+        font-weight: 900;
+        font-size: 24px;
+        margin-bottom: 16px;
+      }
+      h1 {
+        font-size: 20px;
+        font-weight: 700;
+        margin: 0 0 8px 0;
+      }
+      p {
+        font-size: 14px;
+        color: #94a3b8;
+        margin: 0 0 24px 0;
+        line-height: 1.5;
+      }
+      .btn {
+        display: inline-block;
+        background-color: #f97316;
+        color: #ffffff;
+        text-decoration: none;
+        padding: 10px 20px;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        transition: background-color 0.2s;
+      }
+      .btn:hover {
+        background-color: #ea580c;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="logo">OST</div>
+      <h1>Carregando OST Vendas...</h1>
+      <p>A redirecionar automaticamente para a aplicação principal...</p>
+      <a href="./" class="btn">Aceder ao Sistema</a>
+    </div>
+  </body>
+</html>

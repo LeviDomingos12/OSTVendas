@@ -5,8 +5,9 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    // Relative base path ('./') ensures assets resolve properly both at root domain and GitHub repository subpaths
-    base: './',
+    // Configured for GitHub Pages & Root Deployments:
+    // Defaults to './' for portable relative asset linking or uses VITE_BASE if explicitly set
+    base: process.env.VITE_BASE || './',
 
     plugins: [react(), tailwindcss()],
 
