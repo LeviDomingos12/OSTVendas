@@ -5,7 +5,8 @@ import { defineConfig } from 'vite';
 
 export default defineConfig(() => {
   return {
-    base: '/ost-vendas/',
+    // Relative base path ('./') ensures assets resolve properly both at root domain and GitHub repository subpaths
+    base: './',
 
     plugins: [react(), tailwindcss()],
 
@@ -16,8 +17,11 @@ export default defineConfig(() => {
     },
 
     server: {
-      hmr: process.env.DISABLE_HMR !== 'false',
-      watch: process.env.DISABLE_HMR === 'false' ? null : {},
+      host: '0.0.0.0',
+      port: 3000,
+      hmr: process.env.DISABLE_HMR !== 'true',
+      watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },
   };
 });
+

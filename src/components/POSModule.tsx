@@ -896,6 +896,19 @@ export default function POSModule({
       }
     }
 
+    // Validação Financeira: Impedir pagamento em numerário inferior ao total da venda (exceto fiado/crédito)
+    if (paymentMethodToUse === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal) {
+      const faltam = (calculations.grandTotal - receivedCashAmount).toLocaleString();
+      if (onShowToast) {
+        onShowToast(
+          `O valor entregue (${receivedCashAmount.toLocaleString()} MT) é inferior ao total da venda (${calculations.grandTotal.toLocaleString()} MT). Faltam ${faltam} MT. Para fiado, utilize a modalidade 'Crédito'.`,
+          "error",
+          "Valor Insuficiente"
+        );
+      }
+      return;
+    }
+
     if (paymentMethodToUse === "MIXED" && Math.abs(mixedSumTotal - calculations.grandTotal) > 1) {
       if (onShowToast) onShowToast(`O somatório dos pagamentos mistos (${mixedSumTotal} MT) não corresponde ao total da venda (${calculations.grandTotal} MT).`, "error", "Pagamento Incorreto");
       return;
@@ -2532,8 +2545,12 @@ export default function POSModule({
                 {/* Change highlighted inside checkout */}
                 {selectedPaymentMethod === "CASH" && (
                   <div className="flex justify-between text-[11px] text-emerald-400 border-t border-slate-800 pt-1">
-                    <span>TROCO DE NUMERÁRIO:</span>
-                    <span>{calculatedChange.toLocaleString()} MT</span>
+                    <span>{receivedCashAmount < calculations.grandTotal && receivedCashAmount > 0 ? "FALTA RECEBER:" : "TROCO DE NUMERÁRIO:"}</span>
+                    <span className={receivedCashAmount < calculations.grandTotal && receivedCashAmount > 0 ? "text-rose-400 font-bold" : "text-emerald-400 font-bold"}>
+                      {receivedCashAmount < calculations.grandTotal && receivedCashAmount > 0 
+                        ? `-${(calculations.grandTotal - receivedCashAmount).toLocaleString()} MT (Insuficiente)` 
+                        : `${calculatedChange.toLocaleString()} MT`}
+                    </span>
                   </div>
                 )}
               </div>
@@ -2549,9 +2566,16 @@ export default function POSModule({
               </button>
               <button
                 onClick={() => handleCheckout(true)}
-                className="py-2.5 bg-orange-500 hover:bg-orange-600 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-lg shadow-orange-500/15"
+                disabled={selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal}
+                className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-lg ${
+                  selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
+                    ? "bg-slate-300 text-slate-500 cursor-not-allowed shadow-none"
+                    : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/15"
+                }`}
               >
-                Confirmar e Faturar ✓
+                {selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
+                  ? "Valor Insuficiente"
+                  : "Confirmar e Faturar ✓"}
               </button>
             </div>
           </div>
