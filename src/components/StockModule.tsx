@@ -919,16 +919,30 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     }
   };
 
-  // Automated Batch Expiry Detection and Toast Alert
+  // Automated Batch Expiry Detection for real inventory items
   const expiringBatchesInfo = useMemo(() => {
     const today = new Date();
     const limitDate = new Date();
     limitDate.setDate(limitDate.getDate() + 30);
 
-    const activeBatches = settings?.batches || [];
-    
+    // Extract batches ONLY from active products currently in the catalog
+    const activeBatches: any[] = [];
+    products.forEach((prod) => {
+      if (prod && Array.isArray(prod.batches)) {
+        prod.batches.forEach((b) => {
+          if (b && Number(b.quantity) > 0 && b.expiryDate) {
+            activeBatches.push({
+              ...b,
+              productId: prod.id,
+              productName: prod.name,
+              product: prod
+            });
+          }
+        });
+      }
+    });
+
     const expiring = activeBatches.filter((batch: any) => {
-      if (batch.quantity <= 0 || !batch.expiryDate) return false;
       const expiry = new Date(batch.expiryDate);
       return expiry <= limitDate;
     });
@@ -949,21 +963,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
       warning,
       count: expiring.length
     };
-  }, [settings?.batches]);
-
-  // Prevent multiple toast triggers on state re-renders using a Ref
-  const lastNotifiedCountRef = useRef<number>(-1);
-
-  useEffect(() => {
-    if (expiringBatchesInfo.count > 0 && onShowToast && lastNotifiedCountRef.current !== expiringBatchesInfo.count) {
-      lastNotifiedCountRef.current = expiringBatchesInfo.count;
-      const msg = expiringBatchesInfo.expired.length > 0 
-        ? `Atenção: Existem ${expiringBatchesInfo.count} lotes críticos! (${expiringBatchesInfo.expired.length} já vencidos e ${expiringBatchesInfo.warning.length} próximos do vencimento em menos de 30 dias).`
-        : `Alerta de Validade: Existem ${expiringBatchesInfo.count} lotes ativos próximos do vencimento (menos de 30 dias).`;
-      
-      onShowToast(msg, "warning");
-    }
-  }, [expiringBatchesInfo.count, expiringBatchesInfo.expired.length, expiringBatchesInfo.warning.length, onShowToast]);
+  }, [products]);
 
   // Local state for filters and search
   const [searchQuery, setSearchQuery] = useState("");
@@ -1488,29 +1488,99 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     setAdjustmentReason("");
   };
 
-  // Excel simulation triggers
-  const handleSimulateCSVImport = () => {
-    setImportStatus("processing");
-    
-    setTimeout(() => {
-      const mockImports: Product[] = [
-        { id: `csv-1-${Date.now()}`, name: "Cerveja Manica (Garrafa 550ml)", code: "CER-MAN", category: "Bebidas", supplier: "CDM - Moçambique", costPrice: 60, salePrice: 90, vatRate: 16, stock: 120, minStock: 24, emoji: "🍺" },
-        { id: `csv-2-${Date.now()}`, name: "Feijão Preto em Lata Camil (400g)", code: "MER-FEI", category: "Mercearia", supplier: "Distribuidora Sul", costPrice: 95, salePrice: 145, vatRate: 16, stock: 45, minStock: 10, expiryDate: "2027-01-20", emoji: "🥫" },
-        { id: `csv-3-${Date.now()}`, name: "Óleo Alimentar Gordo de Girassol (1L)", code: "OLE-SOL", category: "Mercearia", supplier: "Indústrias de Moçambique", costPrice: 110, salePrice: 165, vatRate: 16, stock: 60, minStock: 15, emoji: "🧴" },
-        { id: `csv-4-${Date.now()}`, name: "Adaptador Universal MozPlug 16A", code: "ELE-ADAPT", category: "Eletrónicos", supplier: "Afritronics", costPrice: 120, salePrice: 320, vatRate: 16, stock: 18, minStock: 5, emoji: "🔌" }
-      ];
+  // Download CSV Template for products import
+  const handleDownloadCSVTemplate = () => {
+    const csvContent = "Nome;Código;Categoria;Fornecedor;Preço de Custo;Preço de Venda;Taxa de IVA;Stock Inicial;Stock Mínimo;Código de Barras\n" +
+      "Arroz Top Star 25kg;ARR-TOP-25;Mercearia;Distribuidor Norte;1450;1850;16;50;10;6001234567890\n" +
+      "Óleo de Cozinha 1L;OLE-1L;Mercearia;Distribuidor Central;120;165;16;100;20;6001234567891\n" +
+      "Sabão em Barra 1kg;SAB-1KG;Higiene e Limpeza;Fábrica Sul;45;70;16;80;15;6001234567892";
 
-      mockImports.forEach(p => onAddProduct(p));
-      
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `modelo_importacao_produtos.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    if (onShowToast) onShowToast("Modelo CSV de produtos descarregado com sucesso!", "success", "Download Concluído");
+  };
+
+  // Real File Import Processor for CSV / TSV / TXT
+  const handleParseAndImportFile = async (file: File) => {
+    setImportStatus("processing");
+    try {
+      const text = await file.text();
+      const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+
+      if (rawLines.length === 0) {
+        throw new Error("O ficheiro carregado está vazio.");
+      }
+
+      // Detect separator: comma, semicolon, or tab
+      const firstLine = rawLines[0];
+      const separator = firstLine.includes(";") ? ";" : (firstLine.includes("\t") ? "\t" : ",");
+
+      const rows: Product[] = [];
+      const startIndex = rawLines.length > 1 && (firstLine.toLowerCase().includes("nome") || firstLine.toLowerCase().includes("name") || firstLine.toLowerCase().includes("código")) ? 1 : 0;
+
+      for (let i = startIndex; i < rawLines.length; i++) {
+        const line = rawLines[i];
+        if (!line) continue;
+
+        const cols = line.split(separator).map(c => c.trim().replace(/^["']|["']$/g, ""));
+        if (cols.length === 0 || !cols[0]) continue;
+
+        const name = cols[0];
+        const code = cols[1] || `PRD-${Date.now().toString().slice(-4)}${i}`;
+        const category = cols[2] || "Geral";
+        const supplier = cols[3] || "Fornecedor Local";
+        const costPrice = parseFloat(cols[4]?.replace(",", ".")) || 0;
+        const salePrice = parseFloat(cols[5]?.replace(",", ".")) || (costPrice > 0 ? Math.round(costPrice * 1.3) : 100);
+        const vatRate = parseFloat(cols[6]?.replace(",", ".")) || 16;
+        const stock = parseFloat(cols[7]?.replace(",", ".")) || 0;
+        const minStock = parseFloat(cols[8]?.replace(",", ".")) || 5;
+        const barcode = cols[9] || "";
+
+        const newProd: Product = {
+          id: `imp-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+          name,
+          code,
+          category,
+          supplier,
+          costPrice,
+          salePrice,
+          vatRate,
+          stock,
+          minStock,
+          barcode: barcode || undefined,
+          emoji: "📦"
+        };
+
+        rows.push(newProd);
+      }
+
+      if (rows.length === 0) {
+        throw new Error("Não foi possível extrair nenhum produto válido do ficheiro. Verifique o formato.");
+      }
+
+      rows.forEach(p => onAddProduct(p));
+
       onAddAuditLog(
-        "Importação Massa Excel CSV",
+        "Importação de Produtos CSV",
         "STOCK",
-        `Carregado planilha com +4 produtos CDM/Mercearia e integrados com sucesso por ${currentRole}.`
+        `Ficheiro '${file.name}' processado. ${rows.length} produtos importados e integrados no catálogo por ${currentRole}.`
       );
 
-      setImportedRowCount(4);
+      setImportedRowCount(rows.length);
       setImportStatus("success");
-    }, 1500);
+      if (onShowToast) onShowToast(`Importados com sucesso ${rows.length} produtos reais do ficheiro ${file.name}!`, "success", "Importação Concluída");
+    } catch (err: any) {
+      console.error("Erro na importação:", err);
+      setImportStatus("idle");
+      if (onShowToast) onShowToast(err?.message || "Falha ao processar o ficheiro.", "error", "Erro de Importação");
+    }
   };
 
   // Automated replenishment order handler
@@ -2391,62 +2461,50 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                   <input 
                     id="native-excel-picker"
                     type="file"
-                    accept=".csv,.xls,.xlsx,.pdf,.txt"
+                    accept=".csv,.txt,.tsv"
                     className="hidden"
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
-                        setImportStatus("processing");
-                        setTimeout(() => {
-                          const mockImports: Product[] = [
-                            { id: `csv-1-${Date.now()}`, name: `Stock: ${file.name.split('.')[0]} A1`, code: "IMPM-1", category: "Bebidas", supplier: "Estoque Fornecedor", costPrice: 48, salePrice: 85, vatRate: 16, stock: 65, minStock: 12, emoji: "📦" },
-                            { id: `csv-2-${Date.now()}`, name: `Stock: ${file.name.split('.')[0]} A2`, code: "IMPM-2", category: "Mercearia", supplier: "Estoque Fornecedor", costPrice: 85, salePrice: 135, vatRate: 16, stock: 40, minStock: 8, emoji: "🥫" },
-                          ];
-                          mockImports.forEach(p => onAddProduct(p));
-                          onAddAuditLog(
-                            "Importação de Ficheiro Comercial",
-                            "STOCK",
-                            `Utilizador carregou e processou o ficheiro real '${file.name}' (${(file.size / 1024).toFixed(1)} KB) com sucesso.`
-                          );
-                          setImportedRowCount(2);
-                          setImportStatus("success");
-                        }, 1400);
+                        handleParseAndImportFile(file);
                       }
+                      e.target.value = "";
                     }}
                   />
                   <Upload className="w-8 h-8 text-slate-400" />
                   <div>
-                    <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">Clique para selecionar ou arraste o ficheiro de stock</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Formatos: CSV, XLS, XLSX, PDF (Máximo 10MB)</p>
+                    <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">Clique para selecionar ficheiro CSV / TXT real</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Lê e importa produtos reais com nomes, preços e stocks</p>
                   </div>
                 </div>
 
                 <div className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between dark:bg-zinc-950 dark:border-zinc-800">
                   <div>
-                    <span className="text-[10px] font-bold text-slate-400 uppercase font-mono block">Simulador Piloto OST</span>
-                    <h4 className="text-xs font-bold text-slate-700 mt-1 dark:text-zinc-300">Carregar Modelo de Mercearia</h4>
-                    <p className="text-[11px] text-slate-400">Insira de imediato itens pré-calculados de Moçambique no seu inventário.</p>
+                    <span className="text-[10px] font-bold text-slate-400 uppercase font-mono block">Modelo Oficial</span>
+                    <h4 className="text-xs font-bold text-slate-700 mt-1 dark:text-zinc-300">Descarregar Modelo CSV</h4>
+                    <p className="text-[11px] text-slate-400">Baixe a planilha modelo pré-formatada para preencher os seus produtos reais.</p>
                   </div>
 
                   {importStatus === "idle" ? (
                     <button
                       type="button"
-                      onClick={handleSimulateCSVImport}
-                      className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs py-2 px-3 rounded-lg mt-3 cursor-pointer text-center transition"
+                      onClick={handleDownloadCSVTemplate}
+                      className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2 px-3 rounded-lg mt-3 cursor-pointer text-center transition flex items-center justify-center gap-2"
                     >
-                      Confirmar e Processar Modelo Misto
+                      <Download className="w-3.5 h-3.5" />
+                      Baixar Template CSV
                     </button>
                   ) : importStatus === "processing" ? (
                     <div className="text-xs font-bold text-orange-600 flex items-center gap-2 mt-3">
                       <span className="w-4 h-4 rounded-full border-2 border-orange-500 border-t-transparent animate-spin"></span>
-                      Lendo planilha CSV de importação...
+                      Processando e importando ficheiro real...
                     </div>
                   ) : (
                     <div className="bg-green-50 border border-green-200 text-green-800 text-xs p-2 rounded-lg mt-3 flex items-center gap-2 dark:bg-green-950/20 dark:border-green-800/50 dark:text-green-400">
                       <CheckCircle className="w-4 h-4 text-green-700 shrink-0" />
                       <div>
-                        <p className="font-bold">Planilha Excel Processada!</p>
-                        <p className="text-[10px]">+{importedRowCount} novos produtos de Moçambique foram injetados.</p>
+                        <p className="font-bold">Ficheiro Processado!</p>
+                        <p className="text-[10px]">+{importedRowCount} produtos reais importados com sucesso.</p>
                       </div>
                     </div>
                   )}

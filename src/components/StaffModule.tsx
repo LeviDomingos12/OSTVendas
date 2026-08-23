@@ -43,7 +43,9 @@ import {
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
 import { sendEmail } from "../lib/gmail";
 import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
-import { getRecoveryRequests, resolveRecoveryRequest } from "../lib/firebase";
+import { SupabaseSyncService } from "../services/supabaseService";
+const getRecoveryRequests = async () => SupabaseSyncService.getRecoveryRequests();
+const resolveRecoveryRequest = async (id: string) => SupabaseSyncService.resolveRecoveryRequest(id);
 import { useConfirm } from "../hooks/useConfirm";
 import { 
   ResponsiveContainer, 
@@ -735,7 +737,7 @@ export default function StaffModule({
       const earningsBody = [
         ["Salário Base Mensal", "30 Dias", `${emp.salary.toLocaleString()} ${currency}`, "-"],
         ["INSS (Segurança Social)", "3.0 %", "-", `${(emp.salary * 0.03).toLocaleString()} ${currency}`],
-        ["IRPS (Imposto sobre Rendimento)", "Simulado", "-", `${(emp.salary * 0.10).toLocaleString()} ${currency}`],
+        ["IRPS (Retenção na Fonte)", "10.0 %", "-", `${(emp.salary * 0.10).toLocaleString()} ${currency}`],
       ];
       
       autoTable(doc, {

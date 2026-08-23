@@ -34,6 +34,8 @@ interface CashShiftModalsProps {
   onCloseEntryModal: () => void;
   showDenomModal: boolean;
   onCloseDenomModal: () => void;
+  showAdjustFloatModal?: boolean;
+  onCloseAdjustFloatModal?: () => void;
   // Calculations
   theoreticalBalance: number;
   physicalBalance: number;
@@ -56,6 +58,7 @@ interface CashShiftModalsProps {
   onConfirmCloseShift: (physicalCount: number, supervisor: string, notes: string) => void;
   onConfirmSangria: (amount: number, destination: string, reason: string, supervisor: string) => void;
   onConfirmEntry: (type: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA", amount: number, reason: string, supplier: string) => void;
+  onConfirmAdjustFloat?: (newFloat: number, reason: string, supervisor: string) => void;
 }
 
 export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
@@ -74,6 +77,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   onCloseEntryModal,
   showDenomModal,
   onCloseDenomModal,
+  showAdjustFloatModal = false,
+  onCloseAdjustFloatModal,
   theoreticalBalance,
   physicalBalance,
   openingBalance,
@@ -92,7 +97,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   onConfirmOpenShift,
   onConfirmCloseShift,
   onConfirmSangria,
-  onConfirmEntry
+  onConfirmEntry,
+  onConfirmAdjustFloat
 }) => {
   // Available Supervisors (Dynamic from real registered employees)
   const availableSupervisors = useMemo(() => {
@@ -104,8 +110,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     return employees.length > 0 ? employees : [{ id: "emp-1", name: activeUsername, role: "SUPERVISOR", pin: "0000" } as Employee];
   }, [employees, activeUsername]);
 
-  // Open Shift Form State
-  const [openFloat, setOpenFloat] = useState<number>(openingBalance || 5000);
+  // Open Shift Form State - strictly empty initially to force manual entry
+  const [openFloat, setOpenFloat] = useState<string>("");
   const [openSupervisor, setOpenSupervisor] = useState<string>("");
   const [openPin, setOpenPin] = useState<string>("");
   const [openNotes, setOpenNotes] = useState<string>("");
@@ -133,14 +139,35 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   const [entrySupplier, setEntrySupplier] = useState<string>("");
   const [entryError, setEntryError] = useState<string>("");
 
+  // Adjust Float Modal State
+  const [adjustFloatVal, setAdjustFloatVal] = useState<number>(openingBalance || 0);
+  const [adjustFloatReason, setAdjustFloatReason] = useState<string>("");
+  const [adjustFloatSupervisor, setAdjustFloatSupervisor] = useState<string>("");
+  const [adjustFloatPin, setAdjustFloatPin] = useState<string>("");
+  const [adjustFloatError, setAdjustFloatError] = useState<string>("");
+
+  // Reset openFloat on modal open
+  useEffect(() => {
+    if (showOpenModal) {
+      setOpenFloat("");
+      setOpenError("");
+    }
+  }, [showOpenModal]);
+
   // Set default supervisor on init
   useEffect(() => {
     if (availableSupervisors.length > 0) {
       if (!openSupervisor) setOpenSupervisor(availableSupervisors[0].name);
       if (!closeSupervisor) setCloseSupervisor(availableSupervisors[0].name);
       if (!sangriaSupervisor) setSangriaSupervisor(availableSupervisors[0].name);
+      if (!adjustFloatSupervisor) setAdjustFloatSupervisor(availableSupervisors[0].name);
     }
   }, [availableSupervisors]);
+
+  // Sync adjustFloatVal with openingBalance
+  useEffect(() => {
+    setAdjustFloatVal(openingBalance || 0);
+  }, [openingBalance]);
 
   // Keep closePhysicalCount in sync
   useEffect(() => {
@@ -164,7 +191,12 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   // 1. Submit Open Shift
   const handleOpenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (openFloat < 0) {
+    if (openFloat === "" || openFloat.trim() === "" || isNaN(Number(openFloat))) {
+      setOpenError("É obrigatório inserir manualmente o valor inicial da gaveta (insira 0 se abrir sem trocos).");
+      return;
+    }
+    const floatNumber = Number(openFloat);
+    if (floatNumber < 0) {
       setOpenError("O fundo de maneio inicial não pode ser negativo.");
       return;
     }
@@ -176,10 +208,11 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       }
     }
     setOpenError("");
-    onConfirmOpenShift(openFloat, openSupervisor || activeUsername, openNotes);
+    onConfirmOpenShift(floatNumber, openSupervisor || activeUsername, openNotes);
     onCloseOpenModal();
     setOpenPin("");
     setOpenNotes("");
+    setOpenFloat("");
   };
 
   // 2. Submit Close Shift
@@ -246,6 +279,31 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     setEntrySupplier("");
   };
 
+  // 5. Submit Adjust Float
+  const handleAdjustFloatSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (adjustFloatVal < 0) {
+      setAdjustFloatError("O fundo de gaveta não pode ser negativo.");
+      return;
+    }
+    if (adjustFloatPin) {
+      const isValid = validateSupervisorPin(adjustFloatSupervisor, adjustFloatPin);
+      if (!isValid) {
+        setAdjustFloatError("PIN de homologação do Supervisor incorreto!");
+        return;
+      }
+    }
+    setAdjustFloatError("");
+    if (onConfirmAdjustFloat) {
+      onConfirmAdjustFloat(adjustFloatVal, adjustFloatReason || "Ajuste manual de fundo da gaveta", adjustFloatSupervisor || activeUsername);
+    }
+    if (onCloseAdjustFloatModal) {
+      onCloseAdjustFloatModal();
+    }
+    setAdjustFloatPin("");
+    setAdjustFloatReason("");
+  };
+
   const calculatedFromDenoms = useMemo(() => {
     return DENOMINATIONS.reduce((sum, d) => {
       const count = denomCounts[d.value.toString()] || 0;
@@ -291,21 +349,42 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Fundo de Maneio Inicial (Trocos) ({currency}) *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-700 dark:text-slate-300">
+                    Fundo de Maneio Inicial (Trocos) ({currency}) *
+                  </label>
+                  <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/40 px-2 py-0.5 rounded-full border border-orange-200 dark:border-orange-900/40">
+                    Inserção Manual
+                  </span>
+                </div>
                 <input
                   type="number"
                   min="0"
                   step="any"
                   required
-                  value={openFloat || ""}
-                  onChange={(e) => setOpenFloat(Number(e.target.value))}
-                  placeholder="Ex: 5000"
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono font-extrabold text-slate-900 dark:text-white text-sm outline-none focus:border-orange-500"
+                  value={openFloat}
+                  onChange={(e) => setOpenFloat(e.target.value)}
+                  placeholder="0.00 (Introduza o valor manual)"
+                  className="w-full p-3 bg-slate-50 dark:bg-zinc-800 border-2 border-slate-200 dark:border-zinc-700 rounded-xl font-mono font-extrabold text-slate-900 dark:text-white text-base outline-none focus:border-orange-500 transition-colors"
                 />
-                <span className="text-[10.5px] text-slate-400 mt-1 block">
-                  Valor físico já presente na gaveta para iniciar as trocas do dia.
+                
+                {/* Quick amount shortcuts */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-400 font-semibold">Atalhos rápidos:</span>
+                  {[0, 200, 500, 1000, 2000, 5000].map((val) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setOpenFloat(val.toString())}
+                      className="px-2 py-1 bg-slate-100 dark:bg-zinc-800 hover:bg-orange-100 dark:hover:bg-orange-950/50 text-slate-700 dark:text-slate-300 hover:text-orange-600 dark:hover:text-orange-400 rounded-lg text-[11px] font-bold font-mono transition cursor-pointer border border-slate-200 dark:border-zinc-700"
+                    >
+                      {val === 0 ? "Sem Fundo (0)" : `${val.toLocaleString()} ${currency}`}
+                    </button>
+                  ))}
+                </div>
+
+                <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1.5 block">
+                  💡 O <strong>Saldo Teórico da Gaveta</strong> inicia exatamente com este valor inserido pelo operador.
                 </span>
               </div>
 
@@ -838,6 +917,118 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                 Actualizar Saldo Físico ({calculatedFromDenoms.toLocaleString()} {currency})
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* 6. MODAL: AJUSTE MANUAL DO FUNDO DE GAVETA / SALDO TEÓRICO */}
+      {showAdjustFloatModal && onCloseAdjustFloatModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-5 h-5 text-orange-500" />
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                  Definir Fundo Inicial da Gaveta (Manual)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={onCloseAdjustFloatModal}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAdjustFloatSubmit} className="space-y-3.5 text-xs">
+              <div className="p-3 bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-900/40 rounded-xl text-orange-800 dark:text-orange-300 space-y-1">
+                <span className="font-extrabold block text-xs">Definição Manual do Saldo de Fundo</span>
+                <p className="text-[11px] leading-relaxed">
+                  Insira manualmente a quantia exata de trocos existente na gaveta de caixa para compor o cálculo do Saldo Teórico Esperado.
+                </p>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Novo Fundo de Trocos ({currency}) *
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  required
+                  value={adjustFloatVal === 0 ? "" : adjustFloatVal}
+                  onChange={(e) => setAdjustFloatVal(Number(e.target.value))}
+                  placeholder="0.00 (Introduza o valor manual)"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono font-extrabold text-slate-900 dark:text-white text-sm outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Motivo / Observação
+                </label>
+                <input
+                  type="text"
+                  value={adjustFloatReason}
+                  onChange={(e) => setAdjustFloatReason(e.target.value)}
+                  placeholder="Ex: Contagem inicial de notas pequenas na gaveta"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-medium outline-none text-slate-800 dark:text-slate-200"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Supervisor Responsável *
+                </label>
+                <select
+                  value={adjustFloatSupervisor}
+                  onChange={(e) => setAdjustFloatSupervisor(e.target.value)}
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none"
+                >
+                  {availableSupervisors.map(s => (
+                    <option key={s.id} value={s.name}>{s.name} ({s.role || "Supervisor"})</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  PIN do Supervisor (Opcional)
+                </label>
+                <input
+                  type="password"
+                  maxLength={8}
+                  value={adjustFloatPin}
+                  onChange={(e) => setAdjustFloatPin(e.target.value)}
+                  placeholder="PIN de autorização"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-center tracking-widest outline-none"
+                />
+              </div>
+
+              {adjustFloatError && (
+                <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 font-bold flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{adjustFloatError}</span>
+                </div>
+              )}
+
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={onCloseAdjustFloatModal}
+                  className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-700 font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-zinc-800 transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-extrabold shadow-sm transition cursor-pointer"
+                >
+                  Salvar Fundo
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

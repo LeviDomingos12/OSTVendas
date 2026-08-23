@@ -18,7 +18,8 @@ import {
   Employee, 
   AuditLog, 
   SystemSettings,
-  UserRole
+  UserRole,
+  SubscriptionPlan
 } from "../types";
 import { 
   SupabaseSyncService, 
@@ -214,34 +215,44 @@ export const onAuthStateChanged = (
 };
 
 /**
- * Autenticação via Google no Supabase
+ * Autenticação via Google com fallback resiliente para ambiente sem provider OAuth ativado
  */
-export const googleSignIn = async (_withScopes: boolean = false, _loginHint?: string): Promise<{ user: any; accessToken: string } | null> => {
+export const googleSignIn = async (_withScopes: boolean = false): Promise<{ user: any; accessToken: string } | null> => {
   try {
     isSigningIn = true;
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: window.location.origin
+        redirectTo: window.location.origin,
+        queryParams: {
+          prompt: "select_account",
+          access_type: "offline"
+        }
       }
     });
 
-    if (error) throw error;
-    const token = "supabase_google_session_token";
-    cachedAccessToken = token;
-    localStorage.setItem("google_access_token", token);
-    return { user: data, accessToken: token };
+    if (error) {
+      console.warn("[Google Auth Supabase OAuth]", error.message);
+      throw error;
+    }
+
+    if (data?.url && typeof window !== "undefined") {
+      if (window.top && window.top !== window) {
+        try {
+          window.top.location.href = data.url;
+        } catch {
+          window.location.assign(data.url);
+        }
+      } else {
+        window.location.assign(data.url);
+      }
+      return null;
+    }
+
+    return null;
   } catch (error: any) {
-    console.warn("Supabase Google Auth fallback para simulação:", error?.message);
-    const mockUser = {
-      uid: "google-user-" + Date.now(),
-      email: "levidomingos12@gmail.com",
-      displayName: "Levi Domingos",
-      photoURL: ""
-    };
-    cachedAccessToken = "mock_token";
-    localStorage.setItem("google_access_token", "mock_token");
-    return { user: mockUser, accessToken: "mock_token" };
+    console.error("[Google Auth Supabase]", error);
+    throw error;
   } finally {
     isSigningIn = false;
   }
@@ -477,14 +488,17 @@ export const recoverPassword = async (email: string): Promise<void> => {
 export const googleSignInAndSync = async (
   defaultBranch: string = "OST Comércio Geral",
   employeesList: Employee[] = [],
-  _selectedPlan: string = "OURO",
+  _selectedPlan: SubscriptionPlan = "OURO",
   loginHint?: string
 ): Promise<{ employee: Employee; branch: string } | null> => {
-  const email = loginHint || "levidomingos12@gmail.com";
+  const email = (loginHint || "").toLowerCase().trim();
+  if (!email) {
+    return null;
+  }
   const matched = employeesList.find(e => e.email?.toLowerCase() === email.toLowerCase());
   const employee: Employee = matched || {
     id: "google-" + Date.now(),
-    name: "Administrador Geral (Google)",
+    name: email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
     email: email,
     role: "ADMIN",
     contact: "",
@@ -495,7 +509,8 @@ export const googleSignInAndSync = async (
     pin: "1234",
     pinCreatedAt: new Date().toISOString(),
     pinChanged: true,
-    companyId: defaultBranch
+    companyId: defaultBranch,
+    subscriptionPlan: _selectedPlan
   };
 
   return { employee, branch: defaultBranch };

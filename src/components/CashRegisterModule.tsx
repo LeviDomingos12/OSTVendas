@@ -68,12 +68,12 @@ export default function CashRegisterModule({
   // Shift Status & Float
   const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">(() => {
     const saved = localStorage.getItem("ost_pos_shift_status");
-    return saved === "CLOSED" ? "CLOSED" : "OPEN";
+    return saved === "OPEN" ? "OPEN" : "CLOSED";
   });
 
   const [openingBalance, setOpeningBalance] = useState<number>(() => {
     const saved = localStorage.getItem("ost_pos_opening_balance");
-    return saved ? Number(saved) : 5000;
+    return saved ? Number(saved) : 0;
   });
 
   const [shiftOpenedAt, setShiftOpenedAt] = useState<string>(() => {
@@ -103,7 +103,7 @@ export default function CashRegisterModule({
     CommercialDataService.fetchActiveCashShift().then((shift) => {
       if (isMounted && shift) {
         setShiftStatus(shift.status);
-        setOpeningBalance(shift.openingBalance);
+        setOpeningBalance(shift.openingBalance || 0);
         setShiftOpenedAt(shift.openedAt);
         setShiftOpenedBy(shift.openedBy || activeUsername);
       }
@@ -146,19 +146,19 @@ export default function CashRegisterModule({
     localStorage.setItem("ost_pos_shift_opened_by", shiftOpenedBy);
   }, [shiftStatus, openingBalance, shiftOpenedAt, shiftOpenedBy]);
 
-  // Denominations Counter State
+  // Denominations Counter State - Clean default initialized to 0 for production commercialization
   const [denomCounts, setDenomCounts] = useState<{ [key: string]: number }>({
-    "1000": 20,
-    "500": 18,
-    "200": 15,
-    "100": 30,
-    "50": 40,
-    "20": 50,
-    "10": 20,
-    "5": 10,
-    "2": 15,
-    "1": 20,
-    "0.5": 10
+    "1000": 0,
+    "500": 0,
+    "200": 0,
+    "100": 0,
+    "50": 0,
+    "20": 0,
+    "10": 0,
+    "5": 0,
+    "2": 0,
+    "1": 0,
+    "0.5": 0
   });
 
   const calculatedFromDenoms = useMemo(() => {
@@ -200,6 +200,7 @@ export default function CashRegisterModule({
   const [showEntryModal, setShowEntryModal] = useState(false);
   const [entryModalType, setEntryModalType] = useState<"REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA">("REINFORCEMENT");
   const [showDenomModal, setShowDenomModal] = useState(false);
+  const [showAdjustFloatModal, setShowAdjustFloatModal] = useState(false);
 
   // Filtered transactions in date range
   const filteredTransactions = useMemo(() => {
@@ -509,6 +510,29 @@ export default function CashRegisterModule({
     onShowToast?.(`Operação de ${type} registada com sucesso!`, "success");
   }, [activeUsername, currency, onAddCashFlowEntry, onAddAuditLog, onShowToast]);
 
+  const handleAdjustOpeningBalance = useCallback((newFloat: number, reason: string, supervisor: string) => {
+    setOpeningBalance(newFloat);
+    localStorage.setItem("ost_pos_opening_balance", newFloat.toString());
+    
+    if (shiftStatus === "OPEN") {
+      CommercialDataService.saveActiveCashShift({
+        status: "OPEN",
+        openingBalance: newFloat,
+        openedAt: shiftOpenedAt,
+        openedBy: shiftOpenedBy,
+        openingSupervisor: supervisor,
+        openingNotes: `Ajuste manual de fundo de gaveta: ${reason}`
+      });
+    }
+
+    onAddAuditLog(
+      "Ajuste Manual Fundo de Gaveta",
+      "CAIXA",
+      `Fundo de maneio / Saldo Teórico da gaveta definido manualmente para ${newFloat.toLocaleString()} ${currency} por ${activeUsername}. Motivo: ${reason}. Homologado por: ${supervisor}`
+    );
+    onShowToast?.(`Fundo da gaveta atualizado para ${newFloat.toLocaleString()} ${currency}!`, "success");
+  }, [shiftStatus, shiftOpenedAt, shiftOpenedBy, activeUsername, currency, onAddAuditLog, onShowToast]);
+
   // Export Livro de Caixa PDF
   const handleExportCashbookPdf = () => {
     exportCashbookPdf(unifiedTimeline, startDate, endDate, activeUsername, currency, settings);
@@ -639,6 +663,7 @@ export default function CashRegisterModule({
             physicalCount={physicalCount}
             currency={currency}
             onOpenDenomModal={() => setShowDenomModal(true)}
+            onEditOpeningBalance={() => setShowAdjustFloatModal(true)}
           />
 
           {/* Quick Operations Bar */}
@@ -742,6 +767,8 @@ export default function CashRegisterModule({
         onCloseEntryModal={() => setShowEntryModal(false)}
         showDenomModal={showDenomModal}
         onCloseDenomModal={() => setShowDenomModal(false)}
+        showAdjustFloatModal={showAdjustFloatModal}
+        onCloseAdjustFloatModal={() => setShowAdjustFloatModal(false)}
         theoreticalBalance={cashMetrics.theoreticalTotal}
         physicalBalance={physicalCount}
         openingBalance={openingBalance}
@@ -761,6 +788,7 @@ export default function CashRegisterModule({
         onConfirmCloseShift={handleCloseShift}
         onConfirmSangria={handleSangria}
         onConfirmEntry={handleGenericEntry}
+        onConfirmAdjustFloat={handleAdjustOpeningBalance}
       />
     </div>
   );

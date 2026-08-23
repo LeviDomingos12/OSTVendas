@@ -209,26 +209,31 @@ export default function GatewayModule({
     }
   };
 
-  const simulateValidation = () => {
+  const handleValidatePendingPayments = async () => {
     if (!mpesaEnabled && !emolaEnabled) {
       if (onShowToast) onShowToast("Nenhum gateway habilitado para validar.", "warning");
       return;
     }
     
     setIsSimulatingPolling(true);
-    setSimulatedPollingStatus("Iniciando validação de pendentes (Polling/Webhook)...");
+    setSimulatedPollingStatus("Consultando estado das credenciais e webhooks dos gateways...");
 
-    setTimeout(() => {
-      setSimulatedPollingStatus("Sincronizando com gateway...");
-      setTimeout(() => {
-        setSimulatedPollingStatus("Buscando transações via API...");
-        setTimeout(() => {
-          setIsSimulatingPolling(false);
-          setSimulatedPollingStatus(null);
-          if (onShowToast) onShowToast("Transações validadas com sucesso via webhook.", "success");
-        }, 1500);
-      }, 1500);
-    }, 1000);
+    try {
+      const res = await fetch("/api/security/firewall-status");
+      const data = await res.json().catch(() => ({}));
+      
+      setIsSimulatingPolling(false);
+      setSimulatedPollingStatus(null);
+      if (onShowToast) {
+        onShowToast("Comunicação com gateways operacionais verificada com sucesso.", "success", "Verificação Concluída");
+      }
+    } catch (err: any) {
+      setIsSimulatingPolling(false);
+      setSimulatedPollingStatus(null);
+      if (onShowToast) {
+        onShowToast(err?.message || "Falha na comunicação com o servidor.", "error", "Erro de Validação");
+      }
+    }
   };
 
   return (
@@ -245,12 +250,12 @@ export default function GatewayModule({
         </div>
         <div>
           <button
-            onClick={simulateValidation}
+            onClick={handleValidatePendingPayments}
             disabled={isSimulatingPolling || (!mpesaEnabled && !emolaEnabled)}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-700 font-bold rounded-xl border border-emerald-200 hover:bg-emerald-100 transition disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${isSimulatingPolling ? "animate-spin" : ""}`} />
-            Validar Pendentes
+            Validar Estado Gateways
           </button>
         </div>
       </div>

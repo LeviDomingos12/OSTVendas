@@ -59,8 +59,7 @@ import {
   Gauge
 } from "lucide-react";
 import { SystemSettings, UserRole, Employee, Branch, AuditLog, Product, Transaction, Customer, SubscriptionPlan } from "../types";
-import { initAuth, googleSignIn, logout, getAccessToken, getLogsFromFirestore, auth, uploadBackupToStorage, listBackupsFromStorage, deleteBackupFromStorage, CloudBackupItem } from "../lib/firebase";
-import { sendEmail } from "../lib/gmail";
+import { getGoogleAccessToken, sendEmail } from "../lib/gmail";
 import { getFormattedSystemVersion } from "../lib/versionManager";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { canAccessModule } from "../lib/planPermissions";
@@ -73,10 +72,43 @@ import {
   SupabaseSyncService, 
   SupabaseConfig,
   LatencyResult,
-  SessionValidationResult
+  SessionValidationResult,
+  CloudBackupItem
 } from "../services/supabaseService";
+
+const googleSignIn = async (_forceConsent?: boolean) => {
+  return await SupabaseSyncService.signInWithGoogle();
+};
+const logout = async () => SupabaseSyncService.signOut();
+const getLogsFromFirestore = async () => SupabaseSyncService.fetchAuditLogs();
+const uploadBackupToStorage = async (_uid: string, filename: string, json: string) => SupabaseSyncService.uploadBackupToStorage(filename, json);
+const listBackupsFromStorage = async (_uid?: string) => SupabaseSyncService.listBackupsFromStorage();
+const deleteBackupFromStorage = async (_uid: string, filename: string) => SupabaseSyncService.deleteBackupFromStorage(filename);
+const auth = {
+  get currentUser() {
+    try {
+      const u = localStorage.getItem("erp_simulated_logged_in_user");
+      return u ? JSON.parse(u) : null;
+    } catch {
+      return null;
+    }
+  }
+};
+const initAuth = (onSuccess?: (user: any, token: string) => void, onFail?: () => void) => {
+  const sub = SupabaseSyncService.onAuthStateChange((_event, session) => {
+    if (session?.user && onSuccess) onSuccess(session.user, session.access_token);
+    else if (onFail) onFail();
+  });
+  return () => {
+    if (sub && typeof sub.unsubscribe === "function") {
+      sub.unsubscribe();
+    }
+  };
+};
+const getAccessToken = async () => getGoogleAccessToken();
 import { BackendManager } from "../services/dataService";
 import { MigrationService, MigrationResult } from "../services/migrationService";
+import { AdminService } from "../services/adminService";
 import GatewayModule from "./GatewayModule";
 import AiForecastModule from "./AiForecastModule";
 import TrainingModule from "./TrainingModule";
@@ -114,6 +146,7 @@ interface SettingsModuleProps {
   onUpdateSystemPlan?: (newPlan: SubscriptionPlan) => void;
   initialSubTab?: string;
   onChangeModule?: (mod: string) => void;
+  onPurgeMockData?: () => Promise<void> | void;
 }
 
 export default function SettingsModule({
@@ -145,7 +178,8 @@ export default function SettingsModule({
   onUpdateUserPlan = () => {},
   onUpdateSystemPlan = () => {},
   initialSubTab,
-  onChangeModule
+  onChangeModule,
+  onPurgeMockData
 }: SettingsModuleProps) {
   const canEdit = currentRole === "ADMIN";
   
@@ -1671,37 +1705,23 @@ CREATE TABLE IF NOT EXISTS caixa (
         isSimulated: false
       }));
 
-      // Add default mock/fallback devices to ensure interactive experience in the preview iframe
-      const mockDevices = [
-        { id: "mock_epson", name: "Epson TM-T20III (USB Direct)", manufacturer: "Epson Inc.", vendorId: 1208, productId: 514, serialNumber: "EP20394821", isSimulated: true },
-        { id: "mock_xprinter", name: "Xprinter XP-58IIH (USB Serial Printer)", manufacturer: "Xprinter", vendorId: 1155, productId: 22336, serialNumber: "XP992011", isSimulated: true },
-        { id: "mock_generic", name: "Generic POS-80 Thermal Printer", manufacturer: "Zjiang", vendorId: 10473, productId: 649, serialNumber: "ZJ80123", isSimulated: true }
-      ];
-
-      const combined = [...mappedDevices, ...mockDevices];
-      setUsbDevices(combined);
+      setUsbDevices(mappedDevices);
       
       setPrinterLogs(prev => [
         ...prev,
-        `[${new Date().toLocaleTimeString()}] 🟢 Varredura concluída. Encontrado(s) ${mappedDevices.length} dispositivo(s) físico(s) e ${mockDevices.length} simulado(s).`
+        `[${new Date().toLocaleTimeString()}] 🟢 Varredura concluída. Encontrado(s) ${mappedDevices.length} dispositivo(s) físico(s) conectado(s).`
       ]);
       
       if (onShowToast) {
-        onShowToast(`Encontrados ${combined.length} dispositivos USB (físicos & simulados) para seleção.`, "info", "Varredura Concluída");
+        onShowToast(`Encontrados ${mappedDevices.length} dispositivos USB físicos para seleção.`, "info", "Varredura Concluída");
       }
     } catch (err: any) {
-      console.warn("WebUSB listing failed, using simulated devices fallback:", err);
-      // Fallback list of simulated devices
-      const fallbackDevices = [
-        { id: "mock_epson", name: "Epson TM-T20III (USB Direct)", manufacturer: "Epson Inc.", vendorId: 1208, productId: 514, serialNumber: "EP20394821", isSimulated: true },
-        { id: "mock_xprinter", name: "Xprinter XP-58IIH (USB Serial Printer)", manufacturer: "Xprinter", vendorId: 1155, productId: 22336, serialNumber: "XP992011", isSimulated: true },
-        { id: "mock_generic", name: "Generic POS-80 Thermal Printer", manufacturer: "Zjiang", vendorId: 10473, productId: 649, serialNumber: "ZJ80123", isSimulated: true }
-      ];
-      setUsbDevices(fallbackDevices);
-      setWebUsbError("O seu navegador ou o iframe bloqueou o WebUSB. Pode utilizar as impressoras simuladas abaixo!");
+      console.warn("WebUSB listing failed:", err);
+      setUsbDevices([]);
+      setWebUsbError("O seu navegador ou o iframe requer permissão explícita para listar dispositivos USB.");
       setPrinterLogs(prev => [
         ...prev,
-        `[${new Date().toLocaleTimeString()}] ⚠️ Restrição de segurança: WebUSB indisponível no iframe. Carregados dispositivos simulados de alto-desempenho para teste.`
+        `[${new Date().toLocaleTimeString()}] ⚠️ Restrição de segurança: Conecte o cabo USB e abra o sistema em nova aba se necessário.`
       ]);
     } finally {
       setIsScanningUsb(false);
@@ -1972,9 +1992,9 @@ CREATE TABLE IF NOT EXISTS caixa (
   const handleGmailLogin = async () => {
     setIsLoggingIn(true);
     try {
-      const result = await googleSignIn(true);
+      const result: any = await googleSignIn(true);
       if (result) {
-        setGmailUser(result.user);
+        setGmailUser(result.user || result);
         setNeedsAuth(false);
         if (onShowToast) onShowToast("Autenticado com Gmail (OAuth2) com sucesso!", "success");
       }
@@ -2439,13 +2459,13 @@ CREATE TABLE IF NOT EXISTS caixa (
       }
     } else {
       setSimulationLogs(prev => [...prev, `[${timeString}] 📤 Preparando relatório de teste via Gmail API...`]);
-      setSimulationLogs(prev => [...prev, `[${timeString}] 🔑 Utilizando token OAuth2 Firebase Auth de ${gmailUser?.email}...`]);
+      setSimulationLogs(prev => [...prev, `[${timeString}] 🔑 Utilizando token Google OAuth2 autenticado para ${gmailUser?.email}...`]);
       
       try {
         const emailBody = `
           <h1>Relatório de Sistema de Vendas OST</h1>
           <p>Este é um envio automatizado de faturas, recibos ou relatórios financeiros.</p>
-          <p>Integração Firebase OAuth2 configurada com sucesso e a utilizar a API Oficial do Gmail.</p>
+          <p>Integração Google OAuth2 configurada com sucesso e a utilizar a API Oficial do Gmail.</p>
         `;
 
         await sendEmail({
@@ -5075,6 +5095,87 @@ CREATE TABLE IF NOT EXISTS caixa (
                   />
                   <Upload className="w-4 h-4 shrink-0" />
                   Restaurar DB (JSON)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* ADMIN TOOL: Permanent Purge of Mock & Sample Data */}
+          <div className="bg-white p-5 rounded-2xl border border-rose-200/80 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b pb-3 border-rose-100">
+              <div className="flex items-center gap-2.5 text-rose-600">
+                <Trash2 className="w-5 h-5 shrink-0" />
+                <div>
+                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Limpeza de Dados de Demonstração (Mock)</h3>
+                  <p className="text-[10px] text-slate-500 font-medium">Purga definitiva de itens de exemplo no Supabase e armazenamento local</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                Ação Administrativa
+              </span>
+            </div>
+
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Esta ferramenta pesquisa e elimina permanentemente produtos de exemplo, clientes fictícios, vendas de teste e históricos de demonstração. Após a execução, apenas registos reais de utilizadores e empresas autenticadas permanecerão no sistema.
+            </p>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="text-[11px] text-slate-400">
+                💡 <span className="font-semibold text-slate-600">Recomendação:</span> Execute antes de colocar a sua loja em operação real.
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={async () => {
+                    if (!window.confirm("ATENÇÃO: Deseja realmente remover permanentemente todos os dados de demonstração/mock do banco de dados? Esta ação não pode ser desfeita.")) {
+                      return;
+                    }
+                    if (onPurgeMockData) {
+                      await onPurgeMockData();
+                    } else {
+                      const res = await AdminService.purgeMockData(activeUser?.name);
+                      if (res.success && onShowToast) {
+                        onShowToast(res.message, "success", "Purga Concluída");
+                      } else if (onShowToast) {
+                        onShowToast(res.message, "error", "Falha na Purga");
+                      }
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4 shrink-0" />
+                  Limpar Dados Mock
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!canEdit}
+                  onClick={async () => {
+                    const promptVal = window.prompt("CONFIRMAÇÃO CRÍTICA:\n\nEsta ação vai reiniciar todo o sistema para estado limpo de comercialização, limpando dados locais, sessões ativas e registos de teste.\n\nDigite 'RESET' para confirmar:");
+                    if (promptVal !== "RESET") {
+                      if (promptVal !== null && onShowToast) {
+                        onShowToast("Código de confirmação incorreto. Operação cancelada.", "warning", "Reset Cancelado");
+                      }
+                      return;
+                    }
+                    if (onShowToast) {
+                      onShowToast("A reiniciar o sistema e a limpar dados...", "info", "Reset em Curso");
+                    }
+                    const res = await AdminService.executeFullCommercialReset(activeUser?.name);
+                    if (res.success) {
+                      if (onShowToast) onShowToast(res.message, "success", "Sistema Pronto");
+                      setTimeout(() => {
+                        window.location.href = "/";
+                      }, 1000);
+                    } else if (onShowToast) {
+                      onShowToast(res.message, "error", "Falha no Reset");
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border border-slate-700"
+                >
+                  <RefreshCw className="w-4 h-4 shrink-0" />
+                  Reset para Comercialização
                 </button>
               </div>
             </div>

@@ -16,13 +16,15 @@ if (typeof window !== "undefined") {
 const listeners = new Set<() => void>();
 
 function notifyListeners(): void {
-  listeners.forEach((listener) => {
-    try {
-      listener();
-    } catch (e) {
-      console.error("Error in version listener:", e);
-    }
-  });
+  setTimeout(() => {
+    listeners.forEach((listener) => {
+      try {
+        listener();
+      } catch (e) {
+        console.error("Error in version listener:", e);
+      }
+    });
+  }, 0);
 }
 
 function subscribe(listener: () => void): () => void {

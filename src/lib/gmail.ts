@@ -1,4 +1,16 @@
-import { getAccessToken } from "./firebase";
+import { getSupabaseClient } from "./supabase";
+
+export const getGoogleAccessToken = async (): Promise<string | null> => {
+  const token = localStorage.getItem("google_access_token");
+  if (token) return token;
+  const client = getSupabaseClient();
+  if (client) {
+    const { data: { session } } = await client.auth.getSession();
+    if (session?.provider_token) return session.provider_token;
+    if (session?.access_token) return session.access_token;
+  }
+  return null;
+};
 
 interface SendEmailParams {
   to: string;
@@ -35,7 +47,7 @@ export const sendEmail = async ({ to, subject, body, isHtml = true, attachments 
 
   // 2. Fallback to client-side Google Gmail API if access token is available
   try {
-    const accessToken = await getAccessToken();
+    const accessToken = await getGoogleAccessToken();
     if (accessToken) {
       let emailContent = "";
 
@@ -94,10 +106,9 @@ export const sendEmail = async ({ to, subject, body, isHtml = true, attachments 
     console.warn("[GMAIL API FALLBACK ERROR]", gmailErr);
   }
 
-  // Fallback return if neither SMTP nor Gmail API delivered
+  // Fallback: report real error if neither SMTP nor Gmail API delivered
   return {
-    success: true,
-    simulated: true,
-    warning: "Notificação de e-mail registada no sistema. Verifique as credenciais SMTP nas Definições para disparo direto de e-mails."
+    success: false,
+    error: "Não foi possível enviar o e-mail. Verifique as configurações de SMTP nas Definições do Sistema."
   };
 };

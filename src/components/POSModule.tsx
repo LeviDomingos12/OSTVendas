@@ -372,9 +372,9 @@ export default function POSModule({
       
       const timer = setTimeout(() => {
         if (action === "email") {
-          simulateSendEmail();
+          handleSendEmail();
         } else if (action === "sms") {
-          simulateSendSms();
+          handleSendSms();
         } else if (action === "whatsapp") {
           handleOpenWhatsAppModal();
         }
@@ -389,14 +389,16 @@ export default function POSModule({
     if (!searchQuery) return;
     const barcodeMatch = localProducts.find(p => p.barcode === searchQuery.trim() || p.code === searchQuery.trim());
     if (barcodeMatch) {
-      if (barcodeMatch.stock <= 0) {
-        if (onShowToast) onShowToast(`Produto ${barcodeMatch.name} está esgotado!`, "error");
+      setTimeout(() => {
+        if (barcodeMatch.stock <= 0) {
+          if (onShowToast) onShowToast(`Produto ${barcodeMatch.name} está esgotado!`, "error");
+          setSearchQuery("");
+          return;
+        }
+        handleTriggerAddToCart(barcodeMatch);
+        if (onShowToast) onShowToast(`Escaneado: ${barcodeMatch.name} adicionado ao carrinho!`, "success");
         setSearchQuery("");
-        return;
-      }
-      handleTriggerAddToCart(barcodeMatch);
-      if (onShowToast) onShowToast(`Escaneado: ${barcodeMatch.name} adicionado ao carrinho!`, "success");
-      setSearchQuery("");
+      }, 0);
     }
   }, [searchQuery, localProducts]);
 
@@ -1084,8 +1086,8 @@ export default function POSModule({
     return "JPEG";
   };
 
-  // Digital communication simulation API
-  const simulateSendEmail = async () => {
+  // Digital communication real delivery API
+  const handleSendEmail = async () => {
     if (!completedTx) return;
     if (!selectedCustomer) {
       if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do email começará automaticamente.", "warning", "Cliente não Registado");
@@ -1370,16 +1372,16 @@ export default function POSModule({
           })
         });
         setSendEmailStatus("sent");
-        onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail (Simulação com PDF anexo).`);
+        onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail para ${targetEmail} com PDF anexo.`);
         if (onShowToast) onShowToast("Recibo enviado por email com sucesso!", "success");
-      } catch (err) {
+      } catch (err: any) {
         setSendEmailStatus("idle");
-        if (onShowToast) onShowToast("Simulado: Recibo de e-mail enviado com sucesso (Mock).", "success");
+        if (onShowToast) onShowToast(err?.message || "Não foi possível enviar o e-mail. Verifique o servidor SMTP nas Definições.", "error", "Falha de E-mail");
       }
     }
   };
 
-  const simulateSendSms = async () => {
+  const handleSendSms = async () => {
     if (!completedTx) return;
     if (!selectedCustomer) {
       if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do SMS começará automaticamente.", "warning", "Cliente não Registado");
@@ -1389,7 +1391,7 @@ export default function POSModule({
     }
     setSendSmsStatus("sending");
     try {
-      await fetch("/api/sms/dispatch-invoice", {
+      const resp = await fetch("/api/sms/dispatch-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1398,12 +1400,16 @@ export default function POSModule({
           grandTotal: completedTx.grandTotal
         })
       });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || `HTTP ${resp.status}: Falha no envio`);
+      }
       setSendSmsStatus("sent");
-      onAddAuditLog("Enviar Recibo por SMS", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via SMS.`);
+      onAddAuditLog("Enviar Recibo por SMS", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via SMS para ${selectedCustomer?.phone}.`);
       if (onShowToast) onShowToast("SMS de confirmação despachado!", "success");
-    } catch (err) {
+    } catch (err: any) {
       setSendSmsStatus("idle");
-      if (onShowToast) onShowToast("Simulado: Recibo de SMS enviado com sucesso (Mock).", "success");
+      if (onShowToast) onShowToast(err?.message || "Falha ao enviar SMS. Verifique as credenciais do Gateway de SMS.", "error", "Falha de SMS");
     }
   };
 
@@ -1628,7 +1634,7 @@ export default function POSModule({
     }
   };
 
-  const simulateSendBudgetEmail = async () => {
+  const handleSendBudgetEmail = async () => {
     if (!completedBudget) return;
     setSendBudgetEmailStatus("sending");
     const targetEmail = budgetTargetEmail || completedBudget.customerEmail || "vendas.central@ost.co.mz";
@@ -1841,12 +1847,12 @@ export default function POSModule({
     }
   };
 
-  const simulateSendBudgetSms = async () => {
+  const handleSendBudgetSms = async () => {
     if (!completedBudget) return;
     setSendBudgetSmsStatus("sending");
     const targetPhone = budgetTargetPhone || completedBudget.customerPhone || "+258 84 900 1202";
     try {
-      await fetch("/api/sms/dispatch-invoice", {
+      const resp = await fetch("/api/sms/dispatch-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1855,12 +1861,16 @@ export default function POSModule({
           grandTotal: completedBudget.grandTotal
         })
       });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || `HTTP ${resp.status}`);
+      }
       setSendBudgetSmsStatus("sent");
       onAddAuditLog("Enviar Orçamento por SMS", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via SMS para ${targetPhone}.`);
       if (onShowToast) onShowToast("Orçamento enviado por SMS com sucesso!", "success");
-    } catch (err) {
-      setSendBudgetSmsStatus("sent");
-      if (onShowToast) onShowToast("Orçamento enviado por SMS com sucesso (Simulado)!", "success");
+    } catch (err: any) {
+      setSendBudgetSmsStatus("idle");
+      if (onShowToast) onShowToast(err?.message || "Falha ao enviar SMS do orçamento.", "error");
     }
   };
 
@@ -3419,7 +3429,7 @@ export default function POSModule({
               
               <div className="grid grid-cols-3 gap-1.5">
                 <button
-                  onClick={simulateSendEmail}
+                  onClick={handleSendEmail}
                   disabled={sendEmailStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-blue-50 text-blue-750 hover:bg-blue-100 transition border border-blue-100 disabled:opacity-75 cursor-pointer"
                 >
@@ -3427,7 +3437,7 @@ export default function POSModule({
                   {sendEmailStatus === "idle" ? "Email" : sendEmailStatus === "sending" ? "..." : "✓"}
                 </button>
                 <button
-                  onClick={simulateSendSms}
+                  onClick={handleSendSms}
                   disabled={sendSmsStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition border border-indigo-100 disabled:opacity-75 cursor-pointer"
                 >
@@ -4064,7 +4074,7 @@ export default function POSModule({
               <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
-                  onClick={simulateSendBudgetEmail}
+                  onClick={handleSendBudgetEmail}
                   disabled={sendBudgetEmailStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-blue-50 text-blue-750 hover:bg-blue-100 transition border border-blue-100 disabled:opacity-75 cursor-pointer"
                 >
@@ -4073,7 +4083,7 @@ export default function POSModule({
                 </button>
                 <button
                   type="button"
-                  onClick={simulateSendBudgetSms}
+                  onClick={handleSendBudgetSms}
                   disabled={sendBudgetSmsStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition border border-indigo-100 disabled:opacity-75 cursor-pointer"
                 >

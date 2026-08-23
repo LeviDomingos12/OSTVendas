@@ -9,7 +9,8 @@ import {
   CheckCircle2, 
   Smartphone, 
   Receipt,
-  Scale
+  Scale,
+  Edit3
 } from "lucide-react";
 
 interface CashKpiCardsProps {
@@ -27,6 +28,7 @@ interface CashKpiCardsProps {
   physicalCount: number;
   currency: string;
   onOpenDenomModal?: () => void;
+  onEditOpeningBalance?: () => void;
 }
 
 export const CashKpiCards: React.FC<CashKpiCardsProps> = ({
@@ -43,7 +45,8 @@ export const CashKpiCards: React.FC<CashKpiCardsProps> = ({
   theoreticalTotal,
   physicalCount,
   currency,
-  onOpenDenomModal
+  onOpenDenomModal,
+  onEditOpeningBalance
 }) => {
   const difference = physicalCount - theoreticalTotal;
   const isShiftOpen = shiftStatus === "OPEN";
@@ -68,9 +71,17 @@ export const CashKpiCards: React.FC<CashKpiCardsProps> = ({
                 </p>
               </div>
             </div>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-slate-300">
-              Cálculo Real
-            </span>
+            {onEditOpeningBalance && (
+              <button
+                type="button"
+                onClick={onEditOpeningBalance}
+                className="px-2 py-1 text-[10px] font-bold text-orange-600 dark:text-orange-400 bg-orange-50 hover:bg-orange-100 dark:bg-orange-950/30 dark:hover:bg-orange-900/40 rounded-lg transition cursor-pointer border border-orange-200 dark:border-orange-900/50 flex items-center gap-1"
+                title="Ajustar manualmente o fundo de trocos ou saldo teórico"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>Definir Fundo</span>
+              </button>
+            )}
           </div>
 
           <div className="my-3">
@@ -206,12 +217,24 @@ export const CashKpiCards: React.FC<CashKpiCardsProps> = ({
       {/* Secondary Metric Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {/* Fundo de Abertura */}
-        <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 shadow-sm">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Fundo de Abertura</span>
+        <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 shadow-sm relative group">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block truncate">Fundo de Abertura</span>
+            {onEditOpeningBalance && (
+              <button
+                type="button"
+                onClick={onEditOpeningBalance}
+                className="text-slate-400 hover:text-orange-500 p-0.5 rounded transition cursor-pointer"
+                title="Editar fundo inicial manualmente"
+              >
+                <Edit3 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
           <div className="text-base sm:text-lg font-extrabold font-mono text-slate-800 dark:text-slate-100 mt-1">
             {openingBalance.toLocaleString()} <span className="text-xs text-slate-400 font-normal">{currency}</span>
           </div>
-          <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 block">Trocos iniciais</span>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 block">Trocos manuais</span>
         </div>
 
         {/* Vendas Dinheiro */}

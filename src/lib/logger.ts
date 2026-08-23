@@ -13,13 +13,15 @@ export function setLogCallback(callback: LogCallback) {
     try {
       const logsToFlush = [...pendingLogs];
       pendingLogs.length = 0;
-      logsToFlush.forEach(log => {
-        try {
-          callback(log.action, log.module, log.details);
-        } catch {
-          // Prevent error escalation
-        }
-      });
+      setTimeout(() => {
+        logsToFlush.forEach(log => {
+          try {
+            callback(log.action, log.module, log.details);
+          } catch {
+            // Prevent error escalation
+          }
+        });
+      }, 0);
     } finally {
       isLogging = false;
     }
@@ -36,7 +38,11 @@ export function logErrorToSystem(action: string, details: string) {
   isLogging = true;
   try {
     if (logCallback) {
-      logCallback(action, "Erros do Sistema", details);
+      setTimeout(() => {
+        try {
+          if (logCallback) logCallback(action, "Erros do Sistema", details);
+        } catch {}
+      }, 0);
     } else {
       if (pendingLogs.length < MAX_PENDING_LOGS) {
         pendingLogs.push({ action, module: "Erros do Sistema", details });

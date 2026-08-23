@@ -6,13 +6,13 @@ import * as d3 from "d3";
 import { 
   initialProducts, 
   initialCustomers, 
-  generateMockTransactions, 
   initialCashFlow, 
   initialEmployees, 
   initialAuditLogs, 
   defaultSettings, 
   masterclassVideos 
 } from "./data/mockData";
+import { AdminService } from "./services/adminService";
 import { 
   Product, 
   Customer, 
@@ -40,6 +40,8 @@ import GatewayModule from "./components/GatewayModule";
 import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
 import PlanLockScreen from "./components/PlanLockScreen";
 import { canAccessModule } from "./lib/planPermissions";
+import { RoleAccessDeniedScreen } from "./components/RoleAccessDeniedScreen";
+import { canRoleAccessModule, normalizeUserRole, getDefaultModuleForRole } from "./lib/rolePermissions";
 import LoginModule from "./components/LoginModule";
 import { UserSwitchModal } from "./components/UserSwitchModal";
 import AiForecastModule from "./components/AiForecastModule";
@@ -81,6 +83,8 @@ import {
   getDoc,
   setDoc
 } from "./lib/firebase";
+import { getSupabaseClient } from "./lib/supabase";
+import { SupabaseSyncService } from "./services/supabaseService";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
@@ -169,7 +173,7 @@ const NAV_MENU_ITEMS = [
   { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
   { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
   { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
 ];
 
 const safeLocalStorageSetItem = (key: string, value: string): boolean => {
@@ -273,8 +277,6 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
   const [zoomScale, setZoomScale] = useState(1);
   const [zoomMode, setZoomMode] = useState<"box" | "pan">("box");
   const [showPrevWeekTrend, setShowPrevWeekTrend] = useState(false);
-  const [isHighActivity, setIsHighActivity] = useState(false);
-  const [movingAvg30Val, setMovingAvg30Val] = useState(0);
   const [hoveredDay, setHoveredDay] = useState<{
     label: string;
     dateStr: string;
@@ -285,6 +287,33 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
   } | null>(null);
   
   const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // High activity moving average calculation (30-day window)
+  const { isHighActivity, movingAvg30Val } = useMemo(() => {
+    if (!logs || logs.length === 0) return { isHighActivity: false, movingAvg30Val: 0 };
+    let logs30dCount = 0;
+    const now30 = new Date();
+    (logs || []).forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        const diffMs = now30.getTime() - logDate.getTime();
+        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
+          logs30dCount++;
+        }
+      } catch {}
+    });
+    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : 0;
+    const threshold50 = avg30 * 1.5;
+
+    const cutoff = new Date(now30);
+    cutoff.setDate(cutoff.getDate() - timeRange);
+    const recentLogs = logs.filter(l => l.timestamp && new Date(l.timestamp) >= cutoff);
+    const avgRecent = recentLogs.length / Math.max(1, timeRange);
+    const exceedsThreshold = avg30 > 0 && avgRecent > threshold50;
+
+    return { isHighActivity: exceedsThreshold, movingAvg30Val: avg30 };
+  }, [logs, timeRange]);
 
   // Trend indicator calculation (current period vs previous period)
   const trendData = useMemo(() => {
@@ -669,9 +698,6 @@ function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
     });
     const avg30 = logs30dCount > 0 ? logs30dCount / 30 : avgCount;
     const threshold50 = avg30 * 1.5;
-    const exceedsThreshold = avg30 > 0 && (avgCount > threshold50 || days.some(d => d.count > threshold50));
-    setIsHighActivity(exceedsThreshold);
-    setMovingAvg30Val(avg30);
 
     // Dotted horizontal line representing average volume
     chartContent.append("line")
@@ -1208,7 +1234,7 @@ export default function App() {
   // SHARED STATES
   const [toasts, setToasts] = useState<Toast[]>([]);
 
-  const showToast = (message: string, type: "success" | "error" | "info" | "warning" = "info", title?: string) => {
+  const showToast = useCallback((message: string, type: "success" | "error" | "info" | "warning" = "info", title?: string) => {
     const id = `toast-${Date.now()}-${Math.random()}`;
     const defaultTitles = {
       success: "Operação Concluída",
@@ -1226,11 +1252,11 @@ export default function App() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4500);
-  };
+  }, []);
 
-  const removeToast = (id: string) => {
+  const removeToast = useCallback((id: string) => {
     setToasts(prev => prev.filter(t => t.id !== id));
-  };
+  }, []);
 
   // Global Fetch Rate Limit (429) Interceptor with Toast Throttling & Auto-Recovery
   useEffect(() => {
@@ -2017,80 +2043,32 @@ export default function App() {
 
   const { formattedVersion: currentSystemVersion, version: systemVersionNumber } = useSystemVersion();
 
-  // Fetch / Sync version counter and semantic version with Firestore partitioned document
+  // Fetch / Sync version counter and semantic version with local storage
   useEffect(() => {
-    const syncFirestoreVersion = async () => {
-      if (isCircuitBroken() || !navigator.onLine) return;
-      try {
-        const path = getPartitionPath("system");
-        const docRef = doc(db, path, "version");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data && typeof data.counter === "number") {
-            const firestoreCounter = data.counter;
-            setBuildVersion(current => {
-              const highest = Math.max(current, firestoreCounter);
-              try {
-                localStorage.setItem("system_build_version", String(highest));
-              } catch (e) {}
-              return highest;
-            });
-          }
-          if (data && typeof data.systemVersion === "string" && data.systemVersion.trim()) {
-            setSystemVersion(data.systemVersion.trim());
-          }
-        } else {
-          // Document does not exist yet, write the current local build version and system version as initial values
-          await setDoc(docRef, { 
-            counter: buildVersion, 
-            systemVersion: getSystemVersion(),
-            updatedAt: new Date().toISOString() 
-          });
+    try {
+      const storedBuildVersion = localStorage.getItem("system_build_version");
+      if (storedBuildVersion) {
+        const parsed = parseInt(storedBuildVersion, 10);
+        if (!isNaN(parsed) && parsed > buildVersion) {
+          setBuildVersion(parsed);
         }
-      } catch (err) {
-        checkAndNotifyQuota(err);
-        console.warn("Failed to fetch/sync global version counter from Firestore:", err);
       }
-    };
+    } catch {}
+  }, []);
 
-    if (isAuthenticated || activeUser) {
-      // Small delay or directly trigger
-      syncFirestoreVersion();
-    }
-  }, [isAuthenticated, activeUser]);
-
-  // Unified function to increment build version and semantic system version both locally and in Firestore
+  // Unified function to increment build version and semantic system version
   const incrementVersionCounter = async () => {
     // 1. Increment semantic version managed by versionManager (e.g., 1.0 -> 1.1 -> 1.2 -> ... -> 2.0)
-    const newSystemVersion = incrementSystemVersion();
+    incrementSystemVersion();
 
     // 2. Increment numeric modification counter
-    let nextVal = buildVersion + 1;
     setBuildVersion(current => {
       const next = current + 1;
-      nextVal = next;
       try {
         localStorage.setItem("system_build_version", String(next));
       } catch (e) {}
       return next;
     });
-
-    // 3. Persist to Firestore
-    if (navigator.onLine && !isCircuitBroken()) {
-      try {
-        const path = getPartitionPath("system");
-        const docRef = doc(db, path, "version");
-        await setDoc(docRef, { 
-          counter: nextVal, 
-          systemVersion: newSystemVersion,
-          updatedAt: new Date().toISOString() 
-        }, { merge: true });
-      } catch (err) {
-        checkAndNotifyQuota(err);
-        console.warn("Failed to update global version counter in Firestore:", err);
-      }
-    }
   };
 
   const currency = "MT"; // Meticais Moçambique
@@ -2111,7 +2089,19 @@ export default function App() {
   
   // Geolocation and IP tracking for Audit Logs
   const [userIpInfo, setUserIpInfo] = useState<{ ip: string; city: string; country: string } | null>(null);
-  const [deviceInfo, setDeviceInfo] = useState<string>("");
+  const [deviceInfo, setDeviceInfo] = useState<string>(() => {
+    if (typeof navigator === "undefined") return "Desktop";
+    const ua = navigator.userAgent;
+    let dev = "Desktop";
+    if (/mobile/i.test(ua)) dev = "Telemóvel / Mobile";
+    else if (/tablet/i.test(ua)) dev = "Tablet";
+    
+    if (ua.includes("Chrome")) dev += " (Chrome)";
+    else if (ua.includes("Firefox")) dev += " (Firefox)";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) dev += " (Safari)";
+    else if (ua.includes("Edge")) dev += " (Edge)";
+    return dev;
+  });
 
   // Track operator-specific custom color theme
   const [activeColorTheme, setActiveColorTheme] = useState<string>("laranja");
@@ -2140,9 +2130,8 @@ export default function App() {
     applyTheme(activeColorTheme);
   }, [activeColorTheme]);
 
-  // Connectivity state tracking Firestore & network connection
+  // Connectivity state tracking network connection
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(isCircuitBroken());
 
   // Stable refs for DB state, performance optimization and concurrency locks
   const sessionStartTimeRef = useRef<number>(Date.now());
@@ -2206,37 +2195,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Listen for Firestore Quota Exceeded events and initialize system error capturing
+  // Initialize system error capturing
   useEffect(() => {
-    const handleQuotaExceeded = () => {
-      console.warn("[APP] Firestore Quota Exceeded detected. Showing notification banner.");
-      setIsQuotaExceeded(true);
-    };
-    window.addEventListener("firestore-quota-exceeded", handleQuotaExceeded);
-    
     // Initialize standard error capturing (console.error, unhandled promises, fetch errors)
     const destroyCapturing = initErrorCapturing();
-    
     return () => {
-      window.removeEventListener("firestore-quota-exceeded", handleQuotaExceeded);
       destroyCapturing();
     };
   }, []);
 
-  // Fetch client IP and device info for Audit logs
+  // Fetch client IP and geolocation for Audit logs
   useEffect(() => {
-    // Detect browser/device info
-    const ua = navigator.userAgent;
-    let dev = "Desktop";
-    if (/mobile/i.test(ua)) dev = "Telemóvel / Mobile";
-    else if (/tablet/i.test(ua)) dev = "Tablet";
-    
-    if (ua.includes("Chrome")) dev += " (Chrome)";
-    else if (ua.includes("Firefox")) dev += " (Firefox)";
-    else if (ua.includes("Safari") && !ua.includes("Chrome")) dev += " (Safari)";
-    else if (ua.includes("Edge")) dev += " (Edge)";
-    setDeviceInfo(dev);
-
     // Fetch IP and Geo IP details
     fetch("https://ipapi.co/json/")
       .then(res => {
@@ -2298,9 +2267,11 @@ export default function App() {
         if (updated.length > 200) {
           updated = updated.slice(-200);
         }
-        try {
-          syncTable("auditlogs", updated);
-        } catch (e) {}
+        setTimeout(() => {
+          try {
+            syncTable("auditlogs", updated);
+          } catch (e) {}
+        }, 0);
         return updated;
       });
     } finally {
@@ -2751,199 +2722,87 @@ export default function App() {
     }
   }, [theme]);
 
-  // Firebase Auth Observer to handle auto-login, load profiles, and synchronize permissions
+  // Supabase Auth Observer to handle auto-login, load profiles, and synchronize permissions
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        try {
-          // Fetch employee list to map Google account to actual employee
-          let currentEmployees: Employee[] = [];
-          try {
-            const dbResponse = await fetch("/api/db/load");
-            const dbJson = await dbResponse.json();
-            if (dbJson.success && dbJson.data && dbJson.data.employees) {
-              currentEmployees = dbJson.data.employees;
-            }
-          } catch (e) {
-            console.warn("Could not load employees for auth mapping:", e);
-          }
+    const handleAuthSync = async (user: any) => {
+      if (!user) return;
+      try {
+        const { employee, companyName } = await SupabaseSyncService.syncUserProfileFromAuth(user);
 
-          // Fetch user profile from Firestore "usuarios" with robust caching & local fallback
-          let profileData: any = null;
-          if (!isCircuitBroken()) {
-            try {
-              const userDocRef = doc(db, "usuarios", user.uid);
-              const docSnap = await getDoc(userDocRef);
-              if (docSnap.exists()) {
-                profileData = docSnap.data();
-                // Cache profile in localStorage for offline, permission, or quota fallback
-                localStorage.setItem(`cached_profile_${user.uid}`, JSON.stringify(profileData));
-              } else {
-                console.warn("[AUTH RESTORE] Perfil não encontrado no Firestore para uid:", user.uid);
-              }
-            } catch (fsErr: any) {
-              checkAndNotifyQuota(fsErr);
-              console.warn("[AUTH RESTORE] Erro ao pesquisar Firestore, usando cache local como recurso:", fsErr);
-            }
-          }
-
-          if (!profileData) {
-            const cached = localStorage.getItem(`cached_profile_${user.uid}`);
-            if (cached) {
-              try {
-                profileData = JSON.parse(cached);
-              } catch (parseErr) {
-                console.error("Erro ao analisar cache local do perfil:", parseErr);
-              }
-            }
-          }
-
-          // Match logged in user email to an existing employee
-          const employeeEmailMatch = currentEmployees.find(emp => emp.email?.toLowerCase() === user.email?.toLowerCase());
-
-          if (!profileData && employeeEmailMatch) {
-            // Create user profile document in Firestore from matched employee
-            profileData = {
-              uid: user.uid,
-              nomeCompleto: employeeEmailMatch.name,
-              email: employeeEmailMatch.email || user.email || "",
-              empresa: "OST Comércio Geral",
-              perfil: employeeEmailMatch.role,
-              cargo: employeeEmailMatch.role,
-              estado: employeeEmailMatch.status === "ACTIVE" ? "Ativo" : "Inativo",
-              fotoPerfil: user.photoURL || "",
-              telefone: employeeEmailMatch.contact || "",
-              ultimoLogin: new Date().toISOString(),
-              dataCriacao: employeeEmailMatch.admissionDate ? new Date(employeeEmailMatch.admissionDate).toISOString() : new Date().toISOString(),
-              username: employeeEmailMatch.username || "",
-              pin: employeeEmailMatch.pin || "",
-              pinCreatedAt: employeeEmailMatch.pinCreatedAt || "",
-              pinChanged: employeeEmailMatch.pinChanged !== undefined ? employeeEmailMatch.pinChanged : true
-            };
-            
-            // Also write to Firestore to persist this mapping if online
-            try {
-              if (!isCircuitBroken()) {
-                const userDocRef = doc(db, "usuarios", user.uid);
-                await setDoc(userDocRef, profileData);
-              }
-            } catch (err) {
-              checkAndNotifyQuota(err);
-              console.warn("Could not save mapped Google profile to Firestore:", err);
-            }
-          }
-
-          if (!profileData) {
-            // Generate a generic profile for the Google user if not found
-            profileData = {
-              uid: user.uid,
-              nomeCompleto: user.displayName || user.email?.split("@")[0] || "Operador",
-              email: user.email || "operador@ostvendas.com",
-              empresa: "OST Comércio Geral",
-              perfil: "Administrador Completo", // Default to high privilege fallback
-              cargo: "Administrador",
-              estado: "Ativo",
-              fotoPerfil: user.photoURL || "",
-              telefone: "",
-              ultimoLogin: new Date().toISOString(),
-              dataCriacao: new Date().toISOString()
-            };
-          }
-
-          if (profileData) {
-            const isGoogleAdminEmail = user.email?.toLowerCase() === "levidomingos12@gmail.com";
-            const isMatchedAdmin = employeeEmailMatch && (employeeEmailMatch.role?.toUpperCase().includes("ADMIN") || employeeEmailMatch.role?.toUpperCase().includes("GESTOR"));
-            const isProfileAdmin = profileData.perfil && (profileData.perfil.toUpperCase().includes("ADMIN") || profileData.perfil.toUpperCase().includes("GESTOR"));
-            if (isGoogleAdminEmail || isMatchedAdmin || isProfileAdmin) {
-              profileData.perfil = "Administrador";
-              profileData.cargo = "Administrador";
-            }
-
-            const mappedEmployee = mapUsuarioToEmployee(profileData as any);
-            
-            if (mappedEmployee.status === "BLOCKED") {
-              showToast("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.", "error");
-              await auth.signOut();
-              setIsAuthenticated(false);
-              setActiveUser(null);
-              return;
-            }
-
-            if (mappedEmployee.status === "INACTIVE" || mappedEmployee.status === "SUSPENDED") {
-              showToast("Esta conta está inativa ou suspensa. Contacte o Administrador.", "error");
-              await auth.signOut();
-              setIsAuthenticated(false);
-              setActiveUser(null);
-              return;
-            }
-
-            // Check if PIN has expired (3 days rule)
-            const now = new Date();
-            const createdAtStr = mappedEmployee.pinCreatedAt || mappedEmployee.admissionDate || now.toISOString();
-            const createdAt = new Date(createdAtStr);
-            const diffTime = now.getTime() - createdAt.getTime();
-            const diffDays = diffTime / (1000 * 60 * 60 * 24);
-
-            const isPinTemporary = mappedEmployee.pinChanged === false;
-
-            if (isPinTemporary && diffDays > 3) {
-              const updatedEmployees = currentEmployees.map(emp => {
-                if (emp.id === mappedEmployee.id) {
-                  return { ...emp, status: "BLOCKED" as const };
-                }
-                return emp;
-              });
-              handleUpdateEmployees(updatedEmployees);
-              
-              handleAddAuditLog(
-                "Bloqueio de Conta Automático",
-                "SEGURANÇA",
-                `Conta do colaborador ${mappedEmployee.name} foi bloqueada por ultrapassar o prazo de 3 dias sem alterar o PIN temporário.`
-              );
-
-              showToast("A sua conta foi BLOQUEADA por expiração do prazo de 3 dias para alterar o PIN temporário.", "error");
-              await auth.signOut();
-              setIsAuthenticated(false);
-              setActiveUser(null);
-              return;
-            }
-
-            setActiveUser(mappedEmployee);
-            setIsAuthenticated(true);
-            setSettings(prev => ({
-              ...prev,
-              companyName: profileData.empresa || "OST Comércio Geral"
-            }));
-            
-            console.log(`[AUTH RESTORE] Utilizador autolocado (com fallback resiliente): ${mappedEmployee.name} (${mappedEmployee.role})`);
-          } else {
-            setIsAuthenticated(false);
-            setActiveUser(null);
-          }
-        } catch (err) {
-          console.error("[AUTH RESTORE] Erro crítico ao processar login do utilizador:", err);
+        if (employee.status === "BLOCKED") {
+          showToast("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.", "error");
+          await SupabaseSyncService.signOut();
           setIsAuthenticated(false);
           setActiveUser(null);
+          return;
         }
-      } else {
-        const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
-        if (storedSimulated) {
-          try {
-            const parsed = JSON.parse(storedSimulated);
-            setActiveUser(parsed);
-            setIsAuthenticated(true);
-            return;
-          } catch (e) {
-            console.error("Failed to restore simulated session:", e);
+
+        if (employee.status === "INACTIVE" || employee.status === "SUSPENDED") {
+          showToast("Esta conta está inativa ou suspensa. Contacte o Administrador.", "error");
+          await SupabaseSyncService.signOut();
+          setIsAuthenticated(false);
+          setActiveUser(null);
+          return;
+        }
+
+        setActiveUser(employee);
+        setIsAuthenticated(true);
+        if (companyName) {
+          setSettings(prev => ({
+            ...prev,
+            companyName: companyName
+          }));
+        }
+        localStorage.setItem("erp_simulated_logged_in_user", JSON.stringify(employee));
+        console.log(`[SUPABASE AUTH] Sessão ativa para: ${employee.name} (${employee.role}) - Empresa: ${companyName}`);
+      } catch (err) {
+        console.error("[SUPABASE AUTH] Erro ao sincronizar perfil:", err);
+      }
+    };
+
+    const client = getSupabaseClient();
+    if (client) {
+      client.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) {
+          handleAuthSync(session.user);
+        } else {
+          const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+          if (storedSimulated) {
+            try {
+              const parsed = JSON.parse(storedSimulated);
+              setActiveUser(parsed);
+              setIsAuthenticated(true);
+            } catch (e) {
+              console.error("Failed to restore local session:", e);
+            }
           }
         }
-        setIsAuthenticated(false);
-        setActiveUser(null);
-      }
-    });
+      });
 
-    return () => unsubscribe();
-  }, [employees]);
+      const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
+        if (session?.user) {
+          handleAuthSync(session.user);
+        } else if (event === "SIGNED_OUT") {
+          setIsAuthenticated(false);
+          setActiveUser(null);
+          localStorage.removeItem("erp_simulated_logged_in_user");
+        }
+      });
+
+      return () => {
+        authListener?.subscription?.unsubscribe();
+      };
+    } else {
+      const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
+      if (storedSimulated) {
+        try {
+          const parsed = JSON.parse(storedSimulated);
+          setActiveUser(parsed);
+          setIsAuthenticated(true);
+        } catch {}
+      }
+    }
+  }, []);
 
   // Real-time products subscription and initial sync
   useEffect(() => {
@@ -3127,30 +2986,10 @@ export default function App() {
     );
 
     // Auto-redirect or reset module access if needed
-    const simplifiedRole: UserRole = 
-      fitEmp.role.toUpperCase().includes("GESTOR") || fitEmp.role.toUpperCase().includes("ADMINISTRADOR") || fitEmp.role.toUpperCase().includes("ADMIN")
-        ? "ADMIN"
-        : fitEmp.role.toUpperCase().includes("SUPERVISOR")
-          ? "SUPERVISOR"
-          : "CASHIER";
-
-    const menuItems = [
-      { id: "dashboard", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "pos", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "stock", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "cash", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "customers", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "staff", roles: ["ADMIN"] },
-      { id: "ai", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "reports", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "training", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "settings", roles: ["ADMIN"] },
-      { id: "gateway", roles: ["ADMIN"] },
-    ];
-
-    const currentMenu = menuItems.find(m => m.id === activeTab.toLowerCase());
-    if (currentMenu && !currentMenu.roles.includes(simplifiedRole)) {
-      setActiveTab("POS");
+    const targetUserRole = normalizeUserRole(fitEmp);
+    const accessCheck = canRoleAccessModule(targetUserRole, activeTab.toLowerCase());
+    if (!accessCheck.allowed) {
+      setActiveTab(getDefaultModuleForRole(targetUserRole));
     }
 
     showToast(`Bem-vindo, ${fitEmp.name}! Sessão autorizada com sucesso.`, "success");
@@ -3217,31 +3056,10 @@ export default function App() {
         );
       });
 
-    const rawRole = (fitEmp.role || "").toUpperCase();
-    const simplifiedRole: UserRole = 
-      rawRole.includes("GESTOR") || rawRole.includes("ADMINISTRADOR") || rawRole.includes("ADMIN")
-        ? "ADMIN"
-        : rawRole.includes("SUPERVISOR")
-          ? "SUPERVISOR"
-          : "CASHIER";
-
-    const menuItems = [
-      { id: "dashboard", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "pos", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "stock", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "cash", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "customers", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "staff", roles: ["ADMIN"] },
-      { id: "ai", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "reports", roles: ["ADMIN", "SUPERVISOR"] },
-      { id: "training", roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-      { id: "settings", roles: ["ADMIN"] },
-      { id: "gateway", roles: ["ADMIN"] },
-    ];
-
-    const currentMenu = menuItems.find(m => m.id === activeTab.toLowerCase());
-    if (currentMenu && !currentMenu.roles.includes(simplifiedRole)) {
-      setActiveTab("POS");
+    const targetUserRole = normalizeUserRole(fitEmp);
+    const accessCheck = canRoleAccessModule(targetUserRole, activeTab.toLowerCase());
+    if (!accessCheck.allowed) {
+      setActiveTab(getDefaultModuleForRole(targetUserRole));
     }
 
     showToast(`Nova senha de acesso registada com sucesso! Bem-vindo, ${fitEmp.name}.`, "success");
@@ -3717,6 +3535,33 @@ export default function App() {
     }
   };
 
+  // ADMIN-ONLY PERMANENT MOCK DATA PURGE
+  const handlePurgeMockData = async () => {
+    try {
+      const result = await AdminService.purgeMockData(activeUser?.name || "Administrador");
+      if (result.success) {
+        setProducts(prev => AdminService.filterRealProducts(prev));
+        setCustomers(prev => AdminService.filterRealCustomers(prev));
+        setTransactions(prev => AdminService.filterRealTransactions(prev));
+
+        handleAddAuditLog(
+          "Purga de Dados Mock/Exemplo",
+          "ADMINISTRAÇÃO",
+          `Administrador removeu ${result.report.purgedProducts} produtos, ${result.report.purgedCustomers} clientes e ${result.report.purgedTransactions} vendas de teste permanentemente.`
+        );
+
+        showToast(
+          `Limpeza concluída com sucesso! ${result.report.purgedProducts} produtos, ${result.report.purgedCustomers} clientes e ${result.report.purgedTransactions} transações de exemplo foram removidos.`,
+          "success"
+        );
+      } else {
+        showToast(result.message || "Erro ao efetuar a purga de dados mock.", "error");
+      }
+    } catch (e: any) {
+      showToast("Falha na execução da purga: " + (e.message || "Erro desconhecido"), "error");
+    }
+  };
+
   const triggerSmsStockAlert = async (productName: string, currentStock: number, threshold: number) => {
     const managerPhone = settings.smsManagerPhone || "+258849001200";
     const provider = settings.smsProviderType || "TWILIO";
@@ -4069,12 +3914,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
   // Translate employees role to fit authorization hooks
   const simplifiedRole: UserRole = useMemo(() => {
-    if (!activeUser || !activeUser.role) return "CASHIER";
-    const raw = activeUser.role.toLowerCase();
-    if (raw.includes("caixa") || raw.includes("vendedor")) return "CASHIER";
-    if (raw.includes("supervisor")) return "SUPERVISOR";
-    return "ADMIN";
+    return normalizeUserRole(activeUser);
   }, [activeUser]);
+
+  // Redirecionamento automático de segurança caso a aba ativa não seja permitida para o perfil do utilizador
+  useEffect(() => {
+    if (!isAuthenticated || !activeUser) return;
+    const currentTabKey = activeTab.toLowerCase();
+    const roleCheck = canRoleAccessModule(simplifiedRole, currentTabKey);
+    if (!roleCheck.allowed) {
+      const fallbackTab = getDefaultModuleForRole(simplifiedRole);
+      setActiveTab(fallbackTab);
+    }
+  }, [simplifiedRole, isAuthenticated, activeUser, activeTab]);
 
   // Filtra dados para que vendedores (CASHIER) e supervisores (SUPERVISOR) vejam apenas os seus registos, enquanto o ADMIN tem acesso total
   const filteredTransactions = useMemo(() => {
@@ -4317,12 +4169,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
     
     // Auto-redirect conforming to profile role
-    const raw = (user.role || "").toLowerCase();
-    if (raw.includes("caixa") || raw.includes("vendedor")) {
-      setActiveTab("POS");
-    } else {
-      setActiveTab("DASHBOARD");
-    }
+    const userRole = normalizeUserRole(user);
+    setActiveTab(getDefaultModuleForRole(userRole));
   };
 
   const handleLogout = async () => {
@@ -4334,7 +4182,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           `Operador ${activeUser.name} encerrou a sessão.`
         );
       }
-      await logout();
+      await SupabaseSyncService.signOut();
+      localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
       // Clean memory state to prevent cross-user data lingering
@@ -4348,7 +4197,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       showToast("Sessão terminada com sucesso.", "info");
     } catch (err: any) {
       console.error("Erro ao efetuar logout:", err);
-      await logout();
+      await SupabaseSyncService.signOut();
+      localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
       setProducts([]);
@@ -4598,65 +4448,50 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               : "bg-white border-slate-150 text-slate-700 shadow-sm"
           }`}>
             <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scrollbar-none py-1 font-sans">
-              {NAV_MENU_ITEMS.map((item) => {
-                const allowedRoles = item.roles;
-                const authorized = allowedRoles.includes(simplifiedRole);
-                const active = activeTab.toLowerCase() === item.id;
-                
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
-                    disabled={!authorized}
-                    className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
-                      active 
-                        ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
-                        : authorized 
-                          ? theme === "night" 
-                            ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
-                            : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
-                          : "opacity-35 cursor-not-allowed text-slate-400"
-                    }`}
-                    title={authorized ? item.label : "Acesso Restrito (" + allowedRoles.join(", ") + ")"}
-                  >
-                    <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
-                      active 
-                        ? "text-white" 
-                        : authorized 
-                          ? theme === "night" 
-                            ? "text-slate-500 group-hover:text-slate-300" 
-                            : "text-slate-400 group-hover:text-orange-500"
-                          : "text-slate-400"
-                    }`} />
-                    <span>{item.shortLabel}</span>
-                    {!authorized && (
-                      <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        
-        {isQuotaExceeded && (
-          <div className="bg-amber-500/10 border-b border-amber-500/20 px-4 py-3 flex items-start gap-3 relative z-30 animate-in slide-in-from-top duration-200">
-            <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-            <div className="flex-1 text-xs">
-              <h4 className="font-extrabold text-amber-500">Aviso do Sistema: Modo de Operação Local Ativo</h4>
-              <p className="text-slate-400 mt-1 leading-relaxed">
-                O limite de operações remotas foi atingido temporariamente. O sistema entrou em modo de segurança local: todas as funcionalidades (POS, vendas, artigos, caixa e relatórios) continuam 100% operacionais e serão sincronizadas automaticamente com o servidor no próximo ciclo.
-              </p>
-              <div className="flex flex-wrap gap-3 mt-2">
-                <button
-                  onClick={() => setIsQuotaExceeded(false)}
-                  className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold px-3 py-1 rounded text-[10px] transition uppercase tracking-wider cursor-pointer"
-                >
-                  Entendido
-                </button>
-              </div>
+              {NAV_MENU_ITEMS
+                .filter((item) => {
+                  if (simplifiedRole === "CASHIER") {
+                    return item.roles.includes("CASHIER");
+                  }
+                  return true;
+                })
+                .map((item) => {
+                  const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
+                  const authorized = roleCheck.allowed;
+                  const active = activeTab.toLowerCase() === item.id;
+                  
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
+                      disabled={!authorized}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
+                        active 
+                          ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
+                          : authorized 
+                            ? theme === "night" 
+                              ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
+                              : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
+                            : "opacity-35 cursor-not-allowed text-slate-400"
+                      }`}
+                      title={authorized ? item.label : "Acesso Restrito para " + simplifiedRole}
+                    >
+                      <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
+                        active 
+                          ? "text-white" 
+                          : authorized 
+                            ? theme === "night" 
+                              ? "text-slate-500 group-hover:text-slate-300" 
+                              : "text-slate-400 group-hover:text-orange-500"
+                            : "text-slate-400"
+                      }`} />
+                      <span>{item.shortLabel}</span>
+                      {!authorized && (
+                        <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
             </div>
           </div>
         )}
@@ -4674,20 +4509,31 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <POSModule
-                  products={products}
-                  customers={customers}
-                  transactions={filteredTransactions}
-                  onCompleteSale={handleCompleteSaleAction}
-                  activeUsername={activeUser.name}
-                  settings={settings}
-                  onAddAuditLog={handleAddAuditLog}
-                  currency={currency}
-                  onShowToast={showToast}
-                  isPOSFullscreen={isPOSFullscreen}
-                  onChangePOSFullscreen={setIsPOSFullscreen}
-                  onTriggerPanic={handleTriggerPanic}
-                />
+                {!canRoleAccessModule(simplifiedRole, "pos").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="pos"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <POSModule
+                    products={products}
+                    customers={customers}
+                    transactions={filteredTransactions}
+                    onCompleteSale={handleCompleteSaleAction}
+                    activeUsername={activeUser.name}
+                    settings={settings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    onShowToast={showToast}
+                    isPOSFullscreen={isPOSFullscreen}
+                    onChangePOSFullscreen={setIsPOSFullscreen}
+                    onTriggerPanic={handleTriggerPanic}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -4701,27 +4547,38 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <DashboardModule
-                  transactions={filteredTransactions}
-                  products={products}
-                  customers={customers}
-                  cashFlow={filteredCashFlow}
-                  currency={currency}
-                  activeUser={activeUser}
-                  onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                  settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
-                  onUpdateProduct={handleUpdateProduct}
-                  onAddAuditLog={handleAddAuditLog}
-                  onShowToast={showToast}
-                  onCompleteSale={handleCompleteSaleAction}
-                  pendingSyncQueue={pendingSyncQueue}
-                  isManualSyncing={isManualSyncing}
-                  isOnline={isOnline}
-                  onManualSync={handleManualSync}
-                  theme={theme}
-                  onTriggerPanic={handleTriggerPanic}
-                />
+                {!canRoleAccessModule(simplifiedRole, "dashboard").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="dashboard"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <DashboardModule
+                    transactions={filteredTransactions}
+                    products={products}
+                    customers={customers}
+                    cashFlow={filteredCashFlow}
+                    currency={currency}
+                    activeUser={activeUser}
+                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onUpdateProduct={handleUpdateProduct}
+                    onAddAuditLog={handleAddAuditLog}
+                    onShowToast={showToast}
+                    onCompleteSale={handleCompleteSaleAction}
+                    pendingSyncQueue={pendingSyncQueue}
+                    isManualSyncing={isManualSyncing}
+                    isOnline={isOnline}
+                    onManualSync={handleManualSync}
+                    theme={theme}
+                    onTriggerPanic={handleTriggerPanic}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -4735,20 +4592,31 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <CashRegisterModule
-                  cashFlow={filteredCashFlow}
-                  transactions={filteredTransactions}
-                  onAddCashFlowEntry={handleAddCashFlowEntry}
-                  activeUsername={activeUser.name}
-                  activeUser={activeUser}
-                  employees={employees}
-                  currentRole={simplifiedRole}
-                  onAddAuditLog={handleAddAuditLog}
-                  currency={currency}
-                  settings={settings}
-                  theme={theme}
-                  onShowToast={showToast}
-                />
+                {!canRoleAccessModule(simplifiedRole, "cash").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="cash"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <CashRegisterModule
+                    cashFlow={filteredCashFlow}
+                    transactions={filteredTransactions}
+                    onAddCashFlowEntry={handleAddCashFlowEntry}
+                    activeUsername={activeUser.name}
+                    activeUser={activeUser}
+                    employees={employees}
+                    currentRole={simplifiedRole}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    settings={settings}
+                    theme={theme}
+                    onShowToast={showToast}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -4762,7 +4630,16 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                {!canAccessModule("stock", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                {!canRoleAccessModule(simplifiedRole, "stock").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="stock"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : !canAccessModule("stock", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
                   <PlanLockScreen
                     moduleName="Gestão Avançada de Stock"
                     requiredPlan="PRATA"
@@ -4798,26 +4675,37 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <CustomersModule
-                  customers={customers}
-                  transactions={transactions}
-                  settings={settings}
-                  onAddCustomer={handleAddCustomer}
-                  onUpdateCustomer={(updatedC) => {
-                    setCustomers(prev => {
-                      const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
-                      syncTable("customers", updated);
-                      return updated;
-                    });
-                  }}
-                  onAddCashFlowEntry={handleAddCashFlowEntry}
-                  onDeleteCustomer={handleDeleteCustomer}
-                  onAddAuditLog={handleAddAuditLog}
-                  currentRole={simplifiedRole}
-                  activeUsername={activeUser.name}
-                  currency={currency}
-                  onShowToast={showToast}
-                />
+                {!canRoleAccessModule(simplifiedRole, "customers").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="customers"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <CustomersModule
+                    customers={customers}
+                    transactions={transactions}
+                    settings={settings}
+                    onAddCustomer={handleAddCustomer}
+                    onUpdateCustomer={(updatedC) => {
+                      setCustomers(prev => {
+                        const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
+                        syncTable("customers", updated);
+                        return updated;
+                      });
+                    }}
+                    onAddCashFlowEntry={handleAddCashFlowEntry}
+                    onDeleteCustomer={handleDeleteCustomer}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    activeUsername={activeUser.name}
+                    currency={currency}
+                    onShowToast={showToast}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -4831,15 +4719,26 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <ReportsModule
-                  transactions={filteredTransactions}
-                  settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
-                  onAddAuditLog={handleAddAuditLog}
-                  currency={currency}
-                  onShowToast={showToast}
-                  auditLogs={auditLogs}
-                />
+                {!canRoleAccessModule(simplifiedRole, "reports").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="reports"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <ReportsModule
+                    transactions={filteredTransactions}
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    onShowToast={showToast}
+                    auditLogs={auditLogs}
+                  />
+                )}
               </motion.div>
             )}
 
@@ -4853,73 +4752,84 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
                 className="h-full"
               >
-                <SettingsModule
-                  settings={settings}
-                  onUpdateSettings={handleUpdateSettings}
-                  onAddAuditLog={handleAddAuditLog}
-                  currentRole={simplifiedRole}
-                  currency={currency}
-                  onShowToast={showToast}
-                  activeUser={activeUser}
-                  activeColorTheme={activeColorTheme}
-                  onChangeColorTheme={handleThemeChange}
-                  onExportLocalDB={handleExportLocalDB}
-                  onImportLocalDB={handleImportLocalDB}
-                  onTriggerLocalBackup={handleTriggerLocalBackup}
-                  onGetBackupPayload={handleGetBackupPayload}
-                  systemVersion={currentSystemVersion}
-                  employees={employees}
-                  auditLogs={auditLogs}
-                  products={products}
-                  transactions={filteredTransactions}
-                  customers={customers}
-                  onAddEmployee={handleAddEmployee}
-                  onUpdateEmployees={handleUpdateEmployees}
-                  masterclassVideos={masterclassVideos}
-                  theme={theme}
-                  onUpdateUserPlan={handleUpdateUserPlan}
-                  onUpdateSystemPlan={handleUpdateSystemPlan}
-                  initialSubTab={
-                    activeTab === "STAFF" ? "staff" :
-                    activeTab === "AI" ? "ai" :
-                    activeTab === "TRAINING" ? "training" :
-                    activeTab === "GATEWAY" ? "gateway" :
-                    activeTab === "PLANS" ? "plans" : undefined
-                  }
-                  onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                  onResetEmployeePin={async (empId) => {
-                    const target = employees.find(e => e.id === empId);
-                    if (!target) return;
-                    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
-                    const updatedEmployees = employees.map(emp => {
-                      if (emp.id === empId) {
-                        return {
-                          ...emp,
-                          pin: generatedPin,
-                          password: generatedPin,
-                          pinChanged: false,
-                          pinCreatedAt: new Date().toISOString()
-                        };
-                      }
-                      return emp;
-                    });
-                    setEmployees(updatedEmployees);
-                    await syncTable("employees", updatedEmployees);
-                    handleAddAuditLog(
-                      "Reset de PIN Forçado",
-                      "SEGURANÇA",
-                      `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
-                    );
+                {!canRoleAccessModule(simplifiedRole, activeTab.toLowerCase()).allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId={activeTab.toLowerCase()}
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <SettingsModule
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    currency={currency}
+                    onShowToast={showToast}
+                    activeUser={activeUser}
+                    activeColorTheme={activeColorTheme}
+                    onChangeColorTheme={handleThemeChange}
+                    onExportLocalDB={handleExportLocalDB}
+                    onImportLocalDB={handleImportLocalDB}
+                    onTriggerLocalBackup={handleTriggerLocalBackup}
+                    onGetBackupPayload={handleGetBackupPayload}
+                    onPurgeMockData={handlePurgeMockData}
+                    systemVersion={currentSystemVersion}
+                    employees={employees}
+                    auditLogs={auditLogs}
+                    products={products}
+                    transactions={filteredTransactions}
+                    customers={customers}
+                    onAddEmployee={handleAddEmployee}
+                    onUpdateEmployees={handleUpdateEmployees}
+                    masterclassVideos={masterclassVideos}
+                    theme={theme}
+                    onUpdateUserPlan={handleUpdateUserPlan}
+                    onUpdateSystemPlan={handleUpdateSystemPlan}
+                    initialSubTab={
+                      activeTab === "STAFF" ? "staff" :
+                      activeTab === "AI" ? "ai" :
+                      activeTab === "TRAINING" ? "training" :
+                      activeTab === "GATEWAY" ? "gateway" :
+                      activeTab === "PLANS" ? "plans" : undefined
+                    }
+                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onResetEmployeePin={async (empId) => {
+                      const target = employees.find(e => e.id === empId);
+                      if (!target) return;
+                      const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+                      const updatedEmployees = employees.map(emp => {
+                        if (emp.id === empId) {
+                          return {
+                            ...emp,
+                            pin: generatedPin,
+                            password: generatedPin,
+                            pinChanged: false,
+                            pinCreatedAt: new Date().toISOString()
+                          };
+                        }
+                        return emp;
+                      });
+                      setEmployees(updatedEmployees);
+                      await syncTable("employees", updatedEmployees);
+                      handleAddAuditLog(
+                        "Reset de PIN Forçado",
+                        "SEGURANÇA",
+                        `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
+                      );
 
-                    let emailDetails = "";
-                    const targetEmail = target.email?.trim();
-                    if (targetEmail) {
-                      try {
-                        await sendEmail({
-                          to: targetEmail,
-                          subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
-                          body: `
-                            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                      let emailDetails = "";
+                      const targetEmail = target.email?.trim();
+                      if (targetEmail) {
+                        try {
+                          await sendEmail({
+                            to: targetEmail,
+                            subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
+                            body: `
+                              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
                               <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
                                 <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
                                 <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
@@ -4983,6 +4893,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     );
                   }}
                 />
+                )}
               </motion.div>
             )}
           </AnimatePresence>
@@ -5406,7 +5317,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                 
                 <div className="grid grid-cols-1 gap-1">
                   {NAV_MENU_ITEMS.map((item) => {
-                    const authorized = item.roles.includes(simplifiedRole);
+                    const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
+                    const authorized = roleCheck.allowed;
                     const active = activeTab.toLowerCase() === item.id;
                     
                     return (
@@ -5414,8 +5326,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                         key={item.id}
                         disabled={!authorized}
                         onClick={() => {
-                          setActiveTab(item.id.toUpperCase());
-                          setIsFabOpen(false);
+                          if (authorized) {
+                            setActiveTab(item.id.toUpperCase());
+                            setIsFabOpen(false);
+                          }
                         }}
                         className={`w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all group ${
                           active

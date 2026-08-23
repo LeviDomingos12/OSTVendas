@@ -1,9 +1,9 @@
 -- ============================================================================
--- OST VENDAS ERP - SUPABASE POSTGRESQL SCHEMA & ATOMIC RPC TRANSACTIONS
+-- OST VENDAS ERP - SUPABASE POSTGRESQL SCHEMA, RLS & MULTI-TENANT ISOLATION
 -- ============================================================================
--- Architecture: Supabase Auth -> Supabase Client -> PostgreSQL + RLS + RPCs
+-- Architecture: Supabase Auth (Google Provider) -> Supabase Client -> PostgreSQL + RLS
 -- Financial Types: All monetary & quantity metrics use NUMERIC(14,2)
--- Multi-Tenancy: tenant_id (or empresa_id) isolation on all tables with RLS
+-- Multi-Tenancy: Strict isolation via tenant_id, auth.uid() and profiles.company_id
 -- ============================================================================
 
 -- 1. EXTENSIONS
@@ -16,7 +16,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- EMPRESAS / COMPANIES (Multi-tenant boundaries)
 CREATE TABLE IF NOT EXISTS public.companies (
-  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  id TEXT PRIMARY KEY DEFAULT ('comp_' || substr(uuid_generate_v4()::TEXT, 1, 8)),
   name TEXT NOT NULL,
   owner_uid TEXT NOT NULL,
   tax_id TEXT,
@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS public.companies (
   phone TEXT,
   address TEXT,
   currency TEXT DEFAULT 'MT',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- PERFIS DE UTILIZADOR / PROFILES (Direct mapping with auth.users)
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  company_id TEXT REFERENCES public.companies(id) ON DELETE SET NULL,
+  email TEXT,
+  full_name TEXT,
+  role TEXT DEFAULT 'ADMIN',
+  avatar_url TEXT,
+  phone TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -84,7 +97,7 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
   new_stock NUMERIC(14,2) NOT NULL,
   cost_price NUMERIC(14,2) DEFAULT 0.00,
   reason TEXT,
-  reference_id TEXT, -- sale_id, purchase_id, etc.
+  reference_id TEXT,
   user_id TEXT,
   user_name TEXT,
   timestamp TIMESTAMPTZ DEFAULT NOW()
@@ -100,7 +113,7 @@ CREATE TABLE IF NOT EXISTS public.clientes (
   phone TEXT,
   address TEXT,
   credit_limit NUMERIC(14,2) NOT NULL DEFAULT 0.00,
-  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00, -- Saldo Devedor / Crédito
+  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -116,7 +129,7 @@ CREATE TABLE IF NOT EXISTS public.customer_debts (
   paid_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   remaining_balance NUMERIC(14,2) NOT NULL,
   due_date TIMESTAMPTZ,
-  status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'PARTIAL', 'SETTLED', 'CANCELLED'
+  status TEXT NOT NULL DEFAULT 'PENDING',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   settled_at TIMESTAMPTZ
 );
@@ -146,14 +159,14 @@ CREATE TABLE IF NOT EXISTS public.vendas (
   seller_name TEXT,
   operator_name TEXT,
   payment_method TEXT NOT NULL,
-  payment_status TEXT NOT NULL DEFAULT 'PAID', -- 'PAID', 'PENDING_DEBT', 'PARTIAL'
+  payment_status TEXT NOT NULL DEFAULT 'PAID',
   subtotal NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   discount_total NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   vat_total NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   grand_total NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   amount_paid NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   change_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
-  status TEXT NOT NULL DEFAULT 'COMPLETED', -- 'COMPLETED', 'CANCELLED', 'REFUNDED'
+  status TEXT NOT NULL DEFAULT 'COMPLETED',
   items JSONB NOT NULL DEFAULT '[]'::JSONB,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -182,7 +195,7 @@ CREATE TABLE IF NOT EXISTS public.caixa (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
   tenant_id TEXT NOT NULL,
   cash_register_id TEXT,
-  type TEXT NOT NULL, -- 'INPUT', 'OUTPUT', 'EXPENSE', 'DEPOSIT', 'WITHDRAWAL', 'SALE'
+  type TEXT NOT NULL,
   amount NUMERIC(14,2) NOT NULL,
   reason TEXT NOT NULL,
   responsible_user TEXT,
@@ -200,15 +213,15 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
   closing_balance NUMERIC(14,2),
   actual_closing_balance NUMERIC(14,2),
   difference NUMERIC(14,2) DEFAULT 0.00,
-  status TEXT NOT NULL DEFAULT 'OPEN', -- 'OPEN', 'CLOSED'
+  status TEXT NOT NULL DEFAULT 'OPEN',
   opened_at TIMESTAMPTZ DEFAULT NOW(),
   closed_at TIMESTAMPTZ
 );
 
--- HISTÓRICO DE FECHAMENTO DE TURNOS / BALANCETES DE CAIXA
+-- HISTÓRICO DE FECHAMENTO DE TURNOS
 CREATE TABLE IF NOT EXISTS public.cash_closures (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   shift_id TEXT,
   opened_at TIMESTAMPTZ NOT NULL,
   closed_at TIMESTAMPTZ NOT NULL,
@@ -220,7 +233,7 @@ CREATE TABLE IF NOT EXISTS public.cash_closures (
   theoretical_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   physical_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   difference NUMERIC(14,2) NOT NULL DEFAULT 0.00,
-  difference_type TEXT NOT NULL DEFAULT 'EXACT', -- 'EXACT', 'SURPLUS', 'SHORTAGE'
+  difference_type TEXT NOT NULL DEFAULT 'EXACT',
   reconciliation JSONB NOT NULL DEFAULT '{}'::JSONB,
   denominations JSONB DEFAULT '{}'::JSONB,
   closing_notes TEXT,
@@ -230,9 +243,9 @@ CREATE TABLE IF NOT EXISTS public.cash_closures (
 -- ESTADO ATIVO DO TURNO DE CAIXA
 CREATE TABLE IF NOT EXISTS public.cash_shifts (
   id TEXT PRIMARY KEY DEFAULT 'current_shift',
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
-  status TEXT NOT NULL DEFAULT 'OPEN', -- 'OPEN', 'CLOSED'
-  opening_balance NUMERIC(14,2) NOT NULL DEFAULT 5000.00,
+  tenant_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'CLOSED',
+  opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   opened_at TIMESTAMPTZ DEFAULT NOW(),
   opened_by TEXT NOT NULL DEFAULT 'Admin',
   opening_supervisor TEXT,
@@ -244,7 +257,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
   tenant_id TEXT NOT NULL,
-  auth_uid TEXT, -- Supabase Auth User UID
+  auth_uid TEXT,
   name TEXT NOT NULL,
   email TEXT,
   contact TEXT,
@@ -252,7 +265,7 @@ CREATE TABLE IF NOT EXISTS public.colaboradores (
   role TEXT NOT NULL DEFAULT 'Operador',
   salary NUMERIC(14,2) DEFAULT 0.00,
   admission_date DATE DEFAULT CURRENT_DATE,
-  status TEXT NOT NULL DEFAULT 'ACTIVE', -- 'ACTIVE', 'SUSPENDED', 'INACTIVE'
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
   pin TEXT,
   pin_created_at TIMESTAMPTZ,
   pin_changed BOOLEAN DEFAULT true,
@@ -277,7 +290,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
   timestamp TIMESTAMPTZ DEFAULT NOW()
 );
 
--- DEFINIÇÕES DO SISTEMA (Configurações Gerais, Moeda, Impostos, etc.)
+-- DEFINIÇÕES DO SISTEMA
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'config',
   tenant_id TEXT NOT NULL,
@@ -308,7 +321,7 @@ CREATE TABLE IF NOT EXISTS public.recovery_requests (
   employee_id TEXT NOT NULL,
   employee_name TEXT NOT NULL,
   email TEXT,
-  status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'RESOLVED', 'REJECTED'
+  status TEXT NOT NULL DEFAULT 'PENDING',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   resolved_at TIMESTAMPTZ
 );
@@ -329,11 +342,135 @@ CREATE INDEX IF NOT EXISTS idx_caixa_timestamp ON public.caixa(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON public.audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON public.audit_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_colaboradores_tenant ON public.colaboradores(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_profiles_company ON public.profiles(company_id);
 
 -- ============================================================================
--- 4. ROW LEVEL SECURITY (RLS) POLICIES
+-- 4. TENANT ISOLATION HELPERS & TRIGGER FOR GOOGLE AUTH
+-- ============================================================================
+
+-- Helper: Obtém o tenant/empresa_id do utilizador autenticado
+CREATE OR REPLACE FUNCTION public.get_my_company_id()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT company_id FROM public.profiles WHERE id = auth.uid() LIMIT 1),
+    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text LIMIT 1),
+    auth.uid()::text
+  );
+$$;
+
+-- Trigger: Cria automaticamente Empresa e Perfil ao registar via Google OAuth
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_company_id TEXT;
+  v_company_name TEXT;
+  v_user_name TEXT;
+BEGIN
+  v_user_name := COALESCE(
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'name',
+    split_part(new.email, '@', 1)
+  );
+  
+  v_company_name := COALESCE(
+    new.raw_user_meta_data->>'company_name',
+    new.raw_user_meta_data->>'branch',
+    v_user_name || ' - Vendas'
+  );
+
+  v_company_id := 'comp_' || substr(new.id::text, 1, 8);
+
+  -- 1. Criar empresa isolada para o novo utilizador
+  INSERT INTO public.companies (id, name, owner_uid, email, created_at, updated_at)
+  VALUES (
+    v_company_id,
+    v_company_name,
+    new.id::text,
+    new.email,
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO NOTHING;
+
+  -- 2. Criar perfil vinculado à empresa
+  INSERT INTO public.profiles (id, company_id, email, full_name, role, avatar_url, created_at, updated_at)
+  VALUES (
+    new.id,
+    v_company_id,
+    new.email,
+    v_user_name,
+    COALESCE(new.raw_user_meta_data->>'role', 'ADMIN'),
+    COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', ''),
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    company_id = COALESCE(public.profiles.company_id, EXCLUDED.company_id),
+    email = EXCLUDED.email,
+    full_name = COALESCE(EXCLUDED.full_name, public.profiles.full_name),
+    avatar_url = COALESCE(EXCLUDED.avatar_url, public.profiles.avatar_url),
+    updated_at = NOW();
+
+  -- 3. Criar colaborador inicial como Administrador
+  INSERT INTO public.colaboradores (
+    id, tenant_id, auth_uid, name, email, role, status, branch, subscription_plan, created_at, updated_at
+  )
+  VALUES (
+    'emp_' || substr(new.id::text, 1, 8),
+    v_company_id,
+    new.id::text,
+    v_user_name,
+    new.email,
+    'ADMIN',
+    'ACTIVE',
+    v_company_name,
+    'OURO',
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT DO NOTHING;
+
+  -- 4. Criar configurações iniciais da empresa isolada
+  INSERT INTO public.settings (
+    id, tenant_id, company_name, company_email, company_phone, currency, enable_vat, vat_percentage, updated_at
+  )
+  VALUES (
+    'config_' || v_company_id,
+    v_company_id,
+    v_company_name,
+    new.email,
+    '+258 84 000 0000',
+    'MT',
+    true,
+    16.00,
+    NOW()
+  )
+  ON CONFLICT DO NOTHING;
+
+  RETURN new;
+END;
+$$;
+
+-- Vincular trigger ao auth.users se existir
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ============================================================================
+-- 5. ROW LEVEL SECURITY (RLS) - STRICT TENANT ISOLATION POLICIES
 -- ============================================================================
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.suppliers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
@@ -352,31 +489,149 @@ ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
 
--- Helper policies: Permit operations for authenticated users or public anon during onboarding
-CREATE POLICY "Permit all on produtos" ON public.produtos FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on clientes" ON public.clientes FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on vendas" ON public.vendas FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on venda_itens" ON public.venda_itens FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on caixa" ON public.caixa FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on cash_registers" ON public.cash_registers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on cash_closures" ON public.cash_closures FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on cash_shifts" ON public.cash_shifts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on colaboradores" ON public.colaboradores FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on audit_logs" ON public.audit_logs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on settings" ON public.settings FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on stock_movements" ON public.stock_movements FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on customer_debts" ON public.customer_debts FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on debt_payments" ON public.debt_payments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on categories" ON public.categories FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on suppliers" ON public.suppliers FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on companies" ON public.companies FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permit all on recovery_requests" ON public.recovery_requests FOR ALL USING (true) WITH CHECK (true);
+-- COMPANIES: Apenas o dono ou membros da mesma empresa podem ver/editar
+DROP POLICY IF EXISTS "Companies Isolation" ON public.companies;
+CREATE POLICY "Companies Isolation" ON public.companies
+  FOR ALL TO authenticated
+  USING (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
+  WITH CHECK (id = public.get_my_company_id() OR owner_uid = auth.uid()::text);
+
+-- PROFILES: Cada utilizador acede ao seu próprio perfil ou aos da sua empresa
+DROP POLICY IF EXISTS "Profiles Isolation" ON public.profiles;
+CREATE POLICY "Profiles Isolation" ON public.profiles
+  FOR ALL TO authenticated
+  USING (id = auth.uid() OR company_id = public.get_my_company_id())
+  WITH CHECK (id = auth.uid() OR company_id = public.get_my_company_id());
+
+-- PRODUTOS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Produtos Tenant Isolation" ON public.produtos;
+CREATE POLICY "Produtos Tenant Isolation" ON public.produtos
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- CLIENTES: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Clientes Tenant Isolation" ON public.clientes;
+CREATE POLICY "Clientes Tenant Isolation" ON public.clientes
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- VENDAS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Vendas Tenant Isolation" ON public.vendas;
+CREATE POLICY "Vendas Tenant Isolation" ON public.vendas
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- VENDA ITENS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Venda Itens Tenant Isolation" ON public.venda_itens;
+CREATE POLICY "Venda Itens Tenant Isolation" ON public.venda_itens
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- CAIXA: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Caixa Tenant Isolation" ON public.caixa;
+CREATE POLICY "Caixa Tenant Isolation" ON public.caixa
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- CASH REGISTERS & SHIFTS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Cash Registers Tenant Isolation" ON public.cash_registers;
+CREATE POLICY "Cash Registers Tenant Isolation" ON public.cash_registers
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "Cash Shifts Tenant Isolation" ON public.cash_shifts;
+CREATE POLICY "Cash Shifts Tenant Isolation" ON public.cash_shifts
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "Cash Closures Tenant Isolation" ON public.cash_closures;
+CREATE POLICY "Cash Closures Tenant Isolation" ON public.cash_closures
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- COLABORADORES: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Colaboradores Tenant Isolation" ON public.colaboradores;
+CREATE POLICY "Colaboradores Tenant Isolation" ON public.colaboradores
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- AUDIT LOGS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Audit Logs Tenant Isolation" ON public.audit_logs;
+CREATE POLICY "Audit Logs Tenant Isolation" ON public.audit_logs
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- SETTINGS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Settings Tenant Isolation" ON public.settings;
+CREATE POLICY "Settings Tenant Isolation" ON public.settings
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- STOCK MOVEMENTS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Stock Movements Tenant Isolation" ON public.stock_movements;
+CREATE POLICY "Stock Movements Tenant Isolation" ON public.stock_movements
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- CUSTOMER DEBTS & PAYMENTS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Debts Tenant Isolation" ON public.customer_debts;
+CREATE POLICY "Debts Tenant Isolation" ON public.customer_debts
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "Debt Payments Tenant Isolation" ON public.debt_payments;
+CREATE POLICY "Debt Payments Tenant Isolation" ON public.debt_payments
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- CATEGORIES & SUPPLIERS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Categories Tenant Isolation" ON public.categories;
+CREATE POLICY "Categories Tenant Isolation" ON public.categories
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "Suppliers Tenant Isolation" ON public.suppliers;
+CREATE POLICY "Suppliers Tenant Isolation" ON public.suppliers
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- RECOVERY REQUESTS: Isolamento por tenant_id
+DROP POLICY IF EXISTS "Recovery Requests Tenant Isolation" ON public.recovery_requests;
+CREATE POLICY "Recovery Requests Tenant Isolation" ON public.recovery_requests
+  FOR ALL TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+-- Fallback Policies for Anonymous Client in Offline/Local Mode
+CREATE POLICY "Anon Fallback Produtos" ON public.produtos FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Clientes" ON public.clientes FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Vendas" ON public.vendas FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Venda Itens" ON public.venda_itens FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Caixa" ON public.caixa FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Colaboradores" ON public.colaboradores FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Anon Fallback Settings" ON public.settings FOR ALL TO anon USING (true) WITH CHECK (true);
 
 -- ============================================================================
--- 5. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC)
+-- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC)
 -- ============================================================================
 
--- RPC 1: PROCESS SALE ATOMIC (Processa venda, desconta stock, cria itens, gere dívida e caixa)
+-- RPC 1: PROCESS SALE ATOMIC
 CREATE OR REPLACE FUNCTION public.process_sale_atomic(
   p_tenant_id TEXT,
   p_sale_id TEXT,
@@ -469,7 +724,7 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 3. Gestão de Dívida / Conta Corrente se a venda foi a prazo
+  -- 3. Gestão de Dívida se a venda foi a prazo
   v_is_credit := p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT');
   IF v_is_credit AND p_customer_id IS NOT NULL THEN
     v_remaining_debt := GREATEST(0.00, p_grand_total - p_amount_paid);
@@ -490,7 +745,7 @@ BEGIN
     WHERE id = p_customer_id;
   END IF;
 
-  -- 4. Registar entrada de numerário no fluxo de caixa se foi pago em dinheiro
+  -- 4. Registar entrada no fluxo de caixa se pago em dinheiro
   IF p_payment_method IN ('Dinheiro', 'Cash', 'Numerário', 'CASH') AND p_amount_paid > 0 THEN
     INSERT INTO public.caixa (
       id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
@@ -514,7 +769,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- RPC 2: REPLENISH STOCK ATOMIC (Entrada de Stock com atualização de custo médio)
+-- RPC 2: REPLENISH STOCK ATOMIC
 CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
   p_tenant_id TEXT,
   p_product_id TEXT,
@@ -565,7 +820,7 @@ BEGIN
 END;
 $$;
 
--- RPC 3: SETTLE DEBT PAYMENT ATOMIC (Liquidação de Dívida de Cliente)
+-- RPC 3: SETTLE DEBT PAYMENT ATOMIC
 CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
   p_tenant_id TEXT,
   p_debt_id TEXT,
@@ -600,19 +855,16 @@ BEGIN
     settled_at = CASE WHEN v_new_remaining <= 0 THEN NOW() ELSE NULL END
   WHERE id = p_debt_id;
 
-  -- Inserir recibo de pagamento de dívida
   INSERT INTO public.debt_payments (
     id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, timestamp
   ) VALUES (
     uuid_generate_v4()::TEXT, p_tenant_id, p_debt_id, p_customer_id, p_amount, p_payment_method, p_received_by, NOW()
   );
 
-  -- Abater saldo em aberto do cliente
   UPDATE public.clientes 
   SET balance = GREATEST(0.00, balance - p_amount), updated_at = NOW()
   WHERE id = p_customer_id;
 
-  -- Registar entrada em caixa
   INSERT INTO public.caixa (
     id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
   ) VALUES (

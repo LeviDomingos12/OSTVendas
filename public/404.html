@@ -4,29 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <title>OST Vendas - Redirecionando...</title>
-    <script>
-      // Single Page App (SPA) Redirect for GitHub Pages
-      // Stores requested path and redirects back to base index.html
+    <script type="text/javascript">
+      // Single Page Apps (SPA) Redirect for GitHub Pages
+      // https://github.com/rafgraph/spa-github-pages
       (function() {
-        var pathSegmentsToKeep = 0;
         var l = window.location;
+        var segments = l.pathname.split('/').filter(Boolean);
         
-        // Detect if hosted on GitHub Pages subpath (e.g. /repo-name/)
-        var pathName = l.pathname;
-        sessionStorage.setItem('spa_redirect_path', pathName + l.search + l.hash);
+        // If hosted on username.github.io/repo-name/, keep repo segment (1), else 0 for custom domains / root sites
+        var isGitHubPagesSubdir = l.hostname.endsWith('github.io') && segments.length > 0;
+        var pathSegmentsToKeep = isGitHubPagesSubdir ? 1 : 0;
         
-        // Redirect to repository or domain root relative to current directory
-        var targetUrl = l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '');
-        var segments = pathName.split('/').filter(Boolean);
-        
-        // If subfolder exists on github.io, preserve repository base path
-        if (l.hostname.endsWith('github.io') && segments.length > 0) {
-          targetUrl += '/' + segments[0] + '/';
-        } else {
-          targetUrl += '/';
-        }
-        
-        window.location.replace(targetUrl);
+        // Also save to sessionStorage for extra resilience across routers
+        try {
+          sessionStorage.setItem('spa_redirect_path', l.pathname + l.search + l.hash);
+        } catch (e) {}
+
+        var targetBase = l.protocol + '//' + l.host + (pathSegmentsToKeep === 1 ? '/' + segments[0] : '');
+        var redirectQuery = (l.pathname.slice(1).split('/').slice(pathSegmentsToKeep).join('/').replace(/&/g, '~and~'));
+        var searchParams = (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '');
+
+        l.replace(
+          targetBase + '/?/' + redirectQuery + searchParams + l.hash
+        );
       })();
     </script>
     <style>
@@ -46,8 +46,8 @@
         background-color: #0f172a;
         border: 1px solid #1e293b;
         border-radius: 16px;
-        padding: 32px 24px;
-        max-width: 420px;
+        padding: 36px 28px;
+        max-width: 440px;
         box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
       }
       .logo {
@@ -61,12 +61,14 @@
         color: #fff;
         font-weight: 900;
         font-size: 24px;
-        margin-bottom: 16px;
+        margin-bottom: 20px;
+        box-shadow: 0 10px 15px -3px rgba(249, 115, 22, 0.3);
       }
       h1 {
         font-size: 20px;
         font-weight: 700;
-        margin: 0 0 8px 0;
+        margin: 0 0 10px 0;
+        color: #ffffff;
       }
       p {
         font-size: 14px;
@@ -74,28 +76,42 @@
         margin: 0 0 24px 0;
         line-height: 1.5;
       }
+      .spinner {
+        width: 32px;
+        height: 32px;
+        margin: 0 auto 20px auto;
+        border: 3px solid rgba(249, 115, 22, 0.2);
+        border-top-color: #f97316;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
       .btn {
         display: inline-block;
         background-color: #f97316;
         color: #ffffff;
         text-decoration: none;
-        padding: 10px 20px;
+        padding: 12px 24px;
         border-radius: 10px;
         font-size: 14px;
         font-weight: 600;
-        transition: background-color 0.2s;
+        transition: all 0.2s ease;
       }
       .btn:hover {
         background-color: #ea580c;
+        transform: translateY(-1px);
       }
     </style>
   </head>
   <body>
     <div class="card">
       <div class="logo">OST</div>
-      <h1>Carregando OST Vendas...</h1>
-      <p>A redirecionar automaticamente para a aplicação principal...</p>
-      <a href="./" class="btn">Aceder ao Sistema</a>
+      <div class="spinner"></div>
+      <h1>A redirecionar...</h1>
+      <p>A carregar o sistema OST Vendas. Será redirecionado para a aplicação em instantes.</p>
+      <a href="./" class="btn">Ir para a Página Inicial</a>
     </div>
   </body>
 </html>
