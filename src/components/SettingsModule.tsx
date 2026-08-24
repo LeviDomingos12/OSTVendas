@@ -1,120 +1,45 @@
 import React, { useState, useEffect } from "react";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { 
   Settings, 
   Building, 
   Database, 
-  CheckCircle, 
-  Shield, 
-  Lock,
   Download,
   Upload,
   RefreshCw,
-  Mail,
-  Clock,
-  Calendar,
-  Play,
-  Terminal,
-  Check,
-  FileText,
-  FileSpreadsheet,
-  Cloud,
-  Globe,
-  Server,
   Printer,
   Palette,
   Trash2,
-  AlertTriangle,
   Smartphone,
   MessageSquare,
-  Usb,
-  Tag,
-  Camera,
   Sparkles,
-  Layers,
-  Bell,
-  ChevronDown,
-  MapPin,
-  Phone,
   Plus,
-  Edit,
-  Sliders,
-  Fingerprint,
-  RotateCcw,
-  ShieldAlert,
-  AlertOctagon,
-  Filter,
-  XCircle,
-  CheckCircle2,
-  TrendingUp,
   UserCheck,
   BookOpen,
   Crown,
-  Zap,
-  Award,
-  Activity,
-  Wifi,
-  Radio,
-  Gauge
+  TrendingUp,
+  Check,
+  Cloud,
+  MapPin,
+  Phone
 } from "lucide-react";
-import { SystemSettings, UserRole, Employee, Branch, AuditLog, Product, Transaction, Customer, SubscriptionPlan } from "../types";
-import { getGoogleAccessToken, sendEmail } from "../lib/gmail";
-import { getFormattedSystemVersion } from "../lib/versionManager";
-import { SYSTEM_THEMES } from "../lib/themes";
-import { canAccessModule } from "../lib/planPermissions";
 import { 
-  getSupabaseConfig, 
-  saveSupabaseConfig, 
-  testSupabaseConnection, 
-  measureSupabaseLatency,
-  validateSupabaseSession,
-  SupabaseSyncService, 
-  SupabaseConfig,
-  LatencyResult,
-  SessionValidationResult,
-  CloudBackupItem
-} from "../services/supabaseService";
-
-const googleSignIn = async (_forceConsent?: boolean) => {
-  return await SupabaseSyncService.signInWithGoogle();
-};
-const logout = async () => SupabaseSyncService.signOut();
-const getLogsFromFirestore = async () => SupabaseSyncService.fetchAuditLogs();
-const uploadBackupToStorage = async (_uid: string, filename: string, json: string) => SupabaseSyncService.uploadBackupToStorage(filename, json);
-const listBackupsFromStorage = async (_uid?: string) => SupabaseSyncService.listBackupsFromStorage();
-const deleteBackupFromStorage = async (_uid: string, filename: string) => SupabaseSyncService.deleteBackupFromStorage(filename);
-const auth = {
-  get currentUser() {
-    try {
-      const u = localStorage.getItem("erp_simulated_logged_in_user");
-      return u ? JSON.parse(u) : null;
-    } catch {
-      return null;
-    }
-  }
-};
-const initAuth = (onSuccess?: (user: any, token: string) => void, onFail?: () => void) => {
-  const sub = SupabaseSyncService.onAuthStateChange((_event, session) => {
-    if (session?.user && onSuccess) onSuccess(session.user, session.access_token);
-    else if (onFail) onFail();
-  });
-  return () => {
-    if (sub && typeof sub.unsubscribe === "function") {
-      sub.unsubscribe();
-    }
-  };
-};
-const getAccessToken = async () => getGoogleAccessToken();
-import { BackendManager } from "../services/dataService";
-import { MigrationService, MigrationResult } from "../services/migrationService";
+  SystemSettings, 
+  UserRole, 
+  Employee, 
+  Branch, 
+  AuditLog, 
+  Product, 
+  Transaction, 
+  Customer, 
+  SubscriptionPlan 
+} from "../types";
+import { SYSTEM_THEMES } from "../lib/themes";
 import { AdminService } from "../services/adminService";
+import StaffModule from "./StaffModule";
 import GatewayModule from "./GatewayModule";
 import AiForecastModule from "./AiForecastModule";
 import TrainingModule from "./TrainingModule";
-import StaffModule from "./StaffModule";
 import SubscriptionPlansModule from "./SubscriptionPlansModule";
-import PlanLockScreen from "./PlanLockScreen";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -166,8 +91,6 @@ export default function SettingsModule({
   systemVersion,
   employees = [],
   auditLogs = [],
-  onResetEmployeePin,
-  onUpdateEmployeeTheme,
   products = [],
   transactions = [],
   customers = [],
@@ -181,9145 +104,1082 @@ export default function SettingsModule({
   onChangeModule,
   onPurgeMockData
 }: SettingsModuleProps) {
-  const canEdit = currentRole === "ADMIN";
+  const canEdit = currentRole === "ADMIN" || currentRole === "SUPERVISOR";
   
-  // Local states matching state configurations
-  const [companyName, setCompanyName] = useState(settings.companyName);
-  const [slogan, setSlogan] = useState(settings.slogan);
-  const [companyNuit, setCompanyNuit] = useState(settings.companyNuit);
-  const [storeAddress, setStoreAddress] = useState(settings.storeAddress);
-  const [storeContact, setStoreContact] = useState(settings.storeContact);
-  const [defaultVat, setDefaultVat] = useState(settings.defaultVat);
-
-  // Logo upload and generation states
-  const [logoUrl, setLogoUrl] = useState(settings.logoUrl || "");
-  const [isGeneratingLogo, setIsGeneratingLogo] = useState(false);
-  const [logoPrompt, setLogoPrompt] = useState("");
-  const [showAiLogoPanel, setShowAiLogoPanel] = useState(false);
-  const [showCameraPanel, setShowCameraPanel] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState("");
-  const videoRef = React.useRef<HTMLVideoElement | null>(null);
-
-  // Gateway credentials configurations (MPesa, EMola)
-
-  // Automated report email states
-  const [reportRecipientEmail, setReportRecipientEmail] = useState(settings.reportRecipientEmail || "");
-  const [reportHour, setReportHour] = useState(settings.reportHour || "02:00");
-  const [reportFrequency, setReportFrequency] = useState(settings.reportFrequency || "daily");
-  const [alertsRecipientEmail, setAlertsRecipientEmail] = useState(settings.alertsRecipientEmail || "");
-  
-  // SMS Alert states
-  const [smsAlertsEnabled, setSmsAlertsEnabled] = useState(settings.smsAlertsEnabled || false);
-  const [smsProviderType, setSmsProviderType] = useState<"TWILIO" | "CUSTOM_HTTP">(settings.smsProviderType || "TWILIO");
-  const [smsTwilioSid, setSmsTwilioSid] = useState(settings.smsTwilioSid || "");
-  const [smsTwilioToken, setSmsTwilioToken] = useState(settings.smsTwilioToken || "");
-  const [smsTwilioFrom, setSmsTwilioFrom] = useState(settings.smsTwilioFrom || "");
-  const [smsCustomUrl, setSmsCustomUrl] = useState(settings.smsCustomUrl || "");
-  const [smsManagerPhone, setSmsManagerPhone] = useState(settings.smsManagerPhone || "");
-  const [smsStockThreshold, setSmsStockThreshold] = useState(settings.smsStockThreshold || 5);
-
-  // WhatsApp Alert states
-  const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappEnabled || false);
-  const [whatsappProvider, setWhatsappProvider] = useState<"DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD">(
-    settings.whatsappProvider || "DIRECT_LINK"
-  );
-  const [whatsappApiEndpoint, setWhatsappApiEndpoint] = useState(settings.whatsappApiEndpoint || "");
-  const [whatsappToken, setWhatsappToken] = useState(settings.whatsappToken || "");
-  const [whatsappPhoneId, setWhatsappPhoneId] = useState(settings.whatsappPhoneId || "");
-  const [managerWhatsappPhone, setManagerWhatsappPhone] = useState(settings.managerWhatsappPhone || "");
-  const [whatsappMessageTemplate, setWhatsappMessageTemplate] = useState(
-    settings.whatsappMessageTemplate ||
-      `⚠️ *ALERTA DE ESTOQUE CRÍTICO* ⚠️\n\nO produto *{product_name}* atingiu o nível crítico de *{current_stock}* unidades (limite: {threshold}).\n\n👉 Acesse o POS para repor o estoque: {pos_link}`
-  );
-  
-  // Custom SMTP Configurations
-  const [smtpEnabled, setSmtpEnabled] = useState(settings.smtpEnabled || false);
-  const [smtpHost, setSmtpHost] = useState(settings.smtpHost || "smtp.gmail.com");
-  const [smtpPort, setSmtpPort] = useState(settings.smtpPort || 587);
-  const [smtpUser, setSmtpUser] = useState(settings.smtpUser || "");
-  const [smtpPassword, setSmtpPassword] = useState(settings.smtpPassword || "");
-  const [smtpSecure, setSmtpSecure] = useState(settings.smtpSecure || false);
-  const [emailStockAlertsEnabled, setEmailStockAlertsEnabled] = useState(settings.emailStockAlertsEnabled || false);
-  const [stockAlertEmailSubject, setStockAlertEmailSubject] = useState(
-    settings.stockAlertEmailSubject || "[ALERTA] Estoque Crítico de Produtos - OST Vendas"
-  );
-  const [stockAlertEmailBody, setStockAlertEmailBody] = useState(
-    settings.stockAlertEmailBody || `Olá,\n\nEste é um alerta automático de que os seguintes produtos atingiram o nível de estoque mínimo definido:\n\n[LISTA_PRODUTOS]\n\nPor favor, providencie a reposição o quanto antes para evitar rupturas de estoque.\n\nAtenciosamente,\nSistema OST Vendas`
-  );
-  const [isSmtpVerified, setIsSmtpVerified] = useState(settings.isSmtpVerified || false);
-  const [testRecipient, setTestRecipient] = useState(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
-  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
-  const [isSavingSmtp, setIsSavingSmtp] = useState(false);
-  const [isImportingEnv, setIsImportingEnv] = useState(false);
-
-  // .env SMTP Diagnostic and Validation states
-  const [envSmtpHost, setEnvSmtpHost] = useState("");
-  const [envSmtpPort, setEnvSmtpPort] = useState<number>(587);
-  const [envSmtpUser, setEnvSmtpUser] = useState("");
-  const [envSmtpPassword, setEnvSmtpPassword] = useState("");
-  const [envSmtpSecure, setEnvSmtpSecure] = useState(false);
-  const [isFetchingEnvSmtp, setIsFetchingEnvSmtp] = useState(false);
-  const [isTestingEnvSmtp, setIsTestingEnvSmtp] = useState(false);
-  const [isSendingEnvTest, setIsSendingEnvTest] = useState(false);
-  const [envSmtpVerifyStatus, setEnvSmtpVerifyStatus] = useState<"idle" | "success" | "error">("idle");
-  const [envSmtpVerifyError, setEnvSmtpVerifyError] = useState("");
-  const [envSmtpTestRecipient, setEnvSmtpTestRecipient] = useState(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
-
-  // Expiry and Batches states
-  const [inventoryStrategy, setInventoryStrategy] = useState<"FIFO" | "LIFO" | "NORMAL">(settings.inventoryStrategy || "FIFO");
-  const [expiryAlertDays, setExpiryAlertDays] = useState<number>(settings.expiryAlertDays || 30);
-  const [expiryAlertsEnabled, setExpiryAlertsEnabled] = useState<boolean>(settings.expiryAlertsEnabled || false);
-  const [expiryNotificationMethod, setExpiryNotificationMethod] = useState<"EMAIL" | "SMS" | "BOTH">(settings.expiryNotificationMethod || "EMAIL");
-  const [expiryEmailSubject, setExpiryEmailSubject] = useState(
-    settings.expiryEmailSubject || "[ALERTA] Vencimento de Produtos - OST Vendas"
-  );
-  const [expiryEmailBody, setExpiryEmailBody] = useState(
-    settings.expiryEmailBody || `Olá,\n\nEste é um alerta automático de que os seguintes lotes/produtos perecíveis estão próximos do vencimento ou já venceram:\n\n[LISTA_VENCIMENTOS]\n\nPor favor, retire de circulação ou providencie que sejam consumidos com base na política configurada.\n\nAtenciosamente,\nSistema OST Vendas`
-  );
-  
-  // Custom states for dispatcher details
-  const [reportFormat, setReportFormat] = useState<"PDF" | "CSV" | "AMBOS">("PDF");
-  const [includeFinancial, setIncludeFinancial] = useState(true);
-  const [includeAudit, setIncludeAudit] = useState(true);
-  const [includeStaff, setIncludeStaff] = useState(false);
-
-  // Audit Logs Filter and Export States
-  const [auditFilterStartDate, setAuditFilterStartDate] = useState("");
-  const [auditFilterEndDate, setAuditFilterEndDate] = useState("");
-
-  // AI Settings States
-  const [aiAutoMonitoring, setAiAutoMonitoring] = useState(settings.aiAutoMonitoring ?? true);
-  const [aiHealthSensitivity, setAiHealthSensitivity] = useState(settings.aiHealthSensitivity ?? 80);
-
-  // Rate Limit & Security System States
-  const [rateLimitEnabled, setRateLimitEnabled] = useState(true);
-  const [rateLimitProfile, setRateLimitProfile] = useState<"strict" | "balanced" | "tolerant" | "custom">("balanced");
-  const [rateLimitGeneralMax, setRateLimitGeneralMax] = useState(120);
-  const [rateLimitAiMax, setRateLimitAiMax] = useState(20);
-  const [rateLimitEmailMax, setRateLimitEmailMax] = useState(10);
-  const [rateLimitDbMax, setRateLimitDbMax] = useState(15);
-  const [rateLimitStats, setRateLimitStats] = useState<{
-    totalRequestsProcessed: number;
-    totalBlocked429: number;
-    recentViolationsCount: number;
-    lastViolationTimestamp: string | null;
-  }>({
-    totalRequestsProcessed: 0,
-    totalBlocked429: 0,
-    recentViolationsCount: 0,
-    lastViolationTimestamp: null
-  });
-  const [rateLimitViolations, setRateLimitViolations] = useState<any[]>([]);
-  const [isLoadingRateLimit, setIsLoadingRateLimit] = useState(false);
-  const [isSavingRateLimit, setIsSavingRateLimit] = useState(false);
-  const [isTestingRateLimit, setIsTestingRateLimit] = useState(false);
-
-  // Firewall & Advanced Security States
-  const [firewallEnabled, setFirewallEnabled] = useState(true);
-  const [securityHeadersEnabled, setSecurityHeadersEnabled] = useState(true);
-  const [sanitizerEnabled, setSanitizerEnabled] = useState(true);
-  const [bruteForceEnabled, setBruteForceEnabled] = useState(true);
-  const [whitelistOnlyMode, setWhitelistOnlyMode] = useState(false);
-  const [blacklistedIps, setBlacklistedIps] = useState<string[]>([]);
-  const [whitelistedIps, setWhitelistedIps] = useState<string[]>([]);
-  const [activeLockouts, setActiveLockouts] = useState<any[]>([]);
-  const [storageHealth, setStorageHealth] = useState<any>(null);
-  const [newIpInput, setNewIpInput] = useState("");
-  const [newIpType, setNewIpType] = useState<"blacklist" | "whitelist">("blacklist");
-  const [isLoadingSecurityData, setIsLoadingSecurityData] = useState(false);
-
-  const fetchSecurityAndFirewallStatus = async () => {
-    try {
-      setIsLoadingSecurityData(true);
-      const [fwRes, healthRes] = await Promise.all([
-        fetch("/api/security/firewall-status"),
-        fetch("/api/security/storage-health")
-      ]);
-      const fwData = await fwRes.json();
-      const healthData = await healthRes.json();
-
-      if (fwData.config) {
-        setFirewallEnabled(fwData.config.enabled !== false);
-        setSecurityHeadersEnabled(fwData.config.securityHeadersEnabled !== false);
-        setSanitizerEnabled(fwData.config.sanitizerEnabled !== false);
-        setBruteForceEnabled(fwData.config.bruteForceProtectionEnabled !== false);
-        setWhitelistOnlyMode(fwData.config.whitelistOnlyMode === true);
-        setBlacklistedIps(fwData.config.blacklistedIps || []);
-        setWhitelistedIps(fwData.config.whitelistedIps || []);
-      }
-      if (fwData.activeLockouts) {
-        setActiveLockouts(fwData.activeLockouts);
-      }
-      if (healthData.status) {
-        setStorageHealth(healthData);
-      }
-    } catch (e) {
-      console.error("Erro ao carregar dados de firewall e integridade:", e);
-    } finally {
-      setIsLoadingSecurityData(false);
-    }
-  };
-
-  const handleSaveFirewallPolicies = async () => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch("/api/security/firewall-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: firewallEnabled,
-          securityHeadersEnabled,
-          sanitizerEnabled,
-          bruteForceProtectionEnabled: bruteForceEnabled,
-          whitelistOnlyMode
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast("Políticas de Firewall e Segurança atualizadas com sucesso!", "success", "Firewall Atualizado");
-        await fetchSecurityAndFirewallStatus();
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const handleAddIpRule = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newIpInput || !newIpInput.trim() || !canEdit) return;
-    try {
-      const res = await fetch("/api/security/ip-rules/add", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ip: newIpInput.trim(), listType: newIpType })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(data.message, "success");
-        setNewIpInput("");
-        await fetchSecurityAndFirewallStatus();
-      } else {
-        if (onShowToast) onShowToast(data.error || "Erro ao adicionar IP.", "error");
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const handleRemoveIpRule = async (ip: string, listType: "blacklist" | "whitelist") => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch("/api/security/ip-rules/remove", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ip, listType })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(data.message, "info");
-        await fetchSecurityAndFirewallStatus();
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const handleUnlockIp = async (ip: string) => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch("/api/security/unlock-ip", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ip })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(`IP ${ip} desbloqueado com sucesso!`, "success");
-        await fetchSecurityAndFirewallStatus();
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const handleUndoLastRestore = async () => {
-    if (!canEdit) return;
-    if (!confirm("Tem a certeza que deseja anular a última restauração e reverter a base de dados para o ponto pré-restauro?")) return;
-    try {
-      const res = await fetch("/api/security/backups/undo-last-restore", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(data.message, "success", "Restauração Anulada");
-        await fetchSecurityAndFirewallStatus();
-      } else {
-        if (onShowToast) onShowToast(data.error || "Nenhum ponto de pré-restauro encontrado.", "warning");
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const fetchRateLimitStatus = async () => {
-    try {
-      setIsLoadingRateLimit(true);
-      const res = await fetch("/api/security/rate-limit-status");
-      const data = await res.json();
-      if (data.config) {
-        setRateLimitEnabled(data.enabled !== false);
-        setRateLimitProfile(data.profile || "balanced");
-        if (data.config.generalMax) setRateLimitGeneralMax(data.config.generalMax);
-        if (data.config.aiMax) setRateLimitAiMax(data.config.aiMax);
-        if (data.config.emailMax) setRateLimitEmailMax(data.config.emailMax);
-        if (data.config.dbMax) setRateLimitDbMax(data.config.dbMax);
-      }
-      if (data.stats) {
-        setRateLimitStats(data.stats);
-      }
-      if (data.recentViolations) {
-        setRateLimitViolations(data.recentViolations);
-      }
-    } catch (e) {
-      console.error("Erro ao obter status do Rate Limit:", e);
-    } finally {
-      setIsLoadingRateLimit(false);
-    }
-  };
-
-  const handleSaveRateLimitConfig = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!canEdit) {
-      if (onShowToast) onShowToast("Apenas administradores podem alterar as regras de segurança e Rate Limit.", "error");
-      return;
-    }
-    setIsSavingRateLimit(true);
-    try {
-      const res = await fetch("/api/security/rate-limit-config", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enabled: rateLimitEnabled,
-          profile: rateLimitProfile,
-          generalMax: Number(rateLimitGeneralMax),
-          aiMax: Number(rateLimitAiMax),
-          emailMax: Number(rateLimitEmailMax),
-          dbMax: Number(rateLimitDbMax)
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(data.message || "Configurações de Rate Limit salvas com sucesso!", "success", "Segurança Atualizada");
-        await fetchRateLimitStatus();
-      } else {
-        throw new Error(data.error || "Erro ao salvar rate limit.");
-      }
-    } catch (err: any) {
-      if (onShowToast) onShowToast(err.message, "error");
-    } finally {
-      setIsSavingRateLimit(false);
-    }
-  };
-
-  const handleClearRateLimitLogs = async () => {
-    if (!canEdit) return;
-    try {
-      const res = await fetch("/api/security/clear-rate-limit-logs", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        if (onShowToast) onShowToast("Histórico de bloqueios de Rate Limit limpo.", "info");
-        await fetchRateLimitStatus();
-      }
-    } catch (e: any) {
-      if (onShowToast) onShowToast(e.message, "error");
-    }
-  };
-
-  const handleTestBurstRateLimit = async () => {
-    setIsTestingRateLimit(true);
-    if (onShowToast) onShowToast("Disparando bateria de requisições de teste para validar o bloqueio 429...", "info", "Teste de Estresse");
-    
-    let blockedCount = 0;
-    let allowedCount = 0;
-
-    for (let i = 0; i < 35; i++) {
-      try {
-        const res = await fetch("/api/security/test-rate-limit", { method: "POST" });
-        if (res.status === 429) {
-          blockedCount++;
-        } else if (res.ok) {
-          allowedCount++;
-        }
-      } catch (e) {
-        console.error("Erro na requisição de teste:", e);
-      }
-    }
-
-    setIsTestingRateLimit(false);
-    await fetchRateLimitStatus();
-
-    if (blockedCount > 0) {
-      if (onShowToast) {
-        onShowToast(
-          `🛡️ Teste de Segurança Concluído! ${allowedCount} requisições processadas e ${blockedCount} requisições BLOQUEADAS (HTTP 429 Rate Limit)!`,
-          "warning",
-          "Bloqueio Ativo"
-        );
-      }
-    } else {
-      if (onShowToast) {
-        onShowToast(
-          `Todas as ${allowedCount} requisições foram aceitas sem atingir o limite atual (${rateLimitGeneralMax}/15m). Altere para o perfil 'Restritivo' para testar o limite rígido!`,
-          "success",
-          "Teste Concluído"
-        );
-      }
-    }
-  };
-
-  useEffect(() => {
-    fetchRateLimitStatus();
-    fetchSecurityAndFirewallStatus();
-  }, []);
-
-  // Gmail OAuth States
-  const [gmailUser, setGmailUser] = useState<any>(null);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [needsAuth, setNeedsAuth] = useState(true);
-
-  // Google Drive States
-  const [driveStats, setDriveStats] = useState<{ limit: number, usage: number } | null>(null);
-  const [recentFiles, setRecentFiles] = useState<any[]>([]);
-  const [isFetchingDrive, setIsFetchingDrive] = useState(false);
-
-  const fetchDriveStats = async () => {
-    if (needsAuth) return;
-    try {
-      const token = await getAccessToken();
-      if (!token || token === "local_token" || token === "mock_token") {
-        setNeedsAuth(true);
-        return;
-      }
-
-      setIsFetchingDrive(true);
-      // Fetch storage quota
-      const aboutRes = await fetch("https://www.googleapis.com/drive/v3/about?fields=storageQuota", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (aboutRes.status === 401 || aboutRes.status === 403) {
-        setNeedsAuth(true);
-        return;
-      }
-      const aboutData = await aboutRes.json();
-      if (aboutData && aboutData.storageQuota) {
-        setDriveStats({
-          limit: Number(aboutData.storageQuota.limit || 0),
-          usage: Number(aboutData.storageQuota.usage || 0)
-        });
-      }
-
-      // Fetch recent files
-      const filesRes = await fetch("https://www.googleapis.com/drive/v3/files?orderBy=createdTime desc&pageSize=5&fields=files(id,name,mimeType,createdTime)", {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (filesRes.ok) {
-        const filesData = await filesRes.json();
-        if (filesData && filesData.files) {
-          setRecentFiles(filesData.files);
-        }
-      }
-    } catch (e) {
-      console.warn("Google Drive stats info:", e);
-    } finally {
-      setIsFetchingDrive(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!needsAuth) {
-      fetchDriveStats();
-    }
-  }, [needsAuth]);
-
-  // Daily backup check scheduler
-  useEffect(() => {
-    if (!canEdit) return; // Only warn admin
-
-    const checkBackupStatus = () => {
-      const lastBackupStr = localStorage.getItem("lastBackupDate");
-      
-      if (!lastBackupStr) {
-        if (onShowToast) onShowToast("Nenhum backup em nuvem encontrado. Realize um backup urgente!", "warning", "Atenção: Risco de Perda de Dados");
-        return;
-      }
-
-      const lastBackupDate = new Date(lastBackupStr);
-      const today = new Date();
-      
-      // Calculate days diff
-      const diffTime = Math.abs(today.getTime() - lastBackupDate.getTime());
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-      
-      if (diffDays > 1) {
-        if (onShowToast) onShowToast(`Último backup foi há ${diffDays} dias. Recomendamos forçar um backup agora.`, "warning", "Aviso de Backup Pendente");
-      }
-    };
-
-    // Check once on mount
-    const timeoutId = setTimeout(checkBackupStatus, 5000); // delay so it doesn't overlap with welcome toasts
-
-    // Check every 6 hours
-    const intervalId = setInterval(checkBackupStatus, 6 * 60 * 60 * 1000);
-
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(intervalId);
-    };
-  }, [canEdit, onShowToast]);
-
-  const handleManualDriveBackup = async () => {
-    setIsBackingUp(true);
-    setCloudBackupLogs([]);
-    
-    try {
-      const token = await getAccessToken();
-      if (!token || token === "local_token" || token === "mock_token") {
-        setNeedsAuth(true);
-        if (onShowToast) onShowToast("Por favor, conecte a sua conta Google primeiro para realizar backups no Google Drive.", "warning");
-        return;
-      }
-      
-      setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 📦 Obtendo snapshot da base de dados local...`]);
-
-      const response = await fetch("/api/db/load");
-      const json = await response.json();
-      
-      if (!json.success) throw new Error("Falha ao ler dados da base local.");
-
-      setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ☁️ Compactando dados e estabelecendo conexão com Google Drive...`]);
-      
-      const dbPayload = JSON.stringify(json.data, null, 2);
-      const filename = `OST_Backup_Vendas_${new Date().toISOString().split("T")[0]}.json`;
-
-      const metadata = {
-        name: filename,
-        mimeType: "application/json",
-      };
-
-      const boundary = "-------314159265358979323846";
-      const delimiter = "\r\n--" + boundary + "\r\n";
-      const close_delim = "\r\n--" + boundary + "--";
-
-      const multipartRequestBody =
-        delimiter +
-        "Content-Type: application/json; charset=UTF-8\r\n\r\n" +
-        JSON.stringify(metadata) +
-        delimiter +
-        "Content-Type: application/json\r\n\r\n" +
-        dbPayload +
-        close_delim;
-
-      const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": `multipart/related; boundary=${boundary}`,
-        },
-        body: multipartRequestBody,
-      });
-
-      if (!res.ok) throw new Error("Erro na API do Google Drive");
-
-      const resData = await res.json();
-
-      setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✅ Backup salvo no Drive com sucesso. ID: ${resData.id}`]);
-      
-      onAddAuditLog("Backup Manual Drive", "CONFIGURAÇÕES", `Backup completo guardado na Cloud: ${filename}`);
-      if (onShowToast) onShowToast("Backup completo realizado no Google Drive com sucesso!", "success", "Resiliência Garantida");
-      
-      // Update local storage date
-      localStorage.setItem("lastBackupDate", new Date().toISOString());
-
-      // Refresh recent files
-      fetchDriveStats();
-    } catch (err) {
-      console.error(err);
-      setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Falha no processo: ${(err as Error).message}`]);
-      if (onShowToast) onShowToast("Falha ao realizar backup no Google Drive.", "error");
-    } finally {
-      setIsBackingUp(false);
-    }
-  };
-
-  // 7-day physical JSON backup scheduling states
-  const [lastFullBackupDate, setLastFullBackupDate] = useState<string | null>(null);
-  const [daysSinceLastBackup, setDaysSinceLastBackup] = useState<number | null>(null);
-  const [isBackupRecommended, setIsBackupRecommended] = useState<boolean>(false);
-
-  const checkFullBackupStatus = () => {
-    if (!canEdit) return;
-    
-    const lastBackupStr = localStorage.getItem("lastFullBackupDownloadDate");
-    setLastFullBackupDate(lastBackupStr);
-
-    if (!lastBackupStr) {
-      setIsBackupRecommended(true);
-      setDaysSinceLastBackup(null);
-      return;
-    }
-
-    const lastBackupDateObj = new Date(lastBackupStr);
-    const today = new Date();
-    
-    // Calculate difference in days
-    const diffTime = Math.abs(today.getTime() - lastBackupDateObj.getTime());
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    setDaysSinceLastBackup(diffDays);
-
-    if (diffDays >= 7) {
-      setIsBackupRecommended(true);
-    } else {
-      setIsBackupRecommended(false);
-    }
-  };
-
-  useEffect(() => {
-    if (canEdit) {
-      checkFullBackupStatus();
-      
-      // Check immediately and also set up warning toast if needed after loading is complete
-      const timerId = setTimeout(() => {
-        const lastBackupStr = localStorage.getItem("lastFullBackupDownloadDate");
-        if (!lastBackupStr) {
-          if (onShowToast) {
-            onShowToast("Por razões de segurança, descarregue um backup físico JSON.", "warning", "Backup Físico Recomendado");
-          }
-        } else {
-          const lastBackupDateObj = new Date(lastBackupStr);
-          const diffDays = Math.floor(Math.abs(new Date().getTime() - lastBackupDateObj.getTime()) / (1000 * 60 * 60 * 24));
-          if (diffDays >= 7 && onShowToast) {
-            onShowToast(`Aviso: Seu último backup físico JSON foi há ${diffDays} dias.`, "warning", "Cópia Física em Atraso");
-          }
-        }
-      }, 6000);
-
-      const interval = setInterval(checkFullBackupStatus, 4 * 60 * 60 * 1000); // Check every 4 hours
-      return () => {
-        clearTimeout(timerId);
-        clearInterval(interval);
-      };
-    }
-  }, [canEdit]);
-
-  const triggerAdminBackupDownload = () => {
-    if (onExportLocalDB) {
-      onExportLocalDB();
-      const nowStr = new Date().toISOString();
-      localStorage.setItem("lastFullBackupDownloadDate", nowStr);
-      setLastFullBackupDate(nowStr);
-      setDaysSinceLastBackup(0);
-      setIsBackupRecommended(false);
-      
-      onAddAuditLog(
-        "Fazer Cópia de Segurança Periódica",
-        "CONFIGURAÇÕES",
-        `Backup físico de 7 dias descarregado com sucesso.`
-      );
-    }
-  };
-
-  // Simulation states
-  const [isSimulatingMail, setIsSimulatingMail] = useState(false);
-  const [simulationLogs, setSimulationLogs] = useState<string[]>([]);
-
-  // NEW Backup and Recovery tab states & Consolidated Advanced Submodules
+  // Navigation Sub-tab state
   const [activeSubTab, setActiveSubTab] = useState<
-    "geral" | "staff" | "gateway" | "ai" | "training" | "plans" | "smtp" | "whatsapp" | "filiais" | "lotes" | "backup" | "seguranca"
+    "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans"
   >((initialSubTab as any) || "geral");
-  const [localBackupsLog, setLocalBackupsLog] = useState<any[]>([]);
-  
-  // CLOUD BACKUP (FIREBASE STORAGE) STATES
-  const [cloudBackups, setCloudBackups] = useState<CloudBackupItem[]>([]);
-  const [isLoadingCloudBackups, setIsLoadingCloudBackups] = useState(false);
-  const [isUploadingCloudBackup, setIsUploadingCloudBackup] = useState(false);
-  const [isRestoringCloudBackup, setIsRestoringCloudBackup] = useState(false);
 
-  const loadCloudBackups = async () => {
-    const uid = auth.currentUser?.uid || activeUser?.id;
-    if (!uid) {
-      console.warn("Nenhum UID encontrado para listar backups em nuvem.");
-      return;
-    }
-    setIsLoadingCloudBackups(true);
-    try {
-      const items = await listBackupsFromStorage(uid);
-      setCloudBackups(items);
-    } catch (error) {
-      console.error("Erro ao listar backups em nuvem:", error);
-    } finally {
-      setIsLoadingCloudBackups(false);
-    }
-  };
-
+  // Sync sub-tab if initialSubTab prop changes
   useEffect(() => {
-    if (activeSubTab === "backup") {
-      loadCloudBackups();
+    if (initialSubTab) {
+      setActiveSubTab(initialSubTab as any);
     }
-  }, [activeSubTab]);
-
-  // SUPABASE (POSTGRESQL) INTEGRATION STATES
-  const [supabaseUrl, setSupabaseUrl] = useState(() => getSupabaseConfig().url);
-  const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => getSupabaseConfig().anonKey);
-  const [supabaseEnabled, setSupabaseEnabled] = useState(() => getSupabaseConfig().enabled);
-  const [supabaseAutoSync, setSupabaseAutoSync] = useState(() => getSupabaseConfig().autoSync);
-  const [isTestingSupabase, setIsTestingSupabase] = useState(false);
-  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
-  const [supabaseStatus, setSupabaseStatus] = useState<"idle" | "connected" | "error">(() => 
-    getSupabaseConfig().enabled ? "connected" : "idle"
-  );
-  const [supabaseStatusMsg, setSupabaseStatusMsg] = useState("");
-
-  // LATÊNCIA & VALIDAÇÃO DE SESSÃO EM TEMPO REAL
-  const [latencyData, setLatencyData] = useState<LatencyResult | null>(null);
-  const [sessionValidation, setSessionValidation] = useState<SessionValidationResult | null>(null);
-  const [isDiagnosing, setIsDiagnosing] = useState(false);
-
-  // Executa diagnóstico em tempo real no carregamento inicial ou ao mudar para aba de backup
-  useEffect(() => {
-    if (supabaseUrl.trim() && supabaseAnonKey.trim() && supabaseEnabled) {
-      measureSupabaseLatency(supabaseUrl.trim(), supabaseAnonKey.trim()).then((lat) => {
-        setLatencyData(lat);
-        if (lat.status !== "error") {
-          setSupabaseStatus("connected");
-          setSupabaseStatusMsg(lat.message);
-        }
-      });
-      validateSupabaseSession().then((sess) => {
-        setSessionValidation(sess);
-      });
-    }
-  }, [activeSubTab]);
-
-  // MOTOR DE MIGRAÇÃO ESTRUTURADA
-  const [isMigrating, setIsMigrating] = useState(false);
-  const [migrationStep, setMigrationStep] = useState("");
-  const [migrationPercent, setMigrationPercent] = useState(0);
-  const [migrationDetail, setMigrationDetail] = useState("");
-  const [migrationLogs, setMigrationLogs] = useState<Array<{ text: string; level: "info" | "success" | "warning" | "error"; time: string }>>([]);
-  const [migrationReport, setMigrationReport] = useState<MigrationResult | null>(null);
-  const [showMigrationModal, setShowMigrationModal] = useState(false);
-
-  const handleRefreshDiagnostics = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      onShowToast?.("Configure o endereço do servidor e a chave de segurança primeiro.", "warning", "Credenciais Ausentes");
-      return;
-    }
-    setIsDiagnosing(true);
-    try {
-      const [lat, sess] = await Promise.all([
-        measureSupabaseLatency(supabaseUrl.trim(), supabaseAnonKey.trim()),
-        validateSupabaseSession()
-      ]);
-      setLatencyData(lat);
-      setSessionValidation(sess);
-      if (lat.status !== "error") {
-        setSupabaseStatus("connected");
-        setSupabaseStatusMsg(lat.message);
-        onShowToast?.(`Latência: ${lat.latencyMs}ms | Sessão de Utilizador Validada com Sucesso!`, "success", "Diagnóstico de Rede");
-      } else {
-        setSupabaseStatus("error");
-        setSupabaseStatusMsg(lat.message);
-        onShowToast?.(lat.message, "error", "Falha de Comunicação");
-      }
-    } catch (err: any) {
-      onShowToast?.(err?.message || "Erro ao rodar diagnóstico de rede.", "error", "Erro");
-    } finally {
-      setIsDiagnosing(false);
-    }
-  };
-
-  const handleTestSupabase = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      onShowToast?.("Introduza o endereço do servidor e a chave de segurança.", "warning", "Campos Incompletos");
-      return;
-    }
-    setIsTestingSupabase(true);
-    setSupabaseStatusMsg("");
-    try {
-      const res = await testSupabaseConnection(supabaseUrl.trim(), supabaseAnonKey.trim());
-      if (res.success) {
-        setSupabaseStatus("connected");
-        setSupabaseStatusMsg(res.message);
-        if (res.latencyMs !== undefined) {
-          setLatencyData({
-            latencyMs: res.latencyMs,
-            status: res.latencyMs < 120 ? "optimal" : res.latencyMs < 300 ? "good" : "slow",
-            message: res.message,
-            timestamp: new Date().toISOString()
-          });
-        }
-        onShowToast?.(`Conexão com o servidor verificada! Latência de resposta: ${res.latencyMs || 0}ms`, "success", "Servidor Operacional");
-      } else {
-        setSupabaseStatus("error");
-        setSupabaseStatusMsg(res.message);
-        onShowToast?.(res.message, "error", "Falha de Conexão");
-      }
-    } catch (err: any) {
-      setSupabaseStatus("error");
-      setSupabaseStatusMsg(err.message || "Erro de ligação ao servidor.");
-      onShowToast?.(err.message || "Erro ao testar ligação ao servidor.", "error", "Erro");
-    } finally {
-      setIsTestingSupabase(false);
-    }
-  };
-
-  const handleSaveSupabaseConfig = () => {
-    const prevCfg = getSupabaseConfig();
-    const newConfig: SupabaseConfig = {
-      url: supabaseUrl.trim(),
-      anonKey: supabaseAnonKey.trim(),
-      enabled: supabaseEnabled,
-      autoSync: supabaseAutoSync,
-      tenantId: prevCfg.tenantId || "default_tenant"
-    };
-    saveSupabaseConfig(newConfig);
-    onShowToast?.("Configuração do servidor de persistência guardada com sucesso!", "success", "Guardado");
-    onAddAuditLog("CONFIG_PERSISTENCIA", "CONFIGURACOES", `Servidor de Nuvem ${supabaseEnabled ? "ativado" : "desativado"}`);
-  };
-
-  const handleRunMigration = async () => {
-    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      onShowToast?.("Configure e teste as credenciais do servidor antes de iniciar a migração.", "warning", "Credenciais Ausentes");
-      return;
-    }
-
-    setIsMigrating(true);
-    setShowMigrationModal(true);
-    setMigrationLogs([]);
-    setMigrationReport(null);
-    setMigrationPercent(0);
-    setMigrationStep("Inicialização");
-    setMigrationDetail("A preparar migração estruturada de dados...");
-
-    try {
-      const result = await MigrationService.runFirestoreToSupabaseMigration({
-        onStep: (step, pct, detail) => {
-          setMigrationStep(step);
-          setMigrationPercent(pct);
-          setMigrationDetail(detail);
-        },
-        onLog: (text, level = "info") => {
-          const now = new Date().toLocaleTimeString();
-          setMigrationLogs(prev => [...prev, { text, level, time: now }]);
-        }
-      }, {
-        products,
-        customers,
-        transactions,
-        cashFlow: []
-      });
-
-      setMigrationReport(result);
-      if (result.success) {
-        onShowToast?.(`Migração concluída! ${result.customersMigrated + result.productsMigrated + result.transactionsMigrated} registos transferidos com sucesso.`, "success", "Migração Concluída");
-        onAddAuditLog("MIGRACAO_DADOS", "CONFIGURACOES", `Migração estruturada de dados finalizada com sucesso em ${(result.durationMs / 1000).toFixed(2)}s`);
-      } else {
-        onShowToast?.("A migração encontrou alguns alertas. Consulte o relatório de integridade.", "warning", "Migração Finalizada");
-      }
-    } catch (err: any) {
-      onShowToast?.(err.message || "Erro crítico durante a migração de dados.", "error", "Falha na Migração");
-    } finally {
-      setIsMigrating(false);
-    }
-  };
-
-  const handleSyncAllToSupabase = async () => {
-    if (!supabaseEnabled || !supabaseUrl.trim() || !supabaseAnonKey.trim()) {
-      onShowToast?.("Ative e configure o servidor de dados antes de sincronizar.", "warning", "Servidor Inativo");
-      return;
-    }
-    setIsSyncingSupabase(true);
-    try {
-      const res = await SupabaseSyncService.syncAll({
-        products,
-        customers,
-        transactions,
-        cashFlow: []
-      });
-      if (res.success) {
-        onShowToast?.(`Sincronização concluída com sucesso! ${res.count} registos replicados no servidor em nuvem.`, "success", "Sincronização Concluída");
-        onAddAuditLog("SYNC_SERVIDOR", "CONFIGURACOES", `${res.count} registos sincronizados com o servidor em nuvem`);
-      } else {
-        onShowToast?.(res.error || "Falha na sincronização com o servidor de dados.", "error", "Erro de Sincronização");
-      }
-    } catch (err: any) {
-      onShowToast?.(err.message || "Erro durante a sincronização.", "error", "Erro");
-    } finally {
-      setIsSyncingSupabase(false);
-    }
-  };
-
-  const copySupabaseSqlSchema = () => {
-    const schemaSql = `-- OST Vendas ERP - Estrutura de Tabelas Relacionais (PostgreSQL Engine)
-
--- 1. Tabela de Produtos / Catálogo
-CREATE TABLE IF NOT EXISTS produtos (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  code TEXT,
-  category TEXT,
-  supplier TEXT,
-  cost_price NUMERIC DEFAULT 0,
-  sale_price NUMERIC NOT NULL,
-  stock NUMERIC DEFAULT 0,
-  min_stock NUMERIC DEFAULT 0,
-  vat_rate NUMERIC DEFAULT 16,
-  barcode TEXT,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- 2. Tabela de Vendas e Faturas
-CREATE TABLE IF NOT EXISTS vendas (
-  id TEXT PRIMARY KEY,
-  invoice_number TEXT,
-  customer_name TEXT,
-  total_amount NUMERIC NOT NULL,
-  payment_method TEXT,
-  operator_name TEXT,
-  items JSONB DEFAULT '[]'::jsonb,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- 3. Tabela de Clientes e Contas Correntes
-CREATE TABLE IF NOT EXISTS clientes (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  nuit TEXT,
-  email TEXT,
-  phone TEXT,
-  address TEXT,
-  balance NUMERIC DEFAULT 0,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-
--- 4. Tabela de Movimentos de Caixa
-CREATE TABLE IF NOT EXISTS caixa (
-  id TEXT PRIMARY KEY,
-  type TEXT NOT NULL,
-  amount NUMERIC NOT NULL,
-  description TEXT,
-  timestamp TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now())
-);
-`;
-    navigator.clipboard.writeText(schemaSql);
-    onShowToast?.("Script de estrutura SQL copiado para a área de transferência!", "info", "SQL Copiado");
-  };
-
-  const handleUploadCloudBackup = async () => {
-    if (!canEdit) {
-      if (onShowToast) {
-        onShowToast("Apenas administradores podem iniciar um backup em nuvem.", "error", "Permissão Negada");
-      }
-      return;
-    }
-
-    const uid = auth.currentUser?.uid;
-    if (!uid) {
-      if (onShowToast) {
-        onShowToast("Nenhum Administrador autenticado encontrado para salvar na nuvem.", "error", "Erro de Autenticação");
-      }
-      return;
-    }
-
-    if (!onGetBackupPayload) {
-      if (onShowToast) {
-        onShowToast("Função de obter payload de backup não configurada.", "error", "Erro Interno");
-      }
-      return;
-    }
-
-    setIsUploadingCloudBackup(true);
-    try {
-      const backupData = onGetBackupPayload();
-      const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const filename = `OST_Vendas_Cloud_Backup_${timestamp}.json`;
-      
-      await uploadBackupToStorage(uid, filename, backupData);
-      
-      if (onShowToast) {
-        onShowToast("Backup completo enviado com sucesso para o armazenamento em nuvem!", "success", "Backup em Nuvem");
-      }
-      
-      onAddAuditLog(
-        "Backup em Nuvem Seguro",
-        "SEGURANÇA",
-        `Administrador ${activeUser?.name || "ADMIN"} realizou um backup completo para a nuvem. Ficheiro: ${filename}`
-      );
-
-      await loadCloudBackups();
-    } catch (error: any) {
-      console.error("Erro no upload de backup para nuvem:", error);
-      if (onShowToast) {
-        onShowToast("Falha ao salvar backup na nuvem: " + error.message, "error", "Falha de Upload");
-      }
-    } finally {
-      setIsUploadingCloudBackup(false);
-    }
-  };
-
-  const handleRestoreFromCloud = async (backupItem: CloudBackupItem) => {
-    if (currentRole !== "ADMIN") {
-      if (onShowToast) {
-        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem restaurar o banco de dados.", "error", "Permissão Negada");
-      }
-      return;
-    }
-
-    if (window.confirm(`Deseja realmente restaurar os dados do sistema a partir do backup em nuvem "${backupItem.filename}"? Os dados atuais serão substituídos.`)) {
-      setIsRestoringCloudBackup(true);
-      try {
-        const response = await fetch(backupItem.downloadUrl);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: Falha ao descarregar ficheiro da nuvem`);
-        }
-        const parsed = await response.json();
-        
-        if (onImportLocalDB && parsed.data) {
-          const success = await onImportLocalDB(parsed.data);
-          if (success) {
-            if (onShowToast) {
-              onShowToast("Banco de dados restaurado com sucesso a partir da nuvem!", "success", "Restauro Concluído");
-            }
-            onAddAuditLog(
-              "Restauro de Backup em Nuvem",
-              "SEGURANÇA",
-              `Administrador ${activeUser?.name || "ADMIN"} restaurou o sistema a partir do backup em nuvem: ${backupItem.filename}`
-            );
-          }
-        } else {
-          if (onShowToast) {
-            onShowToast("Os dados salvos nesse backup em nuvem parecem inválidos ou incompletos.", "warning", "Dados Inválidos");
-          }
-        }
-      } catch (err: any) {
-        console.error("Erro ao restaurar backup em nuvem:", err);
-        if (onShowToast) {
-          onShowToast("Erro ao ler ou processar dados de backup da nuvem: " + err.message, "error", "Erro de Restauro");
-        }
-      } finally {
-        setIsRestoringCloudBackup(false);
-      }
-    }
-  };
-
-  const handleDeleteCloudBackup = async (filename: string) => {
-    if (currentRole !== "ADMIN") {
-      if (onShowToast) {
-        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem remover backups.", "error", "Permissão Negada");
-      }
-      return;
-    }
-
-    const uid = auth.currentUser?.uid || activeUser?.id;
-    if (!uid) {
-      if (onShowToast) {
-        onShowToast("UID de autenticação não encontrado.", "error", "Erro");
-      }
-      return;
-    }
-
-    if (window.confirm(`Deseja realmente eliminar permanentemente o backup "${filename}" do armazenamento em nuvem?`)) {
-      try {
-        await deleteBackupFromStorage(uid, filename);
-        if (onShowToast) {
-          onShowToast("Cópia de segurança em nuvem removida com sucesso!", "success", "Backup Eliminado");
-        }
-        await loadCloudBackups();
-      } catch (err: any) {
-        console.error("Erro ao eliminar backup em nuvem:", err);
-        if (onShowToast) {
-          onShowToast("Erro ao eliminar o backup da nuvem: " + err.message, "error", "Erro");
-        }
-      }
-    }
-  };
-
-  const [confirmResetEmployeeId, setConfirmResetEmployeeId] = useState<string | null>(null);
-  const [isResettingPin, setIsResettingPin] = useState(false);
-
-  // Branch (Filial) Management States
-  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
-  const [branchNameInput, setBranchNameInput] = useState("");
-  const [branchCodeInput, setBranchCodeInput] = useState("");
-  const [branchAddressInput, setBranchAddressInput] = useState("");
-  const [branchContactInput, setBranchContactInput] = useState("");
-  const [branchCityInput, setBranchCityInput] = useState("");
-
-  const handleSaveBranch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit) {
-      if (onShowToast) onShowToast("Apenas administradores podem gerenciar filiais.", "error", "Permissão Negada");
-      return;
-    }
-
-    if (!branchNameInput.trim()) {
-      if (onShowToast) onShowToast("O nome da filial é obrigatório.", "error");
-      return;
-    }
-
-    const currentBranches = settings.branches || [];
-
-    if (editingBranchId) {
-      const updatedBranches = currentBranches.map(b => 
-        b.id === editingBranchId 
-          ? { 
-              ...b, 
-              name: branchNameInput.trim(),
-              code: branchCodeInput.trim() || undefined,
-              address: branchAddressInput.trim(),
-              contact: branchContactInput.trim(),
-              city: branchCityInput.trim() || undefined
-            } 
-          : b
-      );
-
-      onUpdateSettings({ branches: updatedBranches });
-      if (onShowToast) onShowToast("Filial atualizada com sucesso!", "success");
-      
-      if (onAddAuditLog) {
-        onAddAuditLog(
-          "CONFIGURAÇÃO",
-          "CONFIGURAÇÕES",
-          `Filial "${branchNameInput.trim()}" atualizada pelo administrador.`
-        );
-      }
-    } else {
-      const newId = `branch-${Date.now()}`;
-      const newBranch: Branch = {
-        id: newId,
-        name: branchNameInput.trim(),
-        code: branchCodeInput.trim() || `FIL-${currentBranches.length + 1}`,
-        address: branchAddressInput.trim(),
-        contact: branchContactInput.trim(),
-        city: branchCityInput.trim() || undefined
-      };
-
-      const updatedBranches = [...currentBranches, newBranch];
-      onUpdateSettings({ branches: updatedBranches });
-      if (onShowToast) onShowToast("Nova filial cadastrada com sucesso!", "success");
-
-      if (onAddAuditLog) {
-        onAddAuditLog(
-          "CONFIGURAÇÃO",
-          "CONFIGURAÇÕES",
-          `Nova filial "${branchNameInput.trim()}" cadastrada pelo administrador.`
-        );
-      }
-    }
-
-    // Reset inputs
-    setEditingBranchId(null);
-    setBranchNameInput("");
-    setBranchCodeInput("");
-    setBranchAddressInput("");
-    setBranchContactInput("");
-    setBranchCityInput("");
-  };
-
-  const handleEditBranchClick = (branch: Branch) => {
-    setEditingBranchId(branch.id);
-    setBranchNameInput(branch.name);
-    setBranchCodeInput(branch.code || "");
-    setBranchAddressInput(branch.address);
-    setBranchContactInput(branch.contact);
-    setBranchCityInput(branch.city || "");
-    
-    // Smooth scroll to top of form
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDeleteBranch = (id: string, name: string) => {
-    if (!canEdit) {
-      if (onShowToast) onShowToast("Apenas administradores podem gerenciar filiais.", "error", "Permissão Negada");
-      return;
-    }
-
-    const currentBranches = settings.branches || [];
-    if (currentBranches.length <= 1) {
-      if (onShowToast) onShowToast("Não é possível remover todas as filiais. O sistema precisa de pelo menos uma filial ativa.", "error");
-      return;
-    }
-
-    const confirmDel = window.confirm(`Tem certeza de que deseja remover a filial "${name}"?`);
-    if (!confirmDel) return;
-
-    const updatedBranches = currentBranches.filter(b => b.id !== id);
-    onUpdateSettings({ branches: updatedBranches });
-    if (onShowToast) onShowToast("Filial removida com sucesso!", "success");
-
-    if (onAddAuditLog) {
-      onAddAuditLog(
-        "CONFIGURAÇÃO",
-        "CONFIGURAÇÕES",
-        `Filial "${name}" removida pelo administrador.`
-      );
-    }
-  };
-
-  const loadLocalBackupsLog = () => {
-    try {
-      const logsStr = localStorage.getItem("erp_local_backups_log");
-      if (logsStr) {
-        setLocalBackupsLog(JSON.parse(logsStr));
-      } else {
-        setLocalBackupsLog([]);
-      }
-    } catch (e) {
-      console.error("Erro ao ler logs de backup:", e);
-    }
-  };
-
-  useEffect(() => {
-    loadLocalBackupsLog();
-  }, []);
-
-  const handleCreateManualBackup = async () => {
-    if (!canEdit) {
-      if (onShowToast) {
-        onShowToast("Apenas administradores podem iniciar um backup manual.", "error", "Permissão Negada");
-      }
-      return;
-    }
-    
-    if (onTriggerLocalBackup) {
-      const success = await onTriggerLocalBackup("manual");
-      if (success) {
-        if (onShowToast) {
-          onShowToast("Cópia de segurança manual criada localmente com sucesso!", "success", "Backup Concluído");
-        }
-        loadLocalBackupsLog();
-      } else {
-        if (onShowToast) {
-          onShowToast("Erro ao processar cópia de segurança manual.", "error", "Falha de Backup");
-        }
-      }
-    }
-  };
-
-  const handleRestoreFromSlot = async (slotId: string) => {
-    if (currentRole !== "ADMIN") {
-      if (onShowToast) {
-        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem restaurar o banco de dados.", "error", "Permissão Negada");
-      }
-      return;
-    }
-
-    if (window.confirm("Deseja realmente restaurar os dados a partir deste ponto de backup local? Os dados atuais serão substituídos.")) {
-      try {
-        const dataStr = localStorage.getItem(`erp_backup_slot_${slotId}`);
-        if (dataStr) {
-          const parsed = JSON.parse(dataStr);
-          if (onImportLocalDB && parsed.data) {
-            const success = await onImportLocalDB(parsed.data);
-            if (success) {
-              if (onShowToast) {
-                onShowToast("Banco de dados local restaurado com sucesso!", "success", "Redundância Restaurada");
-              }
-            }
-          } else {
-            if (onShowToast) {
-              onShowToast("Os dados salvos nesse backup parecem inválidos ou incompletos.", "warning", "Dados Inválidos");
-            }
-          }
-        } else {
-          if (onShowToast) {
-            onShowToast("Não foi possível encontrar os dados desse backup. Ele pode ter sido limpo pelo navegador.", "error", "Ficheiro Não Encontrado");
-          }
-        }
-      } catch (err) {
-        if (onShowToast) {
-          onShowToast("Erro ao ler dados de backup.", "error", "Erro de Restauro");
-        }
-      }
-    }
-  };
-
-  const handleDownloadSlotBackup = (slotId: string, dateStr: string) => {
-    try {
-      const dataStr = localStorage.getItem(`erp_backup_slot_${slotId}`);
-      if (dataStr) {
-        const blob = new Blob([dataStr], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = `OST_Vendas_Backup_Local_${dateStr.split("T")[0]}_${slotId}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-        
-        if (onShowToast) {
-          onShowToast("Download do backup JSON concluído!", "success", "Exportação");
-        }
-      } else {
-        if (onShowToast) {
-          onShowToast("Não foi possível encontrar os dados do backup para descarregar.", "error", "Erro de Download");
-        }
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleSaveBackupInterval = (frequency: string) => {
-    if (!canEdit) {
-      if (onShowToast) {
-        onShowToast("Apenas administradores podem alterar o intervalo de backup.", "error", "Acesso Negado");
-      }
-      return;
-    }
-
-    setBackupFrequency(frequency);
-    onUpdateSettings({
-      backupFrequency: frequency
-    });
-
-    if (onShowToast) {
-      onShowToast(`Intervalo de exportação automática atualizado para: ${frequency === "daily" ? "Diário" : frequency === "weekly" ? "Semanal" : frequency === "monthly" ? "Mensal" : "A cada 12 Horas"}`, "success", "Intervalo Salvo");
-    }
-
-    onAddAuditLog(
-      "Alterar Intervalo de Backup",
-      "CONFIGURAÇÕES",
-      `Alterado intervalo de backup automático local para: ${frequency}.`
-    );
-  };
-
-  // Automatic Cloud Backup Scheduler States
-  const [cloudBackupEnabled, setCloudBackupEnabled] = useState(settings.cloudBackupEnabled ?? true);
-  const [backupFrequency, setBackupFrequency] = useState(settings.backupFrequency || "daily");
-  const [backupCron, setBackupCron] = useState(settings.backupCron || "0 2 * * *");
-  const [backupTime, setBackupTime] = useState(settings.backupTime || "02:00");
-  const [cloudProvider, setCloudProvider] = useState(settings.cloudProvider || "gcs");
-  const [backupExportToCloud, setBackupExportToCloud] = useState(settings.backupExportToCloud ?? true);
-  const [backupExportToEmail, setBackupExportToEmail] = useState(settings.backupExportToEmail ?? true);
-  const [isSimulatingCloudBackup, setIsSimulatingCloudBackup] = useState(false);
-  const [cloudBackupLogs, setCloudBackupLogs] = useState<string[]>([]);
-
-  // Cron Backups status states from backend
-  const [cronStatus, setCronStatus] = useState<{
-    active: boolean;
-    cronPattern: string;
-    description: string;
-    lastRun: string | null;
-    status: string | null;
-  } | null>(null);
-
-  const fetchCronStatus = async () => {
-    try {
-      const res = await fetch("/api/backups/cron-status");
-      const data = await res.json();
-      if (data.success) {
-        setCronStatus({
-          active: data.active,
-          cronPattern: data.cronPattern,
-          description: data.description,
-          lastRun: data.lastRun,
-          status: data.status
-        });
-      }
-    } catch (e) {
-      console.error("Erro ao carregar status do cron de backup:", e);
-    }
-  };
-
-  const handleTriggerCronBackup = async () => {
-    setIsSimulatingCloudBackup(true);
-    setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🚀 Disparando execução manual do backup agendado (Fim do Dia de Trabalho)...`]);
-    try {
-      const res = await fetch("/api/backups/trigger-cron", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
-        setCloudBackupLogs(prev => [
-          ...prev, 
-          `[${new Date().toLocaleTimeString()}] 📦 Cópia gerada com sucesso!`,
-          `[${new Date().toLocaleTimeString()}] 📧 Resultado: ${data.status || "Backup concluído com sucesso."}`
-        ]);
-        if (onShowToast) {
-          onShowToast("Backup agendado de fim de dia executado e enviado por e-mail com sucesso!", "success", "Cron Concluído");
-        }
-        await fetchCronStatus();
-        await fetchBackupsList();
-      } else {
-        throw new Error(data.error || "Falha na execução");
-      }
-    } catch (e: any) {
-      setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Erro: ${e.message}`]);
-      if (onShowToast) {
-        onShowToast(`Falha ao disparar cron: ${e.message}`, "error");
-      }
-    } finally {
-      setIsSimulatingCloudBackup(false);
-    }
-  };
-
-  // Real backups state & actions
-  const [backupsList, setBackupsList] = useState<any[]>([]);
-  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
-  const [isRestoringBackup, setIsRestoringBackup] = useState(false);
-
-  // Firebase logs states & actions
-  const [firebaseLogs, setFirebaseLogs] = useState<any[]>([]);
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logFilterDate, setLogFilterDate] = useState("");
-  const [logFilterType, setLogFilterType] = useState(""); // filter by category/module/action (e.g., "AUTENTICAÇÃO" or "MÓDULO")
-
-  const fetchBackupsList = async () => {
-    try {
-      setIsLoadingBackups(true);
-      const response = await fetch("/api/backups");
-      const data = await response.json();
-      if (data.success) {
-        setBackupsList(data.backups);
-      }
-    } catch (err) {
-      console.error("Erro ao carregar backups:", err);
-    } finally {
-      setIsLoadingBackups(false);
-    }
-  };
-
-  const fetchFirebaseLogs = async () => {
-    try {
-      setIsLoadingLogs(true);
-      const logs = await getLogsFromFirestore();
-      setFirebaseLogs(logs);
-    } catch (err) {
-      console.error("Erro ao carregar logs do Firebase:", err);
-    } finally {
-      setIsLoadingLogs(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchBackupsList();
-    fetchFirebaseLogs();
-    fetchCronStatus();
-  }, []);
-
-  const handleRestoreBackup = async (filename: string) => {
-    const confirmed = window.confirm(`Atenção: Tem certeza de que deseja restaurar o backup "${filename}"? Todos os dados atuais do banco de dados serão substituídos pelos dados contidos nesta cópia de segurança.`);
-    if (!confirmed) return;
-
-    try {
-      setIsRestoringBackup(true);
-      const response = await fetch("/api/backups/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename })
-      });
-      const data = await response.json();
-      if (data.success) {
-        if (onShowToast) onShowToast(data.message || "Banco de dados restaurado com sucesso!", "success");
-        onAddAuditLog(
-          "Restauro de Backup",
-          "SISTEMA",
-          `Restauro efetuado com sucesso a partir do ficheiro: ${filename}.`
-        );
-        setTimeout(() => {
-          window.location.reload();
-        }, 1500);
-      } else {
-        throw new Error(data.error || "Falha ao restaurar banco de dados.");
-      }
-    } catch (err: any) {
-      if (onShowToast) onShowToast(err.message, "error");
-    } finally {
-      setIsRestoringBackup(false);
-    }
-  };
-
-  const handleDeleteBackup = async (filename: string) => {
-    const confirmed = window.confirm(`Deseja realmente eliminar permanentemente o arquivo de backup "${filename}"?`);
-    if (!confirmed) return;
-
-    try {
-      const response = await fetch(`/api/backups/${filename}`, {
-        method: "DELETE"
-      });
-      const data = await response.json();
-      if (data.success) {
-        if (onShowToast) onShowToast("Cópia de segurança eliminada do servidor.", "success");
-        onAddAuditLog(
-          "Eliminação de Backup",
-          "SISTEMA",
-          `Ficheiro de backup eliminado: ${filename}.`
-        );
-        fetchBackupsList();
-      } else {
-        throw new Error(data.error || "Erro ao eliminar backup.");
-      }
-    } catch (err: any) {
-      if (onShowToast) onShowToast(err.message, "error");
-    }
-  };
-
-  // Thermal Printer States
-  const [printerEnabled, setPrinterEnabled] = useState(settings.printerEnabled || false);
-  const [printerName, setPrinterName] = useState(settings.printerName || "POS-58");
-  const [printerConnectionType, setPrinterConnectionType] = useState<"USB" | "BLUETOOTH" | "NETWORK">(settings.printerConnectionType || "USB");
-  const [printerIpAddress, setPrinterIpAddress] = useState(settings.printerIpAddress || "192.168.1.100");
-  const [printerPort, setPrinterPort] = useState(settings.printerPort || "COM1");
-  const [printerBaudRate, setPrinterBaudRate] = useState(settings.printerBaudRate || "9600");
-  const [printerType, setPrinterType] = useState<"RECEIPT" | "LABEL">(settings.printerType || "RECEIPT");
-  const [paperSize, setPaperSize] = useState<"A4" | "80MM" | "58MM">(settings.paperSize || "80MM");
-  const [printerAutoCut, setPrinterAutoCut] = useState(settings.printerAutoCut !== undefined ? settings.printerAutoCut : true);
-  const [thermalMarginTop, setThermalMarginTop] = useState<number>(settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4);
-  const [thermalMarginBottom, setThermalMarginBottom] = useState<number>(settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8);
-  const [isTestingPrinter, setIsTestingPrinter] = useState(false);
-  const [printerLogs, setPrinterLogs] = useState<string[]>([]);
-  const [showTestReceipt, setShowTestReceipt] = useState(false);
-
-  // WebUSB / Serial Printer Detection Logic
-  const [usbDevices, setUsbDevices] = useState<any[]>([]);
-  const [isScanningUsb, setIsScanningUsb] = useState(false);
-  const [webUsbError, setWebUsbError] = useState("");
-
-  const handleListUsbDevices = async () => {
-    setWebUsbError("");
-    setIsScanningUsb(true);
-    setPrinterLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] 🔎 Iniciando varredura por dispositivos USB (WebUSB)...`]);
-    
-    try {
-      if (typeof navigator === "undefined" || !(navigator as any).usb) {
-        throw new Error("WebUSB API não é suportada neste navegador ou ambiente.");
-      }
-      
-      const devices = await (navigator as any).usb.getDevices();
-      const mappedDevices = devices.map(d => ({
-        id: `${d.vendorId}_${d.productId}`,
-        name: d.productName || `Dispositivo USB (${d.vendorId.toString(16)}:${d.productId.toString(16)})`,
-        manufacturer: d.manufacturerName || "Fabricante Desconhecido",
-        vendorId: d.vendorId,
-        productId: d.productId,
-        serialNumber: d.serialNumber || "",
-        isSimulated: false
-      }));
-
-      setUsbDevices(mappedDevices);
-      
-      setPrinterLogs(prev => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] 🟢 Varredura concluída. Encontrado(s) ${mappedDevices.length} dispositivo(s) físico(s) conectado(s).`
-      ]);
-      
-      if (onShowToast) {
-        onShowToast(`Encontrados ${mappedDevices.length} dispositivos USB físicos para seleção.`, "info", "Varredura Concluída");
-      }
-    } catch (err: any) {
-      console.warn("WebUSB listing failed:", err);
-      setUsbDevices([]);
-      setWebUsbError("O seu navegador ou o iframe requer permissão explícita para listar dispositivos USB.");
-      setPrinterLogs(prev => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] ⚠️ Restrição de segurança: Conecte o cabo USB e abra o sistema em nova aba se necessário.`
-      ]);
-    } finally {
-      setIsScanningUsb(false);
-    }
-  };
-
-  const handleRequestUsbDevice = async () => {
-    setWebUsbError("");
-    setIsScanningUsb(true);
-    
-    try {
-      if (typeof navigator === "undefined" || !(navigator as any).usb) {
-        throw new Error("A WebUSB API não é suportada por este navegador.");
-      }
-      
-      const device = await (navigator as any).usb.requestDevice({ filters: [] });
-      if (device) {
-        const newDev = {
-          id: `${device.vendorId}_${device.productId}`,
-          name: device.productName || `Impressora USB (${device.vendorId.toString(16)}:${device.productId.toString(16)})`,
-          manufacturer: device.manufacturerName || "Fabricante Desconhecido",
-          vendorId: device.vendorId,
-          productId: device.productId,
-          serialNumber: device.serialNumber || "",
-          isSimulated: false
-        };
-
-        setUsbDevices(prev => {
-          if (prev.some(d => d.id === newDev.id)) return prev;
-          return [newDev, ...prev];
-        });
-        
-        setPrinterName(newDev.name);
-        setPrinterConnectionType("USB");
-        setPrinterPort("USB001");
-        
-        if (onShowToast) {
-          onShowToast(`Impressora "${newDev.name}" pareada e selecionada com sucesso!`, "success", "Dispositivo Vinculado");
-        }
-        
-        setPrinterLogs(prev => [
-          ...prev,
-          `[${new Date().toLocaleTimeString()}] ✔️ Dispositivo físico pareado com sucesso: ${newDev.name} (USB Vendor: ${newDev.vendorId}, Product: ${newDev.productId})`
-        ]);
-        
-        onAddAuditLog(
-          "Pareamento USB",
-          "CONFIGURAÇÕES",
-          `Impressora USB pareada com sucesso via WebUSB: ${newDev.name} (ID: ${newDev.id})`
-        );
-      }
-    } catch (err: any) {
-      console.error("Erro ao solicitar dispositivo WebUSB:", err);
-      let errMsg = err.message || "Solicitação USB rejeitada ou cancelada.";
-      if (err.name === "SecurityError") {
-        errMsg = "Segurança: WebUSB bloqueado no iframe. Abra a aplicação numa Nova Aba para utilizar impressoras USB físicas!";
-      } else if (err.name === "NotFoundError") {
-        errMsg = "Nenhum dispositivo USB foi selecionado pelo utilizador.";
-      }
-      setWebUsbError(errMsg);
-      if (onShowToast) {
-        onShowToast(errMsg, "error", "Falha de Conexão");
-      }
-    } finally {
-      setIsScanningUsb(false);
-    }
-  };
-
-  const handleSelectUsbDevice = (device: any) => {
-    setPrinterName(device.name);
-    setPrinterConnectionType("USB");
-    if (device.isSimulated) {
-      setPrinterLogs(prev => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] 🔌 Selecionada Impressora Simulada: ${device.name}. Pronto para testar emissão.`
-      ]);
-      if (onShowToast) {
-        onShowToast(`Impressora simulada "${device.name}" selecionada para testes!`, "info", "Dispositivo Ativo");
-      }
-    } else {
-      setPrinterLogs(prev => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] 🔌 Selecionada Impressora Física WebUSB: ${device.name} (Vid: ${device.vendorId}, Pid: ${device.productId}).`
-      ]);
-      if (onShowToast) {
-        onShowToast(`Impressora "${device.name}" ativa via WebUSB!`, "success", "Dispositivo Selecionado");
-      }
-    }
-  };
-
-  const [feedbackMsg, setFeedbackMsg] = useState("");
-  const [localError, setLocalError] = useState("");
-  const [isBackingUp, setIsBackingUp] = useState(false);
-
-  const handleTestPrinter = () => {
-    if (isTestingPrinter) return;
-
-    setIsTestingPrinter(true);
-    setPrinterLogs([]);
-    setShowTestReceipt(false);
-
-    const connectionInfo = printerConnectionType === "NETWORK" 
-      ? `IP ${printerIpAddress}` 
-      : printerConnectionType === "BLUETOOTH" 
-        ? "Bluetooth (Sem Fios)" 
-        : `${printerPort} a ${printerBaudRate} bps`;
-
-    const steps = [
-      `[${new Date().toLocaleTimeString()}] 🖨️ Inicializando protocolo de comunicação com a ${printerType === "RECEIPT" ? "impressora de talões" : "impressora de etiquetas"}...`,
-      `[${new Date().toLocaleTimeString()}] 🔌 Estabelecendo conexão via ${printerConnectionType} (${connectionInfo})...`,
-      `[${new Date().toLocaleTimeString()}] ✅ Dispositivo detetado com sucesso: ${printerName}.`,
-      `[${new Date().toLocaleTimeString()}] 📄 Preparando ${printerType === "RECEIPT" ? "cupom" : "etiqueta"} de teste (${paperSize})...`,
-      `[${new Date().toLocaleTimeString()}] 📤 Enviando buffer para fila de impressão...`,
-      printerAutoCut 
-        ? `[${new Date().toLocaleTimeString()}] ✂️ Enviando comando de guilhotina ESC/POS (Corte Total: GS V 66 0)...`
-        : `[${new Date().toLocaleTimeString()}] ✂️ Corte Automático de Papel desativado nas configurações. Ignorando comando de guilhotina.`,
-      `[${new Date().toLocaleTimeString()}] ✔️ ${printerType === "RECEIPT" ? "Cupom" : "Etiqueta"} de teste impresso com sucesso!`
-    ];
-
-    let stepIndex = 0;
-    const intervalId = setInterval(() => {
-      if (stepIndex < steps.length) {
-        setPrinterLogs(prev => [...prev, steps[stepIndex]]);
-        stepIndex++;
-      } else {
-        clearInterval(intervalId);
-        setIsTestingPrinter(false);
-        setShowTestReceipt(true);
-        if (onShowToast) onShowToast(`${printerType === "RECEIPT" ? "Cupom" : "Etiqueta"} de teste emitido com sucesso!`, "success", "Impressão Concluída");
-        onAddAuditLog(
-          "Teste de Impressora",
-          "CONFIGURAÇÕES",
-          `Impressão de ${printerType === "RECEIPT" ? "cupom" : "etiqueta"} de teste (${paperSize}) executada com sucesso na impressora "${printerName}" via ${printerConnectionType}.`
-        );
-      }
-    }, 350);
-  };
-
-  const handleSavePrinterConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit) {
-      setLocalError("Apenas administradores seniores têm permissão para editar configurações de impressora.");
-      setTimeout(() => setLocalError(""), 3500);
-      return;
-    }
-    
-    // Save settings globally
-    onUpdateSettings({
-      printerEnabled,
-      printerName,
-      printerConnectionType,
-      printerIpAddress,
-      printerPort,
-      printerBaudRate,
-      printerType,
-      paperSize,
-      printerAutoCut,
-      thermalMarginTop,
-      thermalMarginBottom,
-    });
-
-    setFeedbackMsg("Configuração da Impressora de Vendas salva com sucesso!");
-    onAddAuditLog(
-      "Configuração da Impressora",
-      "CONFIGURAÇÕES",
-      `Impressora configurada: ${printerName}, Tipo: ${printerType}, Papel: ${paperSize}, Margens Térmicas: Topo ${thermalMarginTop}mm / Fundo ${thermalMarginBottom}mm, Conectividade: ${printerConnectionType}, Corte Automático: ${printerAutoCut ? "Ativo" : "Inativo"}.`
-    );
-    if (onShowToast) onShowToast("As configurações da Impressora de Vendas foram gravadas com sucesso!", "success", "Configurações Salvas");
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
+  }, [initialSubTab]);
+
+  // Form States - General & Store Info
+  const [companyName, setCompanyName] = useState(settings.companyName || "");
+  const [slogan, setSlogan] = useState(settings.slogan || "");
+  const [companyNuit, setCompanyNuit] = useState(settings.companyNuit || settings.nuit || "");
+  const [storeAddress, setStoreAddress] = useState(settings.storeAddress || settings.companyAddress || "");
+  const [storeContact, setStoreContact] = useState(settings.storeContact || "");
+  const [storeEmail, setStoreEmail] = useState(settings.storeEmail || settings.email || "");
+  const [logoUrl, setLogoUrl] = useState(settings.logoUrl || "");
+
+  // Form States - Fiscal & Sales Parameters
+  const [defaultVat, setDefaultVat] = useState(settings.defaultVat ?? settings.vatDefaultRate ?? 16);
+  const [currencyCode, setCurrencyCode] = useState(settings.currency || "MT");
+
+  // Form States - Receipt Printing
+  const [paperSize, setPaperSize] = useState<"80MM" | "58MM" | "A4">(settings.paperSize || "80MM");
+  const [printerAutoCut, setPrinterAutoCut] = useState(settings.printerAutoCut ?? true);
+
+  // Form States - Notifications & Stock Alerts
+  const [alertsRecipientEmail, setAlertsRecipientEmail] = useState(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
+  const [managerWhatsappPhone, setManagerWhatsappPhone] = useState(settings.managerWhatsappPhone || "");
+  const [smsStockThreshold, setSmsStockThreshold] = useState(settings.smsStockThreshold || 5);
+  const [emailStockAlertsEnabled, setEmailStockAlertsEnabled] = useState(settings.emailStockAlertsEnabled ?? true);
+  const [whatsappEnabled, setWhatsappEnabled] = useState(settings.whatsappEnabled ?? true);
+  const [reportHour, setReportHour] = useState(settings.reportHour || "20:00");
+  const [reportFrequency, setReportFrequency] = useState<"daily" | "weekly">(settings.reportFrequency || "daily");
+
+  // Form States - Multi-branch / Filiais
+  const [branches, setBranches] = useState<Branch[]>(settings.branches || []);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchAddress, setNewBranchAddress] = useState("");
+  const [newBranchContact, setNewBranchContact] = useState("");
+  const [isAddingBranch, setIsAddingBranch] = useState(false);
+
+  // Cloud & Backup States
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [isPurgingData, setIsPurgingData] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // Update local states when settings change from parent
   useEffect(() => {
     setCompanyName(settings.companyName || "");
     setSlogan(settings.slogan || "");
-    setCompanyNuit(settings.companyNuit || "");
-    setStoreAddress(settings.storeAddress || "");
+    setCompanyNuit(settings.companyNuit || settings.nuit || "");
+    setStoreAddress(settings.storeAddress || settings.companyAddress || "");
     setStoreContact(settings.storeContact || "");
-    setDefaultVat(settings.defaultVat !== undefined ? settings.defaultVat : settings.vatDefaultRate || 16);
+    setStoreEmail(settings.storeEmail || settings.email || "");
     setLogoUrl(settings.logoUrl || "");
-    
-    setReportRecipientEmail(settings.reportRecipientEmail || "");
-    setReportHour(settings.reportHour || "02:00");
-    setReportFrequency(settings.reportFrequency || "daily");
-    setAlertsRecipientEmail(settings.alertsRecipientEmail || "");
-    
-    setSmsAlertsEnabled(settings.smsAlertsEnabled || false);
-    setSmsProviderType(settings.smsProviderType || "TWILIO");
-    setSmsTwilioSid(settings.smsTwilioSid || "");
-    setSmsTwilioToken(settings.smsTwilioToken || "");
-    setSmsTwilioFrom(settings.smsTwilioFrom || "");
-    setSmsCustomUrl(settings.smsCustomUrl || "");
-    setSmsManagerPhone(settings.smsManagerPhone || "");
-    setSmsStockThreshold(settings.smsStockThreshold || 5);
-
-    setWhatsappEnabled(settings.whatsappEnabled || false);
-    setWhatsappProvider(settings.whatsappProvider || "DIRECT_LINK");
-    setWhatsappApiEndpoint(settings.whatsappApiEndpoint || "");
-    setWhatsappToken(settings.whatsappToken || "");
-    setWhatsappPhoneId(settings.whatsappPhoneId || "");
-    setManagerWhatsappPhone(settings.managerWhatsappPhone || "");
-    setWhatsappMessageTemplate(
-      settings.whatsappMessageTemplate ||
-        `⚠️ *ALERTA DE ESTOQUE CRÍTICO* ⚠️\n\nO produto *{product_name}* atingiu o nível crítico de *{current_stock}* unidades (limite: {threshold}).\n\n👉 Acesse o POS para repor o estoque: {pos_link}`
-    );
-    
-    setSmtpEnabled(settings.smtpEnabled || false);
-    setSmtpHost(settings.smtpHost || "smtp.gmail.com");
-    setSmtpPort(settings.smtpPort || 587);
-    setSmtpUser(settings.smtpUser || "");
-    setSmtpPassword(settings.smtpPassword || "");
-    setSmtpSecure(settings.smtpSecure || false);
-    setEmailStockAlertsEnabled(settings.emailStockAlertsEnabled || false);
-    setStockAlertEmailSubject(settings.stockAlertEmailSubject || "[ALERTA] Estoque Crítico de Produtos - OST Vendas");
-    setStockAlertEmailBody(settings.stockAlertEmailBody || `Olá,\n\nEste é um alerta automático de que os seguintes produtos atingiram o nível de estoque mínimo definido:\n\n[LISTA_PRODUTOS]\n\nPor favor, providencie a reposição o quanto antes para evitar rupturas de estoque.\n\nAtenciosamente,\nSistema OST Vendas`);
-    setIsSmtpVerified(settings.isSmtpVerified || false);
-    setTestRecipient(settings.alertsRecipientEmail || settings.reportRecipientEmail || testRecipient || "");
-    
-    if (settings.cloudBackupEnabled !== undefined) setCloudBackupEnabled(settings.cloudBackupEnabled);
-    if (settings.backupFrequency) setBackupFrequency(settings.backupFrequency);
-    if (settings.backupCron) setBackupCron(settings.backupCron);
-    if (settings.backupTime) setBackupTime(settings.backupTime);
-    if (settings.cloudProvider) setCloudProvider(settings.cloudProvider);
-    if (settings.backupExportToCloud !== undefined) setBackupExportToCloud(settings.backupExportToCloud);
-    if (settings.backupExportToEmail !== undefined) setBackupExportToEmail(settings.backupExportToEmail);
-
-    setPrinterEnabled(settings.printerEnabled || false);
-    setPrinterName(settings.printerName || "POS-58");
-    setPrinterConnectionType(settings.printerConnectionType || "USB");
-    setPrinterIpAddress(settings.printerIpAddress || "192.168.1.100");
-    setPrinterPort(settings.printerPort || "COM1");
-    setPrinterBaudRate(settings.printerBaudRate || "9600");
-    setPrinterType(settings.printerType || "RECEIPT");
+    setDefaultVat(settings.defaultVat ?? settings.vatDefaultRate ?? 16);
+    setCurrencyCode(settings.currency || "MT");
     setPaperSize(settings.paperSize || "80MM");
-    setPrinterAutoCut(settings.printerAutoCut !== undefined ? settings.printerAutoCut : true);
-    setThermalMarginTop(settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4);
-    setThermalMarginBottom(settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8);
-
-    if (settings.inventoryStrategy) setInventoryStrategy(settings.inventoryStrategy);
-    if (settings.expiryAlertDays !== undefined) setExpiryAlertDays(settings.expiryAlertDays);
-    if (settings.expiryAlertsEnabled !== undefined) setExpiryAlertsEnabled(settings.expiryAlertsEnabled);
-    if (settings.expiryNotificationMethod) setExpiryNotificationMethod(settings.expiryNotificationMethod);
-    if (settings.expiryEmailSubject) setExpiryEmailSubject(settings.expiryEmailSubject);
-    if (settings.expiryEmailBody) setExpiryEmailBody(settings.expiryEmailBody);
-
-    if (settings.aiAutoMonitoring !== undefined) setAiAutoMonitoring(settings.aiAutoMonitoring);
-    if (settings.aiHealthSensitivity !== undefined) setAiHealthSensitivity(settings.aiHealthSensitivity);
+    setPrinterAutoCut(settings.printerAutoCut ?? true);
+    setAlertsRecipientEmail(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
+    setManagerWhatsappPhone(settings.managerWhatsappPhone || "");
+    setSmsStockThreshold(settings.smsStockThreshold || 5);
+    setEmailStockAlertsEnabled(settings.emailStockAlertsEnabled ?? true);
+    setWhatsappEnabled(settings.whatsappEnabled ?? true);
+    setBranches(settings.branches || []);
   }, [settings]);
 
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user, token) => {
-        const gToken = token || localStorage.getItem("google_access_token");
-        if (gToken && gToken !== "local_token" && gToken !== "mock_token") {
-          setGmailUser(user);
-          setNeedsAuth(false);
-        } else {
-          setNeedsAuth(true);
-        }
-      },
-      () => {
-        setGmailUser(null);
-        setNeedsAuth(true);
-      }
-    );
-    return () => unsubscribe();
-  }, []);
-
-  const handleGmailLogin = async () => {
-    setIsLoggingIn(true);
-    try {
-      const result: any = await googleSignIn(true);
-      if (result) {
-        setGmailUser(result.user || result);
-        setNeedsAuth(false);
-        if (onShowToast) onShowToast("Autenticado com Gmail (OAuth2) com sucesso!", "success");
-      }
-    } catch (err) {
-      if (onShowToast) onShowToast("Falha na autenticação com Gmail.", "error");
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleGmailLogout = async () => {
-    await logout();
-    setGmailUser(null);
-    setNeedsAuth(true);
-    if (onShowToast) onShowToast("Conta Gmail desvinculada.", "info");
-  };
-  
-  const handleDedicatedSmtpTest = async () => {
-    if (!smtpHost || !smtpPort) {
-      if (onShowToast) {
-        onShowToast("O Servidor Host e a Porta do SMTP são obrigatórios para realizar o teste.", "warning", "Campos em Falta");
-      }
-      return;
-    }
-
-    const recipient = alertsRecipientEmail || reportRecipientEmail || testRecipient || (activeUser?.email);
-    if (!recipient || !recipient.includes("@")) {
-      if (onShowToast) {
-        onShowToast("Nenhum e-mail de administrador configurado encontrado para o teste. Por favor, configure o E-mail de Destino para Alertas ou Relatórios primeiro.", "warning", "E-mail Não Configurado");
-      }
-      return;
-    }
-
-    setIsTestingSmtp(true);
-    try {
-      const response = await fetch("/api/email/test-smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smtpHost,
-          smtpPort: Number(smtpPort),
-          smtpUser,
-          smtpPassword,
-          smtpSecure,
-          recipient: recipient,
-          subject: "Teste de Conexão SMTP - OST Vendas",
-          body: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-              <h2 style="color: #f97316; text-align: center; margin-top: 0;">Teste de SMTP Concluído com Sucesso!</h2>
-              <p style="color: #334155; font-size: 14px; line-height: 1.6;">Se recebeu esta mensagem, significa que as credenciais do seu servidor SMTP dedicado foram verificadas corretamente e o sistema de vendas está autorizado a enviar e-mails.</p>
-              <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; margin: 20px 0; border: 1px solid #f1f5f9;">
-                <p style="margin: 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Host:</b> ${smtpHost}</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Porta:</b> ${smtpPort}</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Utilizador:</b> ${smtpUser || "Sem autenticação"}</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Segurança:</b> ${smtpSecure ? "SSL/TLS Ativo" : "Inativo"}</p>
-              </div>
-              <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">Este é um e-mail automático enviado pelo painel de configurações do OST Vendas.</p>
-            </div>
-          `
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setIsSmtpVerified(true);
-        if (onShowToast) {
-          onShowToast(data.message || "Conexão SMTP validada com sucesso e e-mail de teste enviado para o administrador!", "success", "Conexão Estabelecida");
-        }
-        onUpdateSettings({
-          smtpHost,
-          smtpPort: Number(smtpPort),
-          smtpUser,
-          smtpPassword,
-          smtpSecure,
-          isSmtpVerified: true
-        });
-        onAddAuditLog(
-          "Teste de SMTP",
-          "CONFIGURAÇÕES",
-          `Conexão SMTP testada com sucesso para o host ${smtpHost}:${smtpPort}. Destinatário Administrador: ${recipient}. Estado: Verificado.`
-        );
-      } else {
-        setIsSmtpVerified(false);
-        if (onShowToast) {
-          onShowToast(data.error || "Servidor SMTP recusou a ligação de teste.", "error", "Falha de Conexão");
-        }
-        onUpdateSettings({
-          isSmtpVerified: false
-        });
-      }
-    } catch (err: any) {
-      setIsSmtpVerified(false);
-      if (onShowToast) {
-        onShowToast(err.message || "Erro desconhecido ao ligar ao SMTP.", "error", "Falha de Ligação");
-      }
-      onUpdateSettings({
-        isSmtpVerified: false
-      });
-    } finally {
-      setIsTestingSmtp(false);
-    }
-  };
-
-  const handleImportFromEnv = async () => {
-    setIsImportingEnv(true);
-    try {
-      const response = await fetch("/api/email/smtp-env");
-      if (response.ok) {
-        const data = await response.json();
-        setSmtpHost(data.smtpHost || "");
-        setSmtpPort(data.smtpPort || 587);
-        setSmtpUser(data.smtpUser || "");
-        setSmtpPassword(data.smtpPassword || "");
-        setSmtpSecure(data.smtpSecure || false);
-        setIsSmtpVerified(false);
-        if (onShowToast) {
-          onShowToast("Configurações SMTP importadas do arquivo .env com sucesso! Clique em 'Salvar Servidor' para validar e gravar.", "success", "Importação Conclúida");
-        }
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Não foi possível contactar o servidor para obter dados do .env.");
-      }
-    } catch (err: any) {
-      if (onShowToast) {
-        onShowToast(err.message || "Falha ao obter credenciais do .env.", "error", "Falha na Importação");
-      }
-    } finally {
-      setIsImportingEnv(false);
-    }
-  };
-
-  const fetchEnvSmtpSettings = async (showNotification = false) => {
-    setIsFetchingEnvSmtp(true);
-    try {
-      const response = await fetch("/api/email/smtp-env");
-      if (response.ok) {
-        const data = await response.json();
-        setEnvSmtpHost(data.smtpHost || "");
-        setEnvSmtpPort(data.smtpPort || 587);
-        setEnvSmtpUser(data.smtpUser || "");
-        setEnvSmtpPassword(data.smtpPassword || "");
-        setEnvSmtpSecure(data.smtpSecure || false);
-        if (showNotification && onShowToast) {
-          onShowToast("Definições SMTP do ficheiro .env lidas com sucesso!", "success", "Leitura Concluída");
-        }
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Não foi possível contactar o servidor para obter dados do .env.");
-      }
-    } catch (err: any) {
-      if (showNotification && onShowToast) {
-        onShowToast(err.message || "Falha ao ler credenciais do .env.", "error", "Falha de Leitura");
-      }
-    } finally {
-      setIsFetchingEnvSmtp(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchEnvSmtpSettings(false);
-  }, []);
-
-  const handleVerifyEnvSmtp = async () => {
-    if (!envSmtpHost || !envSmtpPort) {
-      if (onShowToast) {
-        onShowToast("O Servidor Host e a Porta do SMTP no ficheiro .env são obrigatórios para realizar o teste.", "warning", "Campos Vazios");
-      }
-      return;
-    }
-
-    setIsTestingEnvSmtp(true);
-    setEnvSmtpVerifyStatus("idle");
-    setEnvSmtpVerifyError("");
-    try {
-      const response = await fetch("/api/email/verify-smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smtpHost: envSmtpHost,
-          smtpPort: Number(envSmtpPort),
-          smtpUser: envSmtpUser,
-          smtpPassword: envSmtpPassword,
-          smtpSecure: envSmtpSecure
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        setEnvSmtpVerifyStatus("success");
-        if (onShowToast) {
-          onShowToast(data.message || "Servidor SMTP do ficheiro .env respondeu com sucesso!", "success", "Conexão .env Estabelecida");
-        }
-        onAddAuditLog(
-          "Verificação SMTP .env",
-          "CONFIGURAÇÕES",
-          `Ligação ao SMTP do .env (${envSmtpHost}:${envSmtpPort}) verificada com sucesso!`
-        );
-      } else {
-        setEnvSmtpVerifyStatus("error");
-        setEnvSmtpVerifyError(data.error || "Erro de resposta do servidor SMTP.");
-        if (onShowToast) {
-          onShowToast(data.error || "Não foi possível estabelecer ligação com o SMTP do .env.", "error", "Falha na Ligação");
-        }
-      }
-    } catch (err: any) {
-      setEnvSmtpVerifyStatus("error");
-      setEnvSmtpVerifyError(err.message || "Erro desconhecido ao ligar.");
-      if (onShowToast) {
-        onShowToast(err.message || "Erro ao conectar ao servidor SMTP.", "error", "Erro SMTP");
-      }
-    } finally {
-      setIsTestingEnvSmtp(false);
-    }
-  };
-
-  const handleTestEnvSmtpEmail = async () => {
-    if (!envSmtpHost || !envSmtpPort) {
-      if (onShowToast) {
-        onShowToast("Definições de SMTP no .env incompletas.", "warning", "Erro");
-      }
-      return;
-    }
-    if (!envSmtpTestRecipient || !envSmtpTestRecipient.includes("@")) {
-      if (onShowToast) {
-        onShowToast("E-mail de destinatário inválido ou não fornecido para teste.", "warning", "Destinatário Inválido");
-      }
-      return;
-    }
-
-    setIsSendingEnvTest(true);
-    try {
-      const response = await fetch("/api/email/test-smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smtpHost: envSmtpHost,
-          smtpPort: Number(envSmtpPort),
-          smtpUser: envSmtpUser,
-          smtpPassword: envSmtpPassword,
-          smtpSecure: envSmtpSecure,
-          recipient: envSmtpTestRecipient,
-          subject: "Teste de Diagnóstico SMTP (.env) - OST Vendas",
-          body: `
-            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-              <h2 style="color: #ea580c; text-align: center; margin-top: 0;">Diagnóstico SMTP (.env) Concluído!</h2>
-              <p style="color: #334155; font-size: 14px; line-height: 1.6;">Este e-mail serve para testar as credenciais configuradas no seu ficheiro <b>.env</b> do servidor OST Vendas.</p>
-              <div style="background-color: #f8fafc; padding: 15px; border-radius: 12px; margin: 20px 0; border: 1px solid #f1f5f9;">
-                <p style="margin: 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Origem:</b> Ficheiro .env</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Host:</b> ${envSmtpHost}</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Porta:</b> ${envSmtpPort}</p>
-                <p style="margin: 4px 0 0 0; font-size: 12px; color: #64748b; font-family: monospace;"><b>Utilizador:</b> ${envSmtpUser || "Nenhum"}</p>
-              </div>
-              <p style="font-size: 11px; color: #94a3b8; text-align: center; margin-bottom: 0;">Se recebeu esta mensagem, a conexão e autenticação com o servidor SMTP estão 100% operacionais.</p>
-            </div>
-          `
-        })
-      });
-
-      const data = await response.json();
-      if (response.ok) {
-        if (onShowToast) {
-          onShowToast(data.message || "E-mail de teste enviado com sucesso!", "success", "Envio Concluído");
-        }
-        onAddAuditLog(
-          "Envio Teste SMTP .env",
-          "CONFIGURAÇÕES",
-          `E-mail de teste enviado com sucesso via credenciais do .env para ${envSmtpTestRecipient}.`
-        );
-      } else {
-        if (onShowToast) {
-          onShowToast(data.error || "O servidor SMTP recusou a mensagem de teste.", "error", "Falha no Envio");
-        }
-      }
-    } catch (err: any) {
-      if (onShowToast) {
-        onShowToast(err.message || "Erro desconhecido ao enviar e-mail de teste.", "error", "Erro SMTP");
-      }
-    } finally {
-      setIsSendingEnvTest(false);
-    }
-  };
-
-  const handleApplyEnvToSystem = () => {
-    if (!envSmtpHost) {
-      if (onShowToast) onShowToast("Nenhuma configuração do .env carregada para aplicar.", "warning");
-      return;
-    }
-    setSmtpHost(envSmtpHost);
-    setSmtpPort(envSmtpPort);
-    setSmtpUser(envSmtpUser);
-    setSmtpPassword(envSmtpPassword);
-    setSmtpSecure(envSmtpSecure);
-    setIsSmtpVerified(false);
-    if (onShowToast) {
-      onShowToast("Configurações do .env aplicadas ao formulário principal. Clique em 'Salvar Servidor' para registar.", "info", "Aplicado ao Formulário");
-    }
-  };
-
-  const handleSaveDedicatedSmtp = async () => {
-    if (!smtpHost || !smtpPort) {
-      if (onShowToast) {
-        onShowToast("O Servidor Host e a Porta do SMTP são obrigatórios para gravar.", "warning", "Campos em Falta");
-      }
-      return;
-    }
-
-    setIsSavingSmtp(true);
-    try {
-      // Validate that the SMTP server is responding correctly before saving
-      const response = await fetch("/api/email/verify-smtp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smtpHost,
-          smtpPort: Number(smtpPort),
-          smtpUser,
-          smtpPassword,
-          smtpSecure
-        })
-      });
-
-      const data = await response.json();
-      if (!response.ok) {
-        setIsSmtpVerified(false);
-        if (onShowToast) {
-          onShowToast(data.error || "O servidor SMTP não está respondendo corretamente. Por favor, verifique se as definições do host, porta e credenciais estão corretas.", "error", "Falha na Validação SMTP");
-        }
-        onUpdateSettings({
-          isSmtpVerified: false
-        });
-        return;
-      }
-
-      // If connection verify succeeds, mark as verified and update settings
-      setIsSmtpVerified(true);
-      onUpdateSettings({
-        smtpHost,
-        smtpPort: Number(smtpPort),
-        smtpUser,
-        smtpPassword,
-        smtpSecure,
-        isSmtpVerified: true
-      });
-
-      setFeedbackMsg("Configuração do Servidor SMTP Dedicado validada e gravada com sucesso!");
-      onAddAuditLog(
-        "Salvar Configuração SMTP",
-        "CONFIGURAÇÕES",
-        `Credenciais SMTP validadas e gravadas para ${smtpHost}:${smtpPort} (Utilizador: ${smtpUser || "Nenhum"}). Verificado: Sim.`
-      );
-      if (onShowToast) {
-        onShowToast("As configurações do servidor SMTP foram validadas e gravadas com sucesso!", "success", "SMTP Gravado");
-      }
-      setTimeout(() => setFeedbackMsg(""), 2200);
-    } catch (err: any) {
-      setIsSmtpVerified(false);
-      if (onShowToast) {
-        onShowToast(err.message || "Erro durante a validação de resposta do SMTP.", "error", "Erro de Conexão");
-      }
-      onUpdateSettings({
-        isSmtpVerified: false
-      });
-    } finally {
-      setIsSavingSmtp(false);
-    }
-  };
-
-  const handleSaveEmailConfig = (e: React.FormEvent) => {
+  // Handler: Save General & Store Settings
+  const handleSaveGeneralSettings = (e: React.FormEvent) => {
     e.preventDefault();
     if (!canEdit) {
-      setLocalError("Apenas administradores seniores têm permissão para editar as configurações de despacho automático.");
-      setTimeout(() => setLocalError(""), 3500);
+      if (onShowToast) onShowToast("Apenas Administradores ou Supervisores podem alterar configurações.", "error");
       return;
     }
 
-    onUpdateSettings({
-      reportRecipientEmail,
-      reportHour,
-      reportFrequency: reportFrequency as "daily" | "weekly",
-      smtpEnabled,
-      smtpHost,
-      smtpPort: Number(smtpPort),
-      smtpUser,
-      smtpPassword,
-      smtpSecure
-    });
-
-    setFeedbackMsg("Configuração de Envio Automático de Relatórios atualizada com sucesso!");
-    onAddAuditLog(
-      "Alteração de Envio Automático",
-      "CONFIGURAÇÕES",
-      `Agendamento configurado: SMTP Habilitado: ${smtpEnabled ? "Sim" : "Não"}, Servidor: ${smtpHost}:${smtpPort}, Destino: ${reportRecipientEmail}, Frequência: ${reportFrequency}, Horário: ${reportHour}.`
-    );
-    if (onShowToast) {
-      onShowToast("Definições de e-mail e SMTP salvas com sucesso!", "success", "E-mail Gravado");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleTriggerEmailSimulation = async () => {
-    if (isSimulatingMail) return;
-
-    if (!reportRecipientEmail || !reportRecipientEmail.includes("@")) {
-      if (onShowToast) onShowToast("Por favor insira um e-mail de destino válido.", "error");
-      return;
-    }
-
-    if (!smtpEnabled && needsAuth) {
-      if (onShowToast) onShowToast("Por favor autentique-se com o Gmail primeiro.", "warning");
-      return;
-    }
-
-    const modeLabel = smtpEnabled ? `via Servidor SMTP (${smtpHost})` : "através da sua conta Gmail";
-    const confirmed = window.confirm(
-      `Deseja enviar um e-mail de teste agora para ${reportRecipientEmail} ${modeLabel}?`
-    );
-    if (!confirmed) return;
-
-    setIsSimulatingMail(true);
-    setSimulationLogs([]);
-
-    const timeString = new Date().toLocaleTimeString();
-
-    if (smtpEnabled) {
-      setSimulationLogs(prev => [...prev, `[${timeString}] 📤 Estabelecendo ligação ao servidor SMTP: ${smtpHost}:${smtpPort}...`]);
-      setSimulationLogs(prev => [...prev, `[${timeString}] 🔒 SSL/TLS: ${smtpSecure ? "Ativo" : "Inativo"} | Autenticação: ${smtpUser ? "Sim" : "Não"}...`]);
-      
-      try {
-        const response = await fetch("/api/email/test-smtp", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            smtpHost,
-            smtpPort,
-            smtpUser,
-            smtpPassword,
-            smtpSecure,
-            recipient: reportRecipientEmail
-          })
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || "Erro desconhecido ao conectar ao servidor SMTP.");
-        }
-
-        setSimulationLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✔️ ${data.message}`]);
-        
-        onAddAuditLog(
-          "Envio de Teste SMTP",
-          "CONFIGURAÇÕES",
-          `Envio manual de e-mail de teste via SMTP customizado (${smtpHost}:${smtpPort}) para ${reportRecipientEmail}.`
-        );
-        if (onShowToast) onShowToast(`E-mail enviado via SMTP com sucesso para ${reportRecipientEmail}!`, "success");
-      } catch (error: any) {
-        setSimulationLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Erro SMTP: ${error.message}`]);
-        if (onShowToast) onShowToast(`Erro SMTP: ${error.message}`, "error");
-      } finally {
-        setIsSimulatingMail(false);
-      }
-    } else {
-      setSimulationLogs(prev => [...prev, `[${timeString}] 📤 Preparando relatório de teste via Gmail API...`]);
-      setSimulationLogs(prev => [...prev, `[${timeString}] 🔑 Utilizando token Google OAuth2 autenticado para ${gmailUser?.email}...`]);
-      
-      try {
-        const emailBody = `
-          <h1>Relatório de Sistema de Vendas OST</h1>
-          <p>Este é um envio automatizado de faturas, recibos ou relatórios financeiros.</p>
-          <p>Integração Google OAuth2 configurada com sucesso e a utilizar a API Oficial do Gmail.</p>
-        `;
-
-        await sendEmail({
-          to: reportRecipientEmail,
-          subject: "Relatório Automatizado OST Vendas (Teste API Gmail)",
-          body: emailBody,
-          isHtml: true
-        });
-
-        setSimulationLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✔️ E-mail enviado com sucesso via Gmail API!`]);
-        
-        onAddAuditLog(
-          "Envio de Teste Gmail",
-          "CONFIGURAÇÕES",
-          `Envio manual de relatório via Gmail API OAuth2 para ${reportRecipientEmail}.`
-        );
-        if (onShowToast) onShowToast(`E-mail enviado para ${reportRecipientEmail} com sucesso!`, "success");
-      } catch (error: any) {
-        setSimulationLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Erro ao enviar email: ${error.message}`]);
-        if (onShowToast) onShowToast(`Erro ao enviar: ${error.message}`, "error");
-      } finally {
-        setIsSimulatingMail(false);
-      }
-    }
-  };
-
-  const startCamera = async () => {
-    setCameraError("");
-    setShowCameraPanel(true);
-    setShowAiLogoPanel(false);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 300, height: 300, facingMode: "environment" } });
-      setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
-    } catch (err: any) {
-      console.error("Camera access error:", err);
-      setCameraError("Não foi possível aceder à câmara do dispositivo. Certifique-se de que deu permissões.");
-    }
-  };
-
-  const stopCamera = () => {
-    if (cameraStream) {
-      cameraStream.getTracks().forEach(track => track.stop());
-      setCameraStream(null);
-    }
-    setShowCameraPanel(false);
-  };
-
-  const capturePhoto = () => {
-    if (videoRef.current) {
-      const canvas = document.createElement("canvas");
-      canvas.width = 300;
-      canvas.height = 300;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, 300, 300);
-        const dataUrl = canvas.toDataURL("image/png");
-        setLogoUrl(dataUrl);
-        if (onShowToast) onShowToast("Logotipo capturado pela câmara com sucesso!", "success");
-      }
-      stopCamera();
-    }
-  };
-
-  // Export filtered audit logs to PDF
-  const handleExportAuditLogsPDF = () => {
-    if (!auditLogs || auditLogs.length === 0) {
-      if (onShowToast) {
-        onShowToast("Não há logs de auditoria disponíveis para exportação.", "warning", "Sem dados");
-      }
-      return;
-    }
-
-    // Filter audit logs based on selected date range
-    const filteredLogs = auditLogs.filter(log => {
-      if (!log.timestamp) return true;
-      const logDate = new Date(log.timestamp);
-      if (auditFilterStartDate) {
-        const start = new Date(auditFilterStartDate);
-        start.setHours(0, 0, 0, 0);
-        if (logDate < start) return false;
-      }
-      if (auditFilterEndDate) {
-        const end = new Date(auditFilterEndDate);
-        end.setHours(23, 59, 59, 999);
-        if (logDate > end) return false;
-      }
-      return true;
-    });
-
-    if (filteredLogs.length === 0) {
-      if (onShowToast) {
-        onShowToast("Nenhum registro de auditoria atende ao intervalo de datas definido.", "warning", "Sem resultados");
-      }
-      return;
-    }
-
-    try {
-      const doc = new jsPDF();
-      
-      // Title Section
-      doc.setFontSize(18);
-      doc.setFont("helvetica", "bold");
-      doc.text("OST VENDAS ERP", 14, 20);
-      
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "normal");
-      doc.text("Trilha de Auditoria & Logs de Segurança", 14, 26);
-      
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.text("Relatório Filtrado de Auditoria", 14, 38);
-      
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      const periodText = (auditFilterStartDate || auditFilterEndDate) 
-        ? `Período: ${auditFilterStartDate || "Início"} até ${auditFilterEndDate || "Fim"}` 
-        : "Período: Completo";
-      doc.text(periodText, 14, 44);
-      doc.text(`Emitido em: ${new Date().toLocaleString()}`, 14, 49);
-      doc.text(`Total de registros: ${filteredLogs.length}`, 14, 54);
-
-      const head = [["DATA / HORA", "USUÁRIO", "CARGO", "MÓDULO", "AÇÃO", "DETALHES"]];
-      const body = filteredLogs.map(log => [
-        new Date(log.timestamp).toLocaleString(),
-        log.user || "N/A",
-        log.userRole || "N/A",
-        log.module || "N/A",
-        log.action || "N/A",
-        log.details || ""
-      ]);
-
-      autoTable(doc, {
-        startY: 60,
-        head: head,
-        body: body,
-        theme: "grid",
-        headStyles: { fillColor: [225, 29, 72] }, // rose-600 to match the security theme
-        styles: { fontSize: 8, cellPadding: 2.5 },
-        columnStyles: {
-          0: { cellWidth: 32 },
-          1: { cellWidth: 20 },
-          2: { cellWidth: 15 },
-          3: { cellWidth: 22 },
-          4: { cellWidth: 25 },
-          5: { cellWidth: "auto" }
-        }
-      });
-
-      const fileName = `Auditoria_Filtrada_${new Date().toISOString().split("T")[0]}.pdf`;
-      doc.save(fileName);
-      
-      if (onShowToast) {
-        onShowToast(`Logs de auditoria exportados com sucesso em formato PDF (${filteredLogs.length} eventos).`, "success", "Exportação Concluída");
-      }
-
-      onAddAuditLog(
-        "Exportar Auditoria PDF (Configurações)",
-        "SEGURANÇA",
-        `Logs de auditoria filtrados salvos em PDF (${filteredLogs.length} eventos). Intervalo: ${auditFilterStartDate || "completo"} - ${auditFilterEndDate || "completo"}.`
-      );
-    } catch (err: any) {
-      console.error(err);
-      if (onShowToast) {
-        onShowToast(`Erro ao exportar PDF: ${err.message}`, "error", "Falha de Exportação");
-      }
-    }
-  };
-
-  // Export filtered audit logs to Excel/CSV
-  const handleExportAuditLogsExcel = () => {
-    if (!auditLogs || auditLogs.length === 0) {
-      if (onShowToast) {
-        onShowToast("Não há logs de auditoria disponíveis para exportação.", "warning", "Sem dados");
-      }
-      return;
-    }
-
-    // Filter audit logs based on selected date range
-    const filteredLogs = auditLogs.filter(log => {
-      if (!log.timestamp) return true;
-      const logDate = new Date(log.timestamp);
-      if (auditFilterStartDate) {
-        const start = new Date(auditFilterStartDate);
-        start.setHours(0, 0, 0, 0);
-        if (logDate < start) return false;
-      }
-      if (auditFilterEndDate) {
-        const end = new Date(auditFilterEndDate);
-        end.setHours(23, 59, 59, 999);
-        if (logDate > end) return false;
-      }
-      return true;
-    });
-
-    if (filteredLogs.length === 0) {
-      if (onShowToast) {
-        onShowToast("Nenhum registro de auditoria atende ao intervalo de datas definido.", "warning", "Sem resultados");
-      }
-      return;
-    }
-
-    try {
-      // Create CSV content with a BOM for proper UTF-8 handling in Excel
-      const BOM = "\uFEFF";
-      const header = "Data/Hora,Usuário,Cargo,Módulo,Ação,Detalhes,IP,Dispositivo\n";
-      const rows = filteredLogs.map(log => {
-        const dateStr = new Date(log.timestamp).toLocaleString();
-        const user = log.user || "N/A";
-        const role = log.userRole || "N/A";
-        const mod = log.module || "N/A";
-        const act = log.action || "N/A";
-        const details = (log.details || "").replace(/"/g, '""');
-        const ip = log.ip || "";
-        const device = (log.device || "").replace(/"/g, '""');
-        return `"${dateStr}","${user}","${role}","${mod}","${act}","${details}","${ip}","${device}"`;
-      }).join("\n");
-
-      const csvContent = BOM + header + rows;
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `Auditoria_Filtrada_${new Date().toISOString().split("T")[0]}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      if (onShowToast) {
-        onShowToast(`Logs de auditoria exportados com sucesso em formato Excel/CSV (${filteredLogs.length} eventos).`, "success", "Exportação Concluída");
-      }
-
-      onAddAuditLog(
-        "Exportar Auditoria Excel (Configurações)",
-        "SEGURANÇA",
-        `Logs de auditoria filtrados salvos em Excel/CSV (${filteredLogs.length} eventos). Intervalo: ${auditFilterStartDate || "completo"} - ${auditFilterEndDate || "completo"}.`
-      );
-    } catch (err: any) {
-      console.error(err);
-      if (onShowToast) {
-        onShowToast(`Erro ao exportar Excel: ${err.message}`, "error", "Falha de Exportação");
-      }
-    }
-  };
-
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        if (onShowToast) onShowToast("O ficheiro de imagem deve ter menos de 2 MB.", "warning");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === "string") {
-          setLogoUrl(reader.result);
-          if (onShowToast) onShowToast("Logotipo carregado com sucesso!", "success");
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const generateOfflineLogoPNG = (compName: string, _promptText: string): string => {
-    const canvas = document.createElement("canvas");
-    canvas.width = 200;
-    canvas.height = 200;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return "";
-    
-    const nameInitial = (compName || "OST").trim().charAt(0).toUpperCase();
-    const colors = ["#f97316", "#3b82f6", "#10b981", "#8b5cf6", "#ec4899", "#eab308"];
-    const colorIndex = nameInitial.charCodeAt(0) % colors.length;
-    const primaryColor = colors[colorIndex];
-    
-    // Background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, 200, 200);
-    
-    // Rounded rect outer
-    ctx.fillStyle = "#f8fafc";
-    ctx.beginPath();
-    ctx.rect(10, 10, 180, 180);
-    ctx.fill();
-    
-    // Circle ring
-    ctx.strokeStyle = primaryColor;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(100, 100, 75, 0, Math.PI * 2);
-    ctx.stroke();
-    
-    // Rotated inner diamond
-    ctx.save();
-    ctx.translate(100, 100);
-    ctx.rotate(45 * Math.PI / 180);
-    ctx.fillStyle = primaryColor;
-    ctx.beginPath();
-    ctx.rect(-35, -35, 70, 70);
-    ctx.fill();
-    ctx.restore();
-    
-    // Text Initial
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 36px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(nameInitial, 100, 100);
-    
-    // Bottom mini text
-    ctx.fillStyle = "#64748b";
-    ctx.font = "bold 9px monospace";
-    ctx.fillText("EST. 2026", 100, 160);
-    
-    return canvas.toDataURL("image/png");
-  };
-
-  const handleGenerateLogoWithAI = async () => {
-    if (!logoPrompt.trim()) {
-      if (onShowToast) onShowToast("Introduza uma descrição/prompt para gerar o logotipo.", "warning");
-      return;
-    }
-    setIsGeneratingLogo(true);
-    try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/generate-logo", {
-        method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
-        },
-        body: JSON.stringify({ 
-          prompt: logoPrompt,
-          apiKey: clientApiKey || undefined
-        })
-      });
-      if (!response.ok) {
-        throw new Error("Falha ao comunicar com o servidor de IA.");
-      }
-      const data = await response.json();
-      if (data.success) {
-        if (data.fallback) {
-          const generatedPng = generateOfflineLogoPNG(companyName, logoPrompt);
-          setLogoUrl(generatedPng);
-          if (onShowToast) onShowToast("Gerado logotipo offline corporativo!", "success", "Gerador Offline");
-        } else {
-          setLogoUrl(data.imageUrl);
-          if (onShowToast) onShowToast("Logotipo gerado por inteligência artificial com sucesso!", "success", "Gerado por IA");
-        }
-        setShowAiLogoPanel(false);
-      } else {
-        throw new Error(data.error || "Erro desconhecido.");
-      }
-    } catch (err: any) {
-      console.error("Error generating logo via AI:", err);
-      const generatedPng = generateOfflineLogoPNG(companyName, logoPrompt);
-      setLogoUrl(generatedPng);
-      if (onShowToast) onShowToast("Logotipo gerado localmente devido a restrições de rede.", "success", "Gerador Offline");
-      setShowAiLogoPanel(false);
-    } finally {
-      setIsGeneratingLogo(false);
-    }
-  };
-
-  const handleSaveCompanyConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    onUpdateSettings({
+    const updatedData: Partial<SystemSettings> = {
       companyName,
       slogan,
       companyNuit,
+      nuit: companyNuit,
       storeAddress,
+      companyAddress: storeAddress,
       storeContact,
-      defaultVat,
-      logoUrl
-    });
-
-    setFeedbackMsg("Configurações do Estabelecimento Comercial salvas com sucesso!");
-    onAddAuditLog(
-      "Alterações de Configurações do Sistema",
-      "CONFIGURAÇÕES",
-      `Perfil institucional atualizado: ${companyName}, NUIT: ${companyNuit}, IVA: ${defaultVat}%, Logotipo: ${logoUrl ? "Definido" : "Não Definido"}.`
-    );
-    if (onShowToast) {
-      onShowToast("Os dados cadastrais e fiscais do estabelecimento foram salvos!", "success", "Dados Gravados");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleSaveAiConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    onUpdateSettings({
-      aiAutoMonitoring,
-      aiHealthSensitivity
-    });
-
-    setFeedbackMsg("Configurações de Inteligência Artificial salvas com sucesso!");
-    onAddAuditLog(
-      "Alterações de Configurações de IA",
-      "CONFIGURAÇÕES",
-      `Monitoramento de Previsões: ${aiAutoMonitoring ? "Ativo" : "Inativo"}, Sensibilidade do Health Score: ${aiHealthSensitivity}%.`
-    );
-    if (onShowToast) {
-      onShowToast("As configurações de IA foram salvas!", "success", "Dados Gravados");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleSaveAlertsConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (alertsRecipientEmail && !alertsRecipientEmail.includes("@")) {
-      if (onShowToast) {
-        onShowToast("Por favor, introduza um e-mail de destino válido.", "warning", "E-mail Inválido");
-      }
-      return;
-    }
-
-    if (emailStockAlertsEnabled && smtpEnabled && !isSmtpVerified) {
-      if (onShowToast) {
-        onShowToast("Aviso: As configurações de alertas de estoque foram gravadas, mas o servidor SMTP ainda não foi testado com sucesso. Recomendamos efetuar o teste de conexão.", "warning", "SMTP Não Verificado");
-      }
-    }
-
-    onUpdateSettings({
-      alertsRecipientEmail,
-      emailStockAlertsEnabled,
-      stockAlertEmailSubject,
-      stockAlertEmailBody
-    });
-
-    setFeedbackMsg("Configurações de Notificações salvas com sucesso!");
-    onAddAuditLog(
-      "Alterações de Configurações do Sistema",
-      "CONFIGURAÇÕES",
-      `E-mail de destino para alertas automáticos atualizado para: ${alertsRecipientEmail || "Nenhum"}. Alertas de estoque por email: ${emailStockAlertsEnabled ? "Ativos" : "Inativos"}.`
-    );
-    if (onShowToast) {
-      onShowToast("O e-mail de alertas para eventos críticos foi atualizado!", "success", "Notificações Gravadas");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const [isTestingSms, setIsTestingSms] = useState(false);
-
-  const handleSaveSmsAlertsConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    onUpdateSettings({
-      smsAlertsEnabled,
-      smsProviderType,
-      smsTwilioSid,
-      smsTwilioToken,
-      smsTwilioFrom,
-      smsCustomUrl,
-      smsManagerPhone,
-      smsStockThreshold
-    });
-
-    setFeedbackMsg("Configurações de Alertas SMS gravadas!");
-    onAddAuditLog(
-      "Alterações de Configurações do Sistema",
-      "CONFIGURAÇÕES",
-      `Configuração de Alertas SMS atualizada. Habilitado: ${smsAlertsEnabled ? "Sim" : "Não"}, Provedor: ${smsProviderType}, Telefone: ${smsManagerPhone}, Limite Stock: ${smsStockThreshold}.`
-    );
-    if (onShowToast) {
-      onShowToast("As configurações de Alertas SMS foram gravadas com sucesso!", "success", "Alertas SMS Salvos");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleTestSms = async () => {
-    if (!smsManagerPhone) {
-      if (onShowToast) {
-        onShowToast("Por favor, introduza um número de telefone de destino para o teste.", "warning", "Contacto Vazio");
-      }
-      return;
-    }
-
-    setIsTestingSms(true);
-    try {
-      const response = await fetch("/api/sms/test-gateway", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          provider: smsProviderType,
-          twilioSid: smsTwilioSid,
-          twilioToken: smsTwilioToken,
-          twilioFrom: smsTwilioFrom,
-          customUrl: smsCustomUrl,
-          managerPhone: smsManagerPhone
-        })
-      });
-
-      const resData = await response.json();
-      if (response.ok && resData.success) {
-        onAddAuditLog(
-          "Teste de Gateway SMS",
-          "CONFIGURAÇÕES",
-          `Enviado SMS de teste para ${smsManagerPhone} usando o provedor ${smsProviderType}.`
-        );
-        if (onShowToast) {
-          onShowToast(resData.message || `SMS de teste enviado com sucesso para ${smsManagerPhone}!`, "success", "SMS Enviado");
-        }
-      } else {
-        throw new Error(resData.error || "Erro desconhecido ao enviar o SMS de teste.");
-      }
-    } catch (err: any) {
-      console.error(err);
-      if (onShowToast) {
-        onShowToast(err.message || "Erro ao processar o SMS de teste.", "error", "Falha no Envio");
-      }
-    } finally {
-      setIsTestingSms(false);
-    }
-  };
-
-  const [isTestingWhatsapp, setIsTestingWhatsapp] = useState(false);
-  const [whatsappLogs, setWhatsappLogs] = useState<string[]>([]);
-
-  const handleSaveWhatsappConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-
-    onUpdateSettings({
-      whatsappEnabled,
-      whatsappProvider,
-      whatsappApiEndpoint,
-      whatsappToken,
-      whatsappPhoneId,
-      managerWhatsappPhone,
-      whatsappMessageTemplate
-    });
-
-    setFeedbackMsg("Configurações de Alertas de WhatsApp gravadas!");
-    onAddAuditLog(
-      "Alterações de Configurações do Sistema",
-      "CONFIGURAÇÕES",
-      `Configuração de Alertas de WhatsApp atualizada. Habilitado: ${whatsappEnabled ? "Sim" : "Não"}, Provedor: ${whatsappProvider}, Telefone Gestor: ${managerWhatsappPhone}.`
-    );
-
-    if (onShowToast) {
-      onShowToast("As configurações de Alertas do WhatsApp foram gravadas com sucesso!", "success", "Alertas WhatsApp Salvos");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleTestWhatsapp = async () => {
-    if (!managerWhatsappPhone) {
-      if (onShowToast) {
-        onShowToast("Por favor, introduza o número de WhatsApp do Gestor para o teste.", "warning", "Contacto Vazio");
-      }
-      return;
-    }
-
-    setIsTestingWhatsapp(true);
-    const testLogs: string[] = [];
-    testLogs.push(`[${new Date().toLocaleTimeString()}] Iniciando envio de teste via ${whatsappProvider}...`);
-
-    const testProduct = "Arroz Nacional Premium (10kg)";
-    const testStock = 2;
-    const testThreshold = 5;
-    const posLink = `${window.location.origin}/?tab=POS`;
-
-    const messageText = whatsappMessageTemplate
-      .replace(/{product_name}/g, testProduct)
-      .replace(/{current_stock}/g, String(testStock))
-      .replace(/{threshold}/g, String(testThreshold))
-      .replace(/{pos_link}/g, posLink)
-      .replace(/\[product_name\]/g, testProduct)
-      .replace(/\[current_stock\]/g, String(testStock))
-      .replace(/\[threshold\]/g, String(testThreshold))
-      .replace(/\[pos_link\]/g, posLink);
-
-    testLogs.push(`[${new Date().toLocaleTimeString()}] Mensagem compilada:`);
-    testLogs.push(`----------------------------------------\n${messageText}\n----------------------------------------`);
-
-    try {
-      if (whatsappProvider === "DIRECT_LINK") {
-        const directUrl = `https://api.whatsapp.com/send?phone=${managerWhatsappPhone.replace(/\+/g, "")}&text=${encodeURIComponent(messageText)}`;
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Gerando link direto para API do WhatsApp.`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Link URL: ${directUrl}`);
-        
-        try {
-          const newWindow = window.open(directUrl, "_blank", "noopener,noreferrer");
-          if (newWindow) {
-            testLogs.push(`[${new Date().toLocaleTimeString()}] Nova aba aberta com a API do WhatsApp.`);
-          } else {
-            testLogs.push(`[${new Date().toLocaleTimeString()}] Bloqueador de popups impediu a abertura automática da aba.`);
-          }
-        } catch (e) {
-          testLogs.push(`[${new Date().toLocaleTimeString()}] Não foi possível abrir o link automaticamente dentro do frame do AI Studio. Clique no botão de redirecionamento.`);
-        }
-        
-        onAddAuditLog(
-          "Teste de Alertas WhatsApp",
-          "CONFIGURAÇÕES",
-          `Link direto gerado de teste de WhatsApp para o contacto ${managerWhatsappPhone}.`
-        );
-        if (onShowToast) {
-          onShowToast("Link de teste gerado! Verifique o console de simulação abaixo.", "success", "Link Gerado");
-        }
-      } else if (whatsappProvider === "EVOLUTION_API") {
-        if (!whatsappApiEndpoint) {
-          throw new Error("O Endpoint da API Evolution é obrigatório para este provedor.");
-        }
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Enviando POST request para: ${whatsappApiEndpoint}/message/sendText/${whatsappPhoneId || "default"}`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Headers: { "Content-Type": "application/json", "apikey": "${whatsappToken ? "******" : "vazio"}" }`);
-        
-        const payload = {
-          number: managerWhatsappPhone.replace(/\+/g, ""),
-          text: messageText
-        };
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Payload: ${JSON.stringify(payload)}`);
-
-        // Use standard fetch
-        const response = await fetch(`${whatsappApiEndpoint}/message/sendText/${whatsappPhoneId || "default"}`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "apikey": whatsappToken || ""
-          },
-          body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-          testLogs.push(`[${new Date().toLocaleTimeString()}] Resposta recebida com status 200 OK!`);
-          if (onShowToast) {
-            onShowToast("Alerta de teste enviado com sucesso via API Evolution!", "success", "Enviado");
-          }
-        } else {
-          const errText = await response.text();
-          throw new Error(`Erro na API Evolution (Status: ${response.status}): ${errText}`);
-        }
-      } else if (whatsappProvider === "TWILIO") {
-        testLogs.push(`[${new Date().toLocaleTimeString()}] [SIMULAÇÃO] Enviando via Twilio Sandbox WhatsApp API...`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] De: whatsapp:+14155238886`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Para: whatsapp:${managerWhatsappPhone}`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] SID da Mensagem Simulado: SM${Math.random().toString(36).substring(2, 10).toUpperCase()}`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Sucesso na simulação de entrega da Twilio.`);
-        if (onShowToast) {
-          onShowToast("Alerta simulado via Twilio enviado com sucesso!", "success", "Twilio Simulado");
-        }
-      } else if (whatsappProvider === "META_CLOUD") {
-        testLogs.push(`[${new Date().toLocaleTimeString()}] [SIMULAÇÃO] Enviando via API Oficial Cloud da Meta (WhatsApp Business)...`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Endpoint: https://graph.facebook.com/v17.0/${whatsappPhoneId || "106555312345678"}/messages`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Token de Acesso: EAAG... (Meta Token)`);
-        testLogs.push(`[${new Date().toLocaleTimeString()}] Sucesso na simulação de chamada de API oficial.`);
-        if (onShowToast) {
-          onShowToast("Alerta simulado da Meta API enviado!", "success", "Meta Simulado");
-        }
-      }
-    } catch (err: any) {
-      testLogs.push(`[${new Date().toLocaleTimeString()}] ❌ ERRO: ${err.message}`);
-      if (onShowToast) {
-        onShowToast(`Falha no envio de teste: ${err.message}`, "error", "Falha no Envio");
-      }
-    } finally {
-      setWhatsappLogs(testLogs);
-      setIsTestingWhatsapp(false);
-    }
-  };
-
-  // Perform fake backup download configuration JSON file
-  const handleTriggerBackup = () => {
-    setIsBackingUp(true);
-    
-    setTimeout(() => {
-      setIsBackingUp(false);
-      
-      const backupData = {
-        app_name: "OST Vendas",
-        export_date: new Date().toISOString(),
-        version: systemVersion || getFormattedSystemVersion(),
-        db_signature: "SQL-LITE-OST-90A1",
-        active_settings: {
-          companyName,
-          slogan,
-          companyNuit,
-          defaultVat
-        }
-      };
-
-      const jsonStr = `data:text/json;charset=utf-8,${encodeURIComponent(JSON.stringify(backupData, null, 2))}`;
-      const linkElem = document.createElement("a");
-      linkElem.setAttribute("href", jsonStr);
-      linkElem.setAttribute("download", `OST_Vendas_Backup_Fisico_${new Date().toISOString().split("T")[0]}.json`);
-      document.body.appendChild(linkElem);
-      linkElem.click();
-      document.body.removeChild(linkElem);
-
-      onAddAuditLog(
-        "Fazer Cópia de Segurança",
-        "CONFIGURAÇÕES",
-        `Backup completo do sistema extraído e salvo no terminal de arquivo.`
-      );
-      if (onShowToast) {
-        onShowToast("Arquivo físico do banco de dados recolhido em formato JSON!", "info", "Cópia de Segurança");
-      }
-    }, 1200);
-  };
-
-  const handleSaveCloudBackupConfig = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canEdit) {
-      setLocalError("Apenas administradores seniores têm permissão para editar as configurações de backup automático em nuvem.");
-      setTimeout(() => setLocalError(""), 3500);
-      return;
-    }
-
-    onUpdateSettings({
-      cloudBackupEnabled,
-      backupFrequency,
-      backupCron,
-      backupTime,
-      cloudProvider,
-      backupExportToCloud,
-      backupExportToEmail
-    });
-
-    setFeedbackMsg("Configuração de Backup Automático em Nuvem atualizada com sucesso!");
-    onAddAuditLog(
-      "Alteração de Backup Automático",
-      "CONFIGURAÇÕES",
-      `Agendamento configurado: Serviço: ${cloudProvider.toUpperCase()}, Frequência: ${backupFrequency}, Cron/Horário: ${backupFrequency === "cron" ? backupCron : backupTime}, Ativo: ${cloudBackupEnabled ? "SIM" : "NÃO"}.`
-    );
-    if (onShowToast) {
-      onShowToast("As configurações de backup automático em nuvem foram gravadas!", "success", "Backup Salvo");
-    }
-
-    setTimeout(() => setFeedbackMsg(""), 2200);
-  };
-
-  const handleTriggerCloudBackupSimulation = async () => {
-    if (isSimulatingCloudBackup) return;
-
-    setIsSimulatingCloudBackup(true);
-    setCloudBackupLogs([]);
-
-    const providerNames: Record<string, string> = {
-      gcs: "Google Cloud Storage (bucket: ost-vendas-backups-mz)",
-      s3: "Amazon S3 (bucket: ost-vendas-backups-s3)",
-      azure: "Azure Blob Storage (container: ostvendasbackups)",
-      mega: "Mega.nz SECURE-API Encr",
-      dropbox: "Dropbox Business Cloud /Backup_DR"
+      storeEmail,
+      email: storeEmail,
+      logoUrl,
+      defaultVat: Number(defaultVat),
+      vatDefaultRate: Number(defaultVat),
+      currency: currencyCode,
+      paperSize,
+      printerAutoCut
     };
 
-    const targetProvider = providerNames[cloudProvider] || "Google Cloud Storage";
-    const timeString = new Date().toLocaleTimeString();
-    
-    // Handle time vs cron presentation logic
-    const calculatedCron = backupFrequency === 'cron' ? backupCron : `0 ${backupTime.split(':')[1]} ${backupTime.split(':')[0]} * * *`;
+    onUpdateSettings(updatedData);
+    onAddAuditLog("Configurações Gerais", "CONFIGURAÇÕES", `Dados da empresa '${companyName}' e parâmetros de venda atualizados.`);
+    if (onShowToast) {
+      onShowToast("Configurações da empresa guardadas com sucesso!", "success", "Guardado");
+    }
+  };
 
-    const steps = [
-      `[${timeString}] 🔄 Inicializando tarefa agendada de Cópia Automática na Nuvem...`,
-      `[${timeString}] 🔍 Analisando catálogo local e índices de transações...`,
-      `[${timeString}] 🔐 Gerando par de chaves RSA-2048 para assinatura criptográfica de integridade...`,
-      `[${timeString}] 📦 Compilando dados: Produtos (JSON enc), Clientes (JSON enc), Balanços de Caixa & Trilhas de Auditoria...`,
-      `[${timeString}] 📡 Estabelecendo canal de comunicação SSL/TLS seguro com ${targetProvider}...`,
-      `[${timeString}] 🔑 Autenticando com chaves secretas de ambiente do sistema configuradas...`,
-      `[${timeString}] 📤 Executando criação real do backup no servidor...`,
-    ];
+  // Handler: Handle Logo Image File Upload
+  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    let currentStep = 0;
-    const interval = setInterval(async () => {
-      if (currentStep < steps.length) {
-        setCloudBackupLogs(prev => [...prev, steps[currentStep]]);
-        currentStep++;
-      } else {
-        clearInterval(interval);
-        
-        try {
-          const response = await fetch("/api/backups/export", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ type: "manual" })
-          });
-          const data = await response.json();
-          if (!response.ok) throw new Error(data.error || "Erro de servidor ao gerar backup");
+    if (!file.type.startsWith("image/")) {
+      if (onShowToast) onShowToast("Por favor, selecione um ficheiro de imagem válido.", "warning");
+      return;
+    }
 
-          const finishedString = new Date().toLocaleTimeString();
-          setCloudBackupLogs(prev => [
-            ...prev,
-            `[${finishedString}] 📤 Streaming de chunks de dados concluído com sucesso. Tamanho: ${(data.backup.size / 1024).toFixed(1)} KB`,
-            `[${finishedString}] ✔️ Backup criado e registado no cron scheduler [${calculatedCron}] com sucesso! Arquivo: ${data.backup.filename}`
-          ]);
+    if (file.size > 2 * 1024 * 1024) {
+      if (onShowToast) onShowToast("A imagem do logótipo deve ter menos de 2MB.", "warning");
+      return;
+    }
 
-          setIsSimulatingCloudBackup(false);
-          setFeedbackMsg(`Backup criado e enviado com sucesso para o servidor e nuvem!`);
-          
-          onAddAuditLog(
-            "Criação de Backup",
-            "CONFIGURAÇÕES",
-            `Exportação em tempo real efetuada para ${targetProvider}. Frequência: ${backupFrequency.toUpperCase()}. Arquivo: ${data.backup.filename}`
-          );
-          if (onShowToast) {
-            onShowToast(`Backup criado com sucesso no servidor e ${cloudProvider.toUpperCase()}!`, "success", "Backup Concluído");
-          }
-          fetchBackupsList();
-        } catch (err: any) {
-          setCloudBackupLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Erro ao exportar backup: ${err.message}`]);
-          setIsSimulatingCloudBackup(false);
-          if (onShowToast) {
-            onShowToast(`Erro ao exportar backup: ${err.message}`, "error");
-          }
-        }
-        setTimeout(() => setFeedbackMsg(""), 4000);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64 = event.target?.result as string;
+      if (base64) {
+        setLogoUrl(base64);
+        onUpdateSettings({ logoUrl: base64 });
+        if (onShowToast) onShowToast("Logótipo carregado com sucesso!", "success");
       }
-    }, 400);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Handler: Save Notifications & Alert Settings
+  const handleSaveNotificationSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!canEdit) return;
+
+    const updatedData: Partial<SystemSettings> = {
+      alertsRecipientEmail,
+      reportRecipientEmail: alertsRecipientEmail,
+      managerWhatsappPhone,
+      smsStockThreshold: Number(smsStockThreshold),
+      emailStockAlertsEnabled,
+      whatsappEnabled,
+      reportHour,
+      reportFrequency
+    };
+
+    onUpdateSettings(updatedData);
+    onAddAuditLog("Notificações", "CONFIGURAÇÕES", "Configurações de alertas de estoque e relatórios atualizadas.");
+    if (onShowToast) {
+      onShowToast("Preferências de alertas e notificações guardadas!", "success");
+    }
+  };
+
+  // Handler: Add New Branch / Filial
+  const handleAddBranch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBranchName.trim()) return;
+
+    const newBranch: Branch = {
+      id: "branch_" + Date.now(),
+      name: newBranchName.trim(),
+      address: newBranchAddress.trim() || storeAddress,
+      contact: newBranchContact.trim() || storeContact
+    };
+
+    const updatedBranches = [...branches, newBranch];
+    setBranches(updatedBranches);
+    onUpdateSettings({ branches: updatedBranches });
+    setNewBranchName("");
+    setNewBranchAddress("");
+    setNewBranchContact("");
+    setIsAddingBranch(false);
+
+    onAddAuditLog("Adicionar Filial", "FILIAIS", `Nova filial '${newBranch.name}' adicionada.`);
+    if (onShowToast) onShowToast(`Filial '${newBranch.name}' criada com sucesso!`, "success");
+  };
+
+  // Handler: Remove Branch
+  const handleRemoveBranch = (branchId: string, branchName: string) => {
+    if (!canEdit) return;
+    if (!confirm(`Deseja realmente remover a filial '${branchName}'?`)) return;
+
+    const updatedBranches = branches.filter(b => b.id !== branchId);
+    setBranches(updatedBranches);
+    onUpdateSettings({ branches: updatedBranches });
+    onAddAuditLog("Remover Filial", "FILIAIS", `Filial '${branchName}' removida.`);
+    if (onShowToast) onShowToast(`Filial '${branchName}' removida.`, "info");
+  };
+
+  // Handler: Force Cloud Sync
+  const handleForceCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      if (onTriggerLocalBackup) {
+        await onTriggerLocalBackup("manual");
+      }
+      onAddAuditLog("Sincronização Cloud", "SISTEMA", "Sincronização manual da base de dados executada com sucesso.");
+      if (onShowToast) onShowToast("Dados sincronizados com o servidor em nuvem!", "success");
+    } catch (err: any) {
+      if (onShowToast) onShowToast("Erro ao sincronizar com a nuvem: " + err.message, "error");
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  // Handler: Purge Mock Data
+  const handleExecutePurge = async () => {
+    if (!confirm("Tem certeza de que deseja limpar todos os dados de teste e demonstração? Esta ação manterá apenas os registos reais do sistema.")) {
+      return;
+    }
+    setIsPurgingData(true);
+    try {
+      if (onPurgeMockData) {
+        await onPurgeMockData();
+      } else {
+        await AdminService.purgeMockData(activeUser?.name || "Administrador");
+      }
+      if (onShowToast) onShowToast("Dados de teste removidos com sucesso!", "success", "Sistema Pronto");
+    } catch (err: any) {
+      if (onShowToast) onShowToast("Erro ao limpar dados: " + err.message, "error");
+    } finally {
+      setIsPurgingData(false);
+    }
+  };
+
+  // Handler: Handle File Upload for Backup Import
+  const handleFileUploadForImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const text = await file.text();
+      const jsonData = JSON.parse(text);
+      if (onImportLocalDB) {
+        const success = await onImportLocalDB(jsonData);
+        if (success && onShowToast) {
+          onShowToast("Cópia de segurança restaurada com sucesso!", "success");
+        }
+      }
+    } catch (err: any) {
+      if (onShowToast) onShowToast("Ficheiro JSON de backup inválido ou corrompido.", "error");
+    } finally {
+      setIsImporting(false);
+      e.target.value = "";
+    }
   };
 
   return (
-    <div className="space-y-6">
-      
-      {/* Visual top notification alerts if operator is not authorized */}
-      {!canEdit && (
-        <div className="bg-red-50 border border-red-100 p-4 rounded-xl flex items-center gap-3 text-red-700 text-xs font-semibold">
-          <Lock className="w-5 h-5 shrink-0" />
+    <div className="space-y-6 pb-12 font-sans">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-orange-500/10 text-orange-600 rounded-xl">
+            <Settings className="w-6 h-6" />
+          </div>
           <div>
-            <p>Acesso Restrito: Modo de Visualização Ativo</p>
-            <p className="font-normal text-[11px] text-red-650 mt-0.5">As suas credenciais de {currentRole} apenas dão acesso à visualização. Edições requerem perfil de Administrador.</p>
+            <h1 className="text-xl font-bold text-slate-850">Configurações do Sistema</h1>
+            <p className="text-xs text-slate-400">
+              Parametrizações essenciais de loja, faturação, pagamentos, recibos e cópias de segurança.
+            </p>
           </div>
         </div>
-      )}
 
-      {feedbackMsg && (
-        <div className="bg-green-50 border border-green-200 p-4.5 rounded-xl text-green-700 text-xs font-bold flex items-center gap-2 animate-bounce">
-          <CheckCircle className="w-4.5 h-4.5 text-green-700 shrink-0" />
-          {feedbackMsg}
-        </div>
-      )}
-
-      {localError && (
-        <div className="bg-red-500/10 border border-red-500/20 p-4.5 rounded-xl text-red-400 text-xs font-bold flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-red-500"></div>
-          {localError}
-        </div>
-      )}
-
-      {/* 7-Day Backup Recommendation Banner */}
-      {canEdit && isBackupRecommended && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm shadow-amber-500/5">
-          <div className="flex items-start gap-3">
-            <div className="bg-amber-500 text-slate-950 p-2.5 rounded-xl shrink-0 mt-0.5">
-              <Database className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="font-bold text-amber-500 text-sm">Download de Cópia Física Requerido (7 Dias)</h4>
-              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
-                {daysSinceLastBackup === null 
-                  ? "Nunca efetuou uma cópia de segurança física do banco de dados completo neste dispositivo. Descarregue uma cópia agora para salvaguardar os seus dados operacionais e fiscais."
-                  : `Já se passaram ${daysSinceLastBackup} dias desde o seu último download de backup JSON do banco de dados. Para evitar perda de dados, recomendamos que descarregue um novo arquivo agora.`
-                }
-              </p>
-            </div>
+        {/* Quick System Status Badge */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span>Sistema Ativo {systemVersion ? `v${systemVersion}` : ""}</span>
           </div>
-          <button
-            type="button"
-            onClick={triggerAdminBackupDownload}
-            className="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-1.5 transition shrink-0 shadow-md shadow-amber-600/20 cursor-pointer"
-          >
-            <Download className="w-4 h-4 shrink-0" />
-            Descarregar Backup JSON
-          </button>
         </div>
-      )}
+      </div>
 
-      {/* Settings Sub-Tabs Navigator */}
-      <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1">
+      {/* Sub-tabs Navigation Bar */}
+      <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1 bg-white/60 p-1.5 rounded-xl">
         <button
           type="button"
           onClick={() => setActiveSubTab("geral")}
           className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "geral"
-              ? "border-orange-500 text-orange-600 font-extrabold"
+              ? "border-orange-500 text-orange-600 font-extrabold bg-orange-50/20"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
-          <Settings className="w-4 h-4" />
-          Configurações Gerais
-        </button>
-
-        {/* STAFF / FUNCIONÁRIOS */}
-        {(canEdit || currentRole === "AUDITOR" || currentRole === "RH") && (
-          <button
-            type="button"
-            onClick={() => setActiveSubTab("staff")}
-            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-              activeSubTab === "staff"
-                ? "border-orange-500 text-orange-600 font-extrabold"
-                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-            }`}
-          >
-            <UserCheck className="w-4 h-4 text-purple-500" />
-            Funcionários & Auditoria
-          </button>
-        )}
-
-        {/* MOBILE MONEY GATEWAY */}
-        {(canEdit || currentRole === "FINANCEIRO") && (
-          <button
-            type="button"
-            onClick={() => setActiveSubTab("gateway")}
-            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-              activeSubTab === "gateway"
-                ? "border-emerald-500 text-emerald-600 font-extrabold"
-                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-            }`}
-          >
-            <Smartphone className="w-4 h-4 text-emerald-500" />
-            Mobile Money (M-Pesa/e-Mola)
-          </button>
-        )}
-
-        {/* AI FORECAST */}
-        {(canEdit || currentRole === "SUPERVISOR") && (
-          <button
-            type="button"
-            onClick={() => setActiveSubTab("ai")}
-            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-              activeSubTab === "ai"
-                ? "border-orange-500 text-orange-600 font-extrabold"
-                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-            }`}
-          >
-            <TrendingUp className="w-4 h-4 text-orange-500" />
-            Previsão AI (Inteligência)
-          </button>
-        )}
-
-        {/* TRAINING CENTER */}
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("training")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "training"
-              ? "border-blue-500 text-blue-600 font-extrabold"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <BookOpen className="w-4 h-4 text-blue-500" />
-          Centro de Formação
-        </button>
-
-        {/* PLANS & SUBSCRIPTIONS */}
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("plans")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "plans"
-              ? "border-amber-500 text-amber-600 font-extrabold"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <Crown className="w-4 h-4 text-amber-500" />
-          Planos & Subscrição
+          <Building className="w-4 h-4 text-orange-500" />
+          Geral & Loja
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveSubTab("smtp")}
+          onClick={() => setActiveSubTab("staff")}
           className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "smtp"
-              ? "border-orange-500 text-orange-600 font-extrabold"
+            activeSubTab === "staff"
+              ? "border-purple-500 text-purple-600 font-extrabold bg-purple-50/20"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
-          <Mail className="w-4 h-4 text-orange-500" />
-          Servidor SMTP
+          <UserCheck className="w-4 h-4 text-purple-500" />
+          Colaboradores & PINs
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("gateway")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "gateway"
+              ? "border-emerald-500 text-emerald-600 font-extrabold bg-emerald-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Smartphone className="w-4 h-4 text-emerald-500" />
+          Mobile Money (M-Pesa / e-Mola)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("notificacoes")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "notificacoes"
+              ? "border-blue-500 text-blue-600 font-extrabold bg-blue-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <MessageSquare className="w-4 h-4 text-blue-500" />
+          Alertas de Estoque
+        </button>
+
         <button
           type="button"
           onClick={() => setActiveSubTab("backup")}
           className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "backup"
-              ? "border-orange-500 text-orange-600 font-extrabold"
+              ? "border-teal-500 text-teal-600 font-extrabold bg-teal-50/20"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
-          <Database className="w-4 h-4" />
-          Backup & Restauro
+          <Database className="w-4 h-4 text-teal-500" />
+          Cópias de Segurança & Dados
         </button>
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("lotes")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "lotes"
-              ? "border-orange-500 text-orange-600 font-extrabold"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          Lotes & Validades
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("whatsapp")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "whatsapp"
-              ? "border-emerald-500 text-emerald-600 font-extrabold"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <MessageSquare className="w-4 h-4 text-emerald-500" />
-          WhatsApp
-        </button>
+
         <button
           type="button"
           onClick={() => setActiveSubTab("filiais")}
           className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "filiais"
-              ? "border-orange-500 text-orange-600 font-extrabold"
+              ? "border-amber-500 text-amber-600 font-extrabold bg-amber-50/20"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
-          <Building className="w-4 h-4 text-orange-500" />
-          Filiais
+          <MapPin className="w-4 h-4 text-amber-500" />
+          Lojas & Filiais
         </button>
-        {canEdit && (
-          <button
-            type="button"
-            onClick={() => setActiveSubTab("seguranca")}
-            className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-              activeSubTab === "seguranca"
-                ? "border-rose-500 text-rose-600 font-extrabold font-black bg-rose-50/20"
-                : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-            }`}
-          >
-            <Shield className="w-4 h-4 text-rose-600 animate-pulse" />
-            Segurança
-          </button>
-        )}
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("ai")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "ai"
+              ? "border-indigo-500 text-indigo-600 font-extrabold bg-indigo-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4 text-indigo-500" />
+          Previsão Comercial
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("training")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "training"
+              ? "border-sky-500 text-sky-600 font-extrabold bg-sky-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-sky-500" />
+          Formação
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("plans")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "plans"
+              ? "border-yellow-500 text-yellow-600 font-extrabold bg-yellow-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Crown className="w-4 h-4 text-yellow-500" />
+          Planos
+        </button>
       </div>
 
+      {/* SUB-TAB 1: GERAL & LOJA */}
       {activeSubTab === "geral" && (
         <div className="space-y-6 animate-in fade-in-50 duration-150">
-          {/* 10-THEME COLOR PALETTE SELECTION FOR EACH OPERATOR */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <div className="flex items-center gap-2.5 text-orange-600">
-          <Palette className="w-5 h-5 text-orange-500" />
-          <div>
-            <h3 className="font-bold text-slate-850 text-sm">Personalização de Temas & Cores do ERP</h3>
-            <p className="text-[11px] text-slate-400">Selecione o seu tema preferido. As preferências de cor são salvas por operador de forma autónoma e aplicadas em todo o sistema.</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3.5 pt-2">
-          {SYSTEM_THEMES.map((theme) => {
-            const isSelected = activeColorTheme === theme.id;
-            return (
-              <button
-                key={theme.id}
-                type="button"
-                onClick={() => {
-                  onChangeColorTheme(theme.id);
-                  if (onShowToast) {
-                    onShowToast(`Tema '${theme.name}' aplicado com sucesso!`, "success", "Identidade Visual");
-                  }
-                  onAddAuditLog(
-                    "Alteração de Tema",
-                    "SISTEMA",
-                    `Operador ${activeUser?.name || "Desconhecido"} alterou o tema visual para ${theme.name}.`
-                  );
-                }}
-                className={`p-3.5 rounded-xl border text-left transition relative flex flex-col justify-between h-24 hover:scale-[1.02] active:scale-[0.99] group ${
-                  isSelected 
-                    ? "border-orange-500 bg-orange-50/10 shadow-sm" 
-                    : "border-slate-200 bg-slate-50/30 hover:bg-slate-50 hover:border-slate-300"
-                }`}
-              >
-                {/* Colored circles showing the scheme */}
-                <div className="flex gap-1.5 items-center">
-                  <div className="w-4 h-4 rounded-full border border-white shadow-sm shrink-0" style={{ backgroundColor: theme.primary }} />
-                  <div className="w-3.5 h-3.5 rounded-full border border-white shadow-sm shrink-0 -ml-2.5" style={{ backgroundColor: theme.hover }} />
-                  <div className="w-3 h-3 rounded-full border border-white shadow-sm shrink-0 -ml-2.5" style={{ backgroundColor: theme.accentBg }} />
-                </div>
-
-                <div className="space-y-0.5">
-                  <p className="font-extrabold text-[10px] text-slate-500 uppercase tracking-wider group-hover:text-slate-700 transition">
-                    {theme.name.split(" ")[0]}
-                  </p>
-                  <p className="text-[11px] font-bold text-slate-800 line-clamp-1">
-                    {theme.name}
-                  </p>
-                </div>
-
-                {/* Selected Checkmark in Top-Right */}
-                {isSelected && (
-                  <span className="absolute top-3 right-3 w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center text-[9px] font-bold shadow-sm shadow-orange-500/30 animate-in zoom-in-50 duration-150">
-                    <Check className="w-2.5 h-2.5 stroke-[3]" />
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* SEÇÃO DE CONFIGURAÇÕES DE IA */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-        <div className="flex items-center gap-2.5 text-orange-600">
-          <Sparkles className="w-5 h-5 text-orange-500 animate-pulse" />
-          <div>
-            <h3 className="font-bold text-slate-850 text-sm">Configurações de Inteligência Artificial (IA)</h3>
-            <p className="text-[11px] text-slate-400">Ative os monitoramentos generativos de faturamento e configure os parâmetros de calibragem do algoritmo de Health Score.</p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSaveAiConfig} className="space-y-5 text-slate-800 text-xs">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            
-            {/* Monitoramento de Previsões Toggle/Checkbox */}
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-3.5 flex flex-col justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-slate-700 text-xs flex items-center gap-1.5">
-                    Monitoramento Automático de Previsões
-                  </span>
-                  <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full ${
-                    aiAutoMonitoring ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"
-                  }`}>
-                    {aiAutoMonitoring ? "Ativo" : "Inativo"}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Quando ativo, o motor generativo do Gemini analisa as faturas e fluxo de caixa continuamente para produzir relatórios automáticos de previsão de vendas e alertas preventivos.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <input
-                  type="checkbox"
-                  id="aiAutoMonitoring"
-                  checked={aiAutoMonitoring}
-                  onChange={(e) => setAiAutoMonitoring(e.target.checked)}
-                  disabled={!canEdit}
-                  className="w-4.5 h-4.5 rounded border-slate-350 text-orange-500 focus:ring-orange-500 accent-orange-500 cursor-pointer disabled:opacity-50"
-                />
-                <label htmlFor="aiAutoMonitoring" className="font-semibold text-slate-600 cursor-pointer select-none">
-                  Ativar análise preventiva contínua do faturamento
-                </label>
+          {/* Identidade da Empresa e Faturação Form */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center gap-2.5 text-orange-600 border-b pb-3 border-slate-100">
+              <Building className="w-5 h-5" />
+              <div>
+                <h2 className="font-bold text-slate-850 text-sm">Identidade Comercial & Dados Fiscais</h2>
+                <p className="text-[11px] text-slate-400">Informações que constam nos recibos de venda, relatórios e documentos emitidos.</p>
               </div>
             </div>
 
-            {/* Health Score Sensitivity Control */}
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-3">
-              <div className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-slate-700 text-xs">Sensibilidade do Health Score</span>
-                  <span className="text-xs font-black font-mono text-orange-600">{aiHealthSensitivity}%</span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Ajusta o nível de exigência para a nota de saúde operacional do negócio. Sensibilidades mais altas aplicam penalidades mais severas para rupturas de estoque e faturamento estagnado.
-                </p>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={aiHealthSensitivity}
-                  onChange={(e) => setAiHealthSensitivity(Number(e.target.value))}
-                  disabled={!canEdit}
-                  className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-orange-500 disabled:opacity-50"
-                />
-                <div className="flex justify-between text-[9px] text-slate-450 font-bold font-mono">
-                  <span>MÍNIMA (LIVRE)</span>
-                  <span>PADRÃO (80%)</span>
-                  <span>MÁXIMA (RIGOROSA)</span>
-                </div>
-              </div>
-            </div>
-
-          </div>
-
-          {canEdit && (
-            <div className="flex justify-end pt-2">
-              <button
-                type="submit"
-                className="px-5 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs transition-all shadow-sm shadow-orange-500/10 active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
-              >
-                <Sparkles className="w-4 h-4" />
-                Gravar Configurações de IA
-              </button>
-            </div>
-          )}
-        </form>
-      </div>
-
-      {/* SEÇÃO DE SEGURANÇA ROBUSTA & RATE LIMITING */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2.5 text-indigo-600">
-            <Shield className="w-5 h-5 text-indigo-600" />
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-850 text-sm">Sistema de Proteção & Rate Limit (Segurança Robustez)</h3>
-                <span className={`text-[9.5px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                  rateLimitEnabled 
-                    ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                    : "bg-amber-50 text-amber-700 border-amber-200"
-                }`}>
-                  {rateLimitEnabled ? "● Proteção Ativa" : "○ Proteção Pausada"}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Limitação de taxa de requisições por IP e categoria de rota (Express Rate Limit + Bloqueio HTTP 429) para proteger o sistema contra ataques DoS, botnets e consumo excessivo de APIs.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={fetchRateLimitStatus}
-              disabled={isLoadingRateLimit}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition text-xs font-bold cursor-pointer flex items-center gap-1"
-              title="Atualizar estatísticas"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingRateLimit ? "animate-spin text-indigo-600" : ""}`} />
-              <span className="hidden sm:inline">Atualizar</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleTestBurstRateLimit}
-              disabled={isTestingRateLimit}
-              className="px-3.5 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-white font-extrabold text-xs transition shadow-sm shadow-indigo-500/20 active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
-            >
-              <Play className={`w-3.5 h-3.5 ${isTestingRateLimit ? "animate-spin" : ""}`} />
-              <span>Simular Estresse (Teste 429)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* METRICS DASHBOARD CARDS */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-          <div className="p-3.5 rounded-xl bg-indigo-50/50 border border-indigo-100/80 space-y-1">
-            <span className="text-[10px] font-extrabold uppercase text-indigo-500 tracking-wider">Requisições Processadas</span>
-            <div className="text-lg font-black text-slate-800 font-mono">
-              {rateLimitStats.totalRequestsProcessed.toLocaleString("pt-MZ")}
-            </div>
-            <span className="text-[9.5px] text-slate-400">Total desde o início do servidor</span>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-rose-50/50 border border-rose-100/80 space-y-1">
-            <span className="text-[10px] font-extrabold uppercase text-rose-500 tracking-wider">Acessos Bloqueados (HTTP 429)</span>
-            <div className="text-lg font-black text-rose-600 font-mono">
-              {rateLimitStats.totalBlocked429}
-            </div>
-            <span className="text-[9.5px] text-slate-400">Tentativas que excederam o limite</span>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-            <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Perfil Atual</span>
-            <div className="text-sm font-black text-slate-800 uppercase tracking-wide">
-              {rateLimitProfile === "strict" ? "🔒 Restritivo" : rateLimitProfile === "balanced" ? "🛡️ Balanceado" : rateLimitProfile === "tolerant" ? "⚡ Tolerante" : "⚙️ Personalizado"}
-            </div>
-            <span className="text-[9.5px] text-slate-400">Política de segurança</span>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-            <span className="text-[10px] font-extrabold uppercase text-slate-500 tracking-wider">Última Ocorrência</span>
-            <div className="text-xs font-bold text-slate-700 font-mono truncate">
-              {rateLimitStats.lastViolationTimestamp 
-                ? new Date(rateLimitStats.lastViolationTimestamp).toLocaleTimeString("pt-MZ") 
-                : "Sem ocorrências"}
-            </div>
-            <span className="text-[9.5px] text-slate-400">Horário do último bloqueio</span>
-          </div>
-        </div>
-
-        {/* PROFILE PRESETS & CONFIGURATION FORM */}
-        <form onSubmit={handleSaveRateLimitConfig} className="space-y-4 text-xs">
-          <div className="space-y-2">
-            <label className="text-[10px] font-extrabold uppercase text-slate-500">Selecionar Perfil de Segurança e Limites</label>
-            
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setRateLimitProfile("strict");
-                  setRateLimitGeneralMax(60);
-                  setRateLimitAiMax(10);
-                  setRateLimitEmailMax(5);
-                  setRateLimitDbMax(10);
-                }}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
-                  rateLimitProfile === "strict"
-                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
-                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-slate-800 flex items-center gap-1">🔒 Restritivo</span>
-                  {rateLimitProfile === "strict" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                </div>
-                <p className="text-[10px] text-slate-500">Segurança Máxima. 60 req/15m Geral, 10 req/1m IA, 5 req/5m Email.</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setRateLimitProfile("balanced");
-                  setRateLimitGeneralMax(120);
-                  setRateLimitAiMax(20);
-                  setRateLimitEmailMax(10);
-                  setRateLimitDbMax(15);
-                }}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
-                  rateLimitProfile === "balanced"
-                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
-                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-slate-800 flex items-center gap-1">🛡️ Balanceado</span>
-                  {rateLimitProfile === "balanced" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                </div>
-                <p className="text-[10px] text-slate-500">Recomendado. 120 req/15m Geral, 20 req/1m IA, 10 req/5m Email.</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setRateLimitProfile("tolerant");
-                  setRateLimitGeneralMax(300);
-                  setRateLimitAiMax(50);
-                  setRateLimitEmailMax(30);
-                  setRateLimitDbMax(30);
-                }}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
-                  rateLimitProfile === "tolerant"
-                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
-                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-slate-800 flex items-center gap-1">⚡ Tolerante</span>
-                  {rateLimitProfile === "tolerant" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                </div>
-                <p className="text-[10px] text-slate-500">Alta Demanda. 300 req/15m Geral, 50 req/1m IA, 30 req/5m Email.</p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setRateLimitProfile("custom")}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1.5 cursor-pointer ${
-                  rateLimitProfile === "custom"
-                    ? "border-indigo-500 bg-indigo-50/30 ring-1 ring-indigo-500"
-                    : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-extrabold text-slate-800 flex items-center gap-1">⚙️ Personalizado</span>
-                  {rateLimitProfile === "custom" && <Check className="w-3.5 h-3.5 text-indigo-600" />}
-                </div>
-                <p className="text-[10px] text-slate-500">Defina limites específicos para cada categoria abaixo.</p>
-              </button>
-            </div>
-          </div>
-
-          {/* DETAILED CATEGORY LIMIT ADJUSTMENTS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200/80">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">API Geral (/api/*)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="10"
-                  max="2000"
-                  value={rateLimitGeneralMax}
-                  onChange={(e) => {
-                    setRateLimitGeneralMax(Number(e.target.value));
-                    setRateLimitProfile("custom");
-                  }}
-                  disabled={!canEdit}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400 shrink-0">req / 15m</span>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Inteligência Artificial (Gemini)</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="2"
-                  max="500"
-                  value={rateLimitAiMax}
-                  onChange={(e) => {
-                    setRateLimitAiMax(Number(e.target.value));
-                    setRateLimitProfile("custom");
-                  }}
-                  disabled={!canEdit}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400 shrink-0">req / 1m</span>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Emails, SMS & Disparos</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="200"
-                  value={rateLimitEmailMax}
-                  onChange={(e) => {
-                    setRateLimitEmailMax(Number(e.target.value));
-                    setRateLimitProfile("custom");
-                  }}
-                  disabled={!canEdit}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400 shrink-0">req / 5m</span>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Sincronia de Banco de Dados</label>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="5"
-                  max="500"
-                  value={rateLimitDbMax}
-                  onChange={(e) => {
-                    setRateLimitDbMax(Number(e.target.value));
-                    setRateLimitProfile("custom");
-                  }}
-                  disabled={!canEdit}
-                  className="w-full bg-white border border-slate-300 rounded-lg p-2 font-bold font-mono text-slate-800"
-                />
-                <span className="text-[10px] text-slate-400 shrink-0">req / 1m</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-            <div className="flex items-center gap-2.5">
-              <input
-                type="checkbox"
-                id="rateLimitEnabledToggle"
-                checked={rateLimitEnabled}
-                onChange={(e) => setRateLimitEnabled(e.target.checked)}
-                disabled={!canEdit}
-                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
-              />
-              <label htmlFor="rateLimitEnabledToggle" className="font-semibold text-slate-700 cursor-pointer select-none">
-                Habilitar motor de proteção de taxa de requisições (Rate Limiter)
-              </label>
-            </div>
-
-            {canEdit && (
-              <button
-                type="submit"
-                disabled={isSavingRateLimit}
-                className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold text-xs transition shadow-sm shadow-indigo-600/10 cursor-pointer flex items-center gap-1.5"
-              >
-                <Shield className="w-4 h-4" />
-                {isSavingRateLimit ? "Gravando..." : "Salvar Política de Rate Limit"}
-              </button>
-            )}
-          </div>
-        </form>
-
-        {/* LOG TABLE OF BLOCKED REQUESTS (HTTP 429) */}
-        <div className="space-y-3 pt-2 border-t border-slate-100">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Lock className="w-4 h-4 text-rose-500" />
-              <h4 className="font-bold text-slate-800 text-xs">Registro de Tentativas Bloqueadas por Rate Limit (HTTP 429)</h4>
-              <span className="bg-rose-100 text-rose-700 font-mono font-bold text-[10px] px-2 py-0.5 rounded-full">
-                {rateLimitViolations.length} {rateLimitViolations.length === 1 ? "registro" : "registros"}
-              </span>
-            </div>
-
-            {rateLimitViolations.length > 0 && canEdit && (
-              <button
-                type="button"
-                onClick={handleClearRateLimitLogs}
-                className="text-[10.5px] text-slate-500 hover:text-rose-600 transition flex items-center gap-1 cursor-pointer font-bold"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Limpar Registros
-              </button>
-            )}
-          </div>
-
-          {rateLimitViolations.length === 0 ? (
-            <div className="p-6 text-center rounded-xl bg-slate-50/50 border border-slate-200/60 text-slate-400 space-y-1">
-              <CheckCircle className="w-6 h-6 text-emerald-500 mx-auto opacity-80" />
-              <p className="font-bold text-slate-600 text-xs">Nenhum bloqueio de segurança registrado recentemente.</p>
-              <p className="text-[10px]">O sistema está operando normalmente dentro dos limites de taxa estabelecidos.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-2xs">
-              <table className="w-full text-left text-[11px] text-slate-700 font-sans">
-                <thead className="bg-slate-100 text-slate-500 font-extrabold uppercase text-[9.5px] border-b border-slate-200">
-                  <tr>
-                    <th className="p-2.5">Horário / Data</th>
-                    <th className="p-2.5">IP de Origem</th>
-                    <th className="p-2.5">Método / Rota Alvo</th>
-                    <th className="p-2.5">Categoria</th>
-                    <th className="p-2.5 text-right">Ação Tomada</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200/70 bg-white font-mono">
-                  {rateLimitViolations.map((v) => (
-                    <tr key={v.id} className="hover:bg-rose-50/20 transition">
-                      <td className="p-2.5 text-slate-600 font-bold whitespace-nowrap">
-                        {new Date(v.timestamp).toLocaleString("pt-MZ")}
-                      </td>
-                      <td className="p-2.5 font-bold text-slate-800">
-                        {v.ip}
-                      </td>
-                      <td className="p-2.5 text-slate-700 max-w-[220px] truncate">
-                        <span className="font-extrabold text-indigo-600 mr-1.5">{v.method}</span>
-                        <span>{v.endpoint}</span>
-                      </td>
-                      <td className="p-2.5">
-                        <span className="uppercase text-[9px] font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                          {v.category}
-                        </span>
-                      </td>
-                      <td className="p-2.5 text-right">
-                        <span className="inline-flex items-center gap-1 font-extrabold text-[9.5px] text-rose-600 bg-rose-100/80 px-2 py-0.5 rounded-full border border-rose-200">
-                          <AlertTriangle className="w-3 h-3" />
-                          BLOQUEADO 429
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* SEÇÃO DE SEGURANÇA AVANÇADA & PREVENÇÃO DE PERDAS (FIREWALL & DLP) */}
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2.5 text-blue-600">
-            <Lock className="w-5 h-5 text-blue-600" />
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-slate-850 text-sm">Firewall Anti-Invasão & Prevenção de Perda de Dados (DLP)</h3>
-                <span className={`text-[9.5px] font-black uppercase px-2 py-0.5 rounded-full border ${
-                  firewallEnabled 
-                    ? "bg-blue-50 text-blue-700 border-blue-200" 
-                    : "bg-slate-100 text-slate-600 border-slate-200"
-                }`}>
-                  {firewallEnabled ? "● Firewall Ativo" : "○ Firewall Inativo"}
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Camadas de proteção contra injeções de código, invasão de sistema por força bruta, filtragem de IP e prevenção ativa contra perda acidental ou eliminação indevida de dados.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={fetchSecurityAndFirewallStatus}
-              disabled={isLoadingSecurityData}
-              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 transition text-xs font-bold cursor-pointer flex items-center gap-1"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingSecurityData ? "animate-spin text-blue-600" : ""}`} />
-              <span className="hidden sm:inline">Diagnosticar Sistema</span>
-            </button>
-            <button
-              type="button"
-              onClick={handleUndoLastRestore}
-              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs transition shadow-sm shadow-amber-500/20 active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
-              title="Anula o último restauro e reverte a base de dados para o ponto de segurança salvo automaticamente antes do restauro."
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Anular Última Restauração</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 1. SAÚDE DE ARMAZENAMENTO & PREVENÇÃO DE PERDAS (DLP METRICS) */}
-        <div className="space-y-3">
-          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
-            <Database className="w-4 h-4 text-emerald-600" />
-            Integridade e Diagnóstico de Armazenamento da Base de Dados
-          </h4>
-
-          {storageHealth ? (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
-              <div className="p-3 rounded-xl bg-emerald-50/50 border border-emerald-100 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-emerald-600 tracking-wider">Status Geral</span>
-                <div className="text-sm font-black text-emerald-800 flex items-center gap-1">
-                  <CheckCircle className="w-4 h-4 text-emerald-600" />
-                  {storageHealth.status}
-                </div>
-                <span className="text-[9px] text-slate-400">100% Tabelas Integras</span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-slate-500 tracking-wider">Espaço Ocupado</span>
-                <div className="text-sm font-black text-slate-800 font-mono">
-                  {storageHealth.totalStorageKb} KB
-                </div>
-                <span className="text-[9px] text-slate-400">Base Local JSON</span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-blue-50/50 border border-blue-100 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-blue-600 tracking-wider">Snapshots Salvos</span>
-                <div className="text-sm font-black text-blue-800 font-mono">
-                  {storageHealth.backupFileCount} Arquivos ({storageHealth.totalBackupKb} KB)
-                </div>
-                <span className="text-[9px] text-slate-400">Histórico de Segurança</span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-purple-50/50 border border-purple-100 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-purple-600 tracking-wider">Sincronização Nuvem</span>
-                <div className="text-sm font-black text-purple-800">
-                  {storageHealth.firestoreConnected ? "● Sincronizado" : "○ Offline Local"}
-                </div>
-                <span className="text-[9px] text-slate-400">Servidor Central</span>
-              </div>
-
-              <div className="p-3 rounded-xl bg-sky-50/50 border border-sky-100 space-y-1">
-                <span className="text-[9.5px] font-extrabold uppercase text-sky-600 tracking-wider">Cloud SQL</span>
-                <div className="text-sm font-black text-sky-800">
-                  {storageHealth.cloudSqlConnected ? "● Conectado (PG)" : "○ Standby Local"}
-                </div>
-                <span className="text-[9px] text-slate-400">PostgreSQL Cloud</span>
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 text-center rounded-xl bg-slate-50 border border-slate-200 text-slate-400 text-xs">
-              Carregando diagnósticos da base de dados...
-            </div>
-          )}
-        </div>
-
-        {/* 2. CONFIGURAÇÃO DE POLÍTICAS DE FIREWALL & PROTEÇÃO */}
-        <div className="space-y-4 pt-2 border-t border-slate-100">
-          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
-            <ShieldAlert className="w-4 h-4 text-blue-600" />
-            Mecanismos de Defesa Anti-Invasão e Filtros de Segurança
-          </h4>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="secHeadersToggle"
-                checked={securityHeadersEnabled}
-                onChange={(e) => setSecurityHeadersEnabled(e.target.checked)}
-                disabled={!canEdit}
-                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
-              />
-              <div className="space-y-0.5">
-                <label htmlFor="secHeadersToggle" className="font-bold text-slate-800 cursor-pointer">
-                  Cabeçalhos de Segurança HTTP (HSTS, Anti-XSS, Anti-Clickjacking)
-                </label>
-                <p className="text-[10px] text-slate-400">
-                  Injeta `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN` e regras HSTS em todas as respostas HTTP do servidor.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="sanitizerToggle"
-                checked={sanitizerEnabled}
-                onChange={(e) => setSanitizerEnabled(e.target.checked)}
-                disabled={!canEdit}
-                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
-              />
-              <div className="space-y-0.5">
-                <label htmlFor="sanitizerToggle" className="font-bold text-slate-800 cursor-pointer">
-                  Filtro Sanitizador e Inspeção de Payload (Anti-Injeção)
-                </label>
-                <p className="text-[10px] text-slate-400">
-                  Bloqueia requisições contendo scripts maliciosos (`&lt;script&gt;`, `javascript:`) e instruções SQL nocivas (`UNION SELECT`, `DROP TABLE`).
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="bruteForceToggle"
-                checked={bruteForceEnabled}
-                onChange={(e) => setBruteForceEnabled(e.target.checked)}
-                disabled={!canEdit}
-                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
-              />
-              <div className="space-y-0.5">
-                <label htmlFor="bruteForceToggle" className="font-bold text-slate-800 cursor-pointer">
-                  Defesa Anti-Força Bruta e Bloqueio de IP por Erros de Autenticação
-                </label>
-                <p className="text-[10px] text-slate-400">
-                  Bloqueia temporariamente (15m) qualquer IP que acumule 5 falhas consecutivas de autenticação em menos de 10 minutos.
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 flex items-start gap-3">
-              <input
-                type="checkbox"
-                id="whitelistOnlyToggle"
-                checked={whitelistOnlyMode}
-                onChange={(e) => setWhitelistOnlyMode(e.target.checked)}
-                disabled={!canEdit}
-                className="mt-0.5 w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
-              />
-              <div className="space-y-0.5">
-                <label htmlFor="whitelistOnlyToggle" className="font-bold text-slate-800 cursor-pointer">
-                  Modo Estrito de Whitelist de IP (Somente IPs Autorizados)
-                </label>
-                <p className="text-[10px] text-slate-400">
-                  Bloqueia o acesso a qualquer IP que não esteja explicitamente cadastrado na lista de permissões do sistema.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-between items-center pt-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="firewallEnabledToggle"
-                checked={firewallEnabled}
-                onChange={(e) => setFirewallEnabled(e.target.checked)}
-                disabled={!canEdit}
-                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 accent-blue-600 cursor-pointer"
-              />
-              <label htmlFor="firewallEnabledToggle" className="font-semibold text-slate-700 cursor-pointer text-xs">
-                Manter o Firewall Anti-Invasão Ativo
-              </label>
-            </div>
-
-            {canEdit && (
-              <button
-                type="button"
-                onClick={handleSaveFirewallPolicies}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs transition shadow-sm shadow-blue-600/10 cursor-pointer flex items-center gap-1.5"
-              >
-                <Shield className="w-4 h-4" />
-                Gravar Políticas de Firewall
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* 3. BLOQUEIOS DE FORÇA BRUTA ATIVOS */}
-        {activeLockouts.length > 0 && (
-          <div className="space-y-2.5 pt-2 border-t border-slate-100">
-            <h4 className="font-bold text-rose-600 text-xs flex items-center gap-2">
-              <AlertOctagon className="w-4 h-4" />
-              IPs Bloqueados em Tempo Real por Tentativas de Força Bruta
-            </h4>
-
-            <div className="overflow-x-auto rounded-xl border border-rose-200 bg-rose-50/20">
-              <table className="w-full text-left text-[11px] text-slate-700 font-mono">
-                <thead className="bg-rose-100/70 text-rose-800 font-extrabold uppercase text-[9.5px]">
-                  <tr>
-                    <th className="p-2.5">Endereço IP</th>
-                    <th className="p-2.5">Tentativas Falhadas</th>
-                    <th className="p-2.5">Bloqueado Até</th>
-                    <th className="p-2.5 text-right">Ação</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-rose-100">
-                  {activeLockouts.map((rec: any) => (
-                    <tr key={rec.ip}>
-                      <td className="p-2.5 font-bold text-slate-800">{rec.ip}</td>
-                      <td className="p-2.5 text-rose-700 font-black">{rec.failedCount} falhas</td>
-                      <td className="p-2.5 text-slate-600">{new Date(rec.lockedUntil).toLocaleString("pt-MZ")}</td>
-                      <td className="p-2.5 text-right">
-                        {canEdit && (
-                          <button
-                            type="button"
-                            onClick={() => handleUnlockIp(rec.ip)}
-                            className="px-2.5 py-1 rounded bg-white hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold transition cursor-pointer"
-                          >
-                            Desbloquear IP
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* 4. GERENCIADOR DE REGRAS DE IP (BLACKIST & WHITELIST) */}
-        <div className="space-y-3 pt-2 border-t border-slate-100">
-          <h4 className="font-bold text-slate-800 text-xs flex items-center gap-2">
-            <Filter className="w-4 h-4 text-blue-600" />
-            Regras de Firewall por IP (Listas Negras e Listas Brancas)
-          </h4>
-
-          {canEdit && (
-            <form onSubmit={handleAddIpRule} className="flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                placeholder="Insira o Endereço IP (ex: 192.168.1.100 ou 41.220.12.5)"
-                value={newIpInput}
-                onChange={(e) => setNewIpInput(e.target.value)}
-                className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 outline-none focus:bg-white focus:border-blue-500"
-              />
-              <select
-                value={newIpType}
-                onChange={(e: any) => setNewIpType(e.target.value)}
-                className="bg-slate-100 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none"
-              >
-                <option value="blacklist">Bloquear IP (Blacklist)</option>
-                <option value="whitelist">Autorizar IP (Whitelist)</option>
-              </select>
-              <button
-                type="submit"
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-xs transition cursor-pointer flex items-center gap-1"
-              >
-                <Plus className="w-4 h-4" />
-                Adicionar Regra
-              </button>
-            </form>
-          )}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-            {/* BLACKLIST */}
-            <div className="p-3.5 rounded-xl border border-rose-200 bg-rose-50/10 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-rose-700 text-xs flex items-center gap-1.5">
-                  <XCircle className="w-4 h-4 text-rose-500" />
-                  IP Blacklist (Bloqueados Permanente)
-                </span>
-                <span className="text-[10px] font-mono font-bold text-rose-600 bg-rose-100 px-2 py-0.5 rounded-full">
-                  {blacklistedIps.length}
-                </span>
-              </div>
-              {blacklistedIps.length === 0 ? (
-                <p className="text-[11px] text-slate-400 italic">Nenhum IP bloqueado manualmente.</p>
-              ) : (
-                <div className="space-y-1">
-                  {blacklistedIps.map((ip) => (
-                    <div key={ip} className="flex items-center justify-between p-1.5 rounded bg-white border border-rose-100 text-xs font-mono">
-                      <span className="font-bold text-rose-800">{ip}</span>
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveIpRule(ip, "blacklist")}
-                          className="text-rose-500 hover:text-rose-700 p-0.5 transition cursor-pointer"
-                          title="Remover regra"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* WHITELIST */}
-            <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/10 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="font-bold text-emerald-700 text-xs flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-                  IP Whitelist (Autorizados)
-                </span>
-                <span className="text-[10px] font-mono font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
-                  {whitelistedIps.length}
-                </span>
-              </div>
-              {whitelistedIps.length === 0 ? (
-                <p className="text-[11px] text-slate-400 italic">Nenhum IP restrito na whitelist.</p>
-              ) : (
-                <div className="space-y-1">
-                  {whitelistedIps.map((ip) => (
-                    <div key={ip} className="flex items-center justify-between p-1.5 rounded bg-white border border-emerald-100 text-xs font-mono">
-                      <span className="font-bold text-emerald-800">{ip}</span>
-                      {canEdit && (
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveIpRule(ip, "whitelist")}
-                          className="text-slate-400 hover:text-rose-600 p-0.5 transition cursor-pointer"
-                          title="Remover regra"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Grid: Left Company profiles, Right Gateway integrations & backups */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 text-xs md:text-xs text-slate-800">
-        
-        {/* LEFT COLUMN: Profile, Tax variables and System Notifications */}
-        <div className="space-y-5">
-          {/* Company Profile Card */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-orange-600">
-              <Building className="w-4.5 h-4.5" />
-              <h3 className="font-bold text-slate-850 text-sm">Identidade Corporativa & Variáveis Fiscais</h3>
-            </div>
-            
-            <form onSubmit={handleSaveCompanyConfig} className="space-y-4">
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Nome Fantasia do Estabelecimento</label>
+            <form onSubmit={handleSaveGeneralSettings} className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+                {/* Nome da Empresa */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Nome da Empresa / Loja *</label>
                   <input
                     type="text"
                     required
                     value={companyName}
                     onChange={(e) => setCompanyName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-bold outline-none text-slate-850"
-                    placeholder="OST Vendas"
+                    disabled={!canEdit}
+                    placeholder="Ex: Mercearia Central, Lda."
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Slogan do Sistema</label>
+                {/* Slogan */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Slogan / Subtítulo</label>
                   <input
                     type="text"
-                    required
                     value={slogan}
                     onChange={(e) => setSlogan(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none"
-                    placeholder="Controle Total do Seu Negócio"
+                    disabled={!canEdit}
+                    placeholder="Ex: Qualidade e os melhores preços"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Empresa NUIT (Contribuinte de Moçambique)</label>
+                {/* NUIT */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">NUIT / NIF Fiscal *</label>
                   <input
                     type="text"
                     required
                     value={companyNuit}
                     onChange={(e) => setCompanyNuit(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-bold outline-none"
-                    placeholder="142833902"
+                    disabled={!canEdit}
+                    placeholder="Ex: 400123456"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-mono font-medium"
                   />
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Taxa Padrão de IVA (%)</label>
-                  <select
-                    value={defaultVat}
-                    onChange={(e) => setDefaultVat(Number(e.target.value))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-bold outline-none"
-                  >
-                    <option value={16}>16% (IVA Geral Moçambique)</option>
-                    <option value={0}>Isento (0%)</option>
-                    <option value={5}>5% (Taxa Especial Reduzida)</option>
-                  </select>
+                {/* Contacto Telefónico */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Telefone de Contacto</label>
+                  <input
+                    type="text"
+                    value={storeContact}
+                    onChange={(e) => setStoreContact(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Ex: +258 84 123 4567"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                  />
                 </div>
 
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Endereço de Facturação</label>
-                <input
-                  type="text"
-                  required
-                  value={storeAddress}
-                  onChange={(e) => setStoreAddress(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850"
-                  placeholder="Av. do Trabalho, Armazém 4, Maputo"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Contacto Oficial</label>
-                <input
-                  type="text"
-                  required
-                  value={storeContact}
-                  onChange={(e) => setStoreContact(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none text-slate-850"
-                  placeholder="+258 84 900 1200"
-                />
-              </div>
-
-              {/* Logotipo da Empresa Section */}
-              <div className="space-y-3 pt-3 border-t border-slate-100">
-                <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Logotipo do Estabelecimento (Recibos & Faturas)</label>
-                  <span className="text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
-                    Exibido no topo do Recibo 80mm
-                  </span>
+                {/* Email Comercial */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Email da Loja</label>
+                  <input
+                    type="email"
+                    value={storeEmail}
+                    onChange={(e) => setStoreEmail(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Ex: contacto@loja.co.mz"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                  />
                 </div>
-                
-                <div className="flex flex-col sm:flex-row gap-4 items-start">
-                  {/* Current Logo Preview */}
-                  <div className="relative group w-28 h-28 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center overflow-hidden shrink-0">
+
+                {/* Endereço Físico */}
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Endereço da Loja</label>
+                  <input
+                    type="text"
+                    value={storeAddress}
+                    onChange={(e) => setStoreAddress(e.target.value)}
+                    disabled={!canEdit}
+                    placeholder="Ex: Av. 24 de Julho, nº 123, Maputo"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Logótipo da Empresa */}
+              <div className="p-4 bg-slate-50/60 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-xl border border-slate-200 bg-white flex items-center justify-center overflow-hidden shrink-0 shadow-sm">
                     {logoUrl ? (
-                      <>
-                        <img 
-                          src={logoUrl} 
-                          alt="Logotipo Corporativo" 
-                          className="w-full h-full object-contain p-2"
-                          referrerPolicy="no-referrer"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setLogoUrl("")}
-                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-[10px] font-bold transition-all cursor-pointer"
-                        >
-                          Remover 🗑️
-                        </button>
-                      </>
+                      <img src={logoUrl} alt="Logo" className="w-full h-full object-contain p-1" />
                     ) : (
-                      <div className="text-center p-2">
-                        <Building className="w-8 h-8 text-slate-300 mx-auto mb-1" />
-                        <span className="text-[9px] text-slate-400 block font-medium">Sem Logotipo</span>
-                      </div>
+                      <Building className="w-8 h-8 text-slate-300" />
                     )}
                   </div>
+                  <div>
+                    <h3 className="font-bold text-xs text-slate-800">Logótipo da Empresa</h3>
+                    <p className="text-[11px] text-slate-400">Aparece no cabeçalho do POS e no topo dos talões de venda.</p>
+                  </div>
+                </div>
 
-                  {/* Actions & Inputs Panel */}
-                  <div className="flex-1 w-full space-y-3">
-                    {/* Action Buttons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      {/* Upload Button */}
-                      <label className="flex items-center justify-center gap-1.5 px-3 py-2 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-[11px] cursor-pointer transition-all shadow-sm">
-                        <Upload className="w-3.5 h-3.5" />
-                        <span>Upload de Imagem</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleLogoUpload}
-                          className="hidden"
-                        />
-                      </label>
-
-                      {/* Camera Button */}
-                      <button
-                        type="button"
-                        onClick={startCamera}
-                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold border border-slate-200 rounded-xl text-[11px] cursor-pointer transition-all"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Câmara</span>
-                      </button>
-
-                      {/* AI Generator Button */}
+                {canEdit && (
+                  <div className="flex items-center gap-2">
+                    <label className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition">
+                      <Upload className="w-3.5 h-3.5" />
+                      Carregar Imagem
+                      <input type="file" accept="image/*" onChange={handleLogoFileUpload} className="hidden" />
+                    </label>
+                    {logoUrl && (
                       <button
                         type="button"
                         onClick={() => {
-                          setShowAiLogoPanel(true);
-                          setShowCameraPanel(false);
+                          setLogoUrl("");
+                          onUpdateSettings({ logoUrl: "" });
                         }}
-                        className="flex items-center justify-center gap-1.5 px-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 font-bold border border-amber-500/20 rounded-xl text-[11px] cursor-pointer transition-all"
+                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-xl transition"
+                        title="Remover Logótipo"
                       >
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        <span>Gerar por IA</span>
+                        <Trash2 className="w-4 h-4" />
                       </button>
-                    </div>
-
-                    {/* Direct Image URL input */}
-                    <div className="space-y-1">
-                      <label className="text-[9px] font-bold text-slate-400 uppercase">Ou cole o link URL da imagem</label>
-                      <input
-                        type="url"
-                        value={logoUrl}
-                        onChange={(e) => setLogoUrl(e.target.value)}
-                        placeholder="https://exemplo.com/logo.png"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 font-mono text-[11px] text-slate-700 outline-none focus:border-orange-500"
-                      />
-                    </div>
-
-                    <p className="text-[10px] text-slate-400">
-                      Suporta ficheiros PNG, JPG ou SVG (máx. 2MB). O logotipo será automaticamente posicionado no topo da fita térmica de 80mm e documentos A4.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Video Stream Camera Overlay/Panel */}
-                {showCameraPanel && (
-                  <div className="p-3 bg-slate-950 text-white rounded-2xl border border-zinc-800 space-y-3 relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex justify-between items-center border-b border-zinc-800 pb-2">
-                      <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1.5">
-                        <Camera className="w-4 h-4 text-orange-500 animate-pulse" />
-                        Capturar com Câmara
-                      </span>
-                      <button
-                        type="button"
-                        onClick={stopCamera}
-                        className="text-[10px] text-zinc-400 hover:text-white px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800"
-                      >
-                        Fechar ✕
-                      </button>
-                    </div>
-
-                    {cameraError ? (
-                      <p className="text-rose-400 text-[10px] text-center py-4">{cameraError}</p>
-                    ) : (
-                      <div className="flex flex-col items-center gap-3">
-                        <div className="w-56 h-56 rounded-xl border border-zinc-800 overflow-hidden bg-black relative">
-                          <video
-                            ref={videoRef}
-                            className="w-full h-full object-cover scale-x-[-1]"
-                            playsInline
-                            muted
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={capturePhoto}
-                          className="px-5 py-2 bg-orange-500 hover:bg-orange-600 font-bold rounded-xl text-[11px] text-white flex items-center gap-1.5"
-                        >
-                          <Camera className="w-4 h-4" />
-                          <span>Tirar Foto 📸</span>
-                        </button>
-                      </div>
                     )}
                   </div>
                 )}
-
-                {/* AI Prompt Generator Panel */}
-                {showAiLogoPanel && (
-                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
-                      <span className="text-[11px] font-bold text-slate-800 uppercase flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                        Gerador de Logotipos com Gemini AI
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAiLogoPanel(false)}
-                        className="text-[10px] text-slate-400 hover:text-slate-600"
-                      >
-                        Fechar ✕
-                      </button>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[9px] font-bold text-slate-500 uppercase">Sugira ideias para o seu Logotipo (Prompt)</label>
-                      <textarea
-                        value={logoPrompt}
-                        onChange={(e) => setLogoPrompt(e.target.value)}
-                        placeholder="Ex: Um logotipo minimalista com um carrinho de compras laranja e folhas verdes, fundo branco, estilo clean"
-                        className="w-full bg-white border border-slate-200 rounded-xl p-2.5 outline-none text-xs text-slate-800 resize-none h-16 leading-relaxed"
-                      />
-                    </div>
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        disabled={isGeneratingLogo}
-                        onClick={handleGenerateLogoWithAI}
-                        className="flex-1 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/50 text-white font-bold rounded-xl text-[11px] flex items-center justify-center gap-1.5"
-                      >
-                        {isGeneratingLogo ? (
-                          <>
-                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                            <span>A gerar logotipo...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>Gerar Logotipo Inteligente ⚡</span>
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setLogoPrompt("Um ícone moderno de tecnologia para varejo, cor azul e laranja, estilo flat")}
-                        className="px-3 py-2 bg-slate-200/60 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-[10px]"
-                        title="Sugestão de Prompt"
-                      >
-                        Dica 💡
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15"
-              >
-                Salvar Definições Fiscais
-              </button>
-
-            </form>
-          </div>
-
-          {/* Configuração da API do Provedor de SMS (Códigos 2FA & Alertas) */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-orange-600">
-                <Smartphone className="w-4.5 h-4.5" />
-                <h3 className="font-bold text-slate-850 text-sm">Configuração da API de SMS (2FA & Alertas)</h3>
-              </div>
-              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
-                Suporta 2FA & Alertas
-              </span>
-            </div>
-            
-            <p className="text-[11px] text-slate-500 leading-normal">
-              Insira as credenciais do seu provedor de SMS (Twilio Sid/Token ou Endpoint HTTP Customizado) para permitir que o sistema envie <strong>códigos de verificação 2FA por SMS</strong> para os colaboradores e alertas automáticos ao gestor.
-            </p>
-
-            <form onSubmit={handleSaveSmsAlertsConfig} className="space-y-4">
-              {/* Enable Switch */}
-              <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                <div className="space-y-0.5">
-                  <span className="text-[11px] font-bold text-slate-800 uppercase block">Ativar Envio de SMS no Sistema</span>
-                  <span className="text-[10px] text-slate-500 block">Habilita envio de códigos de verificação 2FA e notificações via SMS</span>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    disabled={!canEdit}
-                    checked={smsAlertsEnabled}
-                    onChange={(e) => setSmsAlertsEnabled(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
-                </label>
-              </div>
-
-              {smsAlertsEnabled && (
-                <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
-                  {/* SMS Provider Selection */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-600 uppercase block">Provedor de Gateway / API SMS</label>
-                    <select
+              {/* Impostos e Parâmetros de Venda */}
+              <div className="pt-2 border-t border-slate-100">
+                <h3 className="font-bold text-xs text-slate-700 mb-3 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-orange-500" />
+                  Taxas & Faturação Padrão
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Taxa de IVA Padrão (%)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      value={defaultVat}
+                      onChange={(e) => setDefaultVat(Number(e.target.value))}
                       disabled={!canEdit}
-                      value={smsProviderType}
-                      onChange={(e) => setSmsProviderType(e.target.value as "TWILIO" | "CUSTOM_HTTP")}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 text-xs"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Símbolo da Moeda</label>
+                    <input
+                      type="text"
+                      value={currencyCode}
+                      onChange={(e) => setCurrencyCode(e.target.value)}
+                      disabled={!canEdit}
+                      placeholder="MT"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Talão Térmico e Impressão */}
+              <div className="pt-2 border-t border-slate-100">
+                <h3 className="font-bold text-xs text-slate-700 mb-3 flex items-center gap-1.5">
+                  <Printer className="w-3.5 h-3.5 text-orange-500" />
+                  Formato de Impressão de Talões
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">Largura do Papel Térmico</label>
+                    <select
+                      value={paperSize}
+                      onChange={(e) => setPaperSize(e.target.value as any)}
+                      disabled={!canEdit}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
                     >
-                      <option value="TWILIO">Twilio API (Account SID + Auth Token - Global)</option>
-                      <option value="CUSTOM_HTTP">Gateway Customizado HTTP REST (Moçambique / Local)</option>
+                      <option value="80MM">80mm (Padrão para Impressoras Térmicas POS)</option>
+                      <option value="58MM">58mm (Térmica Compacta / Portátil)</option>
+                      <option value="A4">A4 (Folha Inteira de Faturação)</option>
                     </select>
                   </div>
 
-                  {smsProviderType === "TWILIO" ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 animate-in fade-in duration-150 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
-                      <div className="space-y-1 md:col-span-2">
-                        <label className="text-[10px] font-bold text-slate-600 uppercase block flex items-center justify-between">
-                          <span>Account SID (Twilio)</span>
-                          <span className="text-[9px] text-slate-400 font-mono">ex: ACa1b2c3d4e5f6...</span>
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          disabled={!canEdit}
-                          value={smsTwilioSid}
-                          onChange={(e) => setSmsTwilioSid(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
-                          placeholder="ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Auth Token (Twilio)</label>
-                        <input
-                          type="password"
-                          required
-                          disabled={!canEdit}
-                          value={smsTwilioToken}
-                          onChange={(e) => setSmsTwilioToken(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
-                          placeholder="••••••••••••••••••••••••••••••••"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Número de Origem / From Number</label>
-                        <input
-                          type="text"
-                          required
-                          disabled={!canEdit}
-                          value={smsTwilioFrom}
-                          onChange={(e) => setSmsTwilioFrom(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
-                          placeholder="+18885550123 ou SenderID"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5 animate-in fade-in duration-150 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-600 uppercase block">Endpoint URL do Gateway Customizado (POST / GET)</label>
-                        <input
-                          type="url"
-                          required
-                          disabled={!canEdit}
-                          value={smsCustomUrl}
-                          onChange={(e) => setSmsCustomUrl(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono outline-none text-slate-850 text-xs shadow-sm"
-                          placeholder="https://api.sms-mozambique.co.mz/v1/send?api_key=xyz&to={phone}&message={message}"
-                        />
-                      </div>
-                      <p className="text-[10px] text-slate-500 font-mono">
-                        Dica de Variáveis: As tags <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;phone&#125;</code>, <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;to&#125;</code> e <code className="bg-slate-200 px-1 rounded text-slate-800 font-bold">&#123;message&#125;</code> serão substituídas dinamicamente ao enviar o código 2FA.
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Manager phone and Threshold triggers */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-600 uppercase block">Telefone de Testes / Contacto Administrador</label>
+                  <div className="flex items-center gap-3 pt-5">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
-                        type="text"
-                        required
+                        type="checkbox"
+                        checked={printerAutoCut}
+                        onChange={(e) => setPrinterAutoCut(e.target.checked)}
                         disabled={!canEdit}
-                        value={smsManagerPhone}
-                        onChange={(e) => setSmsManagerPhone(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-semibold outline-none text-slate-850 text-xs"
-                        placeholder="+258849001200"
+                        className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
                       />
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-600 uppercase block">Gatilho de Qtd. Mínima (Alertas Stock)</label>
-                      <input
-                        type="number"
-                        required
-                        min="1"
-                        disabled={!canEdit}
-                        value={smsStockThreshold}
-                        onChange={(e) => setSmsStockThreshold(Number(e.target.value))}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-bold outline-none text-slate-850 text-xs"
-                        placeholder="5"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {canEdit ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-                  <button
-                    type="submit"
-                    className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15 text-center flex items-center justify-center gap-1.5"
-                  >
-                    <Smartphone className="w-3.5 h-3.5" />
-                    <span>Salvar Credenciais SMS</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleTestSms}
-                    disabled={isTestingSms}
-                    className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer text-center flex items-center justify-center gap-1.5 border border-slate-200"
-                  >
-                    {isTestingSms ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        A enviar teste...
-                      </>
-                    ) : (
-                      <>
-                        <MessageSquare className="w-3.5 h-3.5 text-orange-500" />
-                        <span>Testar Envio SMS 2FA</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              ) : (
-                <div className="text-[11px] text-slate-400 text-center py-2 bg-slate-50 border border-slate-100 rounded-xl">
-                  Apenas administradores podem gerir os alertas e credenciais do servidor SMS.
-                </div>
-              )}
-            </form>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Mobile Money Gateways & backup panels */}
-        <div className="space-y-5">
-          
-          {/* M-Pesa / e-Mola Shortcodes Credentials Panel */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-center">
-            <h3 className="font-bold text-slate-850 text-sm">Integrações de Mobile Money</h3>
-            <p className="text-xs text-slate-500">
-              As configurações de M-Pesa e e-Mola foram movidas para o módulo "Integração Mobile Money".
-            </p>
-          </div>
-
-          {/* Backup & System Maintenance File tools */}
-          <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800 shadow-lg space-y-4">
-            <div className="flex items-center gap-2 text-slate-200">
-              <Database className="w-4.5 h-4.5 text-orange-400" />
-              <h3 className="font-bold text-slate-100 text-sm">Atividades de Salvaguarda (Backup & Restauro)</h3>
-            </div>
-
-            <p className="text-xs text-slate-300">Descarregue arquivos instantâneos JSON criptografados contendo todas as receitas, cadastros de clientes e logs de auditoria.</p>
-
-            <div className="flex gap-2 text-xs pt-1">
-              <button
-                type="button"
-                onClick={handleTriggerBackup}
-                disabled={isBackingUp}
-                className="w-1/2 bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-3 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition disabled:opacity-50"
-              >
-                <Download className="w-4 h-4 shrink-0" />
-                {isBackingUp ? "Efetuando Backup..." : "Descarregar Cópia"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => document.getElementById("native-backup-picker")?.click()}
-                className="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-2 px-3 rounded-lg flex items-center justify-center gap-1 cursor-pointer border border-slate-700 transition"
-              >
-                <input 
-                  id="native-backup-picker"
-                  type="file"
-                  accept=".json,.csv,.xlsx,.txt"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      setFeedbackMsg(`Sincronizando cópia de segurança real: ${file.name}...`);
-                      setTimeout(() => {
-                        setFeedbackMsg(`Restauro concluído! Integrados dados de ${file.name} (${(file.size / 1024).toFixed(1)} KB) com sucesso.`);
-                        onAddAuditLog(
-                          "Restauro de Backup",
-                          "SISTEMA",
-                          `Importou ficheiro local '${file.name}' de backup de dados fiscais.`
-                        );
-                      }, 1600);
-                    }
-                  }}
-                />
-                <Upload className="w-4 h-4 shrink-0" />
-                Restaurar Configuração
-              </button>
-            </div>
-
-            {/* ADMIN-ONLY FULL LOCAL DATABASE BACKUP & RESTORE */}
-            <div className="border-t border-slate-800 pt-4 mt-2 space-y-2.5">
-              <div className="flex items-center gap-1.5 text-xs text-amber-400 font-bold">
-                <Shield className="w-3.5 h-3.5 shrink-0" />
-                <span>Exportação & Restauro de Banco de Dados Completo (ADMIN)</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-normal">
-                Faça o download de uma cópia integral do banco de dados em formato JSON contendo todos os registos operacionais (Produtos, Clientes, Vendas, Caixa, Staff e Definições) para total segurança em modo offline.
-              </p>
-
-              {/* 7-Day Backup Scheduling info badge */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-2 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Agendamento de Cópia Física:</span>
-                  <span className="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-full font-bold text-[9.5px]">
-                    Cada 7 Dias de Uso
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Último Download:</span>
-                  <span className="font-mono text-slate-200">
-                    {lastFullBackupDate 
-                      ? new Date(lastFullBackupDate).toLocaleDateString("pt-MZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) 
-                      : "Nunca realizado"
-                    }
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Estado do Backup:</span>
-                  {isBackupRecommended ? (
-                    <span className="text-amber-500 font-bold flex items-center gap-1">
-                      ⚠️ Em atraso ({daysSinceLastBackup === null ? "Pendente" : `${daysSinceLastBackup} dias`})
-                    </span>
-                  ) : (
-                    <span className="text-emerald-500 font-bold flex items-center gap-1">
-                      ✅ Em dia (Próximo em {7 - (daysSinceLastBackup || 0)} dias)
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* 24-Hour LocalStorage Automatic Backup Status */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80 space-y-2 text-[11px] mt-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Redundância Automática Local:</span>
-                  <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold text-[9.5px]">
-                    Cada 24 Horas (Ativo)
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400 font-medium">Último Auto-Backup:</span>
-                  <span className="font-mono text-slate-200">
-                    {localStorage.getItem("erp_last_auto_backup_time")
-                      ? new Date(localStorage.getItem("erp_last_auto_backup_time")!).toLocaleString("pt-MZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                      : "Pendente"
-                    }
-                  </span>
-                </div>
-                
-                {localStorage.getItem("erp_auto_backup_local_db") && (
-                  <div className="pt-2 border-t border-slate-800/60 flex justify-between items-center gap-2">
-                    <span className="text-[10px] text-slate-400 font-medium">Redundância salva no navegador</span>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (currentRole !== "ADMIN") {
-                          if (onShowToast) {
-                            onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem restaurar o banco de dados.", "error", "Permissão Negada");
-                          }
-                          return;
-                        }
-                        if (window.confirm("Deseja realmente restaurar os dados a partir do último backup redundante de 24h armazenado no LocalStorage? Os dados atuais serão substituídos.")) {
-                          try {
-                            const dataStr = localStorage.getItem("erp_auto_backup_local_db");
-                            if (dataStr) {
-                              const parsed = JSON.parse(dataStr);
-                              if (onImportLocalDB && parsed.data) {
-                                const success = await onImportLocalDB(parsed.data);
-                                if (success && onShowToast) {
-                                  onShowToast("Banco de dados local restaurado com sucesso a partir do LocalStorage!", "success", "Redundância Restaurada");
-                                }
-                              }
-                            }
-                          } catch (err) {
-                            if (onShowToast) {
-                              onShowToast("Erro ao ler dados de backup do LocalStorage.", "error", "Erro de Restauro");
-                            }
-                          }
-                        }
-                      }}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold py-1 px-2.5 rounded text-[10px] transition cursor-pointer"
-                    >
-                      Restaurar Redundância
-                    </button>
-                  </div>
-                )}
-              </div>
-              
-              <div className="flex gap-2 text-xs pt-1">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentRole !== "ADMIN") {
-                      if (onShowToast) {
-                        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem exportar a base de dados completa.", "error", "Permissão Negada");
-                      }
-                      return;
-                    }
-                    triggerAdminBackupDownload();
-                  }}
-                  className={`w-1/2 font-bold py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                    currentRole === "ADMIN" 
-                      ? "bg-amber-600 hover:bg-amber-700 text-white border border-amber-500 shadow-sm shadow-amber-600/10" 
-                      : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50"
-                  }`}
-                  title={currentRole !== "ADMIN" ? "Restrito para Administradores" : "Exportar base de dados completa para JSON"}
-                >
-                  <Download className="w-4 h-4 shrink-0" />
-                  Exportar DB (JSON)
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentRole !== "ADMIN") {
-                      if (onShowToast) {
-                        onShowToast("Apenas utilizadores com privilégios de Administrador (ADMIN) podem restaurar a base de dados completa.", "error", "Permissão Negada");
-                      }
-                      return;
-                    }
-                    document.getElementById("admin-db-restore-picker")?.click();
-                  }}
-                  className={`w-1/2 font-bold py-2.5 px-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition ${
-                    currentRole === "ADMIN" 
-                      ? "bg-slate-800 hover:bg-slate-700 text-amber-400 border border-amber-500/30" 
-                      : "bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-50"
-                  }`}
-                  title={currentRole !== "ADMIN" ? "Restrito para Administradores" : "Restaurar base de dados completa a partir de um JSON"}
-                >
-                  <input 
-                    id="admin-db-restore-picker"
-                    type="file"
-                    accept=".json"
-                    className="hidden"
-                    onChange={async (e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      
-                      try {
-                        const text = await file.text();
-                        const parsed = JSON.parse(text);
-                        if (!parsed.app || !parsed.data) {
-                          if (onShowToast) {
-                            onShowToast("O ficheiro carregado não é um backup válido de banco de dados do OST Vendas.", "error", "Erro de Backup");
-                          }
-                          return;
-                        }
-                        
-                        if (onImportLocalDB) {
-                          const success = await onImportLocalDB(parsed.data);
-                          if (success && onShowToast) {
-                            onShowToast("Banco de dados local restaurado com sucesso!", "success", "Cópia Restaurada");
-                          }
-                        }
-                      } catch (err) {
-                        if (onShowToast) {
-                          onShowToast("Falha ao analisar o ficheiro JSON de backup.", "error", "Erro de Ficheiro");
-                        }
-                      }
-                    }}
-                  />
-                  <Upload className="w-4 h-4 shrink-0" />
-                  Restaurar DB (JSON)
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* ADMIN TOOL: Permanent Purge of Mock & Sample Data */}
-          <div className="bg-white p-5 rounded-2xl border border-rose-200/80 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b pb-3 border-rose-100">
-              <div className="flex items-center gap-2.5 text-rose-600">
-                <Trash2 className="w-5 h-5 shrink-0" />
-                <div>
-                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Limpeza de Dados de Demonstração (Mock)</h3>
-                  <p className="text-[10px] text-slate-500 font-medium">Purga definitiva de itens de exemplo no Supabase e armazenamento local</p>
-                </div>
-              </div>
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                Ação Administrativa
-              </span>
-            </div>
-
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Esta ferramenta pesquisa e elimina permanentemente produtos de exemplo, clientes fictícios, vendas de teste e históricos de demonstração. Após a execução, apenas registos reais de utilizadores e empresas autenticadas permanecerão no sistema.
-            </p>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <div className="text-[11px] text-slate-400">
-                💡 <span className="font-semibold text-slate-600">Recomendação:</span> Execute antes de colocar a sua loja em operação real.
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={!canEdit}
-                  onClick={async () => {
-                    if (!window.confirm("ATENÇÃO: Deseja realmente remover permanentemente todos os dados de demonstração/mock do banco de dados? Esta ação não pode ser desfeita.")) {
-                      return;
-                    }
-                    if (onPurgeMockData) {
-                      await onPurgeMockData();
-                    } else {
-                      const res = await AdminService.purgeMockData(activeUser?.name);
-                      if (res.success && onShowToast) {
-                        onShowToast(res.message, "success", "Purga Concluída");
-                      } else if (onShowToast) {
-                        onShowToast(res.message, "error", "Falha na Purga");
-                      }
-                    }
-                  }}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-xl text-xs font-bold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4 shrink-0" />
-                  Limpar Dados Mock
-                </button>
-
-                <button
-                  type="button"
-                  disabled={!canEdit}
-                  onClick={async () => {
-                    const promptVal = window.prompt("CONFIRMAÇÃO CRÍTICA:\n\nEsta ação vai reiniciar todo o sistema para estado limpo de comercialização, limpando dados locais, sessões ativas e registos de teste.\n\nDigite 'RESET' para confirmar:");
-                    if (promptVal !== "RESET") {
-                      if (promptVal !== null && onShowToast) {
-                        onShowToast("Código de confirmação incorreto. Operação cancelada.", "warning", "Reset Cancelado");
-                      }
-                      return;
-                    }
-                    if (onShowToast) {
-                      onShowToast("A reiniciar o sistema e a limpar dados...", "info", "Reset em Curso");
-                    }
-                    const res = await AdminService.executeFullCommercialReset(activeUser?.name);
-                    if (res.success) {
-                      if (onShowToast) onShowToast(res.message, "success", "Sistema Pronto");
-                      setTimeout(() => {
-                        window.location.href = "/";
-                      }, 1000);
-                    } else if (onShowToast) {
-                      onShowToast(res.message, "error", "Falha no Reset");
-                    }
-                  }}
-                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-slate-900 hover:bg-black text-white rounded-xl text-xs font-bold transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer border border-slate-700"
-                >
-                  <RefreshCw className="w-4 h-4 shrink-0" />
-                  Reset para Comercialização
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* NEW MODULE: Automated Cloud Backup Scheduler (Mock Cloud Export) */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-              <div className="flex items-center gap-2 text-orange-600">
-                <Cloud className="w-5 h-5 shrink-0" />
-                <div>
-                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Agendamento de Backup</h3>
-                  <p className="text-[10px] text-slate-400 font-medium">Agende a exportação automática de todos os dados do sistema</p>
-                </div>
-              </div>
- 
-              {/* Status Indicator */}
-              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                cloudBackupEnabled 
-                  ? "bg-emerald-50 text-emerald-700 border border-emerald-200" 
-                  : "bg-slate-100 text-slate-500 border border-slate-200"
-              }`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${cloudBackupEnabled ? "bg-emerald-600 animate-pulse" : "bg-slate-400"}`}></span>
-                {cloudBackupEnabled ? "Agendado" : "Inativo"}
-              </span>
-            </div>
- 
-            <form onSubmit={handleSaveCloudBackupConfig} className="space-y-4">
-              {/* Toggle to enable/disable */}
-              <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-150">
-                <div className="space-y-0.5">
-                  <label className="text-xs font-bold text-slate-700 cursor-pointer select-none" htmlFor="cloud-backup-toggle">
-                    Ativar Rotina Automática
-                  </label>
-                  <p className="text-[10px] text-slate-400 leading-tight">Autorizar disparos automáticos nos horários parametrizados.</p>
-                </div>
-                <input
-                  id="cloud-backup-toggle"
-                  type="checkbox"
-                  disabled={!canEdit}
-                  checked={cloudBackupEnabled}
-                  onChange={(e) => setCloudBackupEnabled(e.target.checked)}
-                  className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                />
-              </div>
- 
-              {cloudBackupEnabled && (
-                <div className="space-y-3 p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs animate-in slide-in-from-top-2 duration-150">
-                  {/* Backup Destination Channels */}
-                  <div className="bg-white p-2.5 rounded-xl border border-slate-150 space-y-2">
-                    <span className="text-[9.5px] font-extrabold text-slate-400 uppercase block leading-none">Método de Exportação / Canais de Envio</span>
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
-                        <input
-                          type="checkbox"
-                          disabled={!canEdit}
-                          checked={backupExportToCloud}
-                          onChange={(e) => setBackupExportToCloud(e.target.checked)}
-                          className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span>Nuvem de Destino</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
-                        <input
-                          type="checkbox"
-                          disabled={!canEdit}
-                          checked={backupExportToEmail}
-                          onChange={(e) => setBackupExportToEmail(e.target.checked)}
-                          className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                        />
-                        <span>Enviar por E-mail</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    {/* Destination Cloud Service Selector */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Serviço de Destino (Cloud)</label>
-                      <select
-                        disabled={!canEdit || !backupExportToCloud}
-                        value={cloudProvider}
-                        onChange={(e) => setCloudProvider(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-xs text-slate-750 disabled:opacity-50"
-                      >
-                        <option value="gcs">Google Cloud (GCS)</option>
-                        <option value="s3">Amazon Web Services (S3)</option>
-                        <option value="azure">Microsoft Azure (Blob)</option>
-                        <option value="mega">Mega Storage Cripto</option>
-                        <option value="dropbox">Dropbox Business Cloud</option>
-                      </select>
-                    </div>
- 
-                    {/* Frequency Selector */}
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Frequência</label>
-                      <select
-                        disabled={!canEdit}
-                        value={backupFrequency}
-                        onChange={(e) => setBackupFrequency(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-xs text-slate-750"
-                      >
-                        <option value="12h">A cada 12 Horas</option>
-                        <option value="daily">Diário</option>
-                        <option value="weekly">Semanal</option>
-                        <option value="monthly">Mensal</option>
-                        <option value="cron">Cron (Personalizado)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Frequency parameters time or cron input */}
-                  {backupFrequency === "cron" ? (
-                    <div className="space-y-1 animate-in fade-in duration-100">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase flex items-center justify-between">
-                        <span>Expressão Cron Personalizada</span>
-                        <span className="text-[9px] text-orange-500 font-mono normal-case font-bold">padrão: minuto hora dia mês sem</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        disabled={!canEdit}
-                        value={backupCron}
-                        onChange={(e) => setBackupCron(e.target.value)}
-                        className="w-full bg-white font-mono border border-slate-200 rounded-lg p-2 font-semibold outline-none text-xs text-slate-750"
-                        placeholder="Ex: 0 4 * * 1-5"
-                      />
-                      <p className="text-[9.5px] text-slate-400 font-medium">Configuração cron padrão para agendar tarefas em segundo plano do servidor.</p>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 gap-3 items-center animate-in fade-in duration-100">
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase">Horário de Gravação</label>
-                        <input
-                          type="time"
-                          required
-                          disabled={!canEdit}
-                          value={backupTime}
-                          onChange={(e) => setBackupTime(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-lg p-1.5 font-semibold text-center outline-none text-xs text-slate-750"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase block leading-none mb-1">Cron equivalente</span>
-                        <div className="bg-slate-100 border border-slate-200 p-2 text-center rounded-lg font-mono text-[10.5px] text-slate-500 font-bold">
-                          {backupFrequency === '12h' 
-                            ? `${backupTime.split(':')[1] || '0'} */12 * * *` 
-                            : `0 ${backupTime.split(':')[1] || '0'} ${backupTime.split(':')[0] || '0'} * * ${backupFrequency === 'weekly' ? '1' : backupFrequency === 'monthly' ? '1' : '*'}`
-                          }
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Backend Cron Real-Time status panel */}
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-orange-500" />
-                    Status do Agendador (Cron do Servidor)
-                  </span>
-                  <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wide ${cronStatus?.active ? "bg-emerald-100 text-emerald-805" : "bg-orange-100 text-orange-805"}`}>
-                    {cronStatus?.active ? "Ativo no Servidor" : "Inativo"}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-[11px] font-medium text-slate-600">
-                  <div className="bg-white p-2 rounded-lg border border-slate-100 space-y-0.5">
-                    <span className="text-[9px] text-slate-400 font-bold uppercase block leading-none">Expressão Cron</span>
-                    <span className="font-mono font-bold text-slate-800 text-xs">{cronStatus?.cronPattern || "0 18 * * 1-5"}</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-slate-100 space-y-0.5">
-                    <span className="text-[9px] text-slate-400 font-bold uppercase block leading-none">Frequência Ativa</span>
-                    <span className="font-bold text-slate-800 text-[10px] truncate block" title={cronStatus?.description || "Fim de Dia (Seg-Sex às 18:00)"}>
-                      {cronStatus?.description || "Fim de Dia (Seg-Sex às 18:00)"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-white p-2.5 rounded-lg border border-slate-100 space-y-1">
-                  <div className="flex items-center justify-between text-[9px] text-slate-400 font-bold uppercase leading-none">
-                    <span>Último Disparo Automático</span>
-                    <span>Status de Envio</span>
-                  </div>
-                  <div className="flex items-center justify-between font-bold text-[10.5px]">
-                    <span className="text-slate-750">{cronStatus?.lastRun ? new Date(cronStatus.lastRun).toLocaleString("pt-PT") : "Pendente (Sem disparos)"}</span>
-                    <span className="text-slate-600 max-w-[150px] truncate font-semibold" title={cronStatus?.status || "Nenhum status"}>
-                      {cronStatus?.status || "Pendente"}
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleTriggerCronBackup}
-                  disabled={isSimulatingCloudBackup || !cloudBackupEnabled}
-                  className="w-full py-1.5 bg-orange-50 hover:bg-orange-100 border border-orange-200 text-orange-700 font-bold rounded-lg text-[10.5px] flex items-center justify-center gap-1 transition disabled:opacity-50"
-                >
-                  <Mail className="w-3 h-3" />
-                  Executar Envio & Fecho de Caixa Completo (Manual)
-                </button>
-              </div>
-
-              {/* Operations control buttons */}
-              <div className="flex gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={handleTriggerCloudBackupSimulation}
-                  disabled={isSimulatingCloudBackup || !cloudBackupEnabled}
-                  className="w-1/2 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1 shadow cursor-pointer disabled:opacity-50 transition"
-                >
-                  <Play className={`w-3.5 h-3.5 text-orange-400 ${isSimulatingCloudBackup ? "animate-spin" : ""}`} />
-                  Exportar Agora
-                </button>
-
-                {canEdit && (
-                  <button
-                    type="submit"
-                    className="w-1/2 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg text-xs flex items-center justify-center gap-1 shadow-lg shadow-orange-500/10 cursor-pointer transition"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Salvar Agenda
-                  </button>
-                )}
-              </div>
-            </form>
-
-            {/* Simulated Live CLI Progress Logs console */}
-            {cloudBackupLogs.length > 0 && (
-              <div className="space-y-1.5 pt-1 animate-in fade-in-50 duration-250">
-                <h5 className="text-[9.5px] font-bold font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5" />
-                  Terminal de Envio na Nuvem (Relatório de Monitoria)
-                </h5>
-                <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 font-mono text-[9.5px] leading-relaxed space-y-1 max-h-36 overflow-y-auto shadow-inner text-amber-400">
-                  {cloudBackupLogs.map((log, index) => {
-                    const isSucc = log.includes("✔️") || log.includes("sucesso");
-                    return (
-                      <div key={index} className={`flex items-start gap-1 justify-start ${isSucc ? "text-emerald-400 font-bold" : ""}`}>
-                        <span className="text-slate-600 shrink-0 select-none">$&gt;</span>
-                        <span>{log}</span>
-                      </div>
-                    );
-                  })}
-                  {isSimulatingCloudBackup && (
-                    <div className="flex items-center gap-2 text-slate-550 italic animate-pulse">
-                      <span className="text-slate-650 shrink-0 select-none">$&gt;</span>
-                      <span>Inicializando transmissão de pacotes gzip...</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* NEW MODULE: Backup History & Local Restore Management */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-              <div className="flex items-center gap-2 text-slate-700">
-                <Database className="w-5 h-5 text-orange-500 shrink-0" />
-                <div>
-                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Histórico de Backups</h3>
-                  <p className="text-[10px] text-slate-400 font-medium">Gerencie e restaure backups salvos</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={fetchBackupsList}
-                disabled={isLoadingBackups}
-                className="p-1.5 hover:bg-slate-105 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer"
-                title="Atualizar Lista"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingBackups ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-
-            {isLoadingBackups ? (
-              <div className="py-6 text-center text-slate-400 text-xs">
-                Carregando arquivos de backup...
-              </div>
-            ) : backupsList.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs space-y-1">
-                <Database className="w-8 h-8 text-slate-200 mx-auto" />
-                <p>Nenhum backup encontrado no servidor.</p>
-                <p className="text-[10px] text-slate-350">Clique em 'Exportar Agora' para criar o primeiro.</p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-[11px] text-slate-600">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[10px] text-slate-400 uppercase tracking-wider text-left font-bold">
-                      <th className="py-2">Ficheiro / Data</th>
-                      <th className="py-2">Tamanho</th>
-                      <th className="py-2">Tipo</th>
-                      <th className="py-2 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {backupsList.map((backup) => (
-                      <tr key={backup.filename} className="hover:bg-slate-50 transition">
-                        <td className="py-2.5 pr-2">
-                          <div className="font-semibold text-slate-850 truncate max-w-[140px]" title={backup.filename}>
-                            {backup.filename}
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {new Date(backup.mtime).toLocaleString()}
-                          </div>
-                        </td>
-                        <td className="py-2.5 font-mono text-slate-500">
-                          {(backup.size / 1024).toFixed(1)} KB
-                        </td>
-                        <td className="py-2.5">
-                          <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${
-                            backup.type === "automated" 
-                              ? "bg-indigo-50 text-indigo-700 border border-indigo-100" 
-                              : "bg-orange-50 text-orange-700 border border-orange-100"
-                          }`}>
-                            {backup.type === "automated" ? "Automático" : "Manual"}
-                          </span>
-                        </td>
-                        <td className="py-2.5 text-right space-x-1.5 whitespace-nowrap">
-                          <a
-                            href={`/api/backups/download/${backup.filename}`}
-                            download
-                            className="inline-flex items-center justify-center p-1 hover:bg-slate-150 text-slate-600 hover:text-slate-900 rounded transition"
-                            title="Baixar Backup"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
-                          {canEdit && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreBackup(backup.filename)}
-                                disabled={isRestoringBackup}
-                                className="p-1 hover:bg-slate-150 text-emerald-600 hover:text-emerald-800 rounded transition cursor-pointer"
-                                title="Restaurar este Backup"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteBackup(backup.filename)}
-                                className="p-1 hover:bg-red-50 text-red-500 hover:text-red-700 rounded transition cursor-pointer"
-                                title="Eliminar Backup"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* NEW MODULE: System Diagnostics Logs */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-              <div className="flex items-center gap-2 text-slate-700">
-                <AlertTriangle className="w-5 h-5 text-red-500 shrink-0" />
-                <div>
-                  <h3 className="font-bold text-slate-850 text-xs md:text-sm">Log de Diagnósticos do Sistema</h3>
-                  <p className="text-[10px] text-slate-400 font-medium font-sans">Visualização de auditoria e eventos do sistema</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={fetchFirebaseLogs}
-                disabled={isLoadingLogs}
-                className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-500 hover:text-slate-800 transition cursor-pointer"
-                title="Atualizar Logs"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? "animate-spin" : ""}`} />
-              </button>
-            </div>
-
-            {/* Filters */}
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Filtrar por Data</label>
-                <input
-                  type="date"
-                  value={logFilterDate}
-                  onChange={(e) => setLogFilterDate(e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-slate-700 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-orange-500 text-xs"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Filtrar por Tipo</label>
-                <select
-                  value={logFilterType}
-                  onChange={(e) => setLogFilterType(e.target.value)}
-                  className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-slate-700 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-orange-500 text-xs"
-                >
-                  <option value="">Todos</option>
-                  <option value="AUTENTICAÇÃO">Autenticação</option>
-                  <option value="CONFIGURAÇÕES">Configurações</option>
-                  <option value="SISTEMA">Sistema</option>
-                  <option value="FALHA">Falhas / Erros</option>
-                </select>
-              </div>
-            </div>
-
-            {isLoadingLogs ? (
-              <div className="py-6 text-center text-slate-400 text-xs">
-                Carregando logs de diagnóstico...
-              </div>
-            ) : firebaseLogs.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs space-y-1">
-                <Shield className="w-8 h-8 text-slate-200 mx-auto" />
-                <p>Nenhum log de diagnóstico registado.</p>
-              </div>
-            ) : (() => {
-              // Apply filters
-              const filteredLogs = firebaseLogs.filter(log => {
-                // Filter by date
-                if (logFilterDate) {
-                  if (!log.timestamp) return false;
-                  const logDateStr = log.timestamp.split("T")[0];
-                  if (logDateStr !== logFilterDate) return false;
-                }
-                // Filter by type (module or action contains type)
-                if (logFilterType) {
-                  const actionUpper = (log.action || "").toUpperCase();
-                  const moduleUpper = (log.module || "").toUpperCase();
-                  const detailsUpper = (log.details || "").toUpperCase();
-                  
-                  if (logFilterType === "FALHA") {
-                    return actionUpper.includes("FAIL") || actionUpper.includes("FALHA") || detailsUpper.includes("FALHA") || detailsUpper.includes("ERR") || detailsUpper.includes("RECUSOU");
-                  } else {
-                    return moduleUpper.includes(logFilterType) || actionUpper.includes(logFilterType);
-                  }
-                }
-                return true;
-              });
-
-              if (filteredLogs.length === 0) {
-                return (
-                  <div className="py-6 text-center text-slate-400 text-xs">
-                    Nenhum log corresponde aos filtros aplicados.
-                  </div>
-                );
-              }
-
-              return (
-                <div className="max-h-[250px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {filteredLogs.map((log, logIdx) => {
-                    const isError = (log.action || "").toUpperCase().includes("FALHA") || 
-                                    (log.action || "").toUpperCase().includes("FAIL") ||
-                                    (log.details || "").toUpperCase().includes("ERR") ||
-                                    (log.details || "").toUpperCase().includes("RECUSOU");
-                    return (
-                      <div 
-                        key={`${log.id || 'log'}-${logIdx}`} 
-                        className={`p-2.5 rounded-xl border text-[11px] transition ${
-                          isError 
-                            ? "bg-rose-50/70 border-rose-100 text-rose-900" 
-                            : "bg-slate-50/70 border-slate-100 text-slate-700"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between font-bold mb-1">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider ${
-                            isError ? "bg-rose-100 text-rose-800" : "bg-slate-200 text-slate-800"
-                          }`}>
-                            {log.action || "Log"}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-normal">
-                            {log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : ""}
-                          </span>
-                        </div>
-                        <p className="font-medium text-slate-800 break-words leading-relaxed">
-                          {log.details}
-                        </p>
-                        {log.userName && (
-                          <div className="mt-1.5 flex items-center gap-1 text-[9.5px] text-slate-400 font-semibold uppercase">
-                            <span>Utilizador:</span>
-                            <span className="text-slate-600">{log.userName}</span>
-                          </div>
-                        )}
-                        {log.timestamp && (
-                          <div className="text-[9px] text-slate-400 mt-0.5">
-                            {new Date(log.timestamp).toLocaleDateString()}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-          </div>
-
-        </div>
-
-      </div>
-        </div>
-      )}
-
-      {activeSubTab === "smtp" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Mail className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Servidor SMTP & Alertas de E-mail</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Configure as credenciais do seu próprio servidor de e-mail para enviar faturas, alertas de estoque crítico e relatórios financeiros automatizados.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* System Notifications Card */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center gap-2 text-orange-600">
-              <AlertTriangle className="w-4.5 h-4.5" />
-              <h3 className="font-bold text-slate-850 text-sm">Notificações do Sistema & Alertas por E-mail</h3>
-            </div>
-            <p className="text-[11px] text-slate-400 leading-normal">
-              Configure as definições de e-mail de destino para alertas e relatórios automáticos de auditoria. O administrador receberá logs de eventos operacionais críticos externamente para garantir monitoria contínua do ERP.
-            </p>
-
-            <form onSubmit={handleSaveAlertsConfig} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block">E-mail de Destino para Alertas de Eventos Críticos</label>
-                  <input
-                    type="email"
-                    disabled={!canEdit}
-                    value={alertsRecipientEmail}
-                    onChange={(e) => setAlertsRecipientEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
-                    placeholder="admin-alerts@empresa.co.mz"
-                  />
-                  <span className="text-[10px] text-slate-400 block mt-1">
-                    Este endereço receberá notificações automáticas em caso de eventos de segurança, falhas de sistema e acessos não autorizados.
-                  </span>
-                </div>
-
-                <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700 select-none">
-                    <input
-                      type="checkbox"
-                      disabled={!canEdit}
-                      checked={emailStockAlertsEnabled}
-                      onChange={(e) => {
-                        if (e.target.checked && smtpEnabled && !isSmtpVerified) {
-                          if (onShowToast) {
-                            onShowToast(
-                              "Aviso: O servidor SMTP ainda não foi verificado com sucesso. Certifique-se de salvar e testar as credenciais para garantir que os e-mails sejam enviados.",
-                              "warning",
-                              "SMTP Não Verificado"
-                            );
-                          }
-                        }
-                        setEmailStockAlertsEnabled(e.target.checked);
-                      }}
-                      className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                    />
-                    <span>Alertas de Estoque Baixo por E-mail</span>
-                  </label>
-                  <p className="text-[10.5px] text-slate-400 leading-normal">
-                    Quando ativo, envia avisos automáticos via e-mail para o destinatário ao lado sempre que o estoque de algum item atingir um nível crítico. Requer SMTP configurado.
-                  </p>
-                </div>
-              </div>
-
-              {/* Custom Email Template Editor for Stock Alerts */}
-              {emailStockAlertsEnabled && (
-                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-4 animate-in fade-in duration-200">
-                  <div className="flex items-center gap-1.5 text-orange-600 font-bold text-xs uppercase tracking-wider border-b pb-1.5 border-slate-200">
-                    <Mail className="w-4 h-4 text-orange-500" />
-                    <span>Modelo de E-mail de Alerta</span>
-                  </div>
-                  
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Assunto do E-mail</label>
-                    <input
-                      type="text"
-                      disabled={!canEdit}
-                      value={stockAlertEmailSubject}
-                      onChange={(e) => setStockAlertEmailSubject(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none text-slate-850 disabled:opacity-75 text-xs focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
-                      placeholder="Ex: [ALERTA] Estoque Crítico de Produtos"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase block">Corpo do E-mail (Texto Simples)</label>
-                    <textarea
-                      rows={6}
-                      disabled={!canEdit}
-                      value={stockAlertEmailBody}
-                      onChange={(e) => setStockAlertEmailBody(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2 font-mono text-[11px] text-slate-850 disabled:opacity-75 outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 leading-relaxed resize-y"
-                      placeholder="Escreva a mensagem do e-mail..."
-                    />
-                  </div>
-
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-150 space-y-1.5">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase block">Tags Dinâmicas Disponíveis:</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1 text-[10px] text-slate-600">
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[LISTA_PRODUTOS]</code>
-                        <span>Lista de produtos baixos</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[NOME_EMPRESA]</code>
-                        <span>Nome do estabelecimento</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[DATA]</code>
-                        <span>Data e hora do envio</span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <code className="bg-slate-100 px-1 py-0.5 rounded font-bold font-mono text-orange-600">[EMAIL_DESTINO]</code>
-                        <span>E-mail destinatário</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {canEdit ? (
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15"
-                >
-                  Salvar Definições de Notificações
-                </button>
-              ) : (
-                <div className="text-[11px] text-slate-400 text-center py-2 bg-slate-50 border border-slate-100 rounded-xl">
-                  Apenas administradores podem alterar as definições de alertas críticos.
-                </div>
-              )}
-            </form>
-          </div>
-
-          {/* DIAGNOSTIC PANEL: .env SMTP Configuration Validator */}
-          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-3 border-slate-200">
-              <div className="flex items-center gap-2.5 text-slate-850">
-                <Database className="w-5 h-5 text-orange-500 shrink-0" />
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm">Painel de Diagnóstico do Ficheiro .env (SMTP)</h3>
-                  <p className="text-[11px] text-slate-400 mt-0.5">Validador direto das configurações de e-mail inseridas no ambiente do servidor (.env).</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={isFetchingEnvSmtp}
-                onClick={() => fetchEnvSmtpSettings(true)}
-                className="bg-white hover:bg-slate-100 text-slate-700 disabled:opacity-50 text-[10px] py-1 px-3 rounded-full font-bold transition flex items-center gap-1.5 cursor-pointer border border-slate-200 shadow-sm"
-                title="Recarregar os valores definidos no ficheiro .env do servidor"
-              >
-                <RefreshCw className={`w-3 h-3 ${isFetchingEnvSmtp ? "animate-spin" : ""}`} />
-                Recarregar do .env
-              </button>
-            </div>
-
-            <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-4">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">Credenciais Ativas no Ficheiro de Ambiente:</span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">SMTP Host</span>
-                  <span className="text-xs font-mono font-bold text-slate-700 break-all">{envSmtpHost || <span className="text-red-400 italic font-sans font-medium text-[11px]">Não Definido</span>}</span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Porta SMTP</span>
-                  <span className="text-xs font-mono font-bold text-slate-700">{envSmtpPort || <span className="text-red-400 italic font-sans font-medium text-[11px]">Nenhuma</span>}</span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Usuário</span>
-                  <span className="text-xs font-mono font-bold text-slate-700 break-all">{envSmtpUser || <span className="text-red-400 italic font-sans font-medium text-[11px]">Sem Autenticação</span>}</span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                  <span className="text-[9px] font-bold text-slate-400 block uppercase">Senha</span>
-                  <span className="text-xs font-mono font-bold text-slate-700">{envSmtpPassword ? "••••••••" : <span className="text-red-400 italic font-sans font-medium text-[11px]">Vazia</span>}</span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 pt-1 border-t border-slate-100 mt-2">
-                <div className={`w-2.5 h-2.5 rounded-full ${envSmtpSecure ? "bg-emerald-500" : "bg-amber-400 animate-pulse"}`}></div>
-                <span className="text-[11px] text-slate-500">
-                  Segurança SSL/TLS: <strong className="text-slate-750 font-bold">{envSmtpSecure ? "Habilitado (Porta 465 recomendada)" : "Desabilitado (STARTTLS via porta 587)"}</strong>
-                </span>
-              </div>
-            </div>
-
-            {/* Verification Actions */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-3">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">1. Diagnóstico de Ligação de Rede</span>
-                <p className="text-[11px] text-slate-400 leading-normal">Verifique o handshake com o servidor SMTP e confirme se a rede local consegue se comunicar com a porta de saída antes de autorizar os envios automáticos.</p>
-                <button
-                  type="button"
-                  disabled={isTestingEnvSmtp || isFetchingEnvSmtp}
-                  onClick={handleVerifyEnvSmtp}
-                  className="w-full py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isTestingEnvSmtp ? "animate-spin" : ""}`} />
-                  {isTestingEnvSmtp ? "A verificar ligação..." : "Verificar Resposta SMTP (.env)"}
-                </button>
-
-                {envSmtpVerifyStatus === "success" && (
-                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-[10.5px] rounded-lg flex items-start gap-1.5 animate-in fade-in duration-200">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block">Conexão Estabelecida com Sucesso!</strong>
-                      O servidor de e-mail está acessível e pronto para ser utilizado.
-                    </div>
-                  </div>
-                )}
-
-                {envSmtpVerifyStatus === "error" && (
-                  <div className="p-2.5 bg-red-500/10 border border-red-500/20 text-red-700 text-[10.5px] rounded-lg flex items-start gap-1.5 animate-in fade-in duration-200">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block">Erro na Ligação de Rede:</strong>
-                      <span className="font-mono text-[9.5px] block mt-0.5 break-all">{envSmtpVerifyError}</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="bg-white p-4 rounded-xl border border-slate-150 space-y-3">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">2. Despacho Real de E-mail de Teste</span>
-                <p className="text-[11px] text-slate-400 leading-normal">Envie um e-mail físico para confirmar a integridade das políticas anti-spam, DKIM, SPF ou autenticação de utilizador.</p>
-                <div className="space-y-1">
-                  <label className="text-[9px] font-bold text-slate-500 uppercase">E-mail Destinatário para o Teste</label>
-                  <input
-                    type="email"
-                    value={envSmtpTestRecipient}
-                    onChange={(e) => setEnvSmtpTestRecipient(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 font-semibold text-xs outline-none focus:border-orange-400 text-slate-750"
-                    placeholder="exemplo@gmail.com"
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={isSendingEnvTest || isFetchingEnvSmtp || !envSmtpHost}
-                  onClick={handleTestEnvSmtpEmail}
-                  className="w-full py-2 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-lg text-xs transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-sm"
-                >
-                  <Mail className="w-3.5 h-3.5" />
-                  {isSendingEnvTest ? "A enviar e-mail..." : "Disparar E-mail de Teste (.env)"}
-                </button>
-              </div>
-            </div>
-
-            {/* Apply helper footer */}
-            <div className="p-3 bg-slate-150/50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
-              <div className="flex items-center gap-1.5">
-                <Check className="w-4 h-4 text-emerald-500" />
-                <span>As credenciais do .env estão corretas? Aplique-as nas definições globais do sistema.</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleApplyEnvToSystem}
-                className="bg-slate-900 hover:bg-slate-800 text-white font-bold py-1 px-3 rounded-lg text-[10.5px] transition cursor-pointer shrink-0 shadow shadow-slate-900/10"
-              >
-                Aplicar Definições .env ao Formulário
-              </button>
-            </div>
-          </div>
-
-          {/* EXCLUSIVE PANEL: Dedicated SMTP Server Configuration */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
-          <div className="flex items-center gap-2.5 text-orange-600">
-            <Server className="w-5 h-5 shrink-0" />
-            <div>
-              <h3 className="font-bold text-slate-850 text-sm">Configuração de Servidor SMTP Dedicado</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Gerencie as credenciais do seu servidor de saída para envio de e-mails de forma independente e segura.</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={isImportingEnv || !canEdit}
-              onClick={handleImportFromEnv}
-              className="bg-orange-50 hover:bg-orange-100 text-orange-600 disabled:opacity-50 text-[10px] py-1 px-3 rounded-full font-bold transition flex items-center gap-1 cursor-pointer border border-orange-200"
-              title="Preencher os campos abaixo utilizando as definições de SMTP configuradas no ficheiro .env do servidor"
-            >
-              <Download className={`w-3 h-3 ${isImportingEnv ? "animate-spin" : ""}`} />
-              {isImportingEnv ? "A importar..." : "Preencher do .env"}
-            </button>
-
-            {isSmtpVerified ? (
-              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-3 py-1 rounded-full font-bold text-[10px] flex items-center gap-1">
-                <CheckCircle className="w-3.5 h-3.5" />
-                Conexão Verificada
-              </span>
-            ) : (
-              <span className="bg-amber-50 text-amber-700 border border-amber-200 px-3 py-1 rounded-full font-bold text-[10px] flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Não Verificado
-              </span>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-slate-800 text-xs">
-          {/* SMTP Credentials */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-2 space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Servidor Host (ex: smtp.gmail.com)</label>
-                <input
-                  type="text"
-                  required
-                  disabled={!canEdit}
-                  value={smtpHost}
-                  onChange={(e) => {
-                    setSmtpHost(e.target.value);
-                    setIsSmtpVerified(false);
-                  }}
-                  className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-400 text-xs transition"
-                  placeholder="smtp.empresa.com"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Porta SMTP</label>
-                <input
-                  type="number"
-                  required
-                  disabled={!canEdit}
-                  value={smtpPort}
-                  onChange={(e) => {
-                    setSmtpPort(Number(e.target.value));
-                    setIsSmtpVerified(false);
-                  }}
-                  className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-400 text-xs transition"
-                  placeholder="587"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Usuário / E-mail</label>
-                <input
-                  type="text"
-                  required
-                  disabled={!canEdit}
-                  value={smtpUser}
-                  onChange={(e) => {
-                    setSmtpUser(e.target.value);
-                    setIsSmtpVerified(false);
-                  }}
-                  className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-400 text-xs transition"
-                  placeholder="exemplo@provedor.com"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Senha SMTP</label>
-                <input
-                  type="password"
-                  required
-                  disabled={!canEdit}
-                  value={smtpPassword}
-                  onChange={(e) => {
-                    setSmtpPassword(e.target.value);
-                    setIsSmtpVerified(false);
-                  }}
-                  className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-400 text-xs transition"
-                  placeholder="••••••••••••"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="checkbox"
-                id="smtpSecureDedicated"
-                disabled={!canEdit}
-                checked={smtpSecure}
-                onChange={(e) => {
-                  setSmtpSecure(e.target.checked);
-                  setIsSmtpVerified(false);
-                }}
-                className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-              />
-              <label htmlFor="smtpSecureDedicated" className="text-xs font-semibold text-slate-600 cursor-pointer select-none">
-                Utilizar conexão segura SSL/TLS (Necessário para porta 465)
-              </label>
-            </div>
-          </div>
-
-          {/* Verification & Test Panel */}
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150 space-y-4">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-2 border-slate-200">
-              <Check className="w-4 h-4 text-orange-500" />
-              Verificação & Teste
-            </h4>
-
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Destinatário do E-mail de Teste</label>
-                <input
-                  type="email"
-                  required
-                  disabled={!canEdit}
-                  value={testRecipient}
-                  onChange={(e) => setTestRecipient(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl p-2 font-semibold outline-none focus:border-orange-400 text-xs"
-                  placeholder="destino-teste@empresa.com"
-                />
-              </div>
-
-              <div className="pt-2 flex flex-col sm:flex-row gap-2">
-                <button
-                  type="button"
-                  disabled={isTestingSmtp || isSavingSmtp || !canEdit}
-                  onClick={handleDedicatedSmtpTest}
-                  className="flex-1 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5 shadow shadow-slate-900/10"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isTestingSmtp ? "animate-spin" : ""}`} />
-                  {isTestingSmtp ? "A testar..." : "Testar Conexão SMTP"}
-                </button>
-
-                <button
-                  type="button"
-                  disabled={isSavingSmtp || isTestingSmtp || !canEdit}
-                  onClick={handleSaveDedicatedSmtp}
-                  className="flex-1 py-2 px-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 shadow shadow-orange-500/10 flex items-center justify-center gap-1.5"
-                >
-                  {isSavingSmtp ? (
-                    <>
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      Validando...
-                    </>
-                  ) : (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      Salvar Servidor
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {isSmtpVerified ? (
-                <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 text-[11px] rounded-xl flex items-start gap-2 animate-in fade-in duration-150">
-                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold block">Conexão Ativa!</span>
-                    As credenciais estão corretas. Pode agora ativar as notificações e relatórios automatizados por e-mail com segurança.
-                  </div>
-                </div>
-              ) : (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-700 text-[11px] rounded-xl flex items-start gap-2 animate-in fade-in duration-150">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold block">Necessita Validação</span>
-                    Por favor teste a conexão para garantir o envio correto de alertas de estoque e relatórios periódicos.
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* NEW: Automated Email Report Dispatch Configuration Section */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
-          <div className="flex items-center gap-2.5 text-orange-600">
-            <Mail className="w-5 h-5 shrink-0" />
-            <div>
-              <h3 className="font-bold text-slate-850 text-sm">Envio Automático de Relatórios por Email</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Defina o agendamento de relatórios de auditoria e financeiro utilizando SMTP padrão.</p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleTriggerEmailSimulation}
-            disabled={isSimulatingMail}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow shadow-slate-900/10 shrink-0"
-          >
-            <Play className={`w-3.5 h-3.5 text-amber-400 ${isSimulatingMail ? "animate-spin" : ""}`} />
-            {isSimulatingMail ? "Processando Envio..." : "Disparar Teste de Email"}
-          </button>
-        </div>
-
-        <form onSubmit={handleSaveEmailConfig} className="grid grid-cols-1 lg:grid-cols-3 gap-5 text-slate-800 text-xs">
-          {/* Email dispatch provider column: Gmail API or Custom SMTP */}
-          <div className="space-y-3.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <Globe className="w-3.5 h-3.5 text-slate-400" />
-              Provedor de E-mail Emissor
-            </h4>
-
-            {/* Toggle Selector */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">Método de Envio</label>
-              <div className="flex gap-1.5 p-1 bg-slate-100 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setSmtpEnabled(false)}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-center font-bold text-[11px] transition cursor-pointer ${!smtpEnabled ? "bg-white text-orange-600 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-                >
-                  Gmail API
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSmtpEnabled(true)}
-                  className={`flex-1 py-1.5 px-2 rounded-lg text-center font-bold text-[11px] transition cursor-pointer ${smtpEnabled ? "bg-white text-orange-600 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
-                >
-                  SMTP Personalizado
-                </button>
-              </div>
-            </div>
-
-            {!smtpEnabled ? (
-              <div className="space-y-3">
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Conecte a conta Gmail oficial da empresa. Esta conta será utilizada para disparar os e-mails e faturas através da API oficial do Google.
-                </p>
-
-                <div className="pt-1 flex flex-col gap-3">
-                  {needsAuth ? (
-                    <button
-                      type="button"
-                      onClick={handleGmailLogin}
-                      disabled={isLoggingIn}
-                      className="flex items-center justify-center gap-3 w-full bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-2.5 px-4 rounded-xl transition shadow-sm cursor-pointer"
-                    >
-                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-5 h-5 shrink-0">
-                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                        <path fill="none" d="M0 0h48v48H0z"></path>
-                      </svg>
-                      {isLoggingIn ? "Conectando..." : "Vincular Conta Google"}
-                    </button>
-                  ) : (
-                    <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-2 overflow-hidden">
-                        <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <div className="overflow-hidden">
-                          <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wide">Conta Vinculada</p>
-                          <p className="text-xs font-semibold text-emerald-700 truncate">{gmailUser?.email}</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleGmailLogout}
-                        className="text-[10px] bg-white border border-emerald-200 hover:bg-emerald-100 text-emerald-700 font-bold py-1 px-2.5 rounded shadow-sm transition shrink-0 cursor-pointer"
-                      >
-                        Desvincular
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-200 animate-in fade-in-50 duration-150 text-[11px] text-slate-600 leading-normal">
-                <p>
-                  O sistema utilizará o servidor SMTP dedicado configurado no painel dedicado acima para disparar os relatórios programados.
-                </p>
-                <div className="bg-white p-2.5 rounded-lg border border-slate-150 space-y-1 font-medium">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Servidor:</span>
-                    <span className="font-semibold text-slate-800">{smtpHost || "Não Configurado"}:{smtpPort || "Nenhum"}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Usuário:</span>
-                    <span className="font-semibold text-slate-800 truncate max-w-[120px]">{smtpUser || "Nenhum"}</span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1.5 border-t border-slate-100">
-                    <span className="text-slate-400">Estado SMTP:</span>
-                    {isSmtpVerified ? (
-                      <span className="text-emerald-600 font-bold flex items-center gap-1 text-[10px]">
-                        ● Verificado
-                      </span>
-                    ) : (
-                      <span className="text-amber-600 font-bold flex items-center gap-1 text-[10px]">
-                        ● Não Verificado
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-400 italic">
-                  Para alterar as credenciais ou testar a ligação, utilize o painel exclusivo do Servidor SMTP Dedicado acima.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* Trigger Frequency / Recipient Destination Column */}
-          <div className="space-y-3.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <Clock className="w-3.5 h-3.5 text-slate-400" />
-              Destinatários e Agendamento
-            </h4>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">E-mail de Destino</label>
-              <input
-                type="email"
-                required
-                disabled={!canEdit}
-                value={reportRecipientEmail}
-                onChange={(e) => setReportRecipientEmail(e.target.value)}
-                className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-lg p-2 font-semibold outline-none focus:border-slate-350 text-xs"
-                placeholder="gestor-er@empresa.co.mz"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Frequência</label>
-                <select
-                  disabled={!canEdit}
-                  value={reportFrequency}
-                  onChange={(e) => setReportFrequency(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-                >
-                  <option value="daily">Diário (Consolidado)</option>
-                  <option value="weekly">Semanal (Segundas)</option>
-                  <option value="monthly">Mensal (Dia 1)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase">Hora do Disparo</label>
-                <div className="relative">
-                  <input
-                    type="time"
-                    required
-                    disabled={!canEdit}
-                    value={reportHour}
-                    onChange={(e) => setReportHour(e.target.value)}
-                    className="w-full bg-slate-50 disabled:opacity-75 border border-slate-200 rounded-lg p-1.5 font-semibold text-center outline-none focus:border-slate-350 text-xs"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Attachment Formats & Selective Reports Column */}
-          <div className="space-y-3.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <FileText className="w-3.5 h-3.5 text-slate-400" />
-              Anexos e Relatórios Incluídos
-            </h4>
-
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-400 uppercase">Formato do Arquivo</label>
-              <select
-                disabled={!canEdit}
-                value={reportFormat}
-                onChange={(e) => setReportFormat(e.target.value as any)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-              >
-                <option value="PDF">Formato Comercial PDF (Vectorizado)</option>
-                <option value="CSV">Folha de Cálculo CSV / Excel</option>
-                <option value="AMBOS">Ambos os formatos (PDF + CSV)</option>
-              </select>
-            </div>
-
-            <div className="space-y-2 pt-1 text-[11px] font-medium text-slate-600">
-              <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Módulos de Relatórios</label>
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 items-center">
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeFinancial}
-                    onChange={(e) => setIncludeFinancial(e.target.checked)}
-                    className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-3.5 h-3.5"
-                  />
-                  <span>Financeiro</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeAudit}
-                    onChange={(e) => setIncludeAudit(e.target.checked)}
-                    className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-3.5 h-3.5"
-                  />
-                  <span>Ficheiros Log</span>
-                </label>
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeStaff}
-                    onChange={(e) => setIncludeStaff(e.target.checked)}
-                    className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-3.5 h-3.5"
-                  />
-                  <span>Quadro Staff</span>
-                </label>
-              </div>
-            </div>
-          </div>
-
-          {/* Save Button Row span 3 */}
-          {canEdit && (
-            <div className="lg:col-span-3 pt-2">
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15"
-              >
-                Salvar Definições de Dispatch Automático
-              </button>
-            </div>
-          )}
-        </form>
-
-        {/* Live Simulation Progress CLI Logger Console */}
-        {simulationLogs.length > 0 && (
-          <div className="space-y-2 pt-2 animate-in fade-in-50 duration-200">
-            <h5 className="text-[10px] font-extrabold font-mono text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-              <Terminal className="w-3.5 h-3.5" />
-              Consola de Monitoria do Serviço de SMTP (Monitorização em Tempo Real)
-            </h5>
-            
-            <div className="bg-slate-950 rounded-xl p-4 border border-slate-800 font-mono text-[10.5px] leading-relaxed space-y-1 max-h-48 overflow-y-auto shadow-inner text-amber-400">
-              {simulationLogs.map((log, index) => {
-                const isSuccess = log.includes("✔️") || log.includes("sucesso");
-                return (
-                  <div key={index} className={`flex items-start gap-1 justify-start ${isSuccess ? "text-emerald-400 font-bold" : ""}`}>
-                    <span className="text-slate-600 shrink-0 select-none">$&gt;</span>
-                    <span>{log}</span>
-                  </div>
-                );
-              })}
-              {isSimulatingMail && (
-                <div className="flex items-center gap-2 text-slate-500 italic animate-pulse">
-                  <span className="text-slate-600 shrink-0 select-none">$&gt;</span>
-                  <span>A processar envio de email de teste...</span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-        </div>
-      )}
-
-      {activeSubTab === "geral" && (
-        <div className="space-y-6 animate-in fade-in-50 duration-150">
-
-          {/* Google Drive Integration */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
-          <div className="flex items-center gap-2.5 text-blue-600">
-            <Cloud className="w-5 h-5 shrink-0" />
-            <div>
-              <h3 className="font-bold text-slate-850 text-sm">Integração Google Drive (Storage & Backups)</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Visualize a utilização do espaço e guarde backups na nuvem.</p>
-            </div>
-          </div>
-          
-          <button
-            type="button"
-            onClick={handleManualDriveBackup}
-            disabled={isBackingUp || needsAuth}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow shadow-blue-600/20 shrink-0"
-          >
-            <Database className={`w-3.5 h-3.5 ${isBackingUp ? "animate-pulse" : ""}`} />
-            {isBackingUp ? "A Guardar Backup..." : "Forçar Backup Agora"}
-          </button>
-        </div>
-
-        {/* Logs do Backup */}
-        {cloudBackupLogs.length > 0 && (
-          <div className="bg-slate-900 rounded-xl p-4 overflow-hidden border border-slate-800 relative">
-            <div className="flex items-center justify-between mb-3 border-b border-slate-700 pb-2">
-              <span className="text-slate-300 font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5">
-                <RefreshCw className={`w-3 h-3 text-emerald-400 ${isBackingUp ? 'animate-spin' : ''}`} />
-                Cloud Backup Logs
-              </span>
-            </div>
-            <div className="space-y-1.5 max-h-32 overflow-y-auto font-mono text-[10px] pr-2">
-              {cloudBackupLogs.map((log, idx) => (
-                <div key={idx} className="text-emerald-400/90 leading-relaxed flex gap-2">
-                  <span className="text-slate-500 shrink-0 select-none">$&gt;</span>
-                  <span>{log}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 text-slate-800 text-xs">
-          
-          {/* Storage Quota */}
-          <div className="space-y-3.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <Database className="w-3.5 h-3.5 text-slate-400" />
-              Utilização de Armazenamento
-            </h4>
-            
-            {needsAuth ? (
-              <div className="p-4 bg-slate-50 rounded-xl text-center border border-slate-200">
-                <p className="text-[11px] text-slate-500 mb-3">Autentique-se com sua conta Google para visualizar estatísticas.</p>
-                <button
-                  type="button"
-                  onClick={handleGmailLogin}
-                  disabled={isLoggingIn}
-                  className="mx-auto flex items-center justify-center gap-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold py-2 px-4 rounded-xl transition shadow-sm"
-                >
-                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
-                    <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                    <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                    <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                    <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                    <path fill="none" d="M0 0h48v48H0z"></path>
-                  </svg>
-                  {isLoggingIn ? "Conectando..." : "Vincular Google Drive"}
-                </button>
-              </div>
-            ) : isFetchingDrive ? (
-              <div className="flex items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200">
-                <RefreshCw className="w-5 h-5 text-blue-500 animate-spin" />
-              </div>
-            ) : driveStats ? (
-              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
-                <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                  <span>Espaço Utilizado</span>
-                  <span>{((driveStats.usage / driveStats.limit) * 100).toFixed(1)}%</span>
-                </div>
-                <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                  <div 
-                    className="bg-blue-500 h-2 rounded-full" 
-                    style={{ width: `${Math.min(100, (driveStats.usage / driveStats.limit) * 100)}%` }}
-                  ></div>
-                </div>
-                <div className="flex justify-between items-center font-mono text-[11px] text-slate-700">
-                  <span>{(driveStats.usage / 1024 / 1024 / 1024).toFixed(2)} GB</span>
-                  <span>{(driveStats.limit / 1024 / 1024 / 1024).toFixed(2)} GB</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={fetchDriveStats}
-                  className="w-full mt-2 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[10px] uppercase tracking-wider flex items-center justify-center gap-1.5 transition"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Atualizar Dados
-                </button>
-              </div>
-            ) : (
-              <div className="p-4 bg-slate-50 rounded-xl text-center border border-slate-200 text-slate-500 text-[11px]">
-                Não foi possível carregar as estatísticas.
-              </div>
-            )}
-          </div>
-
-          {/* Recent Files */}
-          <div className="space-y-3.5">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <FileText className="w-3.5 h-3.5 text-slate-400" />
-              Ficheiros Recentes
-            </h4>
-
-            {needsAuth ? (
-              <div className="p-4 bg-slate-50 rounded-xl text-center border border-slate-200">
-                <p className="text-[11px] text-slate-500">Autentique-se para ver os ficheiros recentes.</p>
-              </div>
-            ) : isFetchingDrive ? (
-              <div className="flex items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200">
-                <RefreshCw className="w-5 h-5 text-blue-500 animate-spin" />
-              </div>
-            ) : recentFiles.length > 0 ? (
-              <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                {recentFiles.map(file => (
-                  <div key={file.id} className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-150 rounded-lg">
-                    <div className="flex items-center gap-2 overflow-hidden">
-                      <FileText className="w-4 h-4 text-blue-500 shrink-0" />
-                      <span className="truncate text-[11px] font-semibold text-slate-700" title={file.name}>{file.name}</span>
-                    </div>
-                    <span className="text-[9px] text-slate-400 font-mono shrink-0 ml-2">
-                      {new Date(file.createdTime).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-4 bg-slate-50 rounded-xl text-center border border-slate-200 text-slate-500 text-[11px]">
-                Nenhum ficheiro encontrado.
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Gerenciamento da Impressora de Vendas */}
-      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-4 border-slate-100">
-          <div className="flex items-center gap-2.5 text-orange-600">
-            <Printer className="w-5 h-5 shrink-0" />
-            <div>
-              <h3 className="font-bold text-slate-850 text-sm">Impressora de Vendas</h3>
-              <p className="text-[11px] text-slate-400 mt-0.5">Gerencie os parâmetros de conexão física ou de rede para faturas e recibos do ponto de venda.</p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleTestPrinter}
-            disabled={isTestingPrinter}
-            className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50 transition shadow shadow-slate-900/10 shrink-0"
-          >
-            <Printer className={`w-3.5 h-3.5 text-amber-400 ${isTestingPrinter ? "animate-pulse" : ""}`} />
-            {isTestingPrinter ? "Testando Impressão..." : "Emitir Cupom de Teste"}
-          </button>
-        </div>
-
-        <form onSubmit={handleSavePrinterConfig} className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-slate-800 text-xs">
-          
-          {/* Parâmetros de Conexão */}
-          <div className="space-y-4">
-            <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-              <Settings className="w-3.5 h-3.5 text-slate-400" />
-              Parâmetros da Impressora
-            </h4>
-            
-            <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-150">
-              <div className="space-y-0.5">
-                <label className="text-xs font-bold text-slate-700 cursor-pointer select-none">
-                  Ativar Impressão Direta
-                </label>
-                <p className="text-[10px] text-slate-400 leading-tight">Habilita a integração direta com impressoras térmicas ao fechar vendas.</p>
-              </div>
-              <input
-                type="checkbox"
-                disabled={!canEdit}
-                checked={printerEnabled}
-                onChange={(e) => setPrinterEnabled(e.target.checked)}
-                className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-              />
-            </div>
-
-            {printerEnabled && (
-              <div className="space-y-4 animate-in fade-in duration-200">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Nome da Impressora</label>
-                  <input
-                    type="text"
-                    disabled={!canEdit}
-                    value={printerName}
-                    onChange={(e) => setPrinterName(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-                    placeholder="Ex: POS-80, Epson TM-T20"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Função de Impressão</label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      disabled={!canEdit}
-                      onClick={() => {
-                        setPrinterType("RECEIPT");
-                        // Automatically set appropriate paperSize default if toggled
-                        if (paperSize === "A4") setPaperSize("80MM");
-                      }}
-                      className={`p-3 rounded-xl border flex flex-col items-center gap-2 text-center transition cursor-pointer select-none ${
-                        printerType === "RECEIPT"
-                          ? "bg-orange-50/70 border-orange-300 text-orange-950 font-bold shadow-sm"
-                          : "bg-white border-slate-200 hover:bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      <Printer className="w-5 h-5 text-orange-500 shrink-0" />
-                      <div className="leading-tight">
-                        <span className="text-[11px] block">Impressora de Talões</span>
-                        <span className="text-[8px] text-slate-400 block font-normal mt-0.5">Faturas, recibos simplificados e relatórios</span>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canEdit}
-                      onClick={() => setPrinterType("LABEL")}
-                      className={`p-3 rounded-xl border flex flex-col items-center gap-2 text-center transition cursor-pointer select-none ${
-                        printerType === "LABEL"
-                          ? "bg-orange-50/70 border-orange-300 text-orange-950 font-bold shadow-sm"
-                          : "bg-white border-slate-200 hover:bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      <Tag className="w-5 h-5 text-orange-500 shrink-0" />
-                      <div className="leading-tight">
-                        <span className="text-[11px] block">Impressora de Etiquetas</span>
-                        <span className="text-[8px] text-slate-400 block font-normal mt-0.5">Rótulos de preço, códigos de barras e stock</span>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Tamanho do Papel Padrão</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(["58MM", "80MM", "A4"] as const).map((size) => {
-                      const isDisabled = printerType === "LABEL" && size === "A4"; // Labels generally not printed in direct A4 in POS printers
-                      return (
-                        <button
-                          key={size}
-                          type="button"
-                          disabled={!canEdit || isDisabled}
-                          onClick={() => setPaperSize(size)}
-                          className={`py-2 rounded-lg font-bold border transition text-center text-[10px] cursor-pointer ${
-                            isDisabled ? "opacity-35 cursor-not-allowed bg-slate-100 border-slate-150 text-slate-400" :
-                            paperSize === size
-                              ? "bg-orange-50 border-orange-300 text-orange-700 shadow-sm"
-                              : "bg-white border-slate-200 hover:bg-slate-50 text-slate-600"
-                          }`}
-                        >
-                          {size === "58MM" ? "58mm (Térmico)" : size === "80MM" ? "80mm (Padrão)" : "A4 (Documento)"}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[9px] text-slate-400 leading-tight">
-                    {printerType === "RECEIPT" 
-                      ? "O tamanho do papel define a largura física do cupom virtual gerado nas vendas."
-                      : "Para etiquetas adesivas, recomenda-se o formato de 58mm ou 80mm."}
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between bg-orange-50/30 p-2.5 rounded-xl border border-orange-100/60">
-                  <div className="space-y-0.5">
-                    <label className="text-[10px] font-bold text-slate-700 cursor-pointer select-none flex items-center gap-1.5">
-                      Corte Automático de Papel
+                      <span className="font-bold text-slate-700 text-xs">Corte Automático de Papel (Auto-cut)</span>
                     </label>
-                    <p className="text-[9px] text-slate-400 leading-tight">Envia o comando ESC/POS de corte (GS V 66 0) após a impressão do recibo.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    disabled={!canEdit}
-                    checked={printerAutoCut}
-                    onChange={(e) => setPrinterAutoCut(e.target.checked)}
-                    className="rounded border-slate-300 text-orange-500 focus:ring-orange-500 w-4 h-4 cursor-pointer"
-                  />
-                </div>
-
-                {/* Margens Dinâmicas do Layout Térmico */}
-                <div className="space-y-3 bg-orange-50/20 p-3.5 rounded-xl border border-orange-200/60">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                        <Sliders className="w-3.5 h-3.5 text-orange-600" />
-                        Ajuste de Margens Térmicas (80mm / 58mm)
-                      </h5>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        Ajuste o espaçamento superior e inferior para compensar variações no avanço de papel e guilhotina da mini-impressora.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                    {/* Margem Superior */}
-                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-slate-200">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] font-bold text-slate-700 uppercase">Margem Superior (Topo)</label>
-                        <span className="text-xs font-mono font-extrabold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
-                          {thermalMarginTop} mm
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={30}
-                        step={1}
-                        disabled={!canEdit}
-                        value={thermalMarginTop}
-                        onChange={(e) => setThermalMarginTop(Number(e.target.value))}
-                        className="w-full accent-orange-600 cursor-pointer"
-                      />
-                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                        <span>0 mm</span>
-                        <span>15 mm</span>
-                        <span>30 mm</span>
-                      </div>
-                    </div>
-
-                    {/* Margem Inferior */}
-                    <div className="space-y-1 bg-white p-2.5 rounded-lg border border-slate-200">
-                      <div className="flex justify-between items-center">
-                        <label className="text-[10px] font-bold text-slate-700 uppercase">Margem Inferior (Fundo)</label>
-                        <span className="text-xs font-mono font-extrabold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-200">
-                          {thermalMarginBottom} mm
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={40}
-                        step={1}
-                        disabled={!canEdit}
-                        value={thermalMarginBottom}
-                        onChange={(e) => setThermalMarginBottom(Number(e.target.value))}
-                        className="w-full accent-orange-600 cursor-pointer"
-                      />
-                      <div className="flex justify-between text-[9px] text-slate-400 font-mono">
-                        <span>0 mm</span>
-                        <span>20 mm</span>
-                        <span>40 mm</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase">Tipo de Conexão</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {(["USB", "BLUETOOTH", "NETWORK"] as const).map((type) => (
-                      <button
-                        key={type}
-                        type="button"
-                        disabled={!canEdit}
-                        onClick={() => setPrinterConnectionType(type)}
-                        className={`py-2 rounded-lg font-bold border transition text-center text-[10px] ${
-                          printerConnectionType === type
-                            ? "bg-orange-50 border-orange-300 text-orange-700 shadow-sm"
-                            : "bg-white border-slate-200 hover:bg-slate-50 text-slate-600"
-                        }`}
-                      >
-                        {type === "NETWORK" ? "Rede / IP" : type}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {printerConnectionType === "USB" && (
-                  <div className="space-y-3 bg-slate-50 p-3 rounded-xl border border-slate-150 animate-in slide-in-from-top-1 duration-150">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                        <Usb className="w-3.5 h-3.5 text-orange-500" />
-                        Deteção WebUSB / Serial
-                      </span>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          disabled={isScanningUsb || !canEdit}
-                          onClick={handleListUsbDevices}
-                          className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[9px] font-bold flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
-                          title="Listar dispositivos USB já autorizados no navegador"
-                        >
-                          <RefreshCw className={`w-2.5 h-2.5 ${isScanningUsb ? "animate-spin" : ""}`} />
-                          Procurar
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isScanningUsb || !canEdit}
-                          onClick={handleRequestUsbDevice}
-                          className="px-2 py-1 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[9px] font-bold flex items-center gap-1 cursor-pointer transition disabled:opacity-50"
-                          title="Vincular uma nova impressora USB física"
-                        >
-                          + Parear
-                        </button>
-                      </div>
-                    </div>
-
-                    {webUsbError && (
-                      <p className="text-[9px] text-amber-600 leading-tight font-semibold bg-amber-50 p-1.5 rounded-md border border-amber-100">
-                        ⚠️ {webUsbError}
-                      </p>
-                    )}
-
-                    {usbDevices.length > 0 ? (
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
-                        <label className="text-[8px] font-extrabold text-slate-400 uppercase block tracking-wider">Dispositivos Encontrados (Clique para selecionar):</label>
-                        {usbDevices.map((device) => {
-                          const isSelected = printerName === device.name;
-                          return (
-                            <button
-                              key={device.id}
-                              type="button"
-                              onClick={() => handleSelectUsbDevice(device)}
-                              className={`w-full text-left p-2 rounded-lg border transition flex items-center justify-between ${
-                                isSelected 
-                                  ? "bg-orange-50 border-orange-300 text-orange-950 font-bold" 
-                                  : "bg-white border-slate-200 hover:bg-slate-50 text-slate-700"
-                              }`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <Printer className={`w-3.5 h-3.5 ${isSelected ? "text-orange-500" : "text-slate-400"}`} />
-                                <div className="leading-tight">
-                                  <div className="text-[10px] font-semibold flex items-center gap-1">
-                                    {device.name}
-                                    {device.isSimulated && (
-                                      <span className="text-[7px] bg-slate-100 text-slate-500 px-1 rounded font-normal">Simulado</span>
-                                    )}
-                                  </div>
-                                  <div className="text-[8px] text-slate-400">
-                                    S/N: {device.serialNumber || "N/A"} • ID: {device.vendorId.toString(16).padStart(4, '0')}:{device.productId.toString(16).padStart(4, '0')}
-                                  </div>
-                                </div>
-                              </div>
-                              <span className={`text-[8px] font-bold uppercase ${isSelected ? "text-orange-600" : "text-slate-400"}`}>
-                                {isSelected ? "Ativo" : "Selecionar"}
-                              </span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="text-center py-3 border border-dashed border-slate-200 rounded-lg bg-white">
-                        <Usb className="w-5 h-5 text-slate-300 mx-auto animate-pulse" />
-                        <span className="text-[9px] text-slate-400 block mt-1">Nenhum dispositivo listado. Clique em Procurar ou Parear.</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {printerConnectionType === "NETWORK" ? (
-                  <div className="space-y-1 animate-in slide-in-from-top-1 duration-150">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase">Endereço IP da Impressora</label>
-                    <input
-                      type="text"
-                      disabled={!canEdit}
-                      value={printerIpAddress}
-                      onChange={(e) => setPrinterIpAddress(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-                      placeholder="Ex: 192.168.1.100"
-                    />
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3 animate-in slide-in-from-top-1 duration-150">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Porta de Comunicação</label>
-                      <select
-                        disabled={!canEdit}
-                        value={printerPort}
-                        onChange={(e) => setPrinterPort(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-                      >
-                        <option value="COM1">COM1 (Serial)</option>
-                        <option value="COM2">COM2</option>
-                        <option value="COM3">COM3</option>
-                        <option value="LPT1">LPT1 (Paralela)</option>
-                        <option value="USB001">USB001 (Virtual USB)</option>
-                        <option value="USB002">USB002 (Virtual USB)</option>
-                      </select>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase">Baud Rate (Velocidade)</label>
-                      <select
-                        disabled={!canEdit}
-                        value={printerBaudRate}
-                        onChange={(e) => setPrinterBaudRate(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold focus:border-slate-350 text-xs"
-                      >
-                        <option value="4800">4800 bps</option>
-                        <option value="9600">9600 bps</option>
-                        <option value="19200">19200 bps</option>
-                        <option value="38400">38400 bps</option>
-                        <option value="115200">115200 bps</option>
-                      </select>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Visualização e Resultados */}
-          <div className="space-y-4 flex flex-col justify-between">
-            <div className="space-y-3.5">
-              <h4 className="font-bold text-xs uppercase tracking-wider text-slate-500 flex items-center gap-1.5 border-b pb-1 border-slate-100">
-                <Terminal className="w-3.5 h-3.5 text-slate-400" />
-                Status & Cupom Emitido
-              </h4>
-
-              {printerLogs.length > 0 && (
-                <div className="space-y-1.5 animate-in fade-in-50 duration-200">
-                  <label className="text-[9px] font-extrabold font-mono text-slate-400 uppercase tracking-wider">Consola de Eventos</label>
-                  <div className="bg-slate-950 rounded-xl p-3 border border-slate-800 font-mono text-[10px] leading-relaxed space-y-1 max-h-36 overflow-y-auto shadow-inner text-blue-300">
-                    {printerLogs.map((log, index) => {
-                      const isSucc = log.includes("✔️") || log.includes("sucesso") || log.includes("✅");
-                      return (
-                        <div key={index} className={`flex items-start gap-1 justify-start ${isSucc ? "text-emerald-400 font-bold" : ""}`}>
-                          <span className="text-slate-600 shrink-0 select-none">$&gt;</span>
-                          <span>{log}</span>
-                        </div>
-                      );
-                    })}
-                    {isTestingPrinter && (
-                      <div className="flex items-center gap-2 text-slate-500 italic animate-pulse">
-                        <span className="text-slate-600 shrink-0 select-none">$&gt;</span>
-                        <span>Aguardando resposta do dispositivo...</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Cupom de Teste Virtual Realista */}
-              {showTestReceipt && (
-                <div className="animate-in zoom-in-95 duration-200 mt-2">
-                  <span className="text-[9px] font-extrabold font-mono text-slate-400 uppercase tracking-wider block mb-1">
-                    Visualização do Trabalho de Impressão ({printerType === "RECEIPT" ? "Talão" : "Etiqueta"} - {paperSize})
-                  </span>
-                  
-                  {printerType === "RECEIPT" ? (
-                    /* Layout de Recibo / Talão */
-                    paperSize === "A4" ? (
-                      /* A4 Document Layout */
-                      <div className="bg-white border border-slate-300 rounded-xl p-5 font-mono text-slate-700 text-[9px] shadow-md max-w-md mx-auto relative overflow-hidden">
-                        <div className="flex justify-between items-start border-b pb-3 mb-3 border-slate-200">
-                          <div className="space-y-0.5">
-                            <span className="font-bold text-xs block text-slate-900 uppercase">{companyName || "OST Comércio Geral, Lda"}</span>
-                            {slogan && <span className="text-[8px] text-slate-500 italic block">"{slogan}"</span>}
-                            <span className="text-[8px] text-slate-500 block">NUIT: {companyNuit || "400293112"}</span>
-                            {storeAddress && <span className="text-[7.5px] text-slate-400 block leading-tight">{storeAddress}</span>}
-                            {storeContact && <span className="text-[7.5px] text-slate-400 block">Tel: {storeContact}</span>}
-                          </div>
-                          <div className="text-right">
-                            <span className="font-bold text-[10px] text-slate-900 block tracking-wider">DOCUMENTO DE TESTE</span>
-                            <span className="text-[8px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold block mt-1">FATURA-RECIBO FR TST/1</span>
-                            <span className="text-[7px] text-slate-400 block mt-1">Impresso em: {new Date().toLocaleDateString()}</span>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4 mb-3 bg-slate-50 p-2 rounded-lg border border-slate-150">
-                          <div>
-                            <span className="font-bold text-[8px] uppercase text-slate-400 block">Dados da Impressora:</span>
-                            <span className="block font-semibold">Nome: {printerName}</span>
-                            <span className="block text-slate-500">Conexão: {printerConnectionType}</span>
-                            {printerConnectionType === "NETWORK" ? (
-                              <span className="block text-slate-500">Endereço: {printerIpAddress}</span>
-                            ) : (
-                              <span className="block text-slate-500">Porta: {printerPort} @ {printerBaudRate}bps</span>
-                            )}
-                          </div>
-                          <div>
-                            <span className="font-bold text-[8px] uppercase text-slate-400 block">Parâmetros de Papel:</span>
-                            <span className="block font-semibold">Tamanho Padrão: A4 Documento</span>
-                            <span className="block text-slate-500">Largura Física: 210mm (Escalado)</span>
-                            <span className="block text-emerald-600 font-bold">✓ ESC/POS Alinhamento A4</span>
-                          </div>
-                        </div>
-
-                        <table className="w-full text-left border-collapse mb-4">
-                          <thead>
-                            <tr className="border-b-2 border-slate-200 text-slate-800 text-[8px] font-bold uppercase bg-slate-50">
-                              <th className="py-1 px-1.5">Ref / Produto</th>
-                              <th className="py-1 text-center">Quant.</th>
-                              <th className="py-1 text-right">Preço Un.</th>
-                              <th className="py-1 text-right px-1.5">Total</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr className="border-b border-slate-100">
-                              <td className="py-1.5 px-1.5 font-semibold text-slate-900">COD-9029 • Teste de Protocolo Térmico</td>
-                              <td className="py-1.5 text-center">1.00</td>
-                              <td className="py-1.5 text-right">MZN 1.500,00</td>
-                              <td className="py-1.5 text-right px-1.5 font-semibold">MZN 1.500,00</td>
-                            </tr>
-                            <tr className="border-b border-slate-100">
-                              <td className="py-1.5 px-1.5 font-semibold text-slate-900">COD-3311 • Ajuste de Margem ESC/POS</td>
-                              <td className="py-1.5 text-center">2.00</td>
-                              <td className="py-1.5 text-right">MZN 250,00</td>
-                              <td className="py-1.5 text-right px-1.5 font-semibold">MZN 500,00</td>
-                            </tr>
-                          </tbody>
-                        </table>
-
-                        <div className="flex justify-end mb-3">
-                          <div className="w-1/2 space-y-1 text-right">
-                            <div className="flex justify-between text-slate-500 text-[8px]">
-                              <span>Subtotal:</span>
-                              <span>MZN 2.000,00</span>
-                            </div>
-                            <div className="flex justify-between text-slate-500 text-[8px]">
-                              <span>IVA (16%):</span>
-                              <span>MZN 320,00</span>
-                            </div>
-                            <div className="border-t border-slate-200 my-1"></div>
-                            <div className="flex justify-between font-bold text-slate-900 text-[10px]">
-                              <span>Total Faturado:</span>
-                              <span className="text-orange-600">MZN 2.320,00</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="border-t border-dashed border-slate-200 pt-3 text-center space-y-1">
-                          <p className="text-[8px] font-bold text-emerald-600">✓ COMUNICADOR EMULADO ATIVO E HOMOLOGADO</p>
-                          <p className="text-[7.5px] text-slate-400">Este documento comprova o perfeito fluxo de renderização e enquadramento de margens para folhas de tamanho A4.</p>
-                        </div>
-                      </div>
-                    ) : (
-                      /* 80mm and 58mm Thermal Receipt Layout */
-                      <div 
-                        style={{ paddingTop: `${thermalMarginTop * 1.5 + 4}px`, paddingBottom: `${thermalMarginBottom * 1.5 + 4}px` }}
-                        className={`bg-white border border-slate-200 rounded-xl px-4 font-mono text-slate-700 shadow-sm relative overflow-hidden mx-auto transition-all duration-300 ${
-                        paperSize === "58MM" ? "max-w-[215px] text-[8.5px]" : "max-w-[290px] text-[10px]"
-                      }`}>
-                        {/* Decorative receipt zig-zag top */}
-                        <div className="absolute top-0 left-0 right-0 h-1 bg-[linear-gradient(45deg,#e2e8f0_25%,transparent_25%),linear-gradient(-45deg,#e2e8f0_25%,transparent_25%)] bg-[size:6px_6px]" />
-                        
-                        <div className="text-center space-y-1 pt-2">
-                          <span className={`font-bold block text-slate-900 ${paperSize === "58MM" ? "text-xs" : "text-sm"}`}>{companyName || "OST Comércio Geral, Lda"}</span>
-                          {slogan && <span className="text-[8px] text-slate-500 italic block">"{slogan}"</span>}
-                          <span className="text-[8px] text-slate-500 block">NUIT: {companyNuit || "400293112"}</span>
-                          {storeAddress && <span className="text-[7.5px] text-slate-400 block leading-tight">{storeAddress}</span>}
-                          {storeContact && <span className="text-[7.5px] text-slate-400 block">Tel: {storeContact}</span>}
-                        </div>
-                        
-                        <div className="border-t border-dashed border-slate-300 my-2.5" />
-                        
-                        <div className="text-center font-bold text-slate-900 tracking-wider uppercase py-0.5 text-[9.5px]">
-                          *** CUPOM DE TESTE DE IMPRESSÃO ***
-                        </div>
-                        
-                        <div className="border-t border-dashed border-slate-300 my-2.5" />
-                        
-                        <div className="space-y-1">
-                          <div className="flex justify-between">
-                            <span>Data/Hora:</span>
-                            <span>{new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Terminal:</span>
-                            <span>PDV-PRINCIPAL</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Largura Papel:</span>
-                            <span className="font-bold">{paperSize}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Impressora:</span>
-                            <span>{printerName}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Conexão:</span>
-                            <span className="font-bold text-orange-600">{printerConnectionType}</span>
-                          </div>
-                          {printerConnectionType === "NETWORK" ? (
-                            <div className="flex justify-between">
-                              <span>Endereço IP:</span>
-                              <span>{printerIpAddress}</span>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between">
-                              <span>Porta/Baud:</span>
-                              <span>{printerPort} @ {printerBaudRate}bps</span>
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="border-t border-dashed border-slate-300 my-2.5" />
-
-                        {/* Sample sale item */}
-                        <div className="space-y-1">
-                          <div className="flex justify-between font-bold text-slate-900">
-                            <span>1.00 x TESTE COMUNICAÇÃO ESC/POS</span>
-                            <span>1.500,00</span>
-                          </div>
-                          <div className="flex justify-between text-slate-400 text-[8px]">
-                            <span>Item de validação de largura de coluna ({paperSize})</span>
-                            <span>MZN</span>
-                          </div>
-                        </div>
-                        
-                        <div className="border-t border-dashed border-slate-300 my-2.5" />
-                        
-                        <div className="text-center space-y-1.5 py-1">
-                          <p className="text-[9px] font-bold text-emerald-600">✓ PROTOCOLO TÉRMICO {paperSize} OK</p>
-                          <p className="text-[7.5px] text-slate-400 leading-tight">Este documento confirma que a aplicação possui conectividade bidirecional ativa com a impressora.</p>
-                        </div>
-                        
-                        <div className="border-t border-dashed border-slate-300 my-2.5" />
-                        
-                        <div className="text-center font-bold text-slate-500 text-[8px] tracking-widest uppercase">
-                          Obrigado pela preferência!
-                        </div>
-
-                        {/* Decorative receipt zig-zag bottom */}
-                        <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[linear-gradient(45deg,transparent_75%,#e2e8f0_75%),linear-gradient(-45deg,transparent_75%,#e2e8f0_75%)] bg-[size:6px_6px] rotate-180" />
-                      </div>
-                    )
-                  ) : (
-                    /* Layout de Etiqueta Adesiva (Barcode Sticker) */
-                    <div className={`bg-white border-2 border-dashed border-slate-300 rounded-xl p-4 font-mono text-slate-800 text-center relative overflow-hidden shadow-sm mx-auto transition-all duration-300 ${
-                      paperSize === "58MM" ? "max-w-[215px] text-[8.5px] p-3" : "max-w-[270px] text-[10px]"
-                    }`}>
-                      <div className="absolute top-1 left-2 text-[7px] text-slate-400 font-bold uppercase tracking-wider">
-                        ★ ETIQUETA DE STOCK ★
-                      </div>
-                      <div className="absolute top-1 right-2 text-[7px] text-slate-400 font-bold uppercase tracking-wider">
-                        {paperSize}
-                      </div>
-
-                      <div className="pt-2 pb-1 text-center space-y-1">
-                        <span className="font-extrabold text-slate-900 block leading-tight text-xs">
-                          {companyName || "OST Comércio Geral, Lda"}
-                        </span>
-                        <div className="border-b border-slate-200 w-12 mx-auto my-1"></div>
-                        <span className="font-bold text-slate-950 block text-[11px] leading-tight mt-1">
-                          TESTE IMPRESSÃO ETIQUETAS
-                        </span>
-                        <span className="text-slate-500 text-[7.5px] block font-semibold">
-                          SKU-TST-88219 • SEÇÃO CONFIG
-                        </span>
-                      </div>
-
-                      {/* Simulated Barcode generator lines */}
-                      <div className="bg-slate-50 p-2 rounded-lg border border-slate-200/60 my-2">
-                        <div className="flex justify-center items-stretch h-9 gap-[1.5px] mb-1">
-                          <div className="w-1.5 bg-black"></div>
-                          <div className="w-[1px] bg-black"></div>
-                          <div className="w-[3px] bg-black"></div>
-                          <div className="w-[1px] bg-black"></div>
-                          <div className="w-1.5 bg-black"></div>
-                          <div className="w-[1px] bg-black"></div>
-                          <div className="w-[2px] bg-black"></div>
-                          <div className="w-1.5 bg-black"></div>
-                          <div className="w-[1px] bg-black"></div>
-                          <div className="w-[3px] bg-black"></div>
-                          <div className="w-[2px] bg-black"></div>
-                          <div className="w-1.5 bg-black"></div>
-                          <div className="w-[1px] bg-black"></div>
-                        </div>
-                        <span className="text-[7.5px] tracking-[4px] font-bold text-slate-900">
-                          *992811776512*
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-left pt-1 border-t border-slate-100 text-[8px] leading-tight">
-                        <div>
-                          <span className="text-slate-400 block text-[7px] uppercase font-bold">Local:</span>
-                          <span className="font-bold text-slate-700">PRATELEIRA B-12</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-slate-400 block text-[7px] uppercase font-bold">Preço Unit:</span>
-                          <span className="font-extrabold text-orange-600 text-[9.5px]">MZN 1.250,00</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-2.5 pt-1.5 border-t border-dotted border-slate-200 text-center">
-                        <span className="text-[7px] text-slate-400 block">
-                          Impressora Ativa: {printerName} ({printerPort})
-                        </span>
-                        <span className="text-[7.5px] text-emerald-600 font-bold block mt-0.5">
-                          ✓ PAREAMENTO E TIPO ETIQUETA ATIVOS
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {canEdit && (
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-orange-500/15 transition-all flex items-center justify-center gap-1.5"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                  Gravar Parâmetros da Impressora
-                </button>
-              </div>
-            )}
-          </div>
-        </form>
-      </div>
-      </div>
-      )}
-
-      {activeSubTab === "backup" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Database className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Cópia de Segurança & Recuperação de Dados</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Defina as suas preferências de salvaguarda de dados operacionais e restaure redundâncias passadas.</p>
-              </div>
-            </div>
-          </div>
-
-          {/* SEÇÃO REQUISITADA: FREQUÊNCIA DE BACKUP AUTOMÁTICO & HISTÓRICO DE SUCESSO (ÚLTIMOS 5) */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in duration-300">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-2.5 text-orange-600">
-                <Database className="w-5.5 h-5.5 text-orange-500 shrink-0 animate-pulse" />
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-sm md:text-base">
-                    Gestão de Backup Automático & Histórico de Sucesso
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    Selecione a frequência das cópias de segurança locais e acompanhe o progresso e estado dos últimos 5 pontos de restauro com sucesso.
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 self-start md:self-center">
-                <span className="text-[10px] font-extrabold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full uppercase tracking-wider border border-slate-200">
-                  Frequência Activa: {backupFrequency === "daily" ? "Diária" : backupFrequency === "weekly" ? "Semanal" : backupFrequency === "monthly" ? "Mensal" : "12 Horas"}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCreateManualBackup}
-                  className="px-3.5 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer active:scale-95"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                  Gerar Backup Agora
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Coluna Configuração */}
-              <div className="lg:col-span-4 space-y-4">
-                <div className="space-y-2">
-                  <label className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                    Frequência do Auto-Backup
-                  </label>
-                  <div className="relative">
-                    <select
-                      disabled={!canEdit}
-                      value={backupFrequency}
-                      onChange={(e) => handleSaveBackupInterval(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 pr-10 font-bold outline-none text-xs text-slate-700 shadow-xs focus:border-orange-500 focus:ring-2 focus:ring-orange-500/10 transition cursor-pointer appearance-none"
-                    >
-                      <option value="12h">A cada 12 Horas (Frequência Alta)</option>
-                      <option value="daily">Diária (Recomendado)</option>
-                      <option value="weekly">Semanal (Baixo Volume)</option>
-                      <option value="monthly">Mensal (Salvaguarda de Longo Prazo)</option>
-                    </select>
-                    <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-slate-400">
-                      <ChevronDown className="w-4 h-4" />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-orange-500/5 rounded-2xl border border-orange-500/10 text-[11px] text-slate-600 leading-relaxed shadow-xs">
-                  <span className="font-extrabold text-orange-700 block mb-1">Impacto da Frequência:</span>
-                  {backupFrequency === "12h" && "Alta rotação de dados: O sistema criará pontos de segurança duas vezes por dia para máxima segurança contra perdas recentes."}
-                  {backupFrequency === "daily" && "Recomendado para a maioria: Uma cópia é gerada a cada 24 horas, salvaguardando o expediente comercial de cada dia."}
-                  {backupFrequency === "weekly" && "Indicado para baixo faturamento: Uma cópia a cada 7 dias reduz a utilização de armazenamento no seu navegador."}
-                  {backupFrequency === "monthly" && "Salvaguarda básica: Apenas um ponto de segurança será mantido mensalmente."}
-                </div>
-
-                <div className="border-t border-slate-100 pt-3 flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-medium">Último Auto-Backup:</span>
-                  <span className="font-mono text-slate-700 font-bold">
-                    {localStorage.getItem("erp_last_auto_backup_time")
-                      ? new Date(localStorage.getItem("erp_last_auto_backup_time")!).toLocaleString("pt-MZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                      : "Nunca realizado"
-                    }
-                  </span>
-                </div>
-              </div>
-
-              {/* Coluna Histórico de 5 Backups */}
-              <div className="lg:col-span-8 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-extrabold text-slate-500 uppercase tracking-wider">
-                    Histórico dos Últimos 5 Backups de Sucesso
-                  </span>
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2.5 py-0.5 rounded border border-slate-100">
-                    {localBackupsLog.length} de 5 Slots Utilizados
-                  </span>
-                </div>
-
-                {localBackupsLog.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[160px]">
-                    <div className="bg-slate-100 text-slate-400 p-3 rounded-xl mb-2">
-                      <Database className="w-6 h-6 stroke-[1.5]" />
-                    </div>
-                    <h5 className="font-bold text-slate-750 text-xs">Nenhum backup local registado</h5>
-                    <p className="text-[11px] text-slate-400 max-w-[280px] mt-0.5">
-                      Os backups automáticos e manuais de sucesso aparecerão listados aqui.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto border border-slate-150 rounded-xl bg-slate-50/50">
-                    <table className="w-full text-[11px] text-slate-600 border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
-                          <th className="py-2.5 px-3">Data & Hora</th>
-                          <th className="py-2.5 px-2">Tipo</th>
-                          <th className="py-2.5 px-2">Frequência</th>
-                          <th className="py-2.5 px-2">Tamanho</th>
-                          <th className="py-2.5 px-2 text-center">Status</th>
-                          <th className="py-2.5 px-3 text-right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-150 bg-white">
-                        {localBackupsLog.slice(0, 5).map((log: any, idx: number) => (
-                          <tr key={`${log.id || 'log'}-${idx}`} className="hover:bg-slate-50/70 transition">
-                            <td className="py-3 px-3 font-semibold text-slate-800 font-mono">
-                              {new Date(log.date).toLocaleString("pt-MZ", {
-                                day: "2-digit",
-                                month: "2-digit",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                                second: "2-digit"
-                              })}
-                            </td>
-                            <td className="py-3 px-2">
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
-                                log.type === "Manual"
-                                  ? "bg-amber-50 text-amber-700 border border-amber-200"
-                                  : "bg-indigo-50 text-indigo-700 border border-indigo-200"
-                              }`}>
-                                {log.type}
-                              </span>
-                            </td>
-                            <td className="py-3 px-2 font-semibold text-slate-500">
-                              {log.frequency || "N/A"}
-                            </td>
-                            <td className="py-3 px-2 font-mono text-[10.5px] text-slate-500">
-                              {(log.size / 1024).toFixed(1)} KB
-                            </td>
-                            <td className="py-3 px-2 text-center">
-                              <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-bold text-[9px] border border-emerald-100">
-                                <CheckCircle className="w-3 h-3 text-emerald-500" />
-                                Sucesso
-                              </span>
-                            </td>
-                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => handleDownloadSlotBackup(log.id, log.date)}
-                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-950 border border-slate-200 rounded-lg transition shadow-xs cursor-pointer"
-                                title="Descarregar ficheiro JSON de backup"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={currentRole !== "ADMIN"}
-                                onClick={() => handleRestoreFromSlot(log.id)}
-                                className={`inline-flex items-center justify-center p-1.5 border rounded-lg transition-all cursor-pointer ${
-                                  currentRole === "ADMIN"
-                                    ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 shadow-xs"
-                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50"
-                                }`}
-                                title={currentRole === "ADMIN" ? "Restaurar sistema a partir deste ponto" : "Apenas administradores"}
-                              >
-                                <RefreshCw className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs text-slate-800">
-            {/* Left Config Panel */}
-            <div className="lg:col-span-5 space-y-6">
-
-              {/* Card 2: Manual Trigger */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center gap-2 text-orange-600">
-                  <Shield className="w-4.5 h-4.5" />
-                  <h4 className="font-bold text-slate-800 text-sm">Backup Local Instantâneo</h4>
-                </div>
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Gere e salve imediatamente uma cópia de segurança completa do seu banco de dados na lista de pontos de restauro local.
-                </p>
-
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    disabled={!canEdit}
-                    onClick={handleCreateManualBackup}
-                    className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 shadow shadow-slate-900/10"
-                  >
-                    <RefreshCw className="w-4 h-4 text-orange-400" />
-                    Fazer Backup Local Agora
-                  </button>
-                </div>
-
-                <div className="border-t border-slate-100 pt-3 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400 font-medium">Último Auto-Backup:</span>
-                  <span className="font-mono text-slate-700 font-bold">
-                    {localStorage.getItem("erp_last_auto_backup_time")
-                      ? new Date(localStorage.getItem("erp_last_auto_backup_time")!).toLocaleString("pt-MZ", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
-                      : "Nunca realizado"
-                    }
-                  </span>
-                </div>
-              </div>
-
-              {/* Card 3: Cloud Backup (Secure Storage) */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center gap-2 text-orange-600">
-                  <Cloud className="w-4.5 h-4.5" />
-                  <h4 className="font-bold text-slate-800 text-sm">Cópia de Segurança em Nuvem (Armazenamento Seguro)</h4>
-                </div>
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Guarde uma cópia de segurança completa do banco de dados de vendas diretamente na sua conta de armazenamento em nuvem. Cada administrador possui a sua área própria protegida.
-                </p>
-
-                {auth.currentUser ? (
-                  <div className="p-3 bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-xl space-y-1 text-[11px]">
-                    <div className="flex items-center gap-1.5 font-bold text-emerald-900">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                      </span>
-                      Administrador Conectado:
-                    </div>
-                    <p className="font-semibold truncate font-mono text-[10px]">{auth.currentUser.email}</p>
-                    <p className="text-[10px] text-emerald-600 truncate font-mono">ID: {auth.currentUser.uid}</p>
-                  </div>
-                ) : (
-                  <div className="p-3 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl space-y-1 text-[11px]">
-                    <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                      <AlertTriangle className="w-4 h-4 text-amber-600" />
-                      Aviso de Autenticação:
-                    </div>
-                    <p className="text-[10.5px]">Nenhum Administrador autenticado encontrado. Faça login com uma conta Google na tela de acesso para liberar backups em nuvem.</p>
-                  </div>
-                )}
-
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    disabled={!canEdit || !auth.currentUser || isUploadingCloudBackup}
-                    onClick={handleUploadCloudBackup}
-                    className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow shadow-orange-500/10"
-                  >
-                    <RefreshCw className={`w-4 h-4 text-white ${isUploadingCloudBackup ? "animate-spin" : ""}`} />
-                    {isUploadingCloudBackup ? "Enviando para Nuvem..." : "Fazer Backup na Nuvem Agora"}
-                  </button>
-                </div>
-              </div>
-
-            </div>
-
-            {/* Right List Panel */}
-            <div className="lg:col-span-7 space-y-6">
-
-              {/* Card: Cloud Backups Log */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 flex flex-col min-h-[300px]">
-                <div className="flex items-center justify-between border-b pb-3 border-slate-100">
-                  <div className="flex items-center gap-2 text-orange-600">
-                    <Cloud className="w-4.5 h-4.5" />
-                    <h4 className="font-bold text-slate-800 text-sm">Histórico de Backups na Nuvem</h4>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={loadCloudBackups}
-                    disabled={isLoadingCloudBackups}
-                    className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg transition disabled:opacity-50"
-                    title="Recarregar Backups da Nuvem"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCloudBackups ? "animate-spin" : ""}`} />
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-500 leading-normal">
-                  Estas são as cópias de segurança do seu histórico pessoal salvas de forma segura na nuvem para o administrador autenticado.
-                </p>
-
-                {isLoadingCloudBackups ? (
-                  <div className="flex-1 flex items-center justify-center py-12">
-                    <RefreshCw className="w-6 h-6 text-orange-500 animate-spin" />
-                    <span className="ml-2 text-xs text-slate-500 font-medium">Buscando backups em nuvem...</span>
-                  </div>
-                ) : !auth.currentUser ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
-                    <Lock className="w-8 h-8 text-slate-400 mb-2 stroke-[1.5]" />
-                    <h5 className="font-bold text-slate-700 text-xs">Acesso restrito</h5>
-                    <p className="text-[10px] text-slate-400 max-w-[240px] mt-1">
-                      Por favor, conecte a sua conta de Administrador para listar os seus backups pessoais em nuvem.
-                    </p>
-                  </div>
-                ) : cloudBackups.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 min-h-[150px]">
-                    <Cloud className="w-8 h-8 text-slate-400 mb-3 stroke-[1.5]" />
-                    <h5 className="font-bold text-slate-700 text-xs">Nenhum backup em nuvem encontrado</h5>
-                    <p className="text-[11px] text-slate-400 max-w-[280px] mt-1">
-                      Você ainda não realizou nenhum backup em nuvem. Utilize o botão à esquerda para criar seu primeiro ponto de restauro na nuvem.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto border border-slate-100 rounded-xl bg-slate-50/50">
-                    <table className="w-full text-[11px] text-slate-600 border-collapse">
-                      <thead>
-                        <tr className="bg-slate-100/80 border-b border-slate-200 text-[9.5px] text-slate-500 uppercase tracking-wider text-left font-bold">
-                          <th className="py-2.5 px-3">Nome do Ficheiro</th>
-                          <th className="py-2.5 px-2">Criado em</th>
-                          <th className="py-2.5 px-2">Tamanho</th>
-                          <th className="py-2.5 px-3 text-right">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {cloudBackups.map((backup) => (
-                          <tr key={backup.filename} className="hover:bg-slate-50 transition">
-                            <td className="py-3 px-3 font-semibold text-slate-800 font-mono text-[10px] max-w-[180px] truncate" title={backup.filename}>
-                              {backup.filename}
-                            </td>
-                            <td className="py-3 px-2 font-medium text-slate-500 whitespace-nowrap">
-                              {new Date(backup.createdAt).toLocaleString("pt-MZ", {
-                                day: "2-digit",
-                                month: "2-digit",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit"
-                              })}
-                            </td>
-                            <td className="py-3 px-2 font-mono text-[10.5px] text-slate-500 whitespace-nowrap">
-                              {(backup.size / 1024).toFixed(1)} KB
-                            </td>
-                            <td className="py-3 px-3 text-right space-x-1.5 whitespace-nowrap">
-                              <a
-                                href={backup.downloadUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-slate-100 text-slate-600 hover:text-slate-955 border border-slate-200 rounded-lg transition shadow-sm cursor-pointer"
-                                title="Descarregar ficheiro da nuvem"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </a>
-                              <button
-                                type="button"
-                                disabled={isRestoringCloudBackup || currentRole !== "ADMIN"}
-                                onClick={() => handleRestoreFromCloud(backup)}
-                                className={`inline-flex items-center justify-center p-1.5 border rounded-lg transition-all cursor-pointer ${
-                                  currentRole === "ADMIN"
-                                    ? "bg-emerald-500 hover:bg-emerald-600 text-white border-emerald-600 shadow-sm"
-                                    : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-50"
-                                }`}
-                                title={currentRole === "ADMIN" ? "Restaurar sistema a partir deste backup" : "Apenas administradores"}
-                              >
-                                <RefreshCw className={`w-3.5 h-3.5 ${isRestoringCloudBackup ? "animate-spin" : ""}`} />
-                              </button>
-                              <button
-                                type="button"
-                                disabled={currentRole !== "ADMIN"}
-                                onClick={() => handleDeleteCloudBackup(backup.filename)}
-                                className="inline-flex items-center justify-center p-1.5 bg-white hover:bg-red-50 text-red-500 hover:text-red-655 border border-slate-200 hover:border-red-200 rounded-lg transition shadow-sm cursor-pointer"
-                                title="Eliminar da nuvem"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-
-                <div className="border-t border-slate-100 pt-3 text-[10px] text-slate-400 italic flex items-center gap-1">
-                  <Shield className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>Selecione restaurar para carregar as configurações, vendas, produtos, clientes e funcionários salvos na nuvem.</span>
-                </div>
-              </div>
-
-            </div>
-          </div>
-
-          {/* PAINEL DE CONECTIVIDADE ATIVA, LATÊNCIA DE REDE & VALIDAÇÃO DE SESSÃO */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in duration-300">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="bg-emerald-600 text-white p-2.5 rounded-xl shrink-0 shadow-sm">
-                  <Database className="w-5.5 h-5.5" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-extrabold text-slate-900 text-sm md:text-base">
-                      Monitor de Conectividade em Nuvem & Persistência de Dados
-                    </h4>
-                    <span className={`inline-flex items-center gap-1.5 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                      supabaseStatus === "connected" 
-                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200" 
-                        : supabaseStatus === "error"
-                        ? "bg-rose-100 text-rose-800 border border-rose-200"
-                        : "bg-slate-100 text-slate-700 border border-slate-200"
-                    }`}>
-                      {supabaseStatus === "connected" && (
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                      )}
-                      {supabaseStatus === "connected" ? "Servidor Operacional & Ativo" : supabaseStatus === "error" ? "Falha de Conexão" : "A Aguardar Verificação"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Monitorize a latência de rede em tempo real, valide a integridade da sessão do operador e sincronize os registos de faturas e clientes com integridade referencial.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleRefreshDiagnostics}
-                  disabled={isDiagnosing}
-                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs active:scale-98 disabled:opacity-50"
-                  title="Atualizar métricas de latência e validação de sessão em tempo real"
-                >
-                  <Activity className={`w-3.5 h-3.5 text-emerald-400 ${isDiagnosing ? "animate-spin" : ""}`} />
-                  {isDiagnosing ? "A medir latência..." : "Diagnóstico em Tempo Real"}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={copySupabaseSqlSchema}
-                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Copiar script SQL com as tabelas relacionais estruturadas"
-                >
-                  <Terminal className="w-3.5 h-3.5 text-slate-500" />
-                  Copiar Esquema SQL
-                </button>
-              </div>
-            </div>
-
-            {/* ARQUITETURA DE PERSISTÊNCIA OFICIAL */}
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h5 className="text-xs font-extrabold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Database className="w-4 h-4 text-emerald-600" />
-                    Motor de Dados Relacional & Alta Disponibilidade
-                  </h5>
-                  <p className="text-[11px] text-slate-500">
-                    Backend corporativo com transações ACID atômicas, isolamento multi-tenant (RLS) e replicação em tempo real.
-                  </p>
-                </div>
-                <span className="text-[11px] font-extrabold bg-emerald-100 text-emerald-800 px-3 py-1 rounded-lg border border-emerald-200 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  OFICIAL & ATIVO
-                </span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
-                <div className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-blue-600" />
-                    <span className="font-extrabold text-xs text-slate-900">Segurança Multi-Tenant</span>
-                  </div>
-                  <p className="text-[10.5px] text-slate-500">
-                    Row Level Security (RLS) ativo para isolamento rigoroso entre filiais e empresas.
-                  </p>
-                </div>
-
-                <div className="p-3.5 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Zap className="w-4 h-4 text-amber-600" />
-                    <span className="font-extrabold text-xs text-slate-900">Transações ACID Atômicas</span>
-                  </div>
-                  <p className="text-[10.5px] text-slate-500">
-                    Vendas, quebras e abatimentos de dívidas protegidos contra concorrência e falhas parciais.
-                  </p>
-                </div>
-
-                <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/50 shadow-2xs space-y-1">
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-emerald-700" />
-                    <span className="font-extrabold text-xs text-emerald-950">Sincronização em Tempo Real</span>
-                  </div>
-                  <p className="text-[10.5px] text-slate-600 font-medium">
-                    WebSockets e canais de streaming com tolerância a falhas offline e reenvio automático.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* PAINEL DE STATUS DE CONECTIVIDADE, LATÊNCIA VISUAL & VALIDAÇÃO DE SESSÃO */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* Card Indicador Visual de Latência da Rede */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 relative overflow-hidden">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                    <Wifi className="w-3.5 h-3.5 text-emerald-600" />
-                    Latência da Rede
-                  </span>
-                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
-                    !latencyData 
-                      ? "bg-slate-200 text-slate-600"
-                      : latencyData.status === "optimal"
-                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                      : latencyData.status === "good"
-                      ? "bg-blue-100 text-blue-800 border border-blue-200"
-                      : latencyData.status === "slow"
-                      ? "bg-amber-100 text-amber-800 border border-amber-200"
-                      : "bg-rose-100 text-rose-800 border border-rose-200"
-                  }`}>
-                    {!latencyData ? "Não Medido" : latencyData.status === "optimal" ? "Ótima (< 100ms)" : latencyData.status === "good" ? "Estável" : latencyData.status === "slow" ? "Elevada" : "Sem Resposta"}
-                  </span>
-                </div>
-
-                <div className="flex items-baseline justify-between">
-                  <div className="flex items-baseline gap-1.5">
-                    <span className="text-3xl font-black text-slate-900 font-mono tracking-tight">
-                      {latencyData && latencyData.status !== "error" ? latencyData.latencyMs : "--"}
-                    </span>
-                    <span className="text-xs font-bold text-slate-500 font-mono">ms (ping)</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <span className={`w-2 h-2 rounded-full ${
-                      !latencyData ? "bg-slate-300" : latencyData.status === "optimal" ? "bg-emerald-500 animate-pulse" : latencyData.status === "good" ? "bg-blue-500" : "bg-amber-500"
-                    }`} />
-                    <span className="text-[10px] text-slate-500 font-medium">Tempo de resposta</span>
-                  </div>
-                </div>
-
-                {/* Barra Visual de Escala de Latência */}
-                <div className="space-y-1">
-                  <div className="w-full bg-slate-200 h-2 rounded-full overflow-hidden flex">
-                    <div 
-                      className={`h-full transition-all duration-500 rounded-full ${
-                        !latencyData || latencyData.status === "error"
-                          ? "w-0 bg-slate-300"
-                          : latencyData.status === "optimal"
-                          ? "bg-emerald-500"
-                          : latencyData.status === "good"
-                          ? "bg-blue-500"
-                          : "bg-amber-500"
-                      }`}
-                      style={{ 
-                        width: latencyData && latencyData.status !== "error" 
-                          ? `${Math.min(100, Math.max(8, Math.round((latencyData.latencyMs / 400) * 100)))}%` 
-                          : "0%" 
-                      }}
-                    />
-                  </div>
-                  <div className="flex justify-between text-[9px] text-slate-400 font-mono px-0.5">
-                    <span>0ms</span>
-                    <span>100ms (Ideal)</span>
-                    <span>250ms</span>
-                    <span>500ms+</span>
-                  </div>
-                </div>
-
-                <p className="text-[10.5px] text-slate-500 line-clamp-2">
-                  {latencyData ? latencyData.message : "Execute o diagnóstico para calcular o tempo de ida e volta do pacote de rede."}
-                </p>
-              </div>
-
-              {/* Card Validação em Tempo Real da Sessão do Utilizador */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                    <UserCheck className="w-3.5 h-3.5 text-blue-600" />
-                    Sessão do Utilizador
-                  </span>
-                  <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full ${
-                    sessionValidation?.isValid 
-                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200" 
-                      : "bg-slate-200 text-slate-600"
-                  }`}>
-                    {sessionValidation?.isValid ? "Autenticada & Válida" : "Pendente"}
-                  </span>
-                </div>
-
-                <div className="space-y-1">
-                  <span className="text-xs font-black text-slate-800 block truncate">
-                    {sessionValidation?.email || "Sessão Operacional Autorizada"}
-                  </span>
-                  <div className="flex items-center gap-2 text-[10.5px] text-slate-600">
-                    <span className="bg-slate-200/80 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold text-slate-700">
-                      Nível: {sessionValidation?.role || "Operador do Sistema"}
-                    </span>
-                    <span className="text-emerald-600 font-bold flex items-center gap-1 text-[10px]">
-                      <Shield className="w-3 h-3" /> TLS 1.3 Seguro
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-1 border-t border-slate-200/60">
-                  <p className="text-[10.5px] text-slate-500">
-                    {sessionValidation?.message || "Sessão verificada em tempo real com criptografia de ponta a ponta."}
-                  </p>
-                </div>
-              </div>
-
-              {/* Card Integridade & Migração Estruturada */}
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                      Integridade de Dados
-                    </span>
-                    <span className="text-[10px] font-extrabold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                      Estruturado OK
-                    </span>
-                  </div>
-                  <p className="text-[10.5px] text-slate-500 mt-2">
-                    Transfira o histórico completo de clientes, catálogo e vendas garantindo integridade referencial.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleRunMigration}
-                  disabled={isMigrating || !supabaseEnabled}
-                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition flex items-center justify-center gap-1.5 cursor-pointer shadow-xs active:scale-98"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isMigrating ? "animate-spin" : ""}`} />
-                  {isMigrating ? "Migração em curso..." : "Iniciar Migração de Dados"}
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Coluna Parâmetros do Servidor de Dados */}
-              <div className="lg:col-span-7 space-y-4">
-                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div>
-                    <label className="text-xs font-bold text-slate-800 block">Ativar Conexão com o Servidor de Dados</label>
-                    <p className="text-[11px] text-slate-500">Habilita a sincronização contínua com a base de dados relacional em nuvem.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={supabaseEnabled}
-                    onChange={(e) => setSupabaseEnabled(e.target.checked)}
-                    className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
-                    Endereço do Servidor de Dados em Nuvem (Server Endpoint URL)
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="https://seu-servidor-de-dados.dominio.co"
-                    value={supabaseUrl}
-                    onChange={(e) => setSupabaseUrl(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition"
-                  />
-                  <span className="text-[10px] text-slate-400">Insira a URL do endpoint HTTPS do seu servidor de persistência.</span>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider">
-                    Chave de Autenticação / Segurança da Aplicação (API Token / Access Key)
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="Chave de segurança de comunicação..."
-                    value={supabaseAnonKey}
-                    onChange={(e) => setSupabaseAnonKey(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10 transition"
-                  />
-                  <span className="text-[10px] text-slate-400">Chave pública de acesso autorizada para autenticar as requisições do OST Vendas.</span>
-                </div>
-
-                <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div>
-                    <label className="text-xs font-bold text-slate-800 block">Sincronização Contínua Automática</label>
-                    <p className="text-[11px] text-slate-500">Replicar alterações no servidor em nuvem automaticamente a cada transação e venda.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={supabaseAutoSync}
-                    onChange={(e) => setSupabaseAutoSync(e.target.checked)}
-                    className="w-4 h-4 accent-emerald-600 rounded cursor-pointer"
-                  />
-                </div>
-
-                <div className="flex flex-wrap gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={handleTestSupabase}
-                    disabled={isTestingSupabase || !supabaseUrl || !supabaseAnonKey}
-                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isTestingSupabase ? "animate-spin" : ""}`} />
-                    {isTestingSupabase ? "A testar ligação..." : "Testar Ligação ao Servidor"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveSupabaseConfig}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 cursor-pointer shadow-xs"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    Guardar Configuração
-                  </button>
-                </div>
-
-                {supabaseStatusMsg && (
-                  <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                    supabaseStatus === "connected" 
-                      ? "bg-emerald-50 text-emerald-800 border border-emerald-200" 
-                      : "bg-rose-50 text-rose-800 border border-rose-200"
-                  }`}>
-                    {supabaseStatus === "connected" ? (
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    ) : (
-                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-                    )}
-                    <span>{supabaseStatusMsg}</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Coluna Sincronização e Métricas de Registos */}
-              <div className="lg:col-span-5 space-y-4 flex flex-col justify-between">
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
-                  <h5 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-2">
-                    <Server className="w-4 h-4 text-emerald-600" />
-                    Estado dos Registos para Replicação
-                  </h5>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Artigos / Produtos</span>
-                      <span className="font-extrabold text-slate-800 text-sm">{products.length} registos</span>
-                    </div>
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Vendas / Faturas</span>
-                      <span className="font-extrabold text-slate-800 text-sm">{transactions.length} registos</span>
-                    </div>
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Clientes Cadastrados</span>
-                      <span className="font-extrabold text-slate-800 text-sm">{customers.length} registos</span>
-                    </div>
-                    <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                      <span className="text-[10px] text-slate-500 block uppercase font-bold">Motor de Persistência</span>
-                      <span className="font-extrabold text-emerald-600 text-sm">PostgreSQL Engine</span>
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-slate-500">
-                    A sincronização realiza uma operação atómica de <code className="font-mono text-[10px] bg-slate-200 px-1 py-0.5 rounded">UPSERT</code> seguro nas tabelas estruturadas de produtos, faturas, clientes e movimentos financeiros.
-                  </p>
-                </div>
-
-                <div className="pt-2 space-y-2">
-                  <button
-                    type="button"
-                    disabled={!supabaseEnabled || isSyncingSupabase}
-                    onClick={handleSyncAllToSupabase}
-                    className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-extrabold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-98"
-                  >
-                    <Cloud className={`w-4 h-4 ${isSyncingSupabase ? "animate-bounce" : ""}`} />
-                    {isSyncingSupabase ? "A sincronizar com o servidor em nuvem..." : "Sincronizar Todos os Dados Agora"}
-                  </button>
-                  <span className="text-[10px] text-slate-400 text-center block">
-                    Garante que todas as tabelas em nuvem fiquem 100% atualizadas e sincronizadas.
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* MODAL / PAINEL VISUAL DE MIGRAÇÃO COM CONSOLE E RELATÓRIO DE INTEGRIDADE */}
-          {showMigrationModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-              <div className="bg-white rounded-2xl max-w-2xl w-full border border-slate-200 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="p-5 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-emerald-500 text-white p-2 rounded-xl">
-                      <Database className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-extrabold text-sm text-white">Migração Estruturada para Servidor em Nuvem</h4>
-                      <p className="text-xs text-slate-400">Transposição de histórico com integridade referencial</p>
-                    </div>
-                  </div>
-                  {!isMigrating && (
-                    <button
-                      type="button"
-                      onClick={() => setShowMigrationModal(false)}
-                      className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
-                    >
-                      <XCircle className="w-5 h-5" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="p-6 space-y-6 overflow-y-auto flex-1">
-                  {/* Barra de Progresso */}
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-bold text-slate-700">
-                      <span>{migrationStep}</span>
-                      <span className="font-mono text-emerald-600">{migrationPercent}%</span>
-                    </div>
-                    <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden border border-slate-200">
-                      <div 
-                        className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
-                        style={{ width: `${migrationPercent}%` }}
-                      />
-                    </div>
-                    <p className="text-[11px] text-slate-500">{migrationDetail}</p>
-                  </div>
-
-                  {/* Relatório de Integridade */}
-                  {migrationReport && (
-                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-4 space-y-3 animate-in fade-in duration-200">
-                      <div className="flex items-center gap-2 text-emerald-800 font-extrabold text-xs">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        Relatório de Integridade Referencial & Conclusão
-                      </div>
-                      
-                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
-                          <span className="text-[10px] text-slate-500 block">Clientes</span>
-                          <span className="font-black text-slate-800 text-sm">{migrationReport.customersMigrated}</span>
-                        </div>
-                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
-                          <span className="text-[10px] text-slate-500 block">Produtos</span>
-                          <span className="font-black text-slate-800 text-sm">{migrationReport.productsMigrated}</span>
-                        </div>
-                        <div className="bg-white p-2 rounded-lg border border-emerald-100">
-                          <span className="text-[10px] text-slate-500 block">Vendas / Faturas</span>
-                          <span className="font-black text-slate-800 text-sm">{migrationReport.transactionsMigrated}</span>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1 pt-1">
-                        {migrationReport.integrityChecks.map((chk, idx) => (
-                          <div key={idx} className="flex items-start gap-2 text-[11px] text-slate-700">
-                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
-                            <span><strong>{chk.item}:</strong> {chk.details}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Terminal de Logs */}
-                  <div className="space-y-1.5">
-                    <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block">
-                      Console de Migração em Tempo Real
-                    </span>
-                    <div className="bg-slate-950 text-slate-200 font-mono text-[11px] p-3.5 rounded-xl max-h-48 overflow-y-auto space-y-1 border border-slate-800 shadow-inner">
-                      {migrationLogs.length === 0 ? (
-                        <span className="text-slate-600 italic">A aguardar início das instruções...</span>
-                      ) : (
-                        migrationLogs.map((log, i) => (
-                          <div key={i} className={`flex items-start gap-2 ${
-                            log.level === "success" ? "text-emerald-400" : log.level === "warning" ? "text-amber-400" : log.level === "error" ? "text-rose-400" : "text-slate-300"
-                          }`}>
-                            <span className="text-slate-600 shrink-0">[{log.time}]</span>
-                            <span>{log.text}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    disabled={isMigrating}
-                    onClick={() => setShowMigrationModal(false)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition cursor-pointer"
-                  >
-                    Fechar Painel
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeSubTab === "lotes" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Layers className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Controle de Lotes & Alertas de Validade</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Defina a política de consumo de estoque (FIFO/LIFO) e gerencie as notificações de vencimento para produtos perecíveis.</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Col 1: Strategy & Expiry settings */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              {/* Card 1: Consumo de Lotes */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center gap-2.5 text-slate-800 border-b border-slate-100 pb-3">
-                  <Layers className="w-5 h-5 text-orange-500" />
-                  <div>
-                    <h4 className="font-bold text-slate-800 text-sm">Estratégia de Consumo de Estoque</h4>
-                    <p className="text-[11px] text-slate-400">Determine como o sistema priorizará a saída automática dos lotes no checkout.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {/* Option FIFO */}
-                    <button
-                      type="button"
-                      onClick={() => setInventoryStrategy("FIFO")}
-                      className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between h-32 ${
-                        inventoryStrategy === "FIFO"
-                          ? "border-orange-500 bg-orange-50/20 ring-1 ring-orange-500"
-                          : "border-slate-200 hover:border-slate-350 bg-white"
-                      }`}
-                    >
-                      <div className="flex justify-between items-center w-full">
-                        <span className="font-bold text-xs text-slate-800">FIFO (PEPS)</span>
-                        <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${inventoryStrategy === "FIFO" ? "border-orange-500" : "border-slate-300"}`}>
-                          {inventoryStrategy === "FIFO" && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-orange-700 uppercase">First-In, First-Out</p>
-                        <p className="text-[10px] text-slate-400 mt-1 leading-snug">Vende primeiro o lote com validade mais próxima do vencimento.</p>
-                      </div>
-                    </button>
-
-                    {/* Option LIFO */}
-                    <button
-                      type="button"
-                      onClick={() => setInventoryStrategy("LIFO")}
-                      className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between h-32 ${
-                        inventoryStrategy === "LIFO"
-                          ? "border-orange-500 bg-orange-50/20 ring-1 ring-orange-500"
-                          : "border-slate-200 hover:border-slate-350 bg-white"
-                      }`}
-                    >
-                      <div className="flex justify-between items-center w-full">
-                        <span className="font-bold text-xs text-slate-800">LIFO (UEPS)</span>
-                        <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${inventoryStrategy === "LIFO" ? "border-orange-500" : "border-slate-300"}`}>
-                          {inventoryStrategy === "LIFO" && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-orange-700 uppercase">Last-In, First-Out</p>
-                        <p className="text-[10px] text-slate-400 mt-1 leading-snug">Prioriza a saída do lote recebido mais recentemente no estoque.</p>
-                      </div>
-                    </button>
-
-                    {/* Option NORMAL */}
-                    <button
-                      type="button"
-                      onClick={() => setInventoryStrategy("NORMAL")}
-                      className={`p-4 rounded-xl border text-left transition-all flex flex-col justify-between h-32 ${
-                        inventoryStrategy === "NORMAL"
-                          ? "border-orange-500 bg-orange-50/20 ring-1 ring-orange-500"
-                          : "border-slate-200 hover:border-slate-350 bg-white"
-                      }`}
-                    >
-                      <div className="flex justify-between items-center w-full">
-                        <span className="font-bold text-xs text-slate-800">Sem Lote (Geral)</span>
-                        <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${inventoryStrategy === "NORMAL" ? "border-orange-500" : "border-slate-300"}`}>
-                          {inventoryStrategy === "NORMAL" && <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-bold text-orange-700 uppercase">Padrão Simples</p>
-                        <p className="text-[10px] text-slate-400 mt-1 leading-snug">Deduz o estoque do produto de forma global, ignorando especificações de lote.</p>
-                      </div>
-                    </button>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 border border-slate-150 rounded-xl text-[10px] text-slate-500 leading-relaxed">
-                    💡 <b>Impacto Operacional:</b> A alteração da estratégia afeta o motor de abate do POS e as sugestões de triagem de estoque no painel do operador. O <b>FIFO</b> é altamente recomendado para negócios com produtos perecíveis (alimentação, farmacêutica).
                   </div>
                 </div>
               </div>
 
-              {/* Card 2: Alertas de Vencimento */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2.5 text-slate-800">
-                    <Bell className="w-5 h-5 text-orange-500" />
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Configuração de Alertas de Vencimento</h4>
-                      <p className="text-[11px] text-slate-400">Ative avisos preventivos para produtos que se aproximam do fim da validade.</p>
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={expiryAlertsEnabled}
-                      onChange={(e) => setExpiryAlertsEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-orange-500"></div>
-                  </label>
-                </div>
-
-                {expiryAlertsEnabled && (
-                  <div className="space-y-4 animate-in slide-in-from-top-1 duration-150">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      
-                      {/* Alert days threshold */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Janela de Alerta Prévio (Dias)</label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="1"
-                            max="365"
-                            value={expiryAlertDays}
-                            onChange={(e) => setExpiryAlertDays(Math.max(1, parseInt(e.target.value) || 0))}
-                            className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold w-24 focus:bg-white focus:border-orange-500 outline-none"
-                          />
-                          <span className="text-xs text-slate-500">dias antes do vencimento</span>
-                        </div>
-                      </div>
-
-                      {/* Notification channel selection */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Canal de Notificação</label>
-                        <select
-                          value={expiryNotificationMethod}
-                          onChange={(e) => setExpiryNotificationMethod(e.target.value as any)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs text-slate-700 outline-none focus:bg-white focus:border-orange-500 cursor-pointer"
-                        >
-                          <option value="EMAIL">📧 Enviar apenas por Email (SMTP)</option>
-                          <option value="SMS">💬 Enviar apenas por SMS (Gateway)</option>
-                          <option value="BOTH">🔄 Enviar por Ambos (Email e SMS)</option>
-                        </select>
-                      </div>
-
-                    </div>
-
-                    {/* Email content configuration */}
-                    {(expiryNotificationMethod === "EMAIL" || expiryNotificationMethod === "BOTH") && (
-                      <div className="space-y-3.5 border-t border-slate-100 pt-4.5 animate-in fade-in">
-                        <h5 className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                          <span>📋</span> Template de Alerta por Email
-                        </h5>
-                        
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Assunto do Email</label>
-                          <input
-                            type="text"
-                            value={expiryEmailSubject}
-                            onChange={(e) => setExpiryEmailSubject(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white focus:border-orange-500"
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Corpo da Mensagem</label>
-                          <textarea
-                            rows={5}
-                            value={expiryEmailBody}
-                            onChange={(e) => setExpiryEmailBody(e.target.value)}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-mono outline-none focus:bg-white focus:border-orange-500"
-                          />
-                          <p className="text-[9px] text-slate-400">
-                            Use a tag <code>[LISTA_VENCIMENTOS]</code> para injetar automaticamente a lista de lotes e produtos próximos da expiração.
-                          </p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-            </div>
-
-            {/* Col 2: Action details & active inventory preview */}
-            <div className="space-y-6">
-              
-              {/* Save Settings Action Button */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
-                <div className="bg-orange-100 text-orange-600 p-3 rounded-full w-12 h-12 mx-auto flex items-center justify-center">
-                  <CheckCircle className="w-6 h-6" />
-                </div>
-                <div>
-                  <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wide">Gravar Alterações</h4>
-                  <p className="text-xs text-slate-400 mt-1">Garante que todas as estratégias operacionais e notificações sejam aplicadas imediatamente.</p>
-                </div>
-                
-                <button
-                  type="button"
-                  onClick={() => {
-                    onUpdateSettings({
-                      inventoryStrategy,
-                      expiryAlertsEnabled,
-                      expiryAlertDays,
-                      expiryNotificationMethod,
-                      expiryEmailSubject,
-                      expiryEmailBody
-                    });
-
-                    onAddAuditLog(
-                      "Definições de Lotes e Validades",
-                      "CONFIGURAÇÕES",
-                      `Parâmetros atualizados: Estratégia=${inventoryStrategy}, Alertas=${expiryAlertsEnabled ? 'Sim' : 'Não'} (${expiryAlertDays} dias).`
-                    );
-
-                    if (onShowToast) {
-                      onShowToast("Configurações de lotes e validades salvas com sucesso!", "success");
-                    }
-                  }}
-                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition shadow-md shadow-orange-500/10 cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Check className="w-4 h-4" />
-                  Gravar Parâmetros de Lotes
-                </button>
-              </div>
-
-              {/* Status card preview: Perecíveis no inventário */}
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-150 space-y-4">
-                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 text-orange-500" />
-                  Informações de Lotes Atuais
-                </h4>
-                
-                <div className="space-y-3 font-mono text-slate-650 text-[11px]">
-                  <div className="flex justify-between border-b border-dashed border-slate-200 pb-1.5">
-                    <span>Lotes Totais:</span>
-                    <span className="font-bold text-slate-800">{(settings.batches || []).length} lotes</span>
-                  </div>
-                  <div className="flex justify-between border-b border-dashed border-slate-200 pb-1.5">
-                    <span>Produtos Loteados:</span>
-                    <span className="font-bold text-slate-800">
-                      {new Set((settings.batches || []).map(b => b.productId)).size} produtos
-                    </span>
-                  </div>
-                  <div className="flex justify-between pb-1.5">
-                    <span>Estratégia no POS:</span>
-                    <span className="font-bold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded text-[10px]">
-                      {settings.inventoryStrategy || "FIFO"}
-                    </span>
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-slate-400 leading-relaxed italic">
-                  * Os lotes e validades podem ser cadastrados e ajustados diretamente através da aba "Lotes, Validades & FIFO" no módulo de Controle de Estoque.
-                </p>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeSubTab === "whatsapp" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-emerald-950 text-white p-6 rounded-2xl border border-emerald-900 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-emerald-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <MessageSquare className="w-5 h-5 animate-bounce" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Configuração de Alertas via WhatsApp API</h3>
-                <p className="text-xs text-emerald-300 mt-0.5">
-                  Notifique o gestor instantaneamente por WhatsApp quando o estoque de qualquer produto atingir níveis críticos, com link direto de reabastecimento.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Col 1: Configurations */}
-            <div className="lg:col-span-2 space-y-6">
-              
-              {/* Main settings card */}
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2.5 text-slate-800">
-                    <MessageSquare className="w-5 h-5 text-emerald-500" />
-                    <div>
-                      <h4 className="font-bold text-slate-800 text-sm">Controle de Alertas Automáticos</h4>
-                      <p className="text-[11px] text-slate-400">Ativar ou desativar o disparo de alertas no momento da venda.</p>
-                    </div>
-                  </div>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={whatsappEnabled}
-                      onChange={(e) => setWhatsappEnabled(e.target.checked)}
-                      className="sr-only peer"
-                    />
-                    <div className="w-10 h-5 bg-slate-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                  </label>
-                </div>
-
-                {whatsappEnabled && (
-                  <form onSubmit={handleSaveWhatsappConfig} className="space-y-4 animate-in slide-in-from-top-1 duration-150">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      
-                      {/* Phone number of Manager */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">WhatsApp do Gestor (Destinatário)</label>
-                        <input
-                          type="text"
-                          placeholder="+258849001200"
-                          value={managerWhatsappPhone}
-                          onChange={(e) => setManagerWhatsappPhone(e.target.value)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-semibold outline-none focus:bg-white focus:border-emerald-500"
-                        />
-                        <p className="text-[9px] text-slate-400">Insira com o código de país (ex: +258 para Moçambique).</p>
-                      </div>
-
-                      {/* API Gateway type */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Provedor / Gateway de API</label>
-                        <select
-                          value={whatsappProvider}
-                          onChange={(e) => setWhatsappProvider(e.target.value as any)}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs text-slate-700 outline-none focus:bg-white focus:border-emerald-500 cursor-pointer"
-                        >
-                          <option value="DIRECT_LINK">🔗 Link Direto (Grátis / WhatsApp Web)</option>
-                          <option value="EVOLUTION_API">🚀 Evolution API (Recomendado)</option>
-                          <option value="TWILIO">💬 Twilio API (Enterprise)</option>
-                          <option value="META_CLOUD">🌐 Meta Cloud API (Oficial)</option>
-                        </select>
-                      </div>
-
-                    </div>
-
-                    {/* Conditional gateway settings */}
-                    {whatsappProvider !== "DIRECT_LINK" && (
-                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 space-y-3.5 animate-in fade-in duration-200">
-                        <h5 className="text-[10px] font-bold text-slate-600 uppercase tracking-wider">Credenciais do Gateway ({whatsappProvider})</h5>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                          <div className="space-y-1">
-                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">URL Base da API (Endpoint)</label>
-                            <input
-                              type="text"
-                              placeholder={whatsappProvider === "EVOLUTION_API" ? "https://api.seuservidor.com" : "https://api.twilio.com/..."}
-                              value={whatsappApiEndpoint}
-                              onChange={(e) => setWhatsappApiEndpoint(e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-semibold outline-none focus:border-emerald-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1">
-                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Token de Autenticação / API Key</label>
-                            <input
-                              type="password"
-                              placeholder="Insira o Token ou API Key..."
-                              value={whatsappToken}
-                              onChange={(e) => setWhatsappToken(e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-semibold outline-none focus:border-emerald-500"
-                            />
-                          </div>
-
-                          <div className="space-y-1 md:col-span-2">
-                            <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">
-                              {whatsappProvider === "EVOLUTION_API" ? "Nome da Instância (Instance Name)" : "ID do Telefone / Account SID"}
-                            </label>
-                            <input
-                              type="text"
-                              placeholder={whatsappProvider === "EVOLUTION_API" ? "ex: ost_vendas_inst" : "ex: phone_id_123456"}
-                              value={whatsappPhoneId}
-                              onChange={(e) => setWhatsappPhoneId(e.target.value)}
-                              className="w-full bg-white border border-slate-200 rounded-lg p-2 text-xs font-semibold outline-none focus:border-emerald-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Message customizer template */}
-                    <div className="space-y-1 pt-2">
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Template da Mensagem do Alerta</label>
-                      <textarea
-                        rows={5}
-                        value={whatsappMessageTemplate}
-                        onChange={(e) => setWhatsappMessageTemplate(e.target.value)}
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-mono outline-none focus:bg-white focus:border-emerald-500 leading-relaxed"
-                      />
-                      <div className="bg-slate-100/70 p-3 rounded-lg text-[10px] text-slate-500 leading-relaxed space-y-1 border border-slate-200">
-                        <span className="font-extrabold text-slate-700 block uppercase tracking-wide">Variáveis Disponíveis:</span>
-                        <div className="grid grid-cols-2 gap-1.5 font-mono text-[9px]">
-                          <div><code className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded font-bold">{`{product_name}`}</code> : Nome do produto</div>
-                          <div><code className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded font-bold">{`{current_stock}`}</code> : Estoque atual</div>
-                          <div><code className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded font-bold">{`{threshold}`}</code> : Limite mínimo</div>
-                          <div><code className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded font-bold">{`{pos_link}`}</code> : Link do terminal POS</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Action form buttons */}
-                    <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
-                      <button
-                        type="submit"
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-4 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Check className="w-4 h-4" />
-                        Gravar Configurações WhatsApp
-                      </button>
-                    </div>
-
-                  </form>
-                )}
-
-                {!whatsappEnabled && (
-                  <div className="text-center p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
-                    <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
-                    <div>
-                      <h4 className="font-bold text-slate-700 text-xs">Alertas de WhatsApp Desativados</h4>
-                      <p className="text-xs text-slate-400 mt-1">Ative o switch acima para configurar canais de envio de alertas de estoque crítico diretamente para o WhatsApp do gestor.</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Simulation logs console */}
-              {whatsappEnabled && (
-                <div className="bg-slate-950 p-5 rounded-2xl border border-slate-850 space-y-3.5 shadow-inner">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
-                      <Terminal className="w-4 h-4 text-emerald-500 animate-pulse" />
-                      Console de Integração & logs de Simulação
-                    </h5>
-                    <button
-                      type="button"
-                      onClick={() => setWhatsappLogs([])}
-                      className="text-[9px] font-bold text-slate-500 hover:text-slate-300 transition uppercase cursor-pointer"
-                    >
-                      Limpar Console
-                    </button>
-                  </div>
-                  
-                  <div className="font-mono text-[10px] text-slate-300 space-y-1.5 max-h-56 overflow-y-auto leading-relaxed whitespace-pre-wrap">
-                    {whatsappLogs.length === 0 ? (
-                      <span className="text-slate-600 italic">// Nenhum log de envio gerado nesta sessão. Clique em "Disparar Alerta de Teste" para ver o payload de integração.</span>
-                    ) : (
-                      whatsappLogs.map((log, idx) => (
-                        <div key={idx} className={log.includes("❌ ERRO") ? "text-rose-400 font-extrabold" : log.includes("Resposta") || log.includes("Sucesso") ? "text-emerald-400 font-extrabold" : "text-slate-300"}>
-                          {log}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-            </div>
-
-            {/* Col 2: Actions & Testing panel */}
-            <div className="space-y-6">
-              
-              {/* Test action panel */}
-              {whatsappEnabled && (
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="bg-emerald-50 text-emerald-600 p-3 rounded-full w-12 h-12 mx-auto flex items-center justify-center">
-                    <MessageSquare className="w-6 h-6" />
-                  </div>
-                  <div className="text-center">
-                    <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wide">Testar Disparo Instantâneo</h4>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Envia uma notificação fictícia do produto "Arroz Premium" para validar a formatação do template e a autenticação do seu provedor.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2 pt-2">
-                    <button
-                      type="button"
-                      disabled={isTestingWhatsapp}
-                      onClick={handleTestWhatsapp}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-xl text-xs transition shadow-md shadow-emerald-500/10 cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      {isTestingWhatsapp ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          Enviando Mensagem...
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          Disparar Alerta de Teste
-                        </>
-                      )}
-                    </button>
-
-                    {whatsappProvider === "DIRECT_LINK" && managerWhatsappPhone && (
-                      <a
-                        href={`https://api.whatsapp.com/send?phone=${managerWhatsappPhone.replace(/\+/g, "")}&text=${encodeURIComponent(
-                          whatsappMessageTemplate
-                            .replace(/{product_name}/g, "Arroz Nacional Premium (10kg)")
-                            .replace(/{current_stock}/g, "2")
-                            .replace(/{threshold}/g, "5")
-                            .replace(/{pos_link}/g, `${window.location.origin}/?tab=POS`)
-                        )}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-1.5 text-center border border-slate-250"
-                      >
-                        <Globe className="w-4 h-4" />
-                        Abrir Link do WhatsApp Direto
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Informative Help Guide Card */}
-              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-150 space-y-4">
-                <h4 className="font-bold text-slate-800 text-xs uppercase tracking-wide flex items-center gap-1.5">
-                  <CheckCircle className="w-4 h-4 text-emerald-500" />
-                  Como funcionam os alertas?
-                </h4>
-                
-                <div className="space-y-3 text-slate-650 text-xs leading-relaxed">
-                  <p>
-                    Os alertas de estoque crítico operam em segundo plano durante a finalização de qualquer transação no Caixa (POS).
-                  </p>
-                  <p>
-                    Se o estoque total de um produto baixar do limite definido na seção de <strong>Alertas SMS/Gerais</strong> (atualmente configurado para <strong className="text-orange-600 font-bold">{settings.smsStockThreshold || 5} unidades</strong>), o sistema executará os canais de notificação marcados como ativos.
-                  </p>
-                  <p className="border-t border-slate-200 pt-2 font-semibold text-[10px] text-slate-500">
-                    * Nota: A API Evolution é ideal para integrações com sistemas autônomos, enquanto o Link Direto permite envio rápido sem custo adicional.
-                  </p>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeSubTab === "filiais" && (
-        <div className="space-y-6 animate-in fade-in duration-200 text-slate-800">
-          {/* Header Card */}
-          <div className="bg-orange-950 text-white p-6 rounded-2xl border border-orange-900 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Building className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Gerenciamento de Filiais Comerciais</h3>
-                <p className="text-xs text-orange-200 mt-0.5">
-                  Adicione, edite e organize os pontos de venda e armazéns da empresa. Estas filiais estarão disponíveis para os operadores no login.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Form Section */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 h-fit">
-              <div className="border-b border-slate-100 pb-3 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-orange-500" />
-                <h4 className="font-bold text-slate-850 text-sm">
-                  {editingBranchId ? "Editar Filial" : "Cadastrar Nova Filial"}
-                </h4>
-              </div>
-
-              <form onSubmit={handleSaveBranch} className="space-y-4 text-xs">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Nome da Filial</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Filial Matola, Loja X"
-                    value={branchNameInput}
-                    onChange={(e) => setBranchNameInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Código Único</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: MAT-03"
-                      value={branchCodeInput}
-                      onChange={(e) => setBranchCodeInput(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Cidade / Província</label>
-                    <input
-                      type="text"
-                      placeholder="Ex: Maputo, Matola"
-                      value={branchCityInput}
-                      onChange={(e) => setBranchCityInput(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Endereço Completo</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Rua, Número, Bairro"
-                    value={branchAddressInput}
-                    onChange={(e) => setBranchAddressInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Contacto / Telefone</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: +258 84 900 1300"
-                    value={branchContactInput}
-                    onChange={(e) => setBranchContactInput(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-slate-800 focus:border-orange-500 focus:bg-white outline-none transition font-medium"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-2">
+              {/* Botão de Gravar */}
+              {canEdit && (
+                <div className="flex justify-end pt-3">
                   <button
                     type="submit"
-                    className="flex-1 py-2 px-4 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center shadow-md shadow-orange-600/15"
+                    className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs shadow-md shadow-orange-500/20 flex items-center gap-2 cursor-pointer transition"
                   >
-                    {editingBranchId ? "Guardar Alterações" : "Adicionar Filial"}
+                    <Check className="w-4 h-4" />
+                    Guardar Configurações
                   </button>
-                  {editingBranchId && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingBranchId(null);
-                        setBranchNameInput("");
-                        setBranchCodeInput("");
-                        setBranchAddressInput("");
-                        setBranchContactInput("");
-                        setBranchCityInput("");
-                      }}
-                      className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs transition cursor-pointer font-bold"
-                    >
-                      Cancelar
-                    </button>
-                  )}
                 </div>
-              </form>
-            </div>
-
-            {/* List Section */}
-            <div className="lg:col-span-2 space-y-4">
-              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <h4 className="font-bold text-slate-850 text-sm">Filiais Ativas no Sistema</h4>
-                  <span className="text-[10px] font-mono bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase">
-                    {(settings.branches || []).length} Registadas
-                  </span>
-                </div>
-
-                <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
-                  {(settings.branches || []).map((branch) => (
-                    <div
-                      key={branch.id}
-                      className="p-4 bg-slate-50 hover:bg-slate-100/75 border border-slate-200 rounded-xl transition duration-150 flex items-center justify-between gap-4"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <h5 className="font-bold text-sm text-slate-900">{branch.name}</h5>
-                          {branch.code && (
-                            <span className="text-[9px] font-mono font-bold bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded uppercase">
-                              {branch.code}
-                            </span>
-                          )}
-                        </div>
-                        <div className="space-y-0.5 text-slate-500 text-xs">
-                          <p className="flex items-center gap-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            {branch.address} {branch.city ? `(${branch.city})` : ""}
-                          </p>
-                          <p className="flex items-center gap-1.5">
-                            <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            {branch.contact}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleEditBranchClick(branch)}
-                          className="p-2 text-slate-500 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition cursor-pointer"
-                          title="Editar Filial"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteBranch(branch.id, branch.name)}
-                          className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                          title="Remover Filial"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-
-                  {(settings.branches || []).length === 0 && (
-                    <div className="py-8 text-center text-slate-400 text-xs">
-                      <Building className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                      Nenhuma filial registada. Adicione uma no formulário ao lado.
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeSubTab === "seguranca" && (
-        <div className="space-y-6 animate-in fade-in duration-200 text-slate-800">
-          {/* Header Card */}
-          <div className="bg-rose-950 text-white p-6 rounded-2xl border border-rose-900 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-rose-500 text-white p-2.5 rounded-xl shrink-0">
-                <Shield className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Segurança de Acesso & Controle de PINs</h3>
-                <p className="text-xs text-rose-200 mt-0.5">
-                  Gerencie a política de segurança, monitore a validade das credenciais e force a rotação de senhas para todos os colaboradores.
-                </p>
-              </div>
-            </div>
+              )}
+            </form>
           </div>
 
-          {/* Central Security Panel */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          {/* Personalização Visual do ERP */}
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center gap-2.5 text-orange-600">
+              <Palette className="w-5 h-5" />
               <div>
-                <h4 className="font-bold text-slate-850 text-sm">Controle de PIN dos Colaboradores</h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Administradores podem resetar credenciais instantaneamente. PINs padrões têm validade temporária e expiram em 60 dias.
-                </p>
+                <h3 className="font-bold text-slate-850 text-sm">Personalização de Cores & Temas</h3>
+                <p className="text-[11px] text-slate-400">Escolha o tema visual que melhor combina com o seu ambiente de trabalho.</p>
               </div>
-              <span className="text-[10px] font-mono bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded font-black uppercase">
-                {employees.length} Utilizadores
-              </span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[450px] overflow-y-auto pr-1 custom-scrollbar">
-              {employees.map((emp) => {
-                const isTemp = emp.pinChanged === false || emp.pinChanged === undefined;
-                const now = new Date();
-                const createdAtStr = emp.pinCreatedAt || emp.admissionDate || now.toISOString();
-                const createdAt = new Date(createdAtStr);
-                const diffTime = now.getTime() - createdAt.getTime();
-                const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-                const remainingDays = Math.max(0, 60 - diffDays);
-
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pt-2">
+              {SYSTEM_THEMES.map((themeItem) => {
+                const isSelected = activeColorTheme === themeItem.id;
                 return (
-                  <div 
-                    key={emp.id}
-                    className="p-4 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/60 hover:border-slate-300 transition-all flex flex-col justify-between gap-3"
+                  <button
+                    key={themeItem.id}
+                    type="button"
+                    onClick={() => {
+                      onChangeColorTheme(themeItem.id);
+                      if (onShowToast) onShowToast(`Tema '${themeItem.name}' aplicado!`, "success");
+                    }}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between h-20 group relative cursor-pointer ${
+                      isSelected 
+                        ? "border-orange-500 bg-orange-50/15 shadow-sm" 
+                        : "border-slate-200 bg-slate-50/40 hover:bg-slate-50 hover:border-slate-300"
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="font-extrabold text-slate-900 text-sm">{emp.name}</span>
-                          <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 font-bold uppercase tracking-wider">
-                            {emp.role}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-slate-400 font-bold">@{emp.username} • id: {emp.id}</p>
-                      </div>
+                    <div className="flex gap-1.5 items-center">
+                      <div className="w-3.5 h-3.5 rounded-full border border-white shadow-sm" style={{ backgroundColor: themeItem.primary }} />
+                      <div className="w-3 h-3 rounded-full border border-white shadow-sm -ml-2" style={{ backgroundColor: themeItem.hover }} />
+                      <div className="w-2.5 h-2.5 rounded-full border border-white shadow-sm -ml-2" style={{ backgroundColor: themeItem.accentBg }} />
+                    </div>
 
-                      <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                        emp.status === "ACTIVE" 
-                          ? "bg-emerald-100 text-emerald-800" 
-                          : "bg-amber-100 text-amber-800"
-                      }`}>
-                        {emp.status}
+                    <div className="text-[11px] font-bold text-slate-800 truncate">
+                      {themeItem.name}
+                    </div>
+
+                    {isSelected && (
+                      <span className="absolute top-2.5 right-2.5 w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center text-[9px] font-bold shadow-sm">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
                       </span>
-                    </div>
-
-                    <div className="border-t border-slate-200/50 pt-2.5 flex flex-col gap-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="space-y-1">
-                          <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Estado de Senha (PIN)</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-md border font-extrabold flex items-center gap-1 ${
-                            isTemp 
-                              ? "bg-rose-50 border-rose-200 text-rose-700" 
-                              : remainingDays <= 7 
-                                ? "bg-amber-50 border-amber-200 text-amber-700 animate-pulse" 
-                                : "bg-emerald-50 border-emerald-200 text-emerald-700"
-                          }`}>
-                            <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
-                            {isTemp 
-                              ? "PIN Temporário" 
-                              : remainingDays <= 7 
-                                ? `Expira em ${remainingDays} d` 
-                                : `Válido (${remainingDays}d)`}
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setConfirmResetEmployeeId(emp.id)}
-                          className="py-1.5 px-3 bg-rose-500 hover:bg-rose-600 text-white font-extrabold rounded-lg text-[10px] transition-all cursor-pointer shadow-sm hover:shadow-rose-500/20 flex items-center gap-1.5 border border-rose-600/10 font-sans"
-                        >
-                          <Lock className="w-3 h-3 shrink-0" />
-                          Resetar PIN
-                        </button>
-                      </div>
-
-                      <div className="border-t border-slate-200/30 pt-2.5 flex flex-col gap-1.5">
-                        <span className="text-[9px] text-slate-400 font-bold uppercase block tracking-wide">Paleta de Cores do Colaborador</span>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {SYSTEM_THEMES.slice(0, 5).map((theme) => {
-                            const isEmpTheme = emp.theme === theme.id || (!emp.theme && theme.id === "laranja");
-                            return (
-                              <button
-                                key={theme.id}
-                                type="button"
-                                onClick={() => {
-                                  if (onUpdateEmployeeTheme) {
-                                    onUpdateEmployeeTheme(emp.id, theme.id);
-                                  }
-                                }}
-                                className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all hover:scale-110 active:scale-95 cursor-pointer ${
-                                  isEmpTheme 
-                                    ? "border-slate-800 ring-2 ring-offset-1 ring-slate-400" 
-                                    : "border-slate-200 hover:border-slate-400"
-                                }`}
-                                style={{ backgroundColor: theme.primary }}
-                                title={theme.name}
-                              >
-                                {isEmpTheme && <Check className="w-2.5 h-2.5 text-white font-bold" />}
-                              </button>
-                            );
-                          })}
-                          
-                          <select
-                            value={emp.theme || "laranja"}
-                            onChange={(e) => {
-                              if (onUpdateEmployeeTheme) {
-                                onUpdateEmployeeTheme(emp.id, e.target.value);
-                              }
-                            }}
-                            className="text-[10px] bg-white border border-slate-200 rounded px-1.5 py-0.5 font-bold text-slate-600 focus:outline-none cursor-pointer"
-                          >
-                            {SYSTEM_THEMES.map((theme) => (
-                              <option key={theme.id} value={theme.id}>
-                                {theme.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* WebAuthn Biometric Status */}
-                      <div className="border-t border-slate-200/30 pt-2 flex items-center justify-between gap-2">
-                        <span className="text-[9px] text-slate-500 font-bold uppercase tracking-wide flex items-center gap-1">
-                          <Fingerprint className="w-3 h-3 text-orange-500 shrink-0" />
-                          Login Biométrico (WebAuthn)
-                        </span>
-                        <span className={`text-[9.5px] px-2 py-0.5 rounded-full font-bold border ${
-                          emp.webAuthnEnabled || (typeof localStorage !== "undefined" && localStorage.getItem(`erp_webauthn_enabled_${emp.id}`) === "true")
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 font-mono"
-                            : "bg-slate-100 text-slate-500 border-slate-200"
-                        }`}>
-                          {emp.webAuthnEnabled || (typeof localStorage !== "undefined" && localStorage.getItem(`erp_webauthn_enabled_${emp.id}`) === "true") ? "Ativo" : "Desativado"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    )}
+                  </button>
                 );
               })}
             </div>
           </div>
-
-          {/* Audit Trail Filter and Export Card */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <div>
-                <h4 className="font-bold text-slate-850 text-sm">Trilha de Auditoria & Exportação de Eventos</h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Filtre eventos operacionais críticos e logs de segurança por intervalo de datas para gerar relatórios regulamentares em formato PDF ou Excel.
-                </p>
-              </div>
-              <span className="text-[10px] font-mono bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-0.5 rounded font-black uppercase">
-                {auditLogs.length} Registros Totais
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 block">Data Inicial</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Calendar className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="date"
-                    value={auditFilterStartDate}
-                    onChange={(e) => setAuditFilterStartDate(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-700 block">Data Final</label>
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                    <Calendar className="w-4 h-4" />
-                  </span>
-                  <input
-                    type="date"
-                    value={auditFilterEndDate}
-                    onChange={(e) => setAuditFilterEndDate(e.target.value)}
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Actions / Helpers */}
-            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 p-4 rounded-xl border border-slate-200/60">
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Registros Encontrados</span>
-                <span className="text-xs font-extrabold text-slate-700">
-                  {
-                    (() => {
-                      const count = auditLogs.filter(log => {
-                        if (!log.timestamp) return true;
-                        const logDate = new Date(log.timestamp);
-                        if (auditFilterStartDate) {
-                          const start = new Date(auditFilterStartDate);
-                          start.setHours(0, 0, 0, 0);
-                          if (logDate < start) return false;
-                        }
-                        if (auditFilterEndDate) {
-                          const end = new Date(auditFilterEndDate);
-                          end.setHours(23, 59, 59, 999);
-                          if (logDate > end) return false;
-                        }
-                        return true;
-                      }).length;
-                      return count === 1 ? "1 registro atende aos filtros" : `${count} registros atendem aos filtros`;
-                    })()
-                  }
-                </span>
-              </div>
-
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuditFilterStartDate("");
-                    setAuditFilterEndDate("");
-                  }}
-                  className="py-1.5 px-3 bg-white border border-slate-200 text-slate-600 rounded-lg text-[10px] font-bold transition hover:bg-slate-50 hover:text-slate-800 cursor-pointer"
-                >
-                  Limpar Filtros
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleExportAuditLogsPDF}
-                className="flex-1 py-2.5 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow shadow-slate-900/10"
-              >
-                <FileText className="w-4 h-4 text-rose-400" />
-                Exportar Relatório PDF
-              </button>
-
-              <button
-                type="button"
-                onClick={handleExportAuditLogsExcel}
-                className="flex-1 py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow shadow-emerald-600/10"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-                Exportar Planilha Excel (.xlsx)
-              </button>
-            </div>
-          </div>
-
-          {/* PIN Reset Confirmation Modal */}
-          {confirmResetEmployeeId && (
-            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full border border-slate-100 shadow-2xl p-6 space-y-4 animate-in zoom-in duration-150">
-                <div className="flex items-center gap-3 text-rose-600">
-                  <div className="bg-rose-50 p-3 rounded-xl">
-                    <Shield className="w-6 h-6 text-rose-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-slate-900 text-base">Confirmar Reset de PIN</h3>
-                    <p className="text-xs text-slate-400">Operação de segurança administrativa</p>
-                  </div>
-                </div>
-
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  Tem certeza que deseja forçar o reset de PIN de acesso para o colaborador{" "}
-                  <strong className="text-slate-900 font-bold">
-                    {employees.find(e => e.id === confirmResetEmployeeId)?.name}
-                  </strong>
-                  ?
-                </p>
-
-                <div className="p-3.5 bg-rose-50/50 border border-rose-100 rounded-xl text-[11px] text-rose-800 leading-normal space-y-1">
-                  <p className="font-bold flex items-center gap-1">
-                    <span>⚠️ O que acontece a seguir?</span>
-                  </p>
-                  <ul className="list-disc list-inside space-y-1 opacity-90 pl-1 font-medium">
-                    <li>Um novo PIN temporário aleatório de 6 dígitos será gerado e enviado automaticamente por e-mail para o colaborador.</li>
-                    <li>No próximo login, o colaborador será obrigado por lei de rotação a criar uma nova senha pessoal forte de no mínimo 6 dígitos.</li>
-                    <li>Um registo de auditoria de segurança (Audit Log) será criado.</li>
-                  </ul>
-                </div>
-
-                <div className="flex gap-3 justify-end pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setConfirmResetEmployeeId(null)}
-                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isResettingPin}
-                    onClick={async () => {
-                      setIsResettingPin(true);
-                      try {
-                        if (onResetEmployeePin) {
-                          await onResetEmployeePin(confirmResetEmployeeId);
-                        }
-                      } catch (err) {
-                        console.error(err);
-                      } finally {
-                        setIsResettingPin(false);
-                        setConfirmResetEmployeeId(null);
-                      }
-                    }}
-                    className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-md shadow-rose-600/10 flex items-center gap-1"
-                  >
-                    {isResettingPin ? "A processar..." : "Sim, Confirmar Reset"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
-      {/* CONSOLIDATED SUBMODULE: STAFF EMPLOYEES & AUDIT */}
+      {/* SUB-TAB 2: STAFF / COLABORADORES */}
       {activeSubTab === "staff" && (
         <div className="animate-in fade-in-50 duration-150">
-          {!canAccessModule("staff", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-            <PlanLockScreen
-              moduleName="Equipa & Auditoria"
-              requiredPlan="PRATA"
-              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-              description="A gestão avançada de utilizadores e auditoria D3 está disponível nos Planos Prata e Ouro."
-              onUpgradeClick={() => setActiveSubTab("plans")}
-            />
-          ) : (
-            <StaffModule
-              employees={employees}
-              auditLogs={auditLogs}
-              onAddEmployee={onAddEmployee}
-              onUpdateEmployees={onUpdateEmployees}
-              activeUsername={activeUser?.name || "Administrador"}
-              onAddAuditLog={onAddAuditLog}
-              currentRole={currentRole}
-              currency={_currency}
-              settings={settings}
-            />
-          )}
-        </div>
-      )}
-
-      {/* CONSOLIDATED SUBMODULE: MOBILE MONEY GATEWAY */}
-      {activeSubTab === "gateway" && (
-        <div className="animate-in fade-in-50 duration-150">
-          {!canAccessModule("gateway", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-            <PlanLockScreen
-              moduleName="Integração Mobile Money"
-              requiredPlan="PRATA"
-              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-              description="O recebimento automático via M-Pesa e e-Mola (Paga Fácil) está disponível a partir do Plano Prata."
-              onUpgradeClick={() => setActiveSubTab("plans")}
-            />
-          ) : (
-            <GatewayModule
-              settings={settings}
-              onUpdateSettings={onUpdateSettings}
-              onAddAuditLog={onAddAuditLog}
-              currentRole={currentRole}
-              onShowToast={onShowToast}
-              products={products}
-              customers={customers}
-            />
-          )}
-        </div>
-      )}
-
-      {/* CONSOLIDATED SUBMODULE: AI REVENUE & INSIGHTS */}
-      {activeSubTab === "ai" && (
-        <div className="animate-in fade-in-50 duration-150">
-          {!canAccessModule("ai", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-            <PlanLockScreen
-              moduleName="Previsão AI Premium"
-              requiredPlan="OURO"
-              userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-              description="Modelos preditivos avançados com Inteligência Artificial e o Gerador de Flyers Promocionais são exclusivos do Plano Ouro (VIP)."
-              onUpgradeClick={() => setActiveSubTab("plans")}
-            />
-          ) : (
-            <AiForecastModule
-              products={products}
-              transactions={transactions}
-              settings={settings}
-              theme={theme}
-              currency={_currency}
-              onShowToast={onShowToast}
-              onChangeModule={(mod) => {
-                if (onChangeModule) onChangeModule(mod);
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      {/* CONSOLIDATED SUBMODULE: TRAINING CENTER */}
-      {activeSubTab === "training" && (
-        <div className="animate-in fade-in-50 duration-150">
-          <TrainingModule
-            videos={masterclassVideos}
-            currency={_currency}
+          <StaffModule
+            employees={employees}
+            auditLogs={auditLogs}
+            onAddEmployee={onAddEmployee}
+            onUpdateEmployees={onUpdateEmployees}
+            activeUsername={activeUser?.name || "Administrador"}
+            onAddAuditLog={onAddAuditLog}
+            currentRole={currentRole}
+            currency={currencyCode}
+            settings={settings}
           />
         </div>
       )}
 
-      {/* CONSOLIDATED SUBMODULE: PLANS & SUBSCRIPTIONS */}
+      {/* SUB-TAB 3: GATEWAYS DE PAGAMENTO */}
+      {activeSubTab === "gateway" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <GatewayModule
+            settings={settings}
+            onUpdateSettings={onUpdateSettings}
+            onAddAuditLog={onAddAuditLog}
+            currentRole={currentRole}
+            onShowToast={onShowToast}
+            products={products}
+            customers={customers}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 4: ALERTAS & NOTIFICAÇÕES */}
+      {activeSubTab === "notificacoes" && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
+          <div className="flex items-center gap-2.5 text-blue-600 border-b pb-3 border-slate-100">
+            <MessageSquare className="w-5 h-5" />
+            <div>
+              <h2 className="font-bold text-slate-850 text-sm">Alertas de Estoque & Notificações de Vendas</h2>
+              <p className="text-[11px] text-slate-400">Configure os avisos de ruptura de produtos e destinatários de relatórios diários de caixa.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSaveNotificationSettings} className="space-y-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
+              {/* WhatsApp do Gerente */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-bold text-slate-700">WhatsApp do Gerente para Alertas</label>
+                <input
+                  type="text"
+                  value={managerWhatsappPhone}
+                  onChange={(e) => setManagerWhatsappPhone(e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="+258 84 000 0000"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-medium"
+                />
+                <p className="text-[10px] text-slate-400">Número para receber alertas quando um produto atingir o estoque mínimo.</p>
+              </div>
+
+              {/* Email para Relatório Diário */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-bold text-slate-700">Email para Relatório de Fecho</label>
+                <input
+                  type="email"
+                  value={alertsRecipientEmail}
+                  onChange={(e) => setAlertsRecipientEmail(e.target.value)}
+                  disabled={!canEdit}
+                  placeholder="gerencia@empresa.co.mz"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-medium"
+                />
+                <p className="text-[10px] text-slate-400">Recebe o resumo de faturação e vendas no fecho de turno ou fim do dia.</p>
+              </div>
+
+              {/* Limiar de Estoque Crítico */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-bold text-slate-700">Limite de Estoque Mínimo Geral</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={smsStockThreshold}
+                  onChange={(e) => setSmsStockThreshold(Number(e.target.value))}
+                  disabled={!canEdit}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-bold"
+                />
+                <p className="text-[10px] text-slate-400">Dispara alerta quando qualquer produto atingir ou ficar abaixo desta quantidade.</p>
+              </div>
+
+              {/* Horário de Envio do Relatório */}
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <label className="block font-bold text-slate-700">Horário do Resumo Automático</label>
+                <div className="flex gap-2">
+                  <input
+                    type="time"
+                    value={reportHour}
+                    onChange={(e) => setReportHour(e.target.value)}
+                    disabled={!canEdit}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-bold"
+                  />
+                  <select
+                    value={reportFrequency}
+                    onChange={(e) => setReportFrequency(e.target.value as any)}
+                    disabled={!canEdit}
+                    className="px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
+                  >
+                    <option value="daily">Diário</option>
+                    <option value="weekly">Semanal</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {canEdit && (
+              <div className="flex justify-end pt-2">
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer transition"
+                >
+                  <Check className="w-4 h-4" />
+                  Guardar Preferências de Alertas
+                </button>
+              </div>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* SUB-TAB 5: CÓPIAS DE SEGURANÇA & DADOS */}
+      {activeSubTab === "backup" && (
+        <div className="space-y-6 animate-in fade-in-50 duration-150">
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+            <div className="flex items-center gap-2.5 text-teal-600 border-b pb-3 border-slate-100">
+              <Database className="w-5 h-5" />
+              <div>
+                <h2 className="font-bold text-slate-850 text-sm">Gestão de Dados & Cópias de Segurança (Backup)</h2>
+                <p className="text-[11px] text-slate-400">Exporte, restaure e mantenha os dados da sua loja em total segurança.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Descarregar Cópia de Segurança */}
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-teal-700 font-bold text-sm">
+                    <Download className="w-4 h-4" />
+                    <h3>Exportar Backup Local (JSON)</h3>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Descarregue todos os produtos ({products.length}), clientes ({customers.length}), vendas ({transactions.length}) e definições para o seu computador.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onExportLocalDB) {
+                      onExportLocalDB();
+                    } else {
+                      const payload = onGetBackupPayload ? onGetBackupPayload() : { products, customers, transactions, settings };
+                      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `backup_erp_${new Date().toISOString().split("T")[0]}.json`;
+                      a.click();
+                    }
+                    if (onShowToast) onShowToast("Backup exportado com sucesso!", "success");
+                  }}
+                  className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  Descarregar Ficheiro de Backup
+                </button>
+              </div>
+
+              {/* Restaurar Cópia de Segurança */}
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-blue-700 font-bold text-sm">
+                    <Upload className="w-4 h-4" />
+                    <h3>Restaurar Backup (JSON)</h3>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Carregue um ficheiro de backup previamente exportado para recuperar dados de vendas e catálogo de produtos.
+                  </p>
+                </div>
+
+                <label className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer">
+                  <Upload className="w-4 h-4" />
+                  {isImporting ? "A Restaurar..." : "Selecionar Ficheiro JSON"}
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={handleFileUploadForImport}
+                    disabled={isImporting || !canEdit}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              {/* Sincronização em Nuvem Supabase */}
+              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                    <Cloud className="w-4 h-4" />
+                    <h3>Sincronização em Nuvem</h3>
+                  </div>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Força a sincronização imediata de todos os registos pendentes com a base de dados relacional central.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleForceCloudSync}
+                  disabled={isSyncingCloud}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? "animate-spin" : ""}`} />
+                  {isSyncingCloud ? "A Sincronizar..." : "Forçar Sincronização Agora"}
+                </button>
+              </div>
+
+              {/* Limpeza de Dados de Demonstração (Purge) */}
+              <div className="p-5 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col justify-between space-y-4">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
+                    <Trash2 className="w-4 h-4" />
+                    <h3>Limpar Dados de Demonstração</h3>
+                  </div>
+                  <p className="text-xs text-rose-600/90 leading-relaxed">
+                    Remove produtos e vendas fictícias de teste para deixar o seu ponto de venda 100% pronto para uso comercial.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleExecutePurge}
+                  disabled={isPurgingData || !canEdit}
+                  className="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  {isPurgingData ? "A Limpar..." : "Remover Dados de Teste"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 6: FILIAIS & LOJAS */}
+      {activeSubTab === "filiais" && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-3 border-slate-100">
+            <div className="flex items-center gap-2.5 text-amber-600">
+              <MapPin className="w-5 h-5" />
+              <div>
+                <h2 className="font-bold text-slate-850 text-sm">Lojas & Filiais da Empresa</h2>
+                <p className="text-[11px] text-slate-400">Faça a gestão dos seus pontos de venda físicos e localizações de stock.</p>
+              </div>
+            </div>
+
+            {canEdit && !isAddingBranch && (
+              <button
+                type="button"
+                onClick={() => setIsAddingBranch(true)}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Nova Filial
+              </button>
+            )}
+          </div>
+
+          {/* Form to Add Branch */}
+          {isAddingBranch && (
+            <form onSubmit={handleAddBranch} className="p-4 bg-amber-50/40 rounded-xl border border-amber-200 space-y-4">
+              <h3 className="font-bold text-xs text-amber-800">Cadastrar Nova Filial</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Nome da Filial *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    placeholder="Ex: Filial Matola"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Endereço</label>
+                  <input
+                    type="text"
+                    value={newBranchAddress}
+                    onChange={(e) => setNewBranchAddress(e.target.value)}
+                    placeholder="Ex: Av. da Matola, nº 45"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Contacto</label>
+                  <input
+                    type="text"
+                    value={newBranchContact}
+                    onChange={(e) => setNewBranchContact(e.target.value)}
+                    placeholder="Ex: +258 84 999 8888"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingBranch(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition"
+                >
+                  Salvar Filial
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* List of Branches */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Sede / Loja Principal */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2 relative">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                  Sede Principal
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              </div>
+              <h3 className="font-bold text-sm text-slate-800">{companyName || "Loja Principal"}</h3>
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate">{storeAddress || "Endereço Principal"}</span>
+              </p>
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{storeContact || "Sem contacto"}</span>
+              </p>
+            </div>
+
+            {/* Custom Branches */}
+            {branches.map((b) => (
+              <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 relative group hover:border-amber-300 transition">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                    Filial
+                  </span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBranch(b.id, b.name)}
+                      className="text-slate-400 hover:text-rose-500 p-1 transition"
+                      title="Remover Filial"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <h3 className="font-bold text-sm text-slate-800">{b.name}</h3>
+                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">{b.address || "Sem endereço"}</span>
+                </p>
+                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{b.contact || "Sem contacto"}</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 7: PREVISÃO COMERCIAL (IA) */}
+      {activeSubTab === "ai" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <AiForecastModule
+            products={products}
+            transactions={transactions}
+            settings={settings}
+            theme={theme}
+            currency={currencyCode}
+            onShowToast={onShowToast || (() => {})}
+            onChangeModule={onChangeModule || (() => {})}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 8: FORMAÇÃO */}
+      {activeSubTab === "training" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <TrainingModule
+            videos={masterclassVideos}
+            currency={currencyCode}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 9: PLANOS & SUBSGRIÇÃO */}
       {activeSubTab === "plans" && (
         <div className="animate-in fade-in-50 duration-150">
           <SubscriptionPlansModule
@@ -9327,20 +1187,13 @@ CREATE TABLE IF NOT EXISTS caixa (
             activeUser={activeUser}
             employees={employees}
             settings={settings}
-            onUpdateUserPlan={onUpdateUserPlan}
-            onUpdateSystemPlan={onUpdateSystemPlan}
+            onUpdateUserPlan={onUpdateUserPlan || (() => {})}
+            onUpdateSystemPlan={onUpdateSystemPlan || (() => {})}
             onShowToast={onShowToast}
-            onNavigateToModule={(mod) => {
-              if (mod.toLowerCase() === "gateway" || mod.toLowerCase() === "ai" || mod.toLowerCase() === "training" || mod.toLowerCase() === "staff") {
-                setActiveSubTab(mod.toLowerCase() as any);
-              } else if (onChangeModule) {
-                onChangeModule(mod);
-              }
-            }}
+            onNavigateToModule={onChangeModule}
           />
         </div>
       )}
-
     </div>
   );
 }

@@ -4,11 +4,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as d3 from "d3";
 import { 
-  initialProducts, 
-  initialCustomers, 
-  initialCashFlow, 
   initialEmployees, 
-  initialAuditLogs, 
   defaultSettings, 
   masterclassVideos 
 } from "./data/mockData";
@@ -34,9 +30,7 @@ import StockModule from "./components/StockModule";
 import CustomersModule from "./components/CustomersModule";
 import StaffModule from "./components/StaffModule";
 import ReportsModule from "./components/ReportsModule";
-import TrainingModule from "./components/TrainingModule";
 import SettingsModule from "./components/SettingsModule";
-import GatewayModule from "./components/GatewayModule";
 import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
 import PlanLockScreen from "./components/PlanLockScreen";
 import { canAccessModule } from "./lib/planPermissions";
@@ -52,37 +46,12 @@ import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
 import { 
-  testConnection, 
-  auth, 
-  db, 
-  logout,
-  checkAndNotifyQuota,
-  getUsuariosFromFirestore, 
-  mapUsuarioToEmployee,
-  getProdutosFromFirestore,
-  addProdutoToFirestore,
-  addProdutosToFirestoreBatch,
-  getCustomersFromFirestore,
-  addCustomersToFirestoreBatch,
-  getCashflowFromFirestore,
-  addCashflowToFirestoreBatch,
-  getSettingsFromFirestore,
-  saveSettingsToFirestore,
-  updateProdutoInFirestore,
-  deleteProdutoFromFirestore,
-  deleteProductFromCloudSQL,
-  deleteCustomerFromCloudSQL,
-  getTransacoesFromFirestore,
-  addTransacaoToFirestore,
-  addTransacoesToFirestoreBatch,
-  subscribeToProdutos,
-  isCircuitBroken,
-  getPartitionPath,
-  onAuthStateChanged,
-  doc,
-  getDoc,
-  setDoc
-} from "./lib/firebase";
+  CommercialDataService, 
+  OfflineQueueService, 
+  ConnectionService, 
+  AuthService, 
+  sanitizeServiceError 
+} from "./services/dataService";
 import { getSupabaseClient } from "./lib/supabase";
 import { SupabaseSyncService } from "./services/supabaseService";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
@@ -2284,20 +2253,22 @@ export default function App() {
     setLastSyncTime(new Date().toLocaleTimeString());
     await incrementVersionCounter();
     try {
-      if (!navigator.onLine || isCircuitBroken()) {
-        throw new Error("browser is offline or Firestore quota exceeded");
+      if (!navigator.onLine) {
+        throw new Error("O navegador está offline");
       }
       
       if (tableName === "products") {
-        await addProdutosToFirestoreBatch(updatedData);
+        await CommercialDataService.saveProductsBatch(updatedData);
       } else if (tableName === "transactions") {
-        await addTransacoesToFirestoreBatch(updatedData);
+        await CommercialDataService.saveTransactionsBatch(updatedData);
       } else if (tableName === "customers") {
-        await addCustomersToFirestoreBatch(updatedData);
+        await CommercialDataService.saveCustomersBatch(updatedData);
       } else if (tableName === "cashflow") {
-        await addCashflowToFirestoreBatch(updatedData);
+        await CommercialDataService.saveCashFlowBatch(updatedData);
       } else if (tableName === "settings") {
-        await saveSettingsToFirestore(updatedData);
+        await CommercialDataService.saveSettings(updatedData);
+      } else if (tableName === "employees") {
+        await CommercialDataService.saveEmployeesBatch(updatedData);
       }
 
       // Also send mutation to server endpoint if available
@@ -2354,7 +2325,7 @@ export default function App() {
 
   const processSyncQueue = async () => {
     if (isSyncProcessingRef.current) return;
-    if (!navigator.onLine || isCircuitBroken()) return;
+    if (!navigator.onLine) return;
     
     isSyncProcessingRef.current = true;
     try {
@@ -2373,7 +2344,7 @@ export default function App() {
         
         if (tableName === "products") {
           try {
-            await addProdutosToFirestoreBatch(data);
+            await CommercialDataService.saveProductsBatch(data);
             success = true;
             try {
               await fetch("/api/db/save", {
@@ -2385,11 +2356,11 @@ export default function App() {
               console.warn("[SYNC QUEUE] Erro ao atualizar produtos no servidor:", err);
             }
           } catch (fsErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos com Firestore:", fsErr);
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos:", fsErr);
           }
         } else if (tableName === "transactions") {
           try {
-            await addTransacoesToFirestoreBatch(data);
+            await CommercialDataService.saveTransactionsBatch(data);
             success = true;
             try {
               await fetch("/api/db/save", {
@@ -2401,7 +2372,39 @@ export default function App() {
               console.warn("[SYNC QUEUE] Erro ao atualizar transações no servidor:", err);
             }
           } catch (fsErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar transações com Firestore:", fsErr);
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar transações:", fsErr);
+          }
+        } else if (tableName === "customers") {
+          try {
+            await CommercialDataService.saveCustomersBatch(data);
+            success = true;
+            try {
+              await fetch("/api/db/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ table: "customers", data })
+              });
+            } catch (err) {
+              console.warn("[SYNC QUEUE] Erro ao atualizar clientes no servidor:", err);
+            }
+          } catch (cErr) {
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar clientes:", cErr);
+          }
+        } else if (tableName === "cashflow") {
+          try {
+            await CommercialDataService.saveCashFlowBatch(data);
+            success = true;
+            try {
+              await fetch("/api/db/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ table: "cashflow", data })
+              });
+            } catch (err) {
+              console.warn("[SYNC QUEUE] Erro ao atualizar caixa no servidor:", err);
+            }
+          } catch (cfErr) {
+            console.warn("[SYNC QUEUE] Erro ao ressincronizar caixa:", cfErr);
           }
         } else {
           try {
@@ -2517,8 +2520,8 @@ export default function App() {
   useEffect(() => {
     const syncPendingTransactions = async () => {
       if (isSyncProcessingRef.current) return;
-      if (!navigator.onLine || isCircuitBroken()) {
-        console.log("[SYNC 5MIN] Sistema offline ou cota excedida. Sincronização periódica suspensa.");
+      if (!navigator.onLine) {
+        console.log("[SYNC 5MIN] Sistema offline. Sincronização periódica suspensa.");
         return;
       }
 
@@ -2534,8 +2537,8 @@ export default function App() {
           console.log(`[SYNC 5MIN] Sincronização periódica iniciada: ${pendingTxs.length} transações pendentes encontradas.`);
           
           try {
-            // Envia transações pendentes para o Firestore em lote
-            await addTransacoesToFirestoreBatch(pendingTxs);
+            // Envia transações pendentes para a base de dados em lote
+            await CommercialDataService.saveTransactionsBatch(pendingTxs);
 
             // Sucesso! Remove a chave transactions da fila offline
             delete queue["transactions"];
@@ -2550,10 +2553,10 @@ export default function App() {
             handleAddAuditLog(
               "Sincronização Periódica",
               "Vendas",
-              `Sincronização automática de 5 minutos reenviou ${pendingTxs.length} transações pendentes ao Firestore com sucesso.`
+              `Sincronização automática de 5 minutos reenviou ${pendingTxs.length} transações pendentes com sucesso.`
             );
           } catch (fsErr: any) {
-            console.error("[SYNC 5MIN] Erro ao reenviar transações pendentes ao Firestore:", fsErr);
+            console.error("[SYNC 5MIN] Erro ao reenviar transações pendentes:", fsErr);
             handleAddAuditLog(
               "Falha de Sincronização",
               "Vendas",
@@ -2625,7 +2628,7 @@ export default function App() {
   // Hydrate states from existential server database on mount
   useEffect(() => {
     // Run the connection test via abstract service
-    testConnection();
+    ConnectionService.test();
 
     const fetchExistentialDb = async () => {
       let loadedData = false;
@@ -2670,35 +2673,36 @@ export default function App() {
       }
 
       if (!loadedData) {
-        // Direct Client-Side Service Fetching
+        // Direct Client-Side Supabase Service Fetching
         try {
-          const [fsProducts, fsCustomers, fsTransactions, fsCashflow, fsEmployees, fsSettings] = await Promise.all([
-            getProdutosFromFirestore().catch(() => []),
-            getCustomersFromFirestore().catch(() => []),
-            getTransacoesFromFirestore().catch(() => []),
-            getCashflowFromFirestore().catch(() => []),
-            getUsuariosFromFirestore().catch(() => []),
-            getSettingsFromFirestore().catch(() => null)
+          const [sbProducts, sbCustomers, sbTransactions, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
+            CommercialDataService.fetchProducts().catch(() => []),
+            CommercialDataService.fetchCustomers().catch(() => []),
+            CommercialDataService.fetchTransactions().catch(() => []),
+            CommercialDataService.fetchCashFlow().catch(() => []),
+            CommercialDataService.fetchEmployees().catch(() => []),
+            CommercialDataService.fetchSettings().catch(() => null),
+            CommercialDataService.fetchAuditLogs().catch(() => [])
           ]);
 
-          setProducts(fsProducts || []);
-          setCustomers(fsCustomers || []);
-          setTransactions(fsTransactions || []);
-          setCashFlow(fsCashflow || []);
+          setProducts(sbProducts || []);
+          setCustomers(sbCustomers || []);
+          setTransactions(sbTransactions || []);
+          setCashFlow(sbCashflow || []);
 
-          if (fsEmployees && fsEmployees.length > 0) {
-            setEmployees(fsEmployees);
-            setActiveUser(fsEmployees[0]);
+          if (sbEmployees && sbEmployees.length > 0) {
+            setEmployees(sbEmployees);
+            setActiveUser(sbEmployees[0]);
           } else {
             setEmployees(initialEmployees);
             setActiveUser(initialEmployees[0]);
           }
 
-          if (fsSettings) setSettings(fsSettings);
+          if (sbSettings) setSettings(sbSettings);
           else setSettings(defaultSettings);
 
-          setAuditLogs([]);
-        } catch (fsErr) {
+          setAuditLogs(sbAuditLogs || []);
+        } catch (sbErr) {
           setProducts([]);
           setCustomers([]);
           setTransactions([]);
@@ -2753,7 +2757,8 @@ export default function App() {
             companyName: companyName
           }));
         }
-        localStorage.setItem("erp_simulated_logged_in_user", JSON.stringify(employee));
+        localStorage.setItem("erp_logged_in_user", JSON.stringify(employee));
+        localStorage.removeItem("erp_simulated_logged_in_user");
         console.log(`[SUPABASE AUTH] Sessão ativa para: ${employee.name} (${employee.role}) - Empresa: ${companyName}`);
       } catch (err) {
         console.error("[SUPABASE AUTH] Erro ao sincronizar perfil:", err);
@@ -2766,10 +2771,10 @@ export default function App() {
         if (session?.user) {
           handleAuthSync(session.user);
         } else {
-          const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
-          if (storedSimulated) {
+          const storedUser = localStorage.getItem("erp_logged_in_user") || localStorage.getItem("erp_simulated_logged_in_user");
+          if (storedUser) {
             try {
-              const parsed = JSON.parse(storedSimulated);
+              const parsed = JSON.parse(storedUser);
               setActiveUser(parsed);
               setIsAuthenticated(true);
             } catch (e) {
@@ -2785,6 +2790,7 @@ export default function App() {
         } else if (event === "SIGNED_OUT") {
           setIsAuthenticated(false);
           setActiveUser(null);
+          localStorage.removeItem("erp_logged_in_user");
           localStorage.removeItem("erp_simulated_logged_in_user");
         }
       });
@@ -2793,10 +2799,10 @@ export default function App() {
         authListener?.subscription?.unsubscribe();
       };
     } else {
-      const storedSimulated = localStorage.getItem("erp_simulated_logged_in_user");
-      if (storedSimulated) {
+      const storedUser = localStorage.getItem("erp_logged_in_user") || localStorage.getItem("erp_simulated_logged_in_user");
+      if (storedUser) {
         try {
-          const parsed = JSON.parse(storedSimulated);
+          const parsed = JSON.parse(storedUser);
           setActiveUser(parsed);
           setIsAuthenticated(true);
         } catch {}
@@ -2807,60 +2813,60 @@ export default function App() {
   // Real-time products subscription and initial sync
   useEffect(() => {
     if (isAuthenticated) {
-      console.log("[FIRESTORE] Ativando subscrição em tempo real para produtos...");
+      console.log("[SUPABASE] Ativando subscrição em tempo real para produtos...");
       
-      const unsubscribe = subscribeToProdutos(
-        async (firestoreProducts) => {
-          setIsOnline(true);
-          if (firestoreProducts && firestoreProducts.length > 0) {
-            console.log(`[FIRESTORE] Recebidos ${firestoreProducts.length} produtos em tempo real.`);
-            setProducts(firestoreProducts);
-          } else {
-            console.log("[FIRESTORE] Coleção de produtos vazia ou offline.");
-            setProducts(prev => prev || []);
+      const unsubscribe = CommercialDataService.subscribeProducts(async () => {
+        setIsOnline(true);
+        try {
+          const sbProducts = await CommercialDataService.fetchProducts();
+          if (sbProducts && sbProducts.length > 0) {
+            console.log(`[SUPABASE] Recebidos ${sbProducts.length} produtos em tempo real.`);
+            setProducts(sbProducts);
           }
-        },
-        (error) => {
-          console.error("[FIRESTORE] Erro no listener em tempo real de produtos:", error);
-          setIsOnline(false);
+        } catch (error) {
+          console.error("[SUPABASE] Erro no listener em tempo real de produtos:", error);
         }
-      );
+      });
 
       const loadTransactions = async () => {
         try {
-          const firestoreTx = await getTransacoesFromFirestore();
-          if (firestoreTx && firestoreTx.length > 0) {
-            console.log(`[FIRESTORE] Carregadas ${firestoreTx.length} transações.`);
-            setTransactions(firestoreTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+          const sbTx = await CommercialDataService.fetchTransactions();
+          if (sbTx && sbTx.length > 0) {
+            console.log(`[SUPABASE] Carregadas ${sbTx.length} transações.`);
+            setTransactions(sbTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
           } else {
-            console.log("[FIRESTORE] Sem transações no Firestore.");
+            console.log("[SUPABASE] Sem transações registradas.");
             setTransactions(prev => prev || []);
           }
         } catch (err) {
-          console.error("[FIRESTORE] Erro ao carregar transações do Firestore:", err);
+          console.error("[SUPABASE] Erro ao carregar transações:", err);
         }
       };
 
       loadTransactions();
 
       return () => {
-        console.log("[FIRESTORE] Desativando subscrição em tempo real para produtos.");
-        unsubscribe();
+        console.log("[SUPABASE] Desativando subscrição em tempo real para produtos.");
+        if (unsubscribe && typeof (unsubscribe as any).unsubscribe === "function") {
+          (unsubscribe as any).unsubscribe();
+        } else if (typeof unsubscribe === "function") {
+          (unsubscribe as any)();
+        }
       };
     }
   }, [isAuthenticated]);
 
-  // Synchronize Firestore user database with local staff module list
+  // Synchronize user database with local staff module list
   useEffect(() => {
     if (isAuthenticated) {
       const syncStaff = async () => {
         try {
-          const firestoreUsers = await getUsuariosFromFirestore();
-          if (firestoreUsers && firestoreUsers.length > 0) {
-            // Merge firestore users with mock users by ID, prioritizing Firestore profiles
+          const sbUsers = await CommercialDataService.fetchEmployees();
+          if (sbUsers && sbUsers.length > 0) {
+            // Merge users prioritizing database profiles
             setEmployees(prev => {
               const merged = [...prev];
-              firestoreUsers.forEach(fUser => {
+              sbUsers.forEach(fUser => {
                 const idx = merged.findIndex(m => m.id === fUser.id);
                 if (idx > -1) {
                   merged[idx] = fUser;
@@ -2872,7 +2878,7 @@ export default function App() {
             });
           }
         } catch (err) {
-          console.error("Erro ao sincronizar quadro de funcionários do Firestore:", err);
+          console.error("Erro ao sincronizar quadro de colaboradores:", err);
         }
       };
       syncStaff();
@@ -3227,21 +3233,13 @@ export default function App() {
     });
   };
   const handleDeleteProduct = async (productId: string) => {
-    // 1. Permanently delete from client-side partitioned Firestore
     try {
-      await deleteProdutoFromFirestore(productId);
+      await CommercialDataService.removeProduct(productId);
     } catch (err) {
-      console.warn("Erro ao apagar produto no Firestore do cliente:", err);
+      console.warn("Erro ao apagar produto:", err);
     }
 
-    // 2. Permanently delete from Cloud SQL
-    try {
-      await deleteProductFromCloudSQL(productId);
-    } catch (err) {
-      console.warn("Erro ao apagar produto no Cloud SQL:", err);
-    }
-
-    // 3. Update local state and sync batch
+    // Update local state and sync batch
     setProducts(prev => {
       const updated = prev.filter(p => p.id !== productId);
       syncTable("products", updated);
@@ -3258,14 +3256,13 @@ export default function App() {
     });
   };
   const handleDeleteCustomer = async (customerId: string) => {
-    // 1. Permanently delete from Cloud SQL
     try {
-      await deleteCustomerFromCloudSQL(customerId);
+      await CommercialDataService.removeCustomer(customerId);
     } catch (err) {
-      console.warn("Erro ao apagar cliente no Cloud SQL:", err);
+      console.warn("Erro ao apagar cliente:", err);
     }
 
-    // 2. Update state and sync with server-side API (which cleans up top-level Firestore orphans)
+    // Update state and sync with server
     setCustomers(prev => {
       const updated = prev.filter(c => c.id !== customerId);
       syncTable("customers", updated);
@@ -3995,7 +3992,8 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       return;
     }
 
-    localStorage.setItem("erp_simulated_logged_in_user", JSON.stringify(user));
+    localStorage.setItem("erp_logged_in_user", JSON.stringify(user));
+    localStorage.removeItem("erp_simulated_logged_in_user");
     setActiveUser(user);
     setIsAuthenticated(true);
     setSettings(prev => ({
@@ -4183,6 +4181,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         );
       }
       await SupabaseSyncService.signOut();
+      localStorage.removeItem("erp_logged_in_user");
       localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
@@ -4198,6 +4197,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     } catch (err: any) {
       console.error("Erro ao efetuar logout:", err);
       await SupabaseSyncService.signOut();
+      localStorage.removeItem("erp_logged_in_user");
       localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
