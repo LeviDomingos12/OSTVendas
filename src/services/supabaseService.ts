@@ -448,29 +448,55 @@ export const SupabaseSyncService = {
     const meta = user.user_metadata || {};
     const fullName = meta.full_name || meta.name || email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase());
     const avatarUrl = meta.avatar_url || meta.picture || "";
-    const phone = meta.phone || meta.contact || "+244 923 000 000";
+    const phone = meta.phone || meta.contact || "+258 84 000 0000";
     const defaultCompanyName = meta.company_name || meta.branch || `${fullName} - Vendas`;
-    const role: UserRole = "ADMIN";
-
+    
+    let role: UserRole = "ADMIN";
     let companyId = "comp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
     let companyName = defaultCompanyName;
+    let status: "ACTIVE" | "INACTIVE" | "BLOCKED" = "ACTIVE";
+    let subscriptionPlan: any = meta.subscription_plan || "OURO";
 
     if (client) {
       try {
-        // 1. Procurar perfil existente na tabela 'profiles'
+        // 1. Verificar se este email já foi pré-cadastrado como colaborador por um Administrador
+        const { data: existingColab } = await client
+          .from("colaboradores")
+          .select("*")
+          .or(`auth_uid.eq.${uid},email.eq.${email}`)
+          .maybeSingle();
+
+        if (existingColab) {
+          if (existingColab.tenant_id) companyId = existingColab.tenant_id;
+          if (existingColab.role) role = existingColab.role as UserRole;
+          if (existingColab.status) status = existingColab.status as any;
+          if (existingColab.branch) companyName = existingColab.branch;
+          if (existingColab.subscription_plan) subscriptionPlan = existingColab.subscription_plan;
+
+          // Vincular auth_uid se ainda não estava vinculado
+          if (!existingColab.auth_uid || existingColab.auth_uid !== uid) {
+            await client
+              .from("colaboradores")
+              .update({ auth_uid: uid, updated_at: new Date().toISOString() })
+              .eq("id", existingColab.id);
+          }
+        }
+
+        // 2. Procurar perfil na tabela 'profiles'
         const { data: profile } = await client
           .from("profiles")
           .select("*, companies(*)")
           .eq("id", uid)
           .maybeSingle();
 
-        if (profile && profile.company_id) {
-          companyId = profile.company_id;
+        if (profile) {
+          if (profile.company_id) companyId = profile.company_id;
+          if (profile.role && !existingColab) role = profile.role as UserRole;
           if (profile.companies && profile.companies.name) {
             companyName = profile.companies.name;
           }
-        } else {
-          // 2. Verificar se já existe empresa criada para este owner_uid
+        } else if (!existingColab) {
+          // 3. Verificar se já existe empresa criada para este owner_uid
           const { data: existingComp } = await client
             .from("companies")
             .select("*")
@@ -481,7 +507,7 @@ export const SupabaseSyncService = {
             companyId = existingComp.id;
             companyName = existingComp.name;
           } else {
-            // Criar empresa inicial isolada para este novo utilizador
+            // Criar nova empresa para este novo administrador
             const { data: newComp } = await client
               .from("companies")
               .upsert({
@@ -512,33 +538,32 @@ export const SupabaseSyncService = {
             phone: phone,
             updated_at: new Date().toISOString()
           });
+
+          // Inserir na tabela colaboradores como Administrador da Empresa
+          const empId = "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+          await client.from("colaboradores").upsert({
+            id: empId,
+            tenant_id: companyId,
+            auth_uid: uid,
+            name: fullName,
+            email: email,
+            role: role,
+            contact: phone,
+            salary: 0,
+            admission_date: new Date().toISOString().split("T")[0],
+            status: "ACTIVE",
+            branch: companyName,
+            subscription_plan: subscriptionPlan,
+            foto_perfil: avatarUrl,
+            updated_at: new Date().toISOString()
+          }, { onConflict: "id" });
         }
 
-        // 3. Atualizar o tenant_id ativo do Supabase Service para isolamento estrito RLS
+        // 4. Configurar tenant_id do Supabase Service para isolamento estrito
         saveSupabaseConfig({ tenantId: companyId });
 
-        // 4. Sincronizar na tabela 'colaboradores'
-        const empId = "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
-        const empRecord = {
-          id: empId,
-          tenant_id: companyId,
-          auth_uid: uid,
-          name: fullName,
-          email: email,
-          role: role,
-          contact: phone,
-          salary: 50000,
-          admission_date: new Date().toISOString().split("T")[0],
-          status: "ACTIVE",
-          branch: companyName,
-          subscription_plan: "OURO",
-          foto_perfil: avatarUrl,
-          updated_at: new Date().toISOString()
-        };
-        await client.from("colaboradores").upsert(empRecord, { onConflict: "id" });
-
       } catch (dbErr) {
-        console.warn("[Supabase Sync Profile] Aviso ao persistir perfil no banco de dados:", dbErr);
+        console.warn("[Supabase Sync Profile] Falha ao sincronizar perfil:", dbErr);
       }
     }
 
@@ -548,15 +573,15 @@ export const SupabaseSyncService = {
       email: email,
       role: role,
       contact: phone,
-      salary: 50000,
+      salary: 0,
       admissionDate: new Date().toISOString().split("T")[0],
-      status: "ACTIVE",
+      status: status,
       username: email.split("@")[0],
-      pin: "1234",
+      pin: "",
       pinCreatedAt: new Date().toISOString(),
       pinChanged: true,
       companyId: companyName,
-      subscriptionPlan: "OURO",
+      subscriptionPlan: subscriptionPlan,
       fotoPerfil: avatarUrl
     };
 

@@ -67,11 +67,11 @@ export default function LoginModule({
   const [rememberMe, setRememberMe] = useState(true);
 
   // Google Flow Specific State
-  const [googleEmail, setGoogleEmail] = useState("levidomingos12@gmail.com");
-  const [googleName, setGoogleName] = useState("Levi Domingos");
+  const [googleEmail, setGoogleEmail] = useState("");
+  const [googleName, setGoogleName] = useState("");
   const [googleCompany, setGoogleCompany] = useState(companyName || "OST Comércio Geral");
-  const [googlePassword, setGooglePassword] = useState("123456");
-  const [googleContact, setGoogleContact] = useState("+244 923 000 000");
+  const [googlePassword, setGooglePassword] = useState("");
+  const [googleContact, setGoogleContact] = useState("+258 84 000 0000");
 
   // Signup Form State
   const [signupName, setSignupName] = useState("");
@@ -271,33 +271,26 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(20);
       
-      // If password was entered, perform direct email/password or local credential login
+      // Real authentication strictly via Supabase Auth
       if (password) {
         setLoadingState("CONNECTING");
         setLoadingProgress(45);
-        
-        // 1. Check local registered employees
-        const localEmp = employees.find(e => e.email?.toLowerCase().trim() === inputEmail.toLowerCase().trim());
-        if (localEmp && (localEmp.pin === password || password.length >= 4 || inputEmail.toLowerCase() === "levidomingos12@gmail.com")) {
-          const branchToUse = localEmp.companyId || selectedBranch || companyName || "OST Comércio Geral";
-          setAuthenticatedUser(localEmp);
-          setSelectedBranch(branchToUse);
-          setLoadingState("LOADING_PERMISSIONS");
-          setLoadingProgress(90);
 
-          setTimeout(() => {
-            setLoadingProgress(100);
-            setLoadingState("IDLE");
-            onShowToast(`Autenticado com sucesso! Bem-vindo(a), ${localEmp.name}.`, "success");
-            onLoginSuccess(localEmp, branchToUse);
-          }, 600);
-          return;
-        }
-
-        // 2. Try Supabase Auth
         const result: any = await signInWithEmail(inputEmail, password);
         if (result && result.user) {
           const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(result.user);
+
+          if (employee.status === "BLOCKED") {
+            setLoadingState("IDLE");
+            setErrorMessage("A sua conta está BLOQUEADA por tempo expirado ou suspensão de segurança.");
+            return;
+          }
+          if (employee.status === "INACTIVE" || employee.status === "SUSPENDED") {
+            setLoadingState("IDLE");
+            setErrorMessage("Esta conta está inativa ou suspensa. Contacte o Administrador da sua empresa.");
+            return;
+          }
+
           const branchToUse = userCompany || employee.companyId || selectedBranch || companyName || "OST Comércio Geral";
           setAuthenticatedUser(employee);
           setSelectedBranch(branchToUse);
@@ -309,28 +302,30 @@ export default function LoginModule({
             setLoadingState("IDLE");
             onShowToast(`Autenticado com sucesso! Bem-vindo(a), ${employee.name}.`, "success");
             onLoginSuccess(employee, branchToUse);
-          }, 600);
+          }, 400);
           return;
         }
 
         setLoadingState("IDLE");
         setLoadingProgress(0);
-        setErrorMessage("⚠️ E-mail ou palavra-passe incorretos. Verifique os dados ou utilize o botão 'Entrar com Conta Google'.");
+        setErrorMessage("E-mail ou palavra-passe incorretos. Verifique os seus dados de acesso.");
         return;
       }
 
-      // If no password, prompt to enter password or click Google button
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage("Por favor, introduza a palavra-passe ou clique em 'Entrar com Conta Google' para login instantâneo.");
+      setErrorMessage("Por favor, introduza a palavra-passe para aceder.");
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage(`❌ Falha no Acesso: ${err.message || "Credenciais não reconhecidas."}`);
+      const msg = err.message?.includes("Invalid login credentials")
+        ? "E-mail ou palavra-passe incorretos."
+        : `Falha na autenticação: ${err.message || "Erro de conexão ao servidor."}`;
+      setErrorMessage(msg);
     }
   };
 
-  // 2. Real Firebase Auth - Sign-up Handler
+  // 2. Real Auth - Sign-up Handler
   const handleRealSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -353,15 +348,6 @@ export default function LoginModule({
       return;
     }
 
-    // Check if email is already registered in the system
-    const existingEmp = employees.find(emp => emp.email?.toLowerCase().trim() === emailToRegister);
-    if (existingEmp) {
-      setErrorMessage(`⚠️ O e-mail "${emailToRegister}" já está associado a uma conta existente no sistema. Por favor, inicie sessão.`);
-      onShowToast("Este e-mail já está cadastrado. Faça login para aceder.", "warning");
-      setEmail(emailToRegister);
-      return;
-    }
-
     try {
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(30);
@@ -377,51 +363,36 @@ export default function LoginModule({
         signupPlan
       );
 
-      // Trigger dual-email notification system using sendEmail with WelcomeAdminTemplate
-      const adminSubject = `Credenciais do Novo Administrador - OST Vendas ERP (${signupName.trim()})`;
+      // Enviar credenciais de boas-vindas para o novo Administrador
+      const adminSubject = `Credenciais do Novo Administrador - OST Vendas (${signupName.trim()})`;
       const adminEmailBody = renderWelcomeAdminHtml({
         adminName: signupName.trim(),
         adminEmail: emailToRegister,
         password: signupPassword,
         role: "Administrador do Sistema",
         branchName: targetBranch,
-        adminCopyEmail: "levidomingos12@gmail.com"
+        adminCopyEmail: settings?.reportRecipientEmail || ""
       });
 
-      // 1. Send primary copy to the new admin user
       sendEmail({
         to: emailToRegister,
         subject: adminSubject,
         body: adminEmailBody,
         isHtml: true
-      }).catch(err => console.error("Erro ao enviar email para o novo admin via sendEmail:", err));
+      }).catch(err => console.warn("Aviso ao enviar email para novo admin:", err));
 
-      // 2. Send carbon copy (CC) to levidomingos12@gmail.com if different
-      if (emailToRegister !== "levidomingos12@gmail.com") {
+      if (settings?.reportRecipientEmail && settings.reportRecipientEmail !== emailToRegister) {
         sendEmail({
-          to: "levidomingos12@gmail.com",
-          subject: `[CÓPIA CC - AUDITORIA] ${adminSubject}`,
+          to: settings.reportRecipientEmail,
+          subject: `[AUDITORIA] ${adminSubject}`,
           body: adminEmailBody,
           isHtml: true
-        }).catch(err => console.error("Erro ao enviar cópia de email para levidomingos12@gmail.com via sendEmail:", err));
+        }).catch(() => {});
       }
 
-      // Also dispatch via server credentials route as additional backup
-      fetch("/api/email/dispatch-credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipient: emailToRegister,
-          employeeName: signupName.trim(),
-          username: emailToRegister,
-          tempPin: signupPassword,
-          role: "Administrador (Novo Registo)"
-        })
-      }).catch(err => console.error("Erro ao despachar credenciais via API:", err));
-
       setLoadingState("IDLE");
-      onShowToast("Conta criada e sincronizada com sucesso!", "success");
-      setSuccessMessage("Conta criada com sucesso! Faça login para aceder ao sistema.");
+      onShowToast("Conta de Administrador criada com sucesso!", "success");
+      setSuccessMessage("Conta criada com sucesso! Inicie sessão com o seu e-mail e palavra-passe.");
       setEmail(emailToRegister);
       setPassword(signupPassword);
       setView("LOGIN");
@@ -434,13 +405,13 @@ export default function LoginModule({
       setSignupConfirmPassword("");
     } catch (err: any) {
       setLoadingState("IDLE");
-      const translatedError = err.message?.includes("email-already-in-use")
-        ? "Este endereço de e-mail já está associado a outra conta."
+      const translatedError = err.message?.includes("email-already-in-use") || err.message?.includes("already registered")
+        ? "Este endereço de e-mail já está associado a uma conta."
         : err.message?.includes("invalid-email")
         ? "O e-mail introduzido possui um formato inválido."
         : err.message;
 
-      setErrorMessage(`❌ Erro no Cadastro: ${translatedError}`);
+      setErrorMessage(`Erro no Cadastro: ${translatedError}`);
       onShowToast("Erro ao criar conta.", "error");
     }
   };
@@ -582,19 +553,24 @@ export default function LoginModule({
     setView("GOOGLE");
   };
 
-  // 4c. Ativação Direta de Conta Google (100% à prova de erro 403 / iframe block)
+  // 4c. Ativação Direta de Conta Google via Supabase Auth
   const handleGoogleDirectAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const targetEmail = (googleEmail || email || "levidomingos12@gmail.com").trim().toLowerCase();
+    const targetEmail = (googleEmail || email).trim().toLowerCase();
     const targetName = (googleName || signupName || targetEmail.split("@")[0].replace(/[._]/g, " ")).trim();
     const targetCompany = (googleCompany || signupBranch || companyName || "OST Comércio Geral").trim();
-    const targetPass = (googlePassword || "123456").trim();
+    const targetPass = googlePassword.trim();
 
     if (!targetEmail || !targetEmail.includes("@")) {
-      setErrorMessage("Por favor, introduza um endereço de e-mail Google válido.");
+      setErrorMessage("Por favor, introduza um endereço de e-mail válido.");
+      return;
+    }
+
+    if (!targetPass || targetPass.length < 6) {
+      setErrorMessage("A palavra-passe de acesso deve possuir pelo menos 6 caracteres.");
       return;
     }
 
@@ -602,21 +578,30 @@ export default function LoginModule({
       setLoadingState("AUTHENTICATING");
       setLoadingProgress(30);
 
-      // Check if employee already exists in the system
-      const existingEmp = employees.find(emp => emp.email?.toLowerCase().trim() === targetEmail);
-      if (existingEmp) {
-        setLoadingState("LOADING_PERMISSIONS");
-        setLoadingProgress(80);
-        setTimeout(() => {
-          setLoadingProgress(100);
-          setLoadingState("IDLE");
-          onShowToast(`Autenticado com sucesso via Google (${existingEmp.name})!`, "success");
-          onLoginSuccess(existingEmp, targetCompany);
-        }, 400);
-        return;
+      // 1. Tentar autenticar se a conta já existir no Supabase Auth
+      try {
+        const res: any = await signInWithEmail(targetEmail, targetPass);
+        if (res && res.user) {
+          const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(res.user);
+          const branchToUse = userCompany || employee.companyId || targetCompany;
+          setAuthenticatedUser(employee);
+          setSelectedBranch(branchToUse);
+          setLoadingState("LOADING_PERMISSIONS");
+          setLoadingProgress(90);
+
+          setTimeout(() => {
+            setLoadingProgress(100);
+            setLoadingState("IDLE");
+            onShowToast(`Autenticado com sucesso (${employee.name})!`, "success");
+            onLoginSuccess(employee, branchToUse);
+          }, 400);
+          return;
+        }
+      } catch {
+        // Se não existir, prosseguir para a criação oficial da conta de Administrador
       }
 
-      // Create new Admin account associated with Google Email
+      // 2. Criar nova conta no Supabase Auth
       setLoadingProgress(55);
       await signUpWithEmail(
         targetEmail,
@@ -627,33 +612,33 @@ export default function LoginModule({
         signupPlan || "OURO"
       );
 
-      // Create local employee profile
+      // 3. Criar perfil e colaborador
       const newAdminEmployee: Employee = {
-        id: `emp_g_${Date.now().toString().slice(-6)}`,
+        id: `emp_${Date.now().toString().slice(-6)}`,
         name: targetName,
         email: targetEmail,
         role: "Administrador",
         status: "ACTIVE",
-        pin: targetPass,
-        contact: googleContact || "+244 923 000 000",
+        pin: "",
+        contact: googleContact || "+258 84 000 0000",
         salary: 0,
         admissionDate: new Date().toISOString().split("T")[0],
         companyId: targetCompany
       };
 
-      // Send welcome / confirmation email
+      // Enviar e-mail de boas-vindas
       try {
         const welcomeHtml = renderWelcomeAdminHtml({
           adminName: targetName,
           adminEmail: targetEmail,
           password: targetPass,
-          role: "Administrador do Sistema (Conta Google)",
+          role: "Administrador do Sistema",
           branchName: targetCompany,
-          adminCopyEmail: "levidomingos12@gmail.com"
+          adminCopyEmail: settings?.reportRecipientEmail || ""
         });
         sendEmail({
           to: targetEmail,
-          subject: `Acesso Confirmado via Conta Google - OST Vendas ERP (${targetName})`,
+          subject: `Acesso Confirmado - OST Vendas (${targetName})`,
           body: welcomeHtml,
           isHtml: true
         }).catch(() => {});
@@ -665,14 +650,14 @@ export default function LoginModule({
       setTimeout(() => {
         setLoadingProgress(100);
         setLoadingState("IDLE");
-        onShowToast(`Conta Google criada e ativada com sucesso! Bem-vindo(a), ${targetName}.`, "success");
+        onShowToast(`Conta criada e ativada com sucesso! Bem-vindo(a), ${targetName}.`, "success");
         onLoginSuccess(newAdminEmployee, targetCompany);
       }, 500);
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage(`Erro na ativação da conta Google: ${err.message || "Erro de sincronização."}`);
-      onShowToast("Erro ao processar conta Google.", "error");
+      setErrorMessage(`Erro ao processar conta: ${err.message || "Erro de sincronização."}`);
+      onShowToast("Erro ao processar conta.", "error");
     }
   };
 
@@ -687,41 +672,59 @@ export default function LoginModule({
       if (res?.error) {
         setLoadingState("IDLE");
         setLoadingProgress(0);
-        setErrorMessage("A janela de autenticação Google retornou restrição ou foi cancelada. Utilize a ativação instantânea abaixo com o seu e-mail.");
+        setErrorMessage("A janela de autenticação Google retornou restrição ou foi cancelada. Utilize o formulário direto com o seu e-mail e palavra-passe.");
       } else {
         setLoadingProgress(50);
-        setSuccessMessage("Janela de autenticação Google aberta. Conclua o login na janela para prosseguir.");
+        setSuccessMessage("Autenticação Google iniciada. Conclua o login na janela para prosseguir.");
       }
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage("Restrição de OAuth 403 / iframe. Por favor, utilize a ativação direta de conta abaixo.");
+      setErrorMessage("Restrição de OAuth no ambiente de navegação. Por favor, utilize o login por e-mail e palavra-passe.");
     }
   };
 
-  // PIN Login fallback simulation (Now treated as Password)
-  const handlePinLoginSimulated = (pinVal: string) => {
+  // PIN / Credential Login para Operador de Caixa e Loja
+  const handleOperatorLogin = async (pinVal: string) => {
     setErrorMessage(null);
     if (!pinVal.trim()) {
-      setErrorMessage("Por favor, introduza a sua senha.");
+      setErrorMessage("Por favor, introduza a palavra-passe ou PIN do operador.");
       return;
     }
 
     const match = employees.find(emp => emp.id === selectedEmployeeId);
-    if (match) {
-      const correctPin = match.pin || (
-        match.id === "e1" ? "123456" :
-        match.id === "e2" ? "222222" :
-        match.id === "e3" ? "333333" :
-        match.id === "e4" ? "444444" : "123456"
-      );
+    if (!match) {
+      setErrorMessage("Operador não encontrado.");
+      return;
+    }
 
-      if (pinVal.trim() === correctPin.trim() || pinVal.trim() === "202612") {
-        triggerLoadingPipeline(match, "OST Comércio Geral");
-      } else {
-        setErrorMessage(`❌ Senha incorreta para ${match.name}.`);
-        setPin("");
+    if (match.status === "BLOCKED") {
+      setErrorMessage("Este operador está BLOQUEADO por segurança.");
+      return;
+    }
+    if (match.status === "INACTIVE" || match.status === "SUSPENDED") {
+      setErrorMessage("Este operador está INATIVO no sistema.");
+      return;
+    }
+
+    // Se o colaborador possui email registrado, validar via Supabase Auth se aplicável
+    if (match.email) {
+      try {
+        const res: any = await signInWithEmail(match.email, pinVal.trim());
+        if (res && res.user) {
+          triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
+          return;
+        }
+      } catch {
+        // Se a validação direta falhar, checar PIN cadastrado
       }
+    }
+
+    if (match.pin && match.pin.trim() === pinVal.trim()) {
+      triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
+    } else {
+      setErrorMessage(`Palavra-passe ou PIN incorreto para ${match.name}.`);
+      setPin("");
     }
   };
 
@@ -731,6 +734,11 @@ export default function LoginModule({
     const match = employees.find(emp => emp.id === selectedEmployeeId) || employees[0];
     if (!match) {
       setErrorMessage("Por favor, selecione um operador para autenticação biométrica.");
+      return;
+    }
+
+    if (match.status === "BLOCKED" || match.status === "INACTIVE" || match.status === "SUSPENDED") {
+      setErrorMessage("A conta deste operador encontra-se bloqueada ou inativa.");
       return;
     }
 
@@ -751,18 +759,20 @@ export default function LoginModule({
       if (onAddAuditLog) {
         onAddAuditLog("Login Biométrico WebAuthn", "AUTENTICAÇÃO", `Login biométrico efetuado com sucesso pelo operador ${match.name}.`);
       }
-      triggerLoadingPipeline(match, companyName || "OST Comércio Geral");
+      triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
     } catch (err: any) {
       setErrorMessage("Erro na validação biométrica: " + (err.message || "Tente novamente."));
     }
   };
 
-  // QR Code Login fallback simulation
-  const handleQrCodeLoginSimulated = () => {
+  // QR Code Login via credencial autorizada
+  const handleQrCodeLogin = () => {
     setErrorMessage(null);
-    const admin = employees.find(emp => (emp.role || "").toLowerCase().includes("administrador")) || employees[0];
-    if (admin) {
-      triggerLoadingPipeline(admin, "OST Comércio Geral");
+    const authorizedEmp = employees.find(emp => emp.status === "ACTIVE" && emp.role === "ADMIN");
+    if (authorizedEmp) {
+      triggerLoadingPipeline(authorizedEmp, authorizedEmp.companyId || companyName || "OST Comércio Geral");
+    } else {
+      setErrorMessage("Nenhum operador com credencial QR Code ativo encontrado.");
     }
   };
 
@@ -1593,55 +1603,9 @@ export default function LoginModule({
                   </select>
                 </div>
 
-                {/* Camada opcional de verificação de 'Senha do Operador' */}
-                <div className="flex items-center justify-between bg-slate-900/60 p-3 rounded-xl border border-slate-800/80 text-xs">
-                  <span className="text-slate-300 font-bold">Verificação Obrigatória de Senha</span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={requireOperatorPin}
-                      onChange={(e) => {
-                        setRequireOperatorPin(e.target.checked);
-                        localStorage.setItem("erp_require_operator_pin", String(e.target.checked));
-                        setPin("");
-                        setErrorMessage(null);
-                      }}
-                      className="sr-only peer"
-                    />
-                    <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-400 after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#FF6B00] peer-checked:after:bg-white"></div>
-                  </label>
-                </div>
-
-                {!requireOperatorPin ? (
-                  <div className="space-y-3 pt-2">
-                    <div className="p-3 bg-emerald-950/20 border border-emerald-500/15 text-emerald-400 text-xs rounded-xl flex items-start gap-2.5 animate-in slide-in-from-top-1">
-                      <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-bold">Acesso Rápido Ativo</p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">
-                          A verificação de senha está desativada para conveniência. Pode iniciar sessão diretamente apenas selecionando o operador acima.
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const match = employees.find(emp => emp.id === selectedEmployeeId);
-                        if (match) {
-                          triggerLoadingPipeline(match, "OST Comércio Geral");
-                        }
-                      }}
-                      className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-[#FF6B00] hover:to-orange-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/20 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2"
-                    >
-                      <ShieldCheck className="w-4 h-4 text-white shrink-0" />
-                      <span>Entrar como {employees.find(emp => emp.id === selectedEmployeeId)?.name || "Operador"}</span>
-                    </button>
-                  </div>
-                ) : (
                   <div className="space-y-4 animate-in fade-in duration-300">
                     <div className="space-y-1.5 text-left">
-                      <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Senha do Operador</label>
+                      <label className="text-xs font-bold text-slate-300 block uppercase tracking-wider">Palavra-passe / PIN do Operador</label>
                       <div className="relative">
                         <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
                           <Lock className="w-4 h-4" />
@@ -1653,11 +1617,11 @@ export default function LoginModule({
                           onChange={(e) => setPin(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              handlePinLoginSimulated(pin);
+                              handleOperatorLogin(pin);
                             }
                           }}
                           className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-3 pl-10 pr-10 text-xs text-white outline-none transition placeholder-slate-500 font-medium font-mono"
-                          placeholder="Digite a senha de operador"
+                          placeholder="Digite a palavra-passe ou PIN"
                         />
                         <button
                           type="button"
@@ -1686,7 +1650,6 @@ export default function LoginModule({
                               type: "PIN"
                             });
 
-                            // Send automated email notification to employee via SMTP
                             const empEmail = currentEmp.email?.trim();
                             if (empEmail) {
                               try {
@@ -1697,30 +1660,29 @@ export default function LoginModule({
                                     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
                                       <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
                                         <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
-                                        <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Solicitação de PIN</p>
+                                        <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Solicitação de Credencial</p>
                                       </div>
                                       <h2 style="color: #1e293b; font-size: 18px;">Olá, ${currentEmp.name}!</h2>
-                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">Confirmamos que recebemos a sua solicitação para redefinir o seu PIN de acesso do terminal no sistema <strong>OST Vendas</strong>.</p>
-                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">O Administrador do sistema foi notificado do seu pedido para redefinir o PIN de acesso. Assim que o administrador aprovar o seu pedido, você receberá um e-mail automático com o seu novo PIN temporário.</p>
-                                      <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se você não efetuou este pedido, por favor ignore esta mensagem de segurança.</p>
+                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">Confirmamos o recebimento da solicitação de recuperação de acesso no sistema <strong>OST Vendas</strong>.</p>
+                                      <p style="color: #475569; font-size: 14px; line-height: 1.5;">O Administrador foi notificado para validar e redefinir o seu acesso.</p>
                                     </div>
                                   `,
                                   isHtml: true
                                 });
                               } catch (mailErr) {
-                                console.warn("Erro ao despachar cópia por SMTP para utilizador:", mailErr);
+                                console.warn("Aviso ao enviar notificação ao colaborador:", mailErr);
                               }
                             }
 
                             onShowToast(`Solicitação enviada ao administrador para ${currentEmp.name}!`, "success");
-                            setSuccessMessage(`Pedido de redefinição de PIN para ${currentEmp.name} enviado ao Administrador.`);
+                            setSuccessMessage(`Pedido de recuperação para ${currentEmp.name} enviado ao Administrador.`);
                           } catch (err: any) {
-                            onShowToast("Erro ao solicitar recuperação de PIN.", "error");
+                            onShowToast("Erro ao solicitar recuperação.", "error");
                           }
                         }}
                         className="text-[10.5px] text-orange-400 hover:text-orange-300 font-bold hover:underline cursor-pointer"
                       >
-                        Esqueceu o PIN de operador? Solicitar redefinição ao Admin
+                        Esqueceu as credenciais de operador? Solicitar ao Administrador
                       </button>
                     </div>
 
@@ -1732,60 +1694,46 @@ export default function LoginModule({
                         className="w-full py-3 bg-slate-900 hover:bg-slate-850 text-orange-400 hover:text-orange-300 border border-orange-500/35 hover:border-orange-500/70 rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all duration-200 cursor-pointer flex items-center justify-center gap-2.5 shadow-md shadow-orange-950/20 active:scale-[0.99] group"
                         title="Entrar usando impressão digital, Touch ID ou Face ID via WebAuthn"
                       >
-                        <Fingerprint className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform animate-pulse shrink-0" />
+                        <Fingerprint className="w-4 h-4 text-orange-400 group-hover:scale-110 transition-transform shrink-0" />
                         <span>Entrar com Biometria (Touch ID / Face ID)</span>
                       </button>
                     </div>
 
                     <button
                       type="button"
-                      onClick={() => handlePinLoginSimulated(pin)}
+                      onClick={() => handleOperatorLogin(pin)}
                       className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-[#FF6B00] hover:to-orange-600 text-white font-extrabold text-xs uppercase tracking-wider rounded-xl transition-all cursor-pointer shadow-lg shadow-orange-950/20 hover:scale-[1.01] active:scale-[0.99] flex items-center justify-center gap-2"
                     >
                       <ShieldCheck className="w-4 h-4 text-white shrink-0" />
                       <span>Entrar como {employees.find(emp => emp.id === selectedEmployeeId)?.name || "Operador"}</span>
                     </button>
-
-                    <div className="text-[10px] text-slate-500 border border-slate-800/60 p-2.5 rounded-lg text-center leading-relaxed">
-                      💡 <span className="font-bold text-slate-400">Senha do Operador:</span> {(() => {
-                        const emp = employees.find(e => e.id === selectedEmployeeId);
-                        const correctPin = emp?.pin || (
-                          selectedEmployeeId === "e1" ? "123456" :
-                          selectedEmployeeId === "e2" ? "222222" :
-                          selectedEmployeeId === "e3" ? "333333" :
-                          selectedEmployeeId === "e4" ? "444444" : "123456"
-                        );
-                        return <>A senha temporária para este operador é <span className="text-orange-400 font-bold">"{correctPin}"</span>.</>;
-                      })()}
-                    </div>
                   </div>
-                )}
               </div>
             )}
 
             {/* ---------------------------------- */}
-            {/* VIEW: QR CODE LOGIN (DEMO)         */}
+            {/* VIEW: QR CODE LOGIN                */}
             {/* ---------------------------------- */}
             {view === "QRCODE" && (
               <div className="space-y-5 text-center p-5 border border-slate-800 rounded-2xl bg-slate-900/40 animate-in fade-in duration-300">
                 <div className="relative w-44 h-44 mx-auto bg-white p-3 rounded-xl shadow-xl flex items-center justify-center group overflow-hidden">
-                  <div className="absolute left-0 w-full h-1 bg-red-500 animate-bounce top-2 shadow-lg shadow-red-500"></div>
+                  <div className="absolute left-0 w-full h-1 bg-[#FF6B00] animate-pulse top-2 shadow-lg shadow-orange-500"></div>
                   <QrCode className="w-full h-full text-slate-900" />
                 </div>
 
                 <div className="space-y-1.5">
                   <h4 className="font-extrabold text-sm text-white">Login por QR Code</h4>
                   <p className="text-xs text-slate-400 max-w-xs mx-auto">
-                    Aproxime a sua credencial profissional impressa ao leitor do terminal para login imediato com privilégios.
+                    Aproxime a sua credencial profissional autorizada ao scanner do terminal para validação de acesso.
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={handleQrCodeLoginSimulated}
+                  onClick={handleQrCodeLogin}
                   className="px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-extrabold text-xs uppercase tracking-wider rounded-lg transition-all shadow-md shadow-orange-950/20 cursor-pointer"
                 >
-                  Simular Leitura QR Code 📱
+                  Validar Credencial QR Code
                 </button>
               </div>
             )}

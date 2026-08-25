@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "./supabase";
+import { authenticatedFetch } from "./apiClient";
 
 export const getGoogleAccessToken = async (): Promise<string | null> => {
   const token = localStorage.getItem("google_access_token");
@@ -23,7 +24,7 @@ interface SendEmailParams {
 export const sendEmail = async ({ to, subject, body, isHtml = true, attachments }: SendEmailParams) => {
   try {
     // 1. Try sending via server-side SMTP first (which uses settings/env configs)
-    const serverResponse = await fetch("/api/email/send", {
+    const serverResponse = await authenticatedFetch("/api/email/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

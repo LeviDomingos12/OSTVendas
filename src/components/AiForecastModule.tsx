@@ -30,6 +30,7 @@ import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, Transaction, SystemSettings } from "../types";
+import { authenticatedFetch } from "../lib/apiClient";
 
 interface AiForecastModuleProps {
   products: Product[];
@@ -242,18 +243,15 @@ Como posso ajudar você hoje? Pode escolher uma das perguntas rápidas abaixo ou
     }));
 
     try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/forecast", {
+      const response = await authenticatedFetch("/api/gemini/forecast", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           salesHistory: salesSummary,
           inventoryStatus: criticalStock,
-          businessType: settings.companyName,
-          apiKey: clientApiKey || undefined
+          businessType: settings.companyName
         })
       });
       if (!response.ok) {
@@ -323,12 +321,10 @@ Analisei os registos reais da **${settings.companyName || "OST Vendas"}**:
       .map(p => ({ item: p.name, stock: p.stock }));
 
     try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/chat", {
+      const response = await authenticatedFetch("/api/gemini/chat", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           question: text,
@@ -341,8 +337,7 @@ Analisei os registos reais da **${settings.companyName || "OST Vendas"}**:
             salesRecent: salesSummary,
             company: settings.companyName
           },
-          businessType: settings.companyName,
-          apiKey: clientApiKey || undefined
+          businessType: settings.companyName
         })
       });
 
@@ -695,12 +690,10 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
       .map(p => ({ item: p.name, stock: p.stock }));
 
     try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/chat", {
+      const response = await authenticatedFetch("/api/gemini/chat", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           question: q,
@@ -713,8 +706,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
             salesRecent: salesSummary,
             company: settings.companyName
           },
-          businessType: settings.companyName,
-          apiKey: clientApiKey || undefined
+          businessType: settings.companyName
         })
       });
 

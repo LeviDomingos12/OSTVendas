@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
 import { Customer, UserRole, Transaction, SystemSettings } from "../types";
+import { authenticatedFetch } from "../lib/apiClient";
 import { useConfirm } from "../hooks/useConfirm";
 import { printInvoiceHTML } from "../lib/printHelper";
 
@@ -474,23 +475,20 @@ export default function CustomersModule({
     setSelectedSms(prev => prev + (prev.endsWith(" ") || prev === "" ? "" : " ") + tag);
   };
 
-  // Trigger Gemini API to generate gorgeous creative SMS
+  // Trigger Gemini API to generate gorgeous creative SMS (Server-Side Key)
   const handleGenerateAISms = async () => {
     setIsGeneratingSms(true);
     setSmsOptions([]);
 
     try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/marketing/sms", {
+      const response = await authenticatedFetch("/api/gemini/marketing/sms", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           campaignType: `Fidelização por Pontos (${campaignTarget})`,
-          details: `Incentivar o resgate de pontos de fidelidade de clientes com saldo ativo. Use as tags {NOME}, {PONTOS}, {VALOR_RESGATE} e {EMPRESA}. Instrução extra: ${customSmsPrompt || 'Nenhuma'}`,
-          apiKey: clientApiKey || undefined
+          details: `Incentivar o resgate de pontos de fidelidade de clientes com saldo ativo. Use as tags {NOME}, {PONTOS}, {VALOR_RESGATE} e {EMPRESA}. Instrução extra: ${customSmsPrompt || 'Nenhuma'}`
         })
       });
 
@@ -549,7 +547,7 @@ export default function CustomersModule({
         }
       }
 
-      const response = await fetch("/api/campaign/dispatch", {
+      const response = await authenticatedFetch("/api/campaign/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

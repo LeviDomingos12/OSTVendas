@@ -42,6 +42,7 @@ import {
 } from "lucide-react";
 import { Employee, AuditLog, UserRole, SystemSettings } from "../types";
 import { sendEmail } from "../lib/gmail";
+import { authenticatedFetch } from "../lib/apiClient";
 import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
 import { SupabaseSyncService } from "../services/supabaseService";
 const getRecoveryRequests = async () => SupabaseSyncService.getRecoveryRequests();
@@ -139,7 +140,7 @@ export default function StaffModule({
     let dbStatus: "ok" | "failed" = "failed";
     
     try {
-      const res = await fetch("/api/health");
+      const res = await authenticatedFetch("/api/health");
       if (res.ok) {
         const data = await res.json();
         serverStatus = "ok";
@@ -176,7 +177,7 @@ export default function StaffModule({
 
   const handleSimulateFailure = async () => {
     try {
-      await fetch("/api/force-diagnostic-404-error-for-testing");
+      await authenticatedFetch("/api/force-diagnostic-404-error-for-testing");
     } catch (e) {
       // Ignored
     }
@@ -849,7 +850,7 @@ export default function StaffModule({
       }
 
       // 3. Backup dispatch via API route endpoint
-      fetch("/api/email/dispatch-credentials", {
+      authenticatedFetch("/api/email/dispatch-credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

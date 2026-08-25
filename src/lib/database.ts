@@ -1,3 +1,5 @@
+import { authenticatedFetch } from "./apiClient";
+
 export interface CloudSqlStatus {
   success: boolean;
   available: boolean;
@@ -65,7 +67,7 @@ export const CloudSqlService = {
    */
   async checkStatus(): Promise<CloudSqlStatus> {
     try {
-      const response = await fetch("/api/sql/status");
+      const response = await authenticatedFetch("/api/sql/status");
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch Cloud SQL status`);
       }
@@ -87,7 +89,7 @@ export const CloudSqlService = {
    */
   async triggerSync(): Promise<{ success: boolean; message: string; stats?: any; error?: string }> {
     try {
-      const response = await fetch("/api/sql/sync", {
+      const response = await authenticatedFetch("/api/sql/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" }
       });
@@ -111,7 +113,7 @@ export const CloudSqlService = {
    */
   async getFinancialSummary(startDate: string, endDate: string): Promise<SQLFinancialSummary | null> {
     try {
-      const response = await fetch(`/api/sql/reports/summary?startDate=${startDate}&endDate=${endDate}`);
+      const response = await authenticatedFetch(`/api/sql/reports/summary?startDate=${startDate}&endDate=${endDate}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch financial summary`);
       }
@@ -128,7 +130,7 @@ export const CloudSqlService = {
    */
   async getSalesTrends(startDate: string, endDate: string): Promise<SQLSalesTrend[]> {
     try {
-      const response = await fetch(`/api/sql/reports/trends?startDate=${startDate}&endDate=${endDate}`);
+      const response = await authenticatedFetch(`/api/sql/reports/trends?startDate=${startDate}&endDate=${endDate}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch sales trends`);
       }
@@ -145,7 +147,7 @@ export const CloudSqlService = {
    */
   async getProductPerformance(startDate: string, endDate: string, limit = 10): Promise<SQLProductPerformance[]> {
     try {
-      const response = await fetch(`/api/sql/reports/products?startDate=${startDate}&endDate=${endDate}&limit=${limit}`);
+      const response = await authenticatedFetch(`/api/sql/reports/products?startDate=${startDate}&endDate=${endDate}&limit=${limit}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch product performance`);
       }
@@ -162,7 +164,7 @@ export const CloudSqlService = {
    */
   async getCategoryBreakdown(startDate: string, endDate: string): Promise<SQLCategoryBreakdown[]> {
     try {
-      const response = await fetch(`/api/sql/reports/categories?startDate=${startDate}&endDate=${endDate}`);
+      const response = await authenticatedFetch(`/api/sql/reports/categories?startDate=${startDate}&endDate=${endDate}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch category breakdown`);
       }
@@ -179,7 +181,7 @@ export const CloudSqlService = {
    */
   async getPaymentDistribution(startDate: string, endDate: string): Promise<SQLPaymentDistribution[]> {
     try {
-      const response = await fetch(`/api/sql/reports/payments?startDate=${startDate}&endDate=${endDate}`);
+      const response = await authenticatedFetch(`/api/sql/reports/payments?startDate=${startDate}&endDate=${endDate}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch payment distribution`);
       }
@@ -196,7 +198,7 @@ export const CloudSqlService = {
    */
   async getCustomerLeaderboard(startDate: string, endDate: string, limit = 10): Promise<SQLCustomerLeaderboard[]> {
     try {
-      const response = await fetch(`/api/sql/reports/customers?startDate=${startDate}&endDate=${endDate}&limit=${limit}`);
+      const response = await authenticatedFetch(`/api/sql/reports/customers?startDate=${startDate}&endDate=${endDate}&limit=${limit}`);
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: Failed to fetch customer leaderboard`);
       }

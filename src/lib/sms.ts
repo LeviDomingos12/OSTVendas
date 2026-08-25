@@ -3,9 +3,11 @@
  * Real SMS Gateway Dispatcher - Connects to the backend SMS service
  */
 
+import { authenticatedFetch } from "./apiClient";
+
 export async function sendSMS(to: string, message: string): Promise<{ success: boolean; message?: string; error?: string }> {
   try {
-    const response = await fetch("/api/sms/test-gateway", {
+    const response = await authenticatedFetch("/api/sms/test-gateway", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

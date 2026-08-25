@@ -53,6 +53,7 @@ import {
   sanitizeServiceError 
 } from "./services/dataService";
 import { getSupabaseClient } from "./lib/supabase";
+import { authenticatedFetch } from "./lib/apiClient";
 import { SupabaseSyncService } from "./services/supabaseService";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 import { sendEmail } from "./lib/gmail";
@@ -2273,7 +2274,7 @@ export default function App() {
 
       // Also send mutation to server endpoint if available
       try {
-        await fetch("/api/db/save", {
+        await authenticatedFetch("/api/db/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ table: tableName, data: updatedData })
@@ -2347,7 +2348,7 @@ export default function App() {
             await CommercialDataService.saveProductsBatch(data);
             success = true;
             try {
-              await fetch("/api/db/save", {
+              await authenticatedFetch("/api/db/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ table: "products", data })
@@ -2363,7 +2364,7 @@ export default function App() {
             await CommercialDataService.saveTransactionsBatch(data);
             success = true;
             try {
-              await fetch("/api/db/save", {
+              await authenticatedFetch("/api/db/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ table: "transactions", data })
@@ -2379,7 +2380,7 @@ export default function App() {
             await CommercialDataService.saveCustomersBatch(data);
             success = true;
             try {
-              await fetch("/api/db/save", {
+              await authenticatedFetch("/api/db/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ table: "customers", data })
@@ -2395,7 +2396,7 @@ export default function App() {
             await CommercialDataService.saveCashFlowBatch(data);
             success = true;
             try {
-              await fetch("/api/db/save", {
+              await authenticatedFetch("/api/db/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ table: "cashflow", data })
@@ -2408,7 +2409,7 @@ export default function App() {
           }
         } else {
           try {
-            const response = await fetch("/api/db/save", {
+            const response = await authenticatedFetch("/api/db/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ table: tableName, data })
@@ -2633,7 +2634,7 @@ export default function App() {
     const fetchExistentialDb = async () => {
       let loadedData = false;
       try {
-        const response = await fetch("/api/db/load");
+        const response = await authenticatedFetch("/api/db/load");
         const contentType = response.headers.get("content-type");
         if (response.ok && contentType && contentType.includes("application/json")) {
           const json = await response.json();
@@ -2726,10 +2727,14 @@ export default function App() {
     }
   }, [theme]);
 
-  // Supabase Auth Observer to handle auto-login, load profiles, and synchronize permissions
+  // Supabase Auth Observer to handle auto-login, load profiles, and synchronize permissions strictly via Supabase
   useEffect(() => {
     const handleAuthSync = async (user: any) => {
-      if (!user) return;
+      if (!user) {
+        setIsAuthenticated(false);
+        setActiveUser(null);
+        return;
+      }
       try {
         const { employee, companyName } = await SupabaseSyncService.syncUserProfileFromAuth(user);
 
@@ -2742,7 +2747,7 @@ export default function App() {
         }
 
         if (employee.status === "INACTIVE" || employee.status === "SUSPENDED") {
-          showToast("Esta conta está inativa ou suspensa. Contacte o Administrador.", "error");
+          showToast("Esta conta está inativa ou suspensa. Contacte a Administração.", "error");
           await SupabaseSyncService.signOut();
           setIsAuthenticated(false);
           setActiveUser(null);
@@ -2757,41 +2762,34 @@ export default function App() {
             companyName: companyName
           }));
         }
-        localStorage.setItem("erp_logged_in_user", JSON.stringify(employee));
-        localStorage.removeItem("erp_simulated_logged_in_user");
-        console.log(`[SUPABASE AUTH] Sessão ativa para: ${employee.name} (${employee.role}) - Empresa: ${companyName}`);
+        console.log(`[SUPABASE AUTH] Sessão autoritativa ativa: ${employee.name} (${employee.role}) - Empresa: ${companyName}`);
       } catch (err) {
-        console.error("[SUPABASE AUTH] Erro ao sincronizar perfil:", err);
+        console.error("[SUPABASE AUTH] Erro ao sincronizar perfil autoritativo:", err);
+        setIsAuthenticated(false);
+        setActiveUser(null);
       }
     };
 
     const client = getSupabaseClient();
     if (client) {
-      client.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) {
-          handleAuthSync(session.user);
+      client.auth.getSession().then(({ data: { session }, error }) => {
+        if (error || !session?.user) {
+          setIsAuthenticated(false);
+          setActiveUser(null);
         } else {
-          const storedUser = localStorage.getItem("erp_logged_in_user") || localStorage.getItem("erp_simulated_logged_in_user");
-          if (storedUser) {
-            try {
-              const parsed = JSON.parse(storedUser);
-              setActiveUser(parsed);
-              setIsAuthenticated(true);
-            } catch (e) {
-              console.error("Failed to restore local session:", e);
-            }
-          }
+          handleAuthSync(session.user);
         }
+      }).catch(() => {
+        setIsAuthenticated(false);
+        setActiveUser(null);
       });
 
       const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
-        if (session?.user) {
+        if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
           handleAuthSync(session.user);
-        } else if (event === "SIGNED_OUT") {
+        } else if (event === "SIGNED_OUT" || !session) {
           setIsAuthenticated(false);
           setActiveUser(null);
-          localStorage.removeItem("erp_logged_in_user");
-          localStorage.removeItem("erp_simulated_logged_in_user");
         }
       });
 
@@ -2799,14 +2797,8 @@ export default function App() {
         authListener?.subscription?.unsubscribe();
       };
     } else {
-      const storedUser = localStorage.getItem("erp_logged_in_user") || localStorage.getItem("erp_simulated_logged_in_user");
-      if (storedUser) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          setActiveUser(parsed);
-          setIsAuthenticated(true);
-        } catch {}
-      }
+      setIsAuthenticated(false);
+      setActiveUser(null);
     }
   }, []);
 
@@ -3651,7 +3643,7 @@ export default function App() {
 
     // 3. Dispatch to backend endpoint
     try {
-      const response = await fetch("/api/email/send-alert", {
+      const response = await authenticatedFetch("/api/email/send-alert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3860,18 +3852,15 @@ export default function App() {
     }));
 
     try {
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
-      const response = await fetch("/api/gemini/forecast", {
+      const response = await authenticatedFetch("/api/gemini/forecast", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           salesHistory: salesSummary,
           inventoryStatus: criticalStock,
-          businessType: settings.companyName,
-          apiKey: clientApiKey || undefined
+          businessType: settings.companyName
         })
       });
       if (!response.ok) {

@@ -564,11 +564,14 @@ CREATE POLICY "Colaboradores Tenant Isolation" ON public.colaboradores
   USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
   WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
 
--- AUDIT LOGS: Isolamento por tenant_id
+-- AUDIT LOGS: Append-Only (Permitir apenas INSERT e SELECT por tenant_id, PROIBIR UPDATE e DELETE)
 DROP POLICY IF EXISTS "Audit Logs Tenant Isolation" ON public.audit_logs;
-CREATE POLICY "Audit Logs Tenant Isolation" ON public.audit_logs
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+CREATE POLICY "Audit Logs Tenant Select" ON public.audit_logs
+  FOR SELECT TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+CREATE POLICY "Audit Logs Tenant Insert" ON public.audit_logs
+  FOR INSERT TO authenticated
   WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
 
 -- SETTINGS: Isolamento por tenant_id
@@ -578,11 +581,14 @@ CREATE POLICY "Settings Tenant Isolation" ON public.settings
   USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
   WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
 
--- STOCK MOVEMENTS: Isolamento por tenant_id
+-- STOCK MOVEMENTS: Isolamento por tenant_id (Append-Only)
 DROP POLICY IF EXISTS "Stock Movements Tenant Isolation" ON public.stock_movements;
-CREATE POLICY "Stock Movements Tenant Isolation" ON public.stock_movements
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
+CREATE POLICY "Stock Movements Tenant Select" ON public.stock_movements
+  FOR SELECT TO authenticated
+  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+
+CREATE POLICY "Stock Movements Tenant Insert" ON public.stock_movements
+  FOR INSERT TO authenticated
   WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
 
 -- CUSTOMER DEBTS & PAYMENTS: Isolamento por tenant_id
@@ -618,20 +624,11 @@ CREATE POLICY "Recovery Requests Tenant Isolation" ON public.recovery_requests
   USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
   WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
 
--- Fallback Policies for Anonymous Client in Offline/Local Mode
-CREATE POLICY "Anon Fallback Produtos" ON public.produtos FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Clientes" ON public.clientes FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Vendas" ON public.vendas FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Venda Itens" ON public.venda_itens FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Caixa" ON public.caixa FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Colaboradores" ON public.colaboradores FOR ALL TO anon USING (true) WITH CHECK (true);
-CREATE POLICY "Anon Fallback Settings" ON public.settings FOR ALL TO anon USING (true) WITH CHECK (true);
-
 -- ============================================================================
--- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC)
+-- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC) - HARDENED
 -- ============================================================================
 
--- RPC 1: PROCESS SALE ATOMIC
+-- RPC 1: PROCESS SALE ATOMIC (Idempotent, Transactional & Tenant-Hardened)
 CREATE OR REPLACE FUNCTION public.process_sale_atomic(
   p_tenant_id TEXT,
   p_sale_id TEXT,
@@ -654,8 +651,10 @@ CREATE OR REPLACE FUNCTION public.process_sale_atomic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
+  v_tenant_id TEXT;
   v_item JSONB;
   v_prod_id TEXT;
   v_prod_name TEXT;
@@ -668,6 +667,32 @@ DECLARE
   v_is_credit BOOLEAN;
   v_remaining_debt NUMERIC;
 BEGIN
+  -- 0. Determinar e validar autoritativamente o tenant da sessão (não confiar no frontend)
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+      v_tenant_id := auth.uid()::TEXT;
+    END IF;
+  ELSE
+    -- Contexto de serviço backend (service_role)
+    v_tenant_id := p_tenant_id;
+  END IF;
+
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado.');
+  END IF;
+
+  -- 0.1 Verificação de Idempotência: Se a venda já foi registada para este tenant, devolver com sucesso
+  IF EXISTS (SELECT 1 FROM public.vendas WHERE id = p_sale_id AND tenant_id = v_tenant_id) THEN
+    RETURN jsonb_build_object(
+      'success', true,
+      'sale_id', p_sale_id,
+      'invoice_number', p_invoice_number,
+      'grand_total', p_grand_total,
+      'message', 'Venda já processada anteriormente (idempotente).'
+    );
+  END IF;
+
   -- 1. Inserir registo mestre de venda
   INSERT INTO public.vendas (
     id, tenant_id, invoice_number, customer_id, customer_name, customer_nuit,
@@ -675,9 +700,9 @@ BEGIN
     subtotal, discount_total, vat_total, grand_total, amount_paid, change_amount,
     status, items, notes, timestamp, created_at
   ) VALUES (
-    p_sale_id, p_tenant_id, p_invoice_number, p_customer_id, p_customer_name, p_customer_nuit,
+    p_sale_id, v_tenant_id, p_invoice_number, p_customer_id, p_customer_name, p_customer_nuit,
     p_seller_id, p_seller_name, p_seller_name, p_payment_method,
-    CASE WHEN p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO') THEN 'PENDING_DEBT' ELSE 'PAID' END,
+    CASE WHEN p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT') THEN 'PENDING_DEBT' ELSE 'PAID' END,
     p_subtotal, p_discount_total, p_vat_total, p_grand_total, p_amount_paid, p_change_amount,
     'COMPLETED', p_items, p_notes, NOW(), NOW()
   )
@@ -689,36 +714,36 @@ BEGIN
   -- 2. Iterar sobre os itens: inserir itens individuais e decrementar o stock atomicamente
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
-    v_prod_id := v_item->>'id';
-    v_prod_name := COALESCE(v_item->>'name', v_item->>'nome', 'Artigo');
+    v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
+    v_prod_name := COALESCE(v_item->>'name', v_item->>'productName', v_item->>'nome', 'Artigo');
     v_qty := COALESCE((v_item->>'quantity')::NUMERIC, (v_item->>'quantidade')::NUMERIC, 1.00);
-    v_unit_price := COALESCE((v_item->>'salePrice')::NUMERIC, (v_item->>'price')::NUMERIC, 0.00);
-    v_cost_price := COALESCE((v_item->>'costPrice')::NUMERIC, 0.00);
-    v_total_item := COALESCE((v_item->>'total')::NUMERIC, v_qty * v_unit_price);
+    v_unit_price := COALESCE((v_item->>'salePrice')::NUMERIC, (v_item->>'unitPrice')::NUMERIC, (v_item->>'price')::NUMERIC, 0.00);
+    v_cost_price := COALESCE((v_item->>'costPrice')::NUMERIC, (v_item->>'cost')::NUMERIC, 0.00);
+    v_total_item := COALESCE((v_item->>'totalPrice')::NUMERIC, (v_item->>'total')::NUMERIC, v_qty * v_unit_price);
 
     -- Inserir item da venda
     INSERT INTO public.venda_itens (
       id, tenant_id, sale_id, product_id, product_name,
       unit_price, quantity, cost_price, total_price, created_at
     ) VALUES (
-      uuid_generate_v4()::TEXT, p_tenant_id, p_sale_id, v_prod_id, v_prod_name,
+      uuid_generate_v4()::TEXT, v_tenant_id, p_sale_id, v_prod_id, v_prod_name,
       v_unit_price, v_qty, v_cost_price, v_total_item, NOW()
     );
 
-    -- Buscar e atualizar stock do produto
-    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id FOR UPDATE;
+    -- Buscar e atualizar stock do produto pertencente ao mesmo tenant
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id FOR UPDATE;
     IF FOUND THEN
-      v_new_stock := v_curr_stock - v_qty;
+      v_new_stock := GREATEST(0.00, v_curr_stock - v_qty);
       UPDATE public.produtos 
       SET stock = v_new_stock, updated_at = NOW() 
-      WHERE id = v_prod_id;
+      WHERE id = v_prod_id AND tenant_id = v_tenant_id;
 
       -- Registar movimento no Kardex
       INSERT INTO public.stock_movements (
         id, tenant_id, product_id, type, quantity,
         previous_stock, new_stock, cost_price, reason, reference_id, user_name, timestamp
       ) VALUES (
-        uuid_generate_v4()::TEXT, p_tenant_id, v_prod_id, 'EXIT_SALE', v_qty,
+        uuid_generate_v4()::TEXT, v_tenant_id, v_prod_id, 'EXIT_SALE', v_qty,
         v_curr_stock, v_new_stock, v_cost_price, 'Venda ' || p_invoice_number, p_sale_id, p_seller_name, NOW()
       );
     END IF;
@@ -733,7 +758,7 @@ BEGIN
       id, tenant_id, customer_id, sale_id, total_amount, paid_amount,
       remaining_balance, due_date, status, created_at
     ) VALUES (
-      uuid_generate_v4()::TEXT, p_tenant_id, p_customer_id, p_sale_id, p_grand_total, p_amount_paid,
+      uuid_generate_v4()::TEXT, v_tenant_id, p_customer_id, p_sale_id, p_grand_total, p_amount_paid,
       v_remaining_debt, NOW() + INTERVAL '30 days',
       CASE WHEN v_remaining_debt <= 0 THEN 'SETTLED' ELSE 'PENDING' END,
       NOW()
@@ -742,7 +767,7 @@ BEGIN
     -- Atualizar saldo em aberto do cliente
     UPDATE public.clientes 
     SET balance = balance + v_remaining_debt, updated_at = NOW()
-    WHERE id = p_customer_id;
+    WHERE id = p_customer_id AND tenant_id = v_tenant_id;
   END IF;
 
   -- 4. Registar entrada no fluxo de caixa se pago em dinheiro
@@ -750,7 +775,7 @@ BEGIN
     INSERT INTO public.caixa (
       id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
     ) VALUES (
-      uuid_generate_v4()::TEXT, p_tenant_id, 'INPUT', p_amount_paid, 'Recebimento Venda ' || p_invoice_number, p_seller_name, p_sale_id, NOW()
+      uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount_paid, 'Recebimento Venda ' || p_invoice_number, p_seller_name, p_sale_id, NOW()
     );
   END IF;
 
@@ -781,19 +806,30 @@ CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
+  v_tenant_id TEXT;
   v_curr_stock NUMERIC;
   v_new_stock NUMERIC;
   v_curr_cost NUMERIC;
   v_new_cost NUMERIC;
 BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+      v_tenant_id := auth.uid()::TEXT;
+    END IF;
+  ELSE
+    v_tenant_id := p_tenant_id;
+  END IF;
+
   SELECT stock, cost_price INTO v_curr_stock, v_curr_cost 
   FROM public.produtos 
-  WHERE id = p_product_id FOR UPDATE;
+  WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado.');
+    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no inventário da empresa.');
   END IF;
 
   v_new_stock := v_curr_stock + p_quantity;
@@ -801,13 +837,13 @@ BEGIN
 
   UPDATE public.produtos 
   SET stock = v_new_stock, cost_price = v_new_cost, updated_at = NOW()
-  WHERE id = p_product_id;
+  WHERE id = p_product_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.stock_movements (
     id, tenant_id, product_id, type, quantity,
     previous_stock, new_stock, cost_price, reason, user_name, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, p_tenant_id, p_product_id, 'ENTRY', p_quantity,
+    uuid_generate_v4()::TEXT, v_tenant_id, p_product_id, 'ENTRY', p_quantity,
     v_curr_stock, v_new_stock, v_new_cost, p_reason, p_user_name, NOW()
   );
 
@@ -832,14 +868,25 @@ CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
+  v_tenant_id TEXT;
   v_remaining NUMERIC;
   v_new_remaining NUMERIC;
 BEGIN
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+      v_tenant_id := auth.uid()::TEXT;
+    END IF;
+  ELSE
+    v_tenant_id := p_tenant_id;
+  END IF;
+
   SELECT remaining_balance INTO v_remaining 
   FROM public.customer_debts 
-  WHERE id = p_debt_id FOR UPDATE;
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado.');
@@ -853,22 +900,22 @@ BEGIN
     remaining_balance = v_new_remaining,
     status = CASE WHEN v_new_remaining <= 0 THEN 'SETTLED' ELSE 'PARTIAL' END,
     settled_at = CASE WHEN v_new_remaining <= 0 THEN NOW() ELSE NULL END
-  WHERE id = p_debt_id;
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.debt_payments (
     id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, p_tenant_id, p_debt_id, p_customer_id, p_amount, p_payment_method, p_received_by, NOW()
+    uuid_generate_v4()::TEXT, v_tenant_id, p_debt_id, p_customer_id, p_amount, p_payment_method, p_received_by, NOW()
   );
 
   UPDATE public.clientes 
   SET balance = GREATEST(0.00, balance - p_amount), updated_at = NOW()
-  WHERE id = p_customer_id;
+  WHERE id = p_customer_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.caixa (
     id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, p_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || p_customer_id || ')', p_received_by, p_debt_id, NOW()
+    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || p_customer_id || ')', p_received_by, p_debt_id, NOW()
   );
 
   RETURN jsonb_build_object(
@@ -879,3 +926,69 @@ BEGIN
   );
 END;
 $$;
+
+-- ============================================================================
+-- 7. PRIVILEGE ESCALATION & TENANT MUTATION PROTECTION TRIGGERS
+-- ============================================================================
+
+-- Impede alteração não autorizada de papéis (role) e empresa em profiles
+CREATE OR REPLACE FUNCTION public.protect_profile_privileges()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF current_user != 'service_role' AND (old.role IS DISTINCT FROM new.role OR old.company_id IS DISTINCT FROM new.company_id) THEN
+    IF (SELECT role FROM public.profiles WHERE id = auth.uid()) != 'ADMIN' THEN
+      RAISE EXCEPTION 'Apenas administradores podem alterar o papel ou a empresa associada ao perfil.';
+    END IF;
+  END IF;
+  RETURN new;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_protect_profile_privileges ON public.profiles;
+CREATE TRIGGER trg_protect_profile_privileges
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileges();
+
+-- Impede mutação de tenant_id em tabelas de negócio
+CREATE OR REPLACE FUNCTION public.prevent_tenant_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF old.tenant_id IS DISTINCT FROM new.tenant_id THEN
+    RAISE EXCEPTION 'Violação de segurança: Não é permitido transferir registos entre empresas (mutação de tenant_id negada).';
+  END IF;
+  RETURN new;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_mutation_produtos ON public.produtos;
+CREATE TRIGGER trg_prevent_tenant_mutation_produtos
+  BEFORE UPDATE ON public.produtos
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_tenant_mutation();
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_mutation_clientes ON public.clientes;
+CREATE TRIGGER trg_prevent_tenant_mutation_clientes
+  BEFORE UPDATE ON public.clientes
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_tenant_mutation();
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_mutation_vendas ON public.vendas;
+CREATE TRIGGER trg_prevent_tenant_mutation_vendas
+  BEFORE UPDATE ON public.vendas
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_tenant_mutation();
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_mutation_caixa ON public.caixa;
+CREATE TRIGGER trg_prevent_tenant_mutation_caixa
+  BEFORE UPDATE ON public.caixa
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_tenant_mutation();
+
+DROP TRIGGER IF EXISTS trg_prevent_tenant_mutation_colaboradores ON public.colaboradores;
+CREATE TRIGGER trg_prevent_tenant_mutation_colaboradores
+  BEFORE UPDATE ON public.colaboradores
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_tenant_mutation();

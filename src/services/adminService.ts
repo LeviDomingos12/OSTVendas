@@ -4,6 +4,7 @@
  */
 
 import { supabase } from "../lib/supabase";
+import { authenticatedFetch } from "../lib/apiClient";
 import { Product, Customer, Transaction } from "../types";
 
 export interface CleanMockReport {
@@ -183,7 +184,7 @@ export const AdminService = {
 
     // 1. Tentar executar via API do servidor (que limpa arquivos locais e Supabase com service role)
     try {
-      const response = await fetch("/api/admin/clean-mock-data", {
+      const response = await authenticatedFetch("/api/admin/clean-mock-data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userName: userName || "Administrador" })
@@ -230,7 +231,7 @@ export const AdminService = {
     try {
       // 1. Backend reset
       try {
-        await fetch("/api/system/reset", {
+        await authenticatedFetch("/api/system/reset", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userName: userName || "Administrador", reason: "Commercialization Factory Reset" })

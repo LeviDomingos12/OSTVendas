@@ -32,6 +32,7 @@ import {
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
 import QrCodeScannerComponent from "./QrCodeScannerComponent";
 import { sendEmail } from "../lib/gmail";
+import { authenticatedFetch } from "../lib/apiClient";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { SYSTEM_THEMES } from "../lib/themes";
@@ -1354,7 +1355,7 @@ export default function POSModule({
         const pdfBase64DataUri = doc.output('datauristring');
         const fallbackBase64 = pdfBase64DataUri.split(',')[1];
 
-        await fetch("/api/email/dispatch-invoice", {
+        await authenticatedFetch("/api/email/dispatch-invoice", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1391,7 +1392,7 @@ export default function POSModule({
     }
     setSendSmsStatus("sending");
     try {
-      const resp = await fetch("/api/sms/dispatch-invoice", {
+      const resp = await authenticatedFetch("/api/sms/dispatch-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1478,7 +1479,7 @@ export default function POSModule({
 
     setSendWhatsAppStatus("sending");
     try {
-      const response = await fetch("/api/whatsapp/send-message", {
+      const response = await authenticatedFetch("/api/whatsapp/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1814,7 +1815,7 @@ export default function POSModule({
         console.warn("Could not send email via Gmail API, falling back to server-side SMTP:", gmailErr);
         
         // Fall back to server endpoint /api/email/dispatch-budget
-        const res = await fetch("/api/email/dispatch-budget", {
+        const res = await authenticatedFetch("/api/email/dispatch-budget", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1852,7 +1853,7 @@ export default function POSModule({
     setSendBudgetSmsStatus("sending");
     const targetPhone = budgetTargetPhone || completedBudget.customerPhone || "+258 84 900 1202";
     try {
-      const resp = await fetch("/api/sms/dispatch-invoice", {
+      const resp = await authenticatedFetch("/api/sms/dispatch-invoice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

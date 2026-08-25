@@ -4,6 +4,7 @@ import {
   Download, MessageSquare, Check, RefreshCw, Palette, Trash2, Search
 } from "lucide-react";
 import { Product } from "../types";
+import { authenticatedFetch } from "../lib/apiClient";
 
 interface PromoFlyerGeneratorProps {
   product: Product;
@@ -153,25 +154,22 @@ export function PromoFlyerGenerator({
     setSelectedProducts(prev => prev.filter(p => p.id !== prodId));
   };
 
-  // Generate Slogans with Gemini AI
+  // Generate Slogans with Gemini AI (Server-Side Key)
   const handleGenerateSlogans = async () => {
     setIsGeneratingSlogans(true);
     try {
       const activeP = selectedProducts[0] || product;
       const { discount } = getProductPricesAndDiscount(activeP);
-      const clientApiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY || (import.meta as any).env?.VITE_GOOGLE_API_KEY || "";
       
-      const response = await fetch("/api/gemini/marketing/slogan", {
+      const response = await authenticatedFetch("/api/gemini/marketing/slogan", {
         method: "POST",
         headers: { 
-          "Content-Type": "application/json",
-          ...(clientApiKey ? { "x-gemini-key": clientApiKey } : {})
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({
           productName: activeP.name,
           discountPercent: discount > 0 ? discount : 20,
-          price: productPrices[activeP.id]?.promoPrice || activeP.salePrice,
-          apiKey: clientApiKey || undefined
+          price: productPrices[activeP.id]?.promoPrice || activeP.salePrice
         })
       });
 

@@ -32,6 +32,7 @@ import {
 } from "recharts";
 import { Transaction, SystemSettings, AuditLog } from "../types";
 import { sendEmail } from "../lib/gmail";
+import { authenticatedFetch } from "../lib/apiClient";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { printInvoiceHTML } from "../lib/printHelper";
@@ -526,7 +527,7 @@ export default function ReportsModule({
     setTestSendStatus("sending");
 
     try {
-      const response = await fetch("/api/email/send-report", {
+      const response = await authenticatedFetch("/api/email/send-report", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

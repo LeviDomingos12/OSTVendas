@@ -59,6 +59,7 @@ import {
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, UserRole, Transaction, SystemSettings, StockTransfer } from "../types";
+import { authenticatedFetch } from "../lib/apiClient";
 import BatchManager from "./BatchManager";
 import { useConfirm } from "../hooks/useConfirm";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
@@ -1056,7 +1057,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         return;
       }
 
-      const response = await fetch("/api/whatsapp/send-message", {
+      const response = await authenticatedFetch("/api/whatsapp/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

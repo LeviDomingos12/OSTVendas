@@ -14,6 +14,7 @@ import {
   PackageOpen
 } from "lucide-react";
 import { SystemSettings, UserRole, Product, Customer } from "../types";
+import { authenticatedFetch } from "../lib/apiClient";
 
 interface GatewayModuleProps {
   settings: SystemSettings;
@@ -140,7 +141,7 @@ export default function GatewayModule({
         return;
       }
 
-      const response = await fetch("/api/whatsapp/send-message", {
+      const response = await authenticatedFetch("/api/whatsapp/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -219,7 +220,7 @@ export default function GatewayModule({
     setSimulatedPollingStatus("Consultando estado das credenciais e webhooks dos gateways...");
 
     try {
-      const res = await fetch("/api/security/firewall-status");
+      const res = await authenticatedFetch("/api/security/firewall-status");
       const data = await res.json().catch(() => ({}));
       
       setIsSimulatingPolling(false);
