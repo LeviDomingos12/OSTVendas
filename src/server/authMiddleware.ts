@@ -213,3 +213,32 @@ export function requireSupervisorOrAdmin(req: Request, res: Response, next: Next
   }
   next();
 }
+
+/**
+ * Middleware para exigir perfil de Gestor de Stock, Supervisor ou Administrador
+ */
+export function requireStockOrAdmin(req: Request, res: Response, next: NextFunction) {
+  const user = (req as any).user as AuthenticatedUserContext;
+  if (!user || (user.role !== "ADMIN" && user.role !== "SUPERVISOR" && user.role !== "STOCK_MANAGER")) {
+    return res.status(403).json({
+      success: false,
+      error: "Permissão negada: Esta operação requer privilégios de Gestão de Stock ou Administração."
+    });
+  }
+  next();
+}
+
+/**
+ * Middleware para exigir perfil com permissão de Caixa/Vendas
+ */
+export function requireCashierOrAdmin(req: Request, res: Response, next: NextFunction) {
+  const user = (req as any).user as AuthenticatedUserContext;
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: "Acesso não autorizado: Sessão não identificada."
+    });
+  }
+  next();
+}
+

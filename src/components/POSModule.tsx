@@ -327,9 +327,6 @@ export default function POSModule({
   const [quickCustomerModalOpen, setQuickCustomerModalOpen] = useState(false);
   const [quickCustName, setQuickCustName] = useState("");
   const [quickCustPhone, setQuickCustPhone] = useState("");
-  const [quickCustNuit, setQuickCustNuit] = useState("");
-  const [quickCustPreferredMethod, setQuickCustPreferredMethod] = useState("CASH");
-  const [quickCustOneClick, setQuickCustOneClick] = useState(false);
   const [pendingReceiptAction, setPendingReceiptAction] = useState<"email" | "sms" | "whatsapp" | null>(null);
 
   // 16. Past sales modal trigger
@@ -343,6 +340,15 @@ export default function POSModule({
     const list = new Set(localProducts.map(p => p.category));
     return ["Todos", "⭐ Favoritos", ...Array.from(list)];
   }, [localProducts]);
+
+  // Live cart item quantities mapping for instant real-time stock deduction in UI
+  const cartItemQuantities = useMemo(() => {
+    const map = new Map<string, number>();
+    cart.forEach(item => {
+      map.set(item.product.id, (map.get(item.product.id) || 0) + item.quantity);
+    });
+    return map;
+  }, [cart]);
 
   // Filtered products list
   const filteredProducts = useMemo(() => {
@@ -391,96 +397,18 @@ export default function POSModule({
     const barcodeMatch = localProducts.find(p => p.barcode === searchQuery.trim() || p.code === searchQuery.trim());
     if (barcodeMatch) {
       setTimeout(() => {
-        if (barcodeMatch.stock <= 0) {
-          if (onShowToast) onShowToast(`Produto ${barcodeMatch.name} está esgotado!`, "error");
+        const inCart = cart.find(item => item.product.id === barcodeMatch.id)?.quantity || 0;
+        const liveStock = barcodeMatch.stock - inCart;
+        if (liveStock <= 0) {
+          if (onShowToast) onShowToast(`Produto "${barcodeMatch.name}" já tem todo o stock (${barcodeMatch.stock} un) no carrinho!`, "warning", "Stock Esgotado");
           setSearchQuery("");
           return;
         }
         handleTriggerAddToCart(barcodeMatch);
-        if (onShowToast) onShowToast(`Escaneado: ${barcodeMatch.name} adicionado ao carrinho!`, "success");
         setSearchQuery("");
       }, 0);
     }
-  }, [searchQuery, localProducts]);
-
-  // Global Keyboard Shortcuts (F1, F2, F3, F4, F6, F8, F9, ESC)
-  useEffect(() => {
-    const executeShortcut = (key: string) => {
-      if (key === "F1") {
-        if (showPreCheckoutModal) {
-          // If the pre-checkout modal is already open, F1 confirms and finalizes the sale
-          handleCheckout(true);
-          if (onShowToast) onShowToast("Atalho F1: Venda faturada e confirmada!", "success");
-        } else {
-          // Open help/shortcuts overlay
-          setShowShortcutsHelp(prev => !prev);
-        }
-      } else if (key === "F2") {
-        customerSelectRef.current?.focus();
-        if (onShowToast) onShowToast("Atalho F2: Selecionar cliente focado!", "info");
-      } else if (key === "F3") {
-        searchInputRef.current?.focus();
-        if (onShowToast) onShowToast("Atalho F3: Pesquisa de produtos focada!", "info");
-      } else if (key === "F4") {
-        setQuickCustomerModalOpen(true);
-      } else if (key === "F6") {
-        const value = prompt("Insira a percentagem de desconto comercial (0 a 100):");
-        if (value !== null) {
-          const num = parseFloat(value);
-          if (!isNaN(num) && num >= 0 && num <= 100) {
-            setDiscountType("PERCENT");
-            setDiscountValue(num);
-            if (onShowToast) onShowToast(`Desconto de ${num}% aplicado!`, "success");
-          }
-        }
-      } else if (key === "F8") {
-        // Toggle payment method
-        const methods = ["CASH", "MPESA_PAGA_FACIL", "EMOLA", "POS_CARD", "DEBT", "MIXED"];
-        const nextIdx = (methods.indexOf(selectedPaymentMethod) + 1) % methods.length;
-        setSelectedPaymentMethod(methods[nextIdx]);
-        if (onShowToast) onShowToast(`Método alterado para: ${methods[nextIdx]}`, "info");
-      } else if (key === "F9") {
-        if (cart.length > 0) {
-          setShowPreCheckoutModal(true);
-        } else {
-          if (onShowToast) onShowToast("O carrinho está vazio para finalizar.", "warning");
-        }
-      } else if (key === "F10" || key === "F11") {
-        handleToggleMinimized();
-        if (onShowToast) onShowToast(!isMinimized ? "Modo minimizado ativado (Foco na venda)" : "Modo normal restaurado", "info");
-      } else if (key === "Escape") {
-        if (showShortcutsHelp) {
-          setShowShortcutsHelp(false);
-        } else if (cart.length > 0) {
-          if (confirm("Deseja mesmo limpar e cancelar a venda actual?")) {
-            handleReset();
-            if (onShowToast) onShowToast("Venda cancelada com sucesso.", "info");
-          }
-        }
-      }
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F1" || e.key === "F2" || e.key === "F3" || e.key === "F4" || e.key === "F6" || e.key === "F8" || e.key === "F9" || e.key === "Escape") {
-        e.preventDefault();
-        executeShortcut(e.key);
-      }
-    };
-
-    const handleCustomShortcut = (e: Event) => {
-      const customEvent = e as CustomEvent<{ key: string }>;
-      if (customEvent.detail && customEvent.detail.key) {
-        executeShortcut(customEvent.detail.key);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("pos-shortcut-trigger", handleCustomShortcut);
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("pos-shortcut-trigger", handleCustomShortcut);
-    };
-  }, [cart, selectedPaymentMethod, showPreCheckoutModal, showShortcutsHelp]);
+  }, [searchQuery, localProducts, cart]);
 
   // Web Audio API feedback for retail barcode scanner
   const playBarcodeBeep = () => {
@@ -532,13 +460,17 @@ export default function POSModule({
       if (code.length >= 2) {
         const prod = productCache.findByBarcodeOrCode(code);
         if (prod) {
+          const inCart = cart.find(item => item.product.id === prod.id)?.quantity || 0;
+          const liveStock = prod.stock - inCart;
           if (prod.stock <= 0) {
             playErrorBeep();
             if (onShowToast) onShowToast(`Produto "${prod.name}" está esgotado!`, "error", "Stock Vazio");
+          } else if (liveStock <= 0) {
+            playErrorBeep();
+            if (onShowToast) onShowToast(`Todo o stock de "${prod.name}" (${prod.stock} un) já está no carrinho!`, "warning", "Stock Esgotado");
           } else {
             playBarcodeBeep();
             handleTriggerAddToCart(prod);
-            if (onShowToast) onShowToast(`📦 ${prod.name} adicionado (+1)`, "success", "Leitor de Código");
             setSearchQuery("");
             // Maintain focus on the search input
             setTimeout(() => {
@@ -618,15 +550,20 @@ export default function POSModule({
         const existing = prev.find(item => item.product.id === product.id);
         if (existing) {
           if (existing.quantity + addedQty > product.stock) {
-            if (onShowToast) onShowToast(`Quantidade excede o stock disponível (${product.stock} un)!`, "warning");
+            if (onShowToast) onShowToast(`Quantidade excede o stock disponível (${product.stock} un)! Já tem ${existing.quantity} un no carrinho.`, "warning", "Stock Esgotado");
             return prev;
           }
+          const updatedQty = parseFloat((existing.quantity + addedQty).toFixed(3));
           return prev.map(item => 
             item.product.id === product.id 
-              ? { ...item, quantity: parseFloat((item.quantity + addedQty).toFixed(3)) }
+              ? { ...item, quantity: updatedQty }
               : item
           );
         } else {
+          if (addedQty > product.stock) {
+            if (onShowToast) onShowToast(`Quantidade excede o stock disponível (${product.stock} un)!`, "warning", "Stock Insuficiente");
+            return prev;
+          }
           return [...prev, { product, quantity: addedQty, discount: 0, vatRate: product.vatRate, observation: "" }];
         }
       });
@@ -641,7 +578,7 @@ export default function POSModule({
     setCart(prev => prev.map(item => {
       if (item.product.id === productId) {
         if (parsed > item.product.stock) {
-          if (onShowToast) onShowToast(`Disponível apenas ${item.product.stock} em stock!`, "warning");
+          if (onShowToast) onShowToast(`Disponível apenas ${item.product.stock} un em stock! Quantidade ajustada ao máximo.`, "warning");
           return { ...item, quantity: item.product.stock };
         }
         return { ...item, quantity: parsed };
@@ -656,14 +593,17 @@ export default function POSModule({
       if (existing) {
         const decStep = existing.product.weightBased ? 0.25 : 1;
         if (existing.quantity > decStep) {
+          const updatedQty = parseFloat((existing.quantity - decStep).toFixed(3));
           return prev.map(item => 
             item.product.id === productId 
-              ? { ...item, quantity: parseFloat((item.quantity - decStep).toFixed(3)) }
+              ? { ...item, quantity: updatedQty }
               : item
           );
+        } else {
+          return prev.filter(item => item.product.id !== productId);
         }
       }
-      return prev.filter(item => item.product.id !== productId);
+      return prev;
     });
   };
 
@@ -1027,6 +967,157 @@ export default function POSModule({
       onShowToast(`⚡ One-Click Checkout: Venda finalizada com sucesso via ${label}!`, "success", "One-Click Ativo");
     }
   };
+
+  // Helper to trigger receipt printing with simulated visual feedback and safe window.print
+  const triggerPrintReceipt = (mode: "receipt" | "invoice" = "receipt") => {
+    setPrintMode(mode);
+    setIsSimulatingPrint(true);
+    setTimeout(() => {
+      try {
+        window.print();
+      } catch (err) {
+        console.warn("Dispositivo em iFrame bloqueado para window.print.");
+      }
+    }, 150);
+    setTimeout(() => {
+      setIsSimulatingPrint(false);
+    }, 4000);
+  };
+
+  // Global Keyboard Shortcuts (F1, F2, F3, F4, F5, F6, F8, F9, F10, F11, ESC)
+  useEffect(() => {
+    const executeShortcut = (key: string) => {
+      if (key === "F1") {
+        if (showPreCheckoutModal) {
+          // If the pre-checkout modal is already open, F1 confirms and finalizes the sale
+          handleCheckout(true, true);
+          if (onShowToast) onShowToast("Atalho F1: Venda faturada e confirmada!", "success");
+        } else {
+          // Open help/shortcuts overlay
+          setShowShortcutsHelp(prev => !prev);
+        }
+      } else if (key === "F2") {
+        customerSelectRef.current?.focus();
+        if (onShowToast) onShowToast("Atalho F2: Selecionar cliente focado!", "info");
+      } else if (key === "F3") {
+        searchInputRef.current?.focus();
+        if (onShowToast) onShowToast("Atalho F3: Pesquisa de produtos focada!", "info");
+      } else if (key === "F4") {
+        setQuickCustomerModalOpen(true);
+      } else if (key === "F5") {
+        // Shortcut F5: Trigger Print Function / Instant Finalize & Print
+        if (completedTx) {
+          triggerPrintReceipt("receipt");
+          if (onShowToast) onShowToast("Atalho F5: A imprimir recibo fiscal...", "success");
+        } else if (completedBudget) {
+          setIsSimulatingPrint(true);
+          setTimeout(() => {
+            try {
+              window.print();
+            } catch (err) {
+              console.warn("Dispositivo em iFrame bloqueado para window.print.");
+            }
+          }, 150);
+          setTimeout(() => {
+            setIsSimulatingPrint(false);
+          }, 4000);
+          if (onShowToast) onShowToast("Atalho F5: A imprimir proposta de orçamento...", "info");
+        } else if (showFinalConfirmModal) {
+          handleCheckout(true, true);
+          if (onShowToast) onShowToast("Atalho F5: Venda finalizada com emissão de recibo!", "success");
+        } else if (showPreCheckoutModal) {
+          handleCheckout(true, true);
+          if (onShowToast) onShowToast("Atalho F5: Venda confirmada e enviada para faturação!", "success");
+        } else if (cart.length > 0) {
+          handleCheckout(true, true);
+          if (onShowToast) onShowToast("Atalho F5: Venda rápida finalizada e enviada para impressão!", "success");
+        } else {
+          if (onShowToast) onShowToast("O carrinho está vazio para imprimir ou finalizar.", "warning");
+        }
+      } else if (key === "F6") {
+        const value = prompt("Insira a percentagem de desconto comercial (0 a 100):");
+        if (value !== null) {
+          const num = parseFloat(value);
+          if (!isNaN(num) && num >= 0 && num <= 100) {
+            setDiscountType("PERCENT");
+            setDiscountValue(num);
+            if (onShowToast) onShowToast(`Desconto de ${num}% aplicado!`, "success");
+          }
+        }
+      } else if (key === "F8") {
+        // Toggle payment method
+        const methods = ["CASH", "MPESA_PAGA_FACIL", "EMOLA", "POS_CARD", "DEBT", "MIXED"];
+        const nextIdx = (methods.indexOf(selectedPaymentMethod) + 1) % methods.length;
+        setSelectedPaymentMethod(methods[nextIdx]);
+        if (onShowToast) onShowToast(`Método alterado para: ${methods[nextIdx]}`, "info");
+      } else if (key === "F9") {
+        if (cart.length > 0) {
+          setShowPreCheckoutModal(true);
+        } else {
+          if (onShowToast) onShowToast("O carrinho está vazio para finalizar.", "warning");
+        }
+      } else if (key === "F10" || key === "F11") {
+        handleToggleMinimized();
+        if (onShowToast) onShowToast(!isMinimized ? "Modo minimizado ativado (Foco na venda)" : "Modo normal restaurado", "info");
+      } else if (key === "Escape") {
+        if (showShortcutsHelp) {
+          setShowShortcutsHelp(false);
+        } else if (cart.length > 0) {
+          if (confirm("Deseja mesmo limpar e cancelar a venda actual?")) {
+            handleReset();
+            if (onShowToast) onShowToast("Venda cancelada com sucesso.", "info");
+          }
+        }
+      }
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.key === "F1" || 
+        e.key === "F2" || 
+        e.key === "F3" || 
+        e.key === "F4" || 
+        e.key === "F5" || 
+        e.key === "F6" || 
+        e.key === "F8" || 
+        e.key === "F9" || 
+        e.key === "F10" || 
+        e.key === "F11" || 
+        e.key === "Escape"
+      ) {
+        e.preventDefault();
+        executeShortcut(e.key);
+      }
+    };
+
+    const handleCustomShortcut = (e: Event) => {
+      const customEvent = e as CustomEvent<{ key: string }>;
+      if (customEvent.detail && customEvent.detail.key) {
+        executeShortcut(customEvent.detail.key);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("pos-shortcut-trigger", handleCustomShortcut);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("pos-shortcut-trigger", handleCustomShortcut);
+    };
+  }, [
+    cart, 
+    selectedPaymentMethod, 
+    showPreCheckoutModal, 
+    showFinalConfirmModal, 
+    showShortcutsHelp, 
+    completedTx, 
+    completedBudget, 
+    isMinimized, 
+    calculations, 
+    selectedCustomer, 
+    receivedCashAmount, 
+    mixedSumTotal, 
+    mobilePaymentStatus
+  ]);
 
   // 15. Suspend and Resume Sale functions
   const handleSuspendSale = () => {
@@ -1923,13 +2014,13 @@ export default function POSModule({
       phone: quickCustPhone || "Sem Telemóvel",
       email: `${quickCustName.toLowerCase().replace(/\s+/g, "")}@gmail.com`,
       address: "Maputo, Moçambique",
-      nuit: quickCustNuit || "400000000",
+      nuit: "",
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
       loyaltyPoints: 0,
-      preferredPaymentMethod: quickCustPreferredMethod,
-      oneClickCheckoutEnabled: quickCustOneClick
+      preferredPaymentMethod: "CASH",
+      oneClickCheckoutEnabled: false
     };
     setLocalCustomers(prev => [...prev, newCust]);
     setSelectedCustomerId(newCust.id);
@@ -1944,7 +2035,6 @@ export default function POSModule({
           customerName: newCust.name,
           customerPhone: newCust.phone !== "Sem Telemóvel" ? newCust.phone : "",
           customerEmail: newCust.email,
-          nuit: newCust.nuit !== "400000000" ? newCust.nuit : prev.nuit,
         };
       });
     }
@@ -1952,9 +2042,6 @@ export default function POSModule({
     setQuickCustomerModalOpen(false);
     setQuickCustName("");
     setQuickCustPhone("");
-    setQuickCustNuit("");
-    setQuickCustPreferredMethod("CASH");
-    setQuickCustOneClick(false);
     if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e selecionado!`, "success");
   };
 
@@ -1989,13 +2076,17 @@ export default function POSModule({
                       );
                       if (prod) {
                         e.preventDefault();
+                        const inCart = cart.find(item => item.product.id === prod.id)?.quantity || 0;
+                        const liveStock = prod.stock - inCart;
                         if (prod.stock <= 0) {
                           playErrorBeep();
                           if (onShowToast) onShowToast(`Produto "${prod.name}" está esgotado!`, "error", "Stock Vazio");
+                        } else if (liveStock <= 0) {
+                          playErrorBeep();
+                          if (onShowToast) onShowToast(`Todo o stock de "${prod.name}" (${prod.stock} un) já foi colocado no carrinho!`, "warning", "Stock Esgotado no Carrinho");
                         } else {
                           playBarcodeBeep();
                           handleTriggerAddToCart(prod);
-                          if (onShowToast) onShowToast(`📦 ${prod.name} adicionado (+1)`, "success", "Código Lido");
                           setSearchQuery("");
                           setTimeout(() => {
                             searchInputRef.current?.focus();
@@ -2122,8 +2213,12 @@ export default function POSModule({
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {filteredProducts.map((p) => {
+                const inCartQty = cartItemQuantities.get(p.id) || 0;
+                const liveRemainingStock = Math.max(0, p.stock - inCartQty);
                 const isOutOfStock = p.stock <= 0;
-                const isLowStock = p.stock > 0 && p.stock <= p.minStock;
+                const isCartExhausted = liveRemainingStock <= 0 && p.stock > 0;
+                const isLowStock = liveRemainingStock > 0 && liveRemainingStock <= p.minStock;
+                const isDisabled = isOutOfStock || isCartExhausted;
                 
                 return (
                   <button
@@ -2132,24 +2227,43 @@ export default function POSModule({
                       playBarcodeBeep();
                       handleTriggerAddToCart(p);
                     }}
-                    disabled={isOutOfStock}
+                    disabled={isDisabled}
                     id={`btn-product-${p.id}`}
                     className={`group bg-white p-3 rounded-xl border relative text-left transition-all flex flex-col justify-between select-none h-40 ${
-                      isOutOfStock 
-                        ? "border-slate-200 bg-slate-100/70 cursor-not-allowed opacity-60" 
-                        : "border-slate-200 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
+                      isDisabled 
+                        ? isCartExhausted
+                          ? "border-amber-300 bg-amber-50/40 cursor-not-allowed opacity-90"
+                          : "border-slate-200 bg-slate-100/70 cursor-not-allowed opacity-60" 
+                        : inCartQty > 0
+                          ? "border-orange-300 bg-orange-50/20 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
+                          : "border-slate-200 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
                     }`}
                   >
                     {/* Status & Barcode badge */}
                     <div className="flex items-start justify-between w-full">
-                      <span className="text-2xl p-1 bg-slate-50 group-hover:bg-orange-50 rounded-lg transition">{p.emoji || "📦"}</span>
+                      <div className="relative">
+                        <span className="text-2xl p-1 bg-slate-50 group-hover:bg-orange-50 rounded-lg transition inline-block">{p.emoji || "📦"}</span>
+                        {inCartQty > 0 && (
+                          <span className="absolute -top-1.5 -right-2 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-sm">
+                            {inCartQty}
+                          </span>
+                        )}
+                      </div>
                       <div className="flex flex-col items-end gap-0.5">
                         {isOutOfStock ? (
                           <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-red-100 text-red-700">ESGOTADO</span>
+                        ) : isCartExhausted ? (
+                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-mono">
+                            0 disp. (🛒 {inCartQty})
+                          </span>
+                        ) : inCartQty > 0 ? (
+                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                            <span>{liveRemainingStock} un disp.</span>
+                          </span>
                         ) : isLowStock ? (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{p.stock} un</span>
+                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{liveRemainingStock} un</span>
                         ) : (
-                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">{p.stock} un</span>
+                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">{liveRemainingStock} un</span>
                         )}
                         {p.barcode && (
                           <span className="text-[7.5px] font-mono text-slate-400 flex items-center gap-0.5">
@@ -2163,13 +2277,28 @@ export default function POSModule({
                     {/* Title */}
                     <div>
                       <h4 className="text-xs font-bold text-slate-800 line-clamp-2 leading-snug">{p.name}</h4>
-                      <p className="text-[9.5px] text-slate-400 font-mono mt-0.5">{p.category}</p>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <p className="text-[9.5px] text-slate-400 font-mono">{p.category}</p>
+                        {inCartQty > 0 && (
+                          <span className="text-[9px] font-bold text-orange-600 font-mono">
+                            🛒 {inCartQty} {p.weightBased ? "kg" : "un"}
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Price */}
                     <div className="mt-1 pt-1.5 border-t border-slate-100 flex items-center justify-between">
                       <span className="text-sm font-black text-slate-900">{p.salePrice.toLocaleString()} <span className="text-[10px] font-semibold text-slate-400">{currency}</span></span>
-                      <span className="text-[10px] font-bold text-orange-600 group-hover:translate-x-0.5 transition">+ Adicionar</span>
+                      {isOutOfStock ? (
+                        <span className="text-[9.5px] font-bold text-slate-400">Esgotado</span>
+                      ) : isCartExhausted ? (
+                        <span className="text-[9.5px] font-bold text-amber-700">Máx. no Carrinho</span>
+                      ) : (
+                        <span className="text-[10px] font-bold text-orange-600 group-hover:translate-x-0.5 transition">
+                          {inCartQty > 0 ? `+ Adicionar (${liveRemainingStock})` : "+ Adicionar"}
+                        </span>
+                      )}
                     </div>
                   </button>
                 );
@@ -2267,6 +2396,7 @@ export default function POSModule({
           ) : (
             <AnimatePresence initial={false}>
               {cart.map((item) => {
+                const stockRemaining = Math.max(0, item.product.stock - item.quantity);
                 const isInsufficient = item.quantity > item.product.stock;
                 return (
                   <motion.div 
@@ -2284,9 +2414,14 @@ export default function POSModule({
                   >
                     <div className="flex-1 min-w-0 pr-1">
                       <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">{item.product.name}</h5>
-                      <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        {item.product.salePrice.toLocaleString()} MT/un
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {item.product.salePrice.toLocaleString()} MT/un
+                        </span>
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${stockRemaining === 0 ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-emerald-50 text-emerald-700 border-emerald-150"}`}>
+                          {stockRemaining === 0 ? "Stock esgotado no carrinho" : `Resta: ${stockRemaining} un`}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Quantity Controls */}
@@ -2294,6 +2429,7 @@ export default function POSModule({
                       <button 
                         onClick={() => handleRemoveFromCart(item.product.id)}
                         className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95"
+                        title="Diminuir quantidade (Restitui ao stock)"
                       >
                         <Minus className="w-3.5 h-3.5" />
                       </button>
@@ -2307,8 +2443,9 @@ export default function POSModule({
                       />
 
                       <button 
-                        onClick={() => handleTriggerAddToCart(item.product.id as any)}
+                        onClick={() => handleTriggerAddToCart(item.product)}
                         disabled={item.quantity >= item.product.stock}
+                        title={item.quantity >= item.product.stock ? "Stock esgotado para este produto" : "Adicionar mais 1 un (Deduz do stock)"}
                         className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -2323,6 +2460,7 @@ export default function POSModule({
                       <button
                         onClick={() => handleDeleteRow(item.product.id)}
                         className="text-[10px] text-red-400 hover:text-red-600 cursor-pointer transition mt-0.5"
+                        title="Remover produto e repor stock total"
                       >
                         Remover
                       </button>
@@ -2524,12 +2662,18 @@ export default function POSModule({
 
               {/* Items listing brief */}
               <div className="max-h-36 overflow-y-auto border border-slate-150 rounded-xl p-2.5 bg-slate-50/50 space-y-1.5 font-mono text-[10.5px]">
-                {cart.map(item => (
-                  <div key={item.product.id} className="flex justify-between text-slate-600">
-                    <span className="truncate max-w-[220px]">{item.product.name}</span>
-                    <span className="font-bold shrink-0">{item.quantity} × {item.product.salePrice.toLocaleString()} MT</span>
-                  </div>
-                ))}
+                {cart.map(item => {
+                  const stockRemaining = Math.max(0, item.product.stock - item.quantity);
+                  return (
+                    <div key={item.product.id} className="flex justify-between text-slate-600">
+                      <div className="truncate max-w-[200px]">
+                        <span>{item.product.name}</span>
+                        <span className="text-[9px] text-slate-400 block font-sans">Restará: {stockRemaining} un</span>
+                      </div>
+                      <span className="font-bold shrink-0">{item.quantity} × {item.product.salePrice.toLocaleString()} MT</span>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Detailed Financial highlight box */}
@@ -2578,15 +2722,19 @@ export default function POSModule({
               <button
                 onClick={() => handleCheckout(true)}
                 disabled={selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal}
-                className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-lg ${
+                title="Confirmar e Faturar com Recibo (Atalho: F5 / F1)"
+                className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5 ${
                   selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
                     ? "bg-slate-300 text-slate-500 cursor-not-allowed shadow-none"
                     : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/15"
                 }`}
               >
-                {selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
+                <span>{selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
                   ? "Valor Insuficiente"
-                  : "Confirmar e Faturar ✓"}
+                  : "Confirmar e Faturar ✓"}</span>
+                {!(selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal) && (
+                  <kbd className="px-1.5 py-0.2 bg-white/25 text-white rounded text-[10px] font-mono font-bold">F5</kbd>
+                )}
               </button>
             </div>
           </div>
@@ -2790,9 +2938,6 @@ export default function POSModule({
                           const match = localProducts.find(p => p.barcode === trimmed || p.code === trimmed);
                           if (match) {
                             handleTriggerAddToCart(match);
-                            if (onShowToast) {
-                              onShowToast(`Artigo Lido: ${match.name} (+1 adicionado)`, "success", "Câmara");
-                            }
                             if (!continuousScan) {
                               setScannerModalOpen(false);
                             }
@@ -2828,23 +2973,34 @@ export default function POSModule({
                 {/* Simulated list of barcodes */}
                 <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
                   <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider font-mono block">Barcodes Disponíveis:</span>
-                  {localProducts.map(p => (
-                    <button
-                      key={p.id}
-                      onClick={() => {
-                        handleTriggerAddToCart(p);
-                        if (onShowToast) onShowToast(`Scanner leu: ${p.barcode}`, "success", "Emulador");
-                        setScannerModalOpen(false);
-                      }}
-                      className="w-full text-left p-2 bg-slate-50 border border-slate-150 rounded-lg hover:bg-orange-50 hover:border-orange-200 text-xs flex justify-between items-center cursor-pointer transition"
-                    >
-                      <div className="truncate pr-2">
-                        <span className="font-bold text-slate-700 block truncate">{p.name}</span>
-                        <span className="text-[9.5px] font-mono text-slate-400 block">{p.barcode || "Sem Barcode"}</span>
-                      </div>
-                      <span className="text-[10px] font-mono font-bold text-orange-600 bg-white border border-slate-100 px-1.5 py-0.5 rounded shrink-0">Bipar</span>
-                    </button>
-                  ))}
+                  {localProducts.map(p => {
+                    const inCartQty = cartItemQuantities.get(p.id) || 0;
+                    const liveStock = Math.max(0, p.stock - inCartQty);
+                    const isExhausted = liveStock <= 0;
+                    return (
+                      <button
+                        key={p.id}
+                        disabled={isExhausted}
+                        onClick={() => {
+                          handleTriggerAddToCart(p);
+                          setScannerModalOpen(false);
+                        }}
+                        className={`w-full text-left p-2 border rounded-lg text-xs flex justify-between items-center transition ${
+                          isExhausted
+                            ? "bg-slate-100/60 border-slate-200 cursor-not-allowed opacity-60"
+                            : "bg-slate-50 border-slate-150 hover:bg-orange-50 hover:border-orange-200 cursor-pointer"
+                        }`}
+                      >
+                        <div className="truncate pr-2">
+                          <span className="font-bold text-slate-700 block truncate">{p.name}</span>
+                          <span className="text-[9.5px] font-mono text-slate-400 block">{p.barcode || "Sem Barcode"} • Disp: {liveStock} un</span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-orange-600 bg-white border border-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                          {isExhausted ? "Esgotado" : "Bipar"}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="border-t border-slate-100 pt-3 flex gap-2">
@@ -2861,7 +3017,6 @@ export default function POSModule({
                         const match = localProducts.find(p => p.barcode === manualBarcodeScan.trim() || p.code === manualBarcodeScan.trim());
                         if (match) {
                           handleTriggerAddToCart(match);
-                          if (onShowToast) onShowToast(`Leitor processou: ${match.name}`, "success", "Manual");
                           setScannerModalOpen(false);
                           setManualBarcodeScan("");
                         } else {
@@ -2921,46 +3076,6 @@ export default function POSModule({
                   onChange={(e) => setQuickCustPhone(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
                 />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">NUIT (Moçambique ID)</label>
-                <input
-                  type="text"
-                  placeholder="Ex: 299104882"
-                  value={quickCustNuit}
-                  onChange={(e) => setQuickCustNuit(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="font-semibold text-slate-600 block mb-1">Método de Liquidação Preferido</label>
-                <select
-                  value={quickCustPreferredMethod}
-                  onChange={(e) => setQuickCustPreferredMethod(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 text-slate-700 font-bold"
-                >
-                  <option value="CASH">💵 Dinheiro</option>
-                  <option value="MPESA_PAGA_FACIL">📱 M-Pesa</option>
-                  <option value="EMOLA">📱 E-Mola</option>
-                  <option value="POS_CARD">💳 POS</option>
-                  <option value="CREDIT_CARD">💳 Cartão de Crédito</option>
-                  <option value="BANK_TRANSFER">🏦 Transferência Bancária</option>
-                  <option value="DEBT">🧾 Dívida (Venda a Crédito)</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-150">
-                <input
-                  type="checkbox"
-                  id="quickCustOneClick"
-                  checked={quickCustOneClick}
-                  onChange={(e) => setQuickCustOneClick(e.target.checked)}
-                  className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
-                />
-                <label htmlFor="quickCustOneClick" className="text-xs font-bold text-slate-600 cursor-pointer select-none">
-                  ⚡ Habilitar One-Click Checkout
-                </label>
               </div>
             </div>
 
@@ -3458,25 +3573,16 @@ export default function POSModule({
               {/* Primary 80mm Thermal Receipt Button */}
               <button
                 type="button"
-                onClick={() => {
-                  setPrintMode("receipt");
-                  setIsSimulatingPrint(true);
-                  setTimeout(() => {
-                    try {
-                      window.print();
-                    } catch (err) {
-                      console.warn("Dispositivo em iFrame bloqueado para window.print.");
-                    }
-                  }, 150);
-                  setTimeout(() => {
-                    setIsSimulatingPrint(false);
-                  }, 4000);
-                }}
+                onClick={() => triggerPrintReceipt("receipt")}
                 className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 rounded-xl text-xs font-bold text-white transition shadow-lg shadow-orange-600/20 cursor-pointer active:scale-[0.99]"
+                title="Imprimir Fita Térmica de 80mm (Atalho: F5)"
               >
                 <div className="flex items-center gap-2">
                   <Printer className="w-4 h-4 shrink-0" />
                   <span>Imprimir Recibo</span>
+                  <kbd className="px-1.5 py-0.5 bg-white/20 text-white rounded text-[10px] font-mono font-bold shadow-inner">
+                    F5
+                  </kbd>
                 </div>
                 <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-mono font-semibold tracking-wide">
                   Térmica 80mm
@@ -3486,21 +3592,9 @@ export default function POSModule({
               {/* Secondary A4 Invoice Button */}
               <button
                 type="button"
-                onClick={() => {
-                  setPrintMode("invoice");
-                  setIsSimulatingPrint(true);
-                  setTimeout(() => {
-                    try {
-                      window.print();
-                    } catch (err) {
-                      console.warn("Dispositivo em iFrame bloqueado para window.print.");
-                    }
-                  }, 150);
-                  setTimeout(() => {
-                    setIsSimulatingPrint(false);
-                  }, 4000);
-                }}
+                onClick={() => triggerPrintReceipt("invoice")}
                 className="w-full flex items-center justify-between px-4 py-2.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition cursor-pointer"
+                title="Imprimir Fatura em Folha A4"
               >
                 <div className="flex items-center gap-2">
                   <Printer className="w-3.5 h-3.5 shrink-0 text-slate-500" />
@@ -4116,9 +4210,13 @@ export default function POSModule({
                   }, 4000);
                 }}
                 className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-lg shadow-amber-600/15"
+                title="Imprimir Orçamento (Atalho: F5)"
               >
                 <Printer className="w-4 h-4 text-amber-100" />
-                {budgetPrintFormat === "ESC_POS" ? `Imprimir Fita Térmica (${selectedPaperSize})` : "Imprimir Proposta A4"}
+                <span>{budgetPrintFormat === "ESC_POS" ? `Imprimir Fita Térmica (${selectedPaperSize})` : "Imprimir Proposta A4"}</span>
+                <kbd className="px-1.5 py-0.5 bg-white/20 text-white rounded text-[10px] font-mono font-bold shadow-inner ml-1">
+                  F5
+                </kbd>
               </button>
             </div>
 
@@ -4312,6 +4410,18 @@ export default function POSModule({
                       <span className="text-xs font-semibold text-slate-700">Registo Rápido de Cliente</span>
                     </div>
                     <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F4</kbd>
+                  </div>
+
+                  {/* F5 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-amber-50/70 transition bg-amber-50/40">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <div>
+                        <span className="text-xs font-bold text-amber-950 block">Imprimir Recibo / Finalização Rápida</span>
+                        <span className="text-[10.5px] text-amber-800/80">Imprime o recibo atual ou fatura imediatamente com emissão</span>
+                      </div>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-amber-500 text-white border border-amber-600 rounded-lg text-xs font-bold font-mono shadow-sm">F5</kbd>
                   </div>
 
                   {/* F6 */}

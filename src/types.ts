@@ -269,6 +269,9 @@ export interface SystemSettings extends MultiTenantMetadata {
   smsCustomUrl?: string;
   smsManagerPhone?: string;
   smsStockThreshold?: number;
+  stockAlertAutoSendOnSale?: boolean;
+  stockAlertSoundEnabled?: boolean;
+  stockAlertIncludeDeficit?: boolean;
   printerEnabled?: boolean;
   twoFactorEmailEnabled?: boolean;
   twoFactorNewLocationEmail?: boolean;

@@ -287,21 +287,21 @@ export async function testSupabaseConnection(url?: string, key?: string): Promis
  */
 export const SupabaseSyncService = {
 
-  // --- AUTENTICAÇÃO SUPABASE COM RESILIÊNCIA A ERROS 403 / OFFLINE ---
+  // --- AUTENTICAÇÃO SUPABASE COM VALIDAÇÃO ESTRITA DE SEGURANÇA ---
   async signUpWithEmail(email: string, password: string, name: string, branch: string, role: string = "Administrador", plan: string = "OURO") {
     const client = getSupabaseClient();
     if (!client) {
-      return { user: { id: `usr_${Date.now()}`, email, user_metadata: { name, branch, role, subscription_plan: plan } } };
+      return { user: null, error: new Error("Servidor de autenticação Supabase não está configurado.") };
     }
 
     try {
       const { data, error } = await client.auth.signUp({
-        email,
+        email: email.trim().toLowerCase(),
         password,
         options: {
           data: {
-            name,
-            branch,
+            name: name.trim(),
+            branch: branch.trim(),
             role,
             subscription_plan: plan
           }
@@ -309,8 +309,8 @@ export const SupabaseSyncService = {
       });
 
       if (error) {
-        console.warn("[Supabase Auth] Aviso no signUp (fallback local ativo):", error.message);
-        return { user: { id: `usr_${Date.now()}`, email, user_metadata: { name, branch, role, subscription_plan: plan } } };
+        console.warn("[Supabase Auth] Erro no signUp:", error.message);
+        return { user: null, error };
       }
 
       if (data && data.user) {
@@ -320,45 +320,46 @@ export const SupabaseSyncService = {
             id: `emp_${data.user.id.slice(0, 8)}`,
             tenant_id: tenantId,
             auth_uid: data.user.id,
-            name,
-            email,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
             role,
             status: "ACTIVE",
-            branch,
+            branch: branch.trim(),
             subscription_plan: plan,
             created_at: new Date().toISOString()
           };
           await client.from("colaboradores").upsert(empRecord, { onConflict: "email" });
-        } catch {}
+        } catch (colabErr) {
+          console.warn("[Supabase Auth] Aviso ao sincronizar colaborador:", colabErr);
+        }
       }
 
       return data;
     } catch (err: any) {
-      console.warn("[Supabase Auth] Exceção no signUpWithEmail (resiliente):", err?.message);
-      return { user: { id: `usr_${Date.now()}`, email, user_metadata: { name, branch, role, subscription_plan: plan } } };
+      console.error("[Supabase Auth] Exceção no signUpWithEmail:", err?.message);
+      return { user: null, error: err };
     }
   },
 
   async signInWithEmail(email: string, password: string) {
     const client = getSupabaseClient();
     if (!client) {
-      return { user: { id: `usr_${Date.now()}`, email, user_metadata: { name: email.split("@")[0] } } };
+      return { user: null, error: new Error("Servidor de autenticação Supabase não está configurado.") };
     }
 
     try {
       const { data, error } = await client.auth.signInWithPassword({
-        email,
+        email: email.trim().toLowerCase(),
         password
       });
 
       if (error) {
-        console.warn("[Supabase Auth] Aviso no signInWithPassword:", error.message);
-        // Do not throw raw 403; return object or let caller check local credentials
+        console.warn("[Supabase Auth] Falha no signInWithPassword:", error.message);
         return { user: null, error };
       }
       return data;
     } catch (err: any) {
-      console.warn("[Supabase Auth] Exceção no signInWithEmail:", err?.message);
+      console.error("[Supabase Auth] Exceção no signInWithEmail:", err?.message);
       return { user: null, error: err };
     }
   },
@@ -370,34 +371,39 @@ export const SupabaseSyncService = {
     }
 
     try {
-      const redirectUri = typeof window !== "undefined" ? window.location.origin : "";
+      const redirectUri = typeof window !== "undefined" && window.location.origin ? window.location.origin : "";
+      const isIframe = typeof window !== "undefined" && window.self !== window.top;
+
       const { data, error } = await client.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: redirectUri,
-          skipBrowserRedirect: true,
           queryParams: {
             access_type: "offline",
             prompt: "select_account"
-          }
+          },
+          skipBrowserRedirect: isIframe
         }
       });
 
       if (error) {
-        console.warn("[Supabase Auth] Aviso no signInWithOAuth Google:", error.message);
+        console.warn("[Supabase Auth] Erro no signInWithOAuth Google:", error.message);
         return { data: null, error, url: null };
       }
 
       if (data?.url && typeof window !== "undefined") {
-        if (options?.popup !== false) {
-          // Open popup window to prevent iframe 403 / X-Frame-Options blocking
+        if (isIframe) {
           const popup = window.open(
             data.url,
             "google_oauth_popup",
             "width=550,height=650,left=250,top=100,status=no,resizable=yes"
           );
           if (!popup || popup.closed || typeof popup.closed === "undefined") {
-            console.warn("[Supabase Auth] Janela Popup bloqueada pelo navegador.");
+            if (window.top) {
+              window.top.location.href = data.url;
+            } else {
+              window.location.assign(data.url);
+            }
           }
         } else {
           window.location.assign(data.url);
@@ -406,7 +412,7 @@ export const SupabaseSyncService = {
 
       return { data, error: null, url: data?.url || null };
     } catch (err: any) {
-      console.warn("[Supabase Auth] Exceção no signInWithOAuth Google:", err?.message || err);
+      console.error("[Supabase Auth] Exceção no signInWithOAuth Google:", err?.message || err);
       return { data: null, error: err, url: null };
     }
   },
@@ -438,10 +444,45 @@ export const SupabaseSyncService = {
   },
 
   /**
-   * Sincroniza e Mapeia o Utilizador Autenticado (via Google Provider ou Email)
-   * para a tabela 'profiles', 'companies' e 'colaboradores' no Supabase.
+   * Utilitário de Integridade de Dados: Mescla listas de entidades preservando registros locais e remotos por ID
    */
-  async syncUserProfileFromAuth(user: User): Promise<{ employee: Employee; companyId: string; companyName: string }> {
+  mergeRecordsById<T extends { id: string; updatedAt?: string; updated_at?: string }>(localList: T[] = [], remoteList: T[] = []): T[] {
+    const map = new Map<string, T>();
+    
+    // Primeiro insere os registros locais
+    for (const item of localList) {
+      if (item && item.id) {
+        map.set(item.id, item);
+      }
+    }
+    
+    // Em seguida mescla com os registros remotos (atualizando se o remoto for mais recente ou complementar)
+    for (const remote of remoteList) {
+      if (remote && remote.id) {
+        const local = map.get(remote.id);
+        if (!local) {
+          map.set(remote.id, remote);
+        } else {
+          // Merge inteligente preservando campos não vazios locais
+          map.set(remote.id, {
+            ...local,
+            ...remote,
+            // Preserva chaves locais sensíveis se o remoto vier em branco
+            ...((local as any).pin && !(remote as any).pin ? { pin: (local as any).pin } : {}),
+            ...((local as any).password && !(remote as any).password ? { password: (local as any).password } : {})
+          });
+        }
+      }
+    }
+    
+    return Array.from(map.values());
+  },
+
+  /**
+   * Sincroniza e Mapeia o Utilizador Autenticado (via Google Provider ou Email)
+   * com verificação estrita de integridade de dados para evitar sobrescrita de perfis locais existentes.
+   */
+  async syncUserProfileFromAuth(user: User, localEmployees: Employee[] = []): Promise<{ employee: Employee; companyId: string; companyName: string }> {
     const client = getSupabaseClient();
     const uid = user.id;
     const email = (user.email || "").toLowerCase().trim();
@@ -451,11 +492,23 @@ export const SupabaseSyncService = {
     const phone = meta.phone || meta.contact || "+258 84 000 0000";
     const defaultCompanyName = meta.company_name || meta.branch || `${fullName} - Vendas`;
     
-    let role: UserRole = "ADMIN";
+    // Verificar se já existe colaborador local com este email ou ID correspondente para preservar PIN e configurações
+    const localMatch = localEmployees.find(e => 
+      (e.email && e.email.toLowerCase().trim() === email) ||
+      e.id === "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) ||
+      (e.username && e.username.toLowerCase() === email.split("@")[0].toLowerCase())
+    );
+
+    let role: string = localMatch?.role || "ADMIN";
     let companyId = "comp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
-    let companyName = defaultCompanyName;
-    let status: "ACTIVE" | "INACTIVE" | "BLOCKED" = "ACTIVE";
-    let subscriptionPlan: any = meta.subscription_plan || "OURO";
+    let companyName = localMatch?.companyId || defaultCompanyName;
+    let status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED" = localMatch?.status || "ACTIVE";
+    let subscriptionPlan: any = localMatch?.subscriptionPlan || meta.subscription_plan || "OURO";
+    let existingEmpId = localMatch?.id || "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+    let pin = localMatch?.pin || "";
+    let pinChanged = localMatch?.pinChanged ?? true;
+    let pinCreatedAt = localMatch?.pinCreatedAt || new Date().toISOString();
+    let fotoPerfil = localMatch?.fotoPerfil || avatarUrl;
 
     if (client) {
       try {
@@ -467,11 +520,14 @@ export const SupabaseSyncService = {
           .maybeSingle();
 
         if (existingColab) {
+          if (existingColab.id) existingEmpId = existingColab.id;
           if (existingColab.tenant_id) companyId = existingColab.tenant_id;
           if (existingColab.role) role = existingColab.role as UserRole;
           if (existingColab.status) status = existingColab.status as any;
           if (existingColab.branch) companyName = existingColab.branch;
           if (existingColab.subscription_plan) subscriptionPlan = existingColab.subscription_plan;
+          if (existingColab.foto_perfil) fotoPerfil = existingColab.foto_perfil;
+          if (existingColab.pin) pin = existingColab.pin;
 
           // Vincular auth_uid se ainda não estava vinculado
           if (!existingColab.auth_uid || existingColab.auth_uid !== uid) {
@@ -534,27 +590,27 @@ export const SupabaseSyncService = {
             email: email,
             full_name: fullName,
             role: role,
-            avatar_url: avatarUrl,
+            avatar_url: fotoPerfil,
             phone: phone,
             updated_at: new Date().toISOString()
           });
 
           // Inserir na tabela colaboradores como Administrador da Empresa
-          const empId = "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
           await client.from("colaboradores").upsert({
-            id: empId,
+            id: existingEmpId,
             tenant_id: companyId,
             auth_uid: uid,
             name: fullName,
             email: email,
             role: role,
             contact: phone,
-            salary: 0,
-            admission_date: new Date().toISOString().split("T")[0],
-            status: "ACTIVE",
+            salary: localMatch?.salary || 0,
+            admission_date: localMatch?.admissionDate || new Date().toISOString().split("T")[0],
+            status: status,
             branch: companyName,
             subscription_plan: subscriptionPlan,
-            foto_perfil: avatarUrl,
+            foto_perfil: fotoPerfil,
+            pin: pin,
             updated_at: new Date().toISOString()
           }, { onConflict: "id" });
         }
@@ -568,21 +624,22 @@ export const SupabaseSyncService = {
     }
 
     const employee: Employee = {
-      id: "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8),
-      name: fullName,
+      id: existingEmpId,
+      name: localMatch?.name || fullName,
       email: email,
       role: role,
-      contact: phone,
-      salary: 0,
-      admissionDate: new Date().toISOString().split("T")[0],
+      contact: localMatch?.contact || phone,
+      salary: localMatch?.salary || 0,
+      admissionDate: localMatch?.admissionDate || new Date().toISOString().split("T")[0],
       status: status,
-      username: email.split("@")[0],
-      pin: "",
-      pinCreatedAt: new Date().toISOString(),
-      pinChanged: true,
+      username: localMatch?.username || email.split("@")[0],
+      pin: pin,
+      pinCreatedAt: pinCreatedAt,
+      pinChanged: pinChanged,
       companyId: companyName,
       subscriptionPlan: subscriptionPlan,
-      fotoPerfil: avatarUrl
+      fotoPerfil: fotoPerfil,
+      theme: localMatch?.theme
     };
 
     return { employee, companyId, companyName };
@@ -846,15 +903,21 @@ export const SupabaseSyncService = {
   },
 
   // --- VENDAS / TRANSAÇÕES ---
-  async fetchTransactions(): Promise<Transaction[]> {
+  async fetchTransactions(sinceIsoDate?: string): Promise<Transaction[]> {
     const client = getSupabaseClient();
     if (!client) return [];
 
     try {
-      const { data, error } = await client
+      let query = client
         .from("vendas")
         .select("*")
         .order("timestamp", { ascending: false });
+
+      if (sinceIsoDate) {
+        query = query.gte("timestamp", sinceIsoDate);
+      }
+
+      const { data, error } = await query;
 
       if (error || !data) return [];
 
@@ -878,6 +941,11 @@ export const SupabaseSyncService = {
     }
   },
 
+  async fetchRecentTransactions24h(): Promise<Transaction[]> {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return await this.fetchTransactions(since24h);
+  },
+
   // --- PROCESS SALE ATOMIC (RPC) ---
   async processSaleAtomic(params: {
     saleId: string;
@@ -896,6 +964,7 @@ export const SupabaseSyncService = {
     changeAmount: number;
     items: any[];
     notes?: string;
+    idempotencyKey?: string;
   }): Promise<{ success: boolean; error?: string }> {
     const client = getSupabaseClient();
     if (!client) return { success: false, error: "Supabase não conectado." };
@@ -919,18 +988,51 @@ export const SupabaseSyncService = {
         p_amount_paid: params.amountPaid,
         p_change_amount: params.changeAmount,
         p_items: params.items,
-        p_notes: params.notes || null
+        p_notes: params.notes || null,
+        p_idempotency_key: params.idempotencyKey || params.saleId || null
       });
 
       if (error) {
-        // Fallback: direct table insert if RPC function isn't yet deployed
-        console.warn("RPC process_sale_atomic falhou, executando upsert direto:", error.message);
-        return await this.saveTransactionDirect(params);
+        console.error("RPC process_sale_atomic falhou (Rollback seguro acionado):", error.message);
+        return { success: false, error: error.message };
       }
 
       return data || { success: true };
     } catch (err: any) {
-      return await this.saveTransactionDirect(params);
+      console.error("Erro inesperado em processSaleAtomic:", err.message);
+      return { success: false, error: err.message };
+    }
+  },
+
+  async settleDebtPaymentAtomic(params: {
+    debtId: string;
+    customerId: string;
+    amount: number;
+    paymentMethod?: string;
+    notes?: string;
+    userName?: string;
+    idempotencyKey?: string;
+  }): Promise<{ success: boolean; error?: string; remainingDebt?: number }> {
+    const client = getSupabaseClient();
+    if (!client) return { success: false, error: "Supabase não conectado." };
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const { data, error } = await client.rpc("settle_debt_payment_atomic", {
+        p_tenant_id: tenantId,
+        p_debt_id: params.debtId,
+        p_customer_id: params.customerId,
+        p_amount: params.amount,
+        p_payment_method: params.paymentMethod || "Dinheiro",
+        p_notes: params.notes || null,
+        p_user_name: params.userName || "Operador",
+        p_idempotency_key: params.idempotencyKey || null
+      });
+
+      if (error) return { success: false, error: error.message };
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
     }
   },
 

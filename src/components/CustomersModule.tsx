@@ -91,9 +91,6 @@ export default function CustomersModule({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
-  const [nuit, setNuit] = useState("");
-  const [preferredPaymentMethod, setPreferredPaymentMethod] = useState("CASH");
-  const [oneClickCheckoutEnabled, setOneClickCheckoutEnabled] = useState(false);
   const [localError, setLocalError] = useState("");
 
   // SMS Marketing & Loyalty Campaigns states
@@ -199,8 +196,8 @@ export default function CustomersModule({
   // Handle customer registration
   const handleSubmitCustomer = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !phone.trim() || !nuit.trim()) {
-      setLocalError("Por favor, preencha os campos obrigatórios (Nome, Telefone e NUIT).");
+    if (!name.trim() || !phone.trim()) {
+      setLocalError("Por favor, preencha os campos obrigatórios (Nome e Telefone).");
       return;
     }
     setLocalError("");
@@ -211,20 +208,20 @@ export default function CustomersModule({
       phone,
       email: email || "consumidor@geral.com",
       address: address || "Não Informado, Maputo",
-      nuit,
+      nuit: "",
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
       loyaltyPoints: 0,
-      preferredPaymentMethod: preferredPaymentMethod,
-      oneClickCheckoutEnabled: oneClickCheckoutEnabled
+      preferredPaymentMethod: "CASH",
+      oneClickCheckoutEnabled: false
     };
 
     onAddCustomer(payload);
     onAddAuditLog(
       "Cadastrar Cliente",
       "CLIENTES",
-      `Novo cliente '${payload.name}' cadastrado por ${currentRole}. NUIT: ${payload.nuit}, Telefone: ${payload.phone}`
+      `Novo cliente '${payload.name}' cadastrado por ${currentRole}. Telefone: ${payload.phone}`
     );
 
     if (onShowToast) {
@@ -237,9 +234,6 @@ export default function CustomersModule({
     setPhone("");
     setEmail("");
     setAddress("");
-    setNuit("");
-    setPreferredPaymentMethod("CASH");
-    setOneClickCheckoutEnabled(false);
   };
 
   // Delete Customer
@@ -1337,30 +1331,16 @@ export default function CustomersModule({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Contacto Telefónico *</label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="Ex: 847231455"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-505 uppercase">NUIT Fiscal de Moçambique *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: 142533669"
-                  value={nuit}
-                  onChange={(e) => setNuit(e.target.value)}
-                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
-                />
-              </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Contacto Telefónico *</label>
+              <input
+                type="tel"
+                required
+                placeholder="Ex: 847231455"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+              />
             </div>
 
             <div className="space-y-1">
@@ -1383,38 +1363,6 @@ export default function CustomersModule({
                 onChange={(e) => setAddress(e.target.value)}
                 className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500 text-slate-850"
               />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">Método de Liquidação Preferido</label>
-                <select
-                  value={preferredPaymentMethod}
-                  onChange={(e) => setPreferredPaymentMethod(e.target.value)}
-                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500 text-xs text-slate-750"
-                >
-                  <option value="CASH">💵 Dinheiro</option>
-                  <option value="MPESA_PAGA_FACIL">📱 M-Pesa</option>
-                  <option value="EMOLA">📱 E-Mola</option>
-                  <option value="POS_CARD">💳 POS</option>
-                  <option value="CREDIT_CARD">💳 Cartão de Crédito</option>
-                  <option value="BANK_TRANSFER">🏦 Transferência Bancária</option>
-                  <option value="DEBT">🧾 Dívida (Venda a Crédito)</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-150 self-end">
-                <input
-                  type="checkbox"
-                  id="oneClickCheckout"
-                  checked={oneClickCheckoutEnabled}
-                  onChange={(e) => setOneClickCheckoutEnabled(e.target.checked)}
-                  className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500 cursor-pointer"
-                />
-                <label htmlFor="oneClickCheckout" className="text-[10.5px] font-bold text-slate-650 cursor-pointer select-none">
-                  ⚡ Habilitar One-Click Checkout
-                </label>
-              </div>
             </div>
 
             <div className="flex gap-2 pt-2">

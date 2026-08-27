@@ -57,21 +57,14 @@ export default function LoginModule({
   onAddAuditLog,
   settings
 }: LoginModuleProps) {
-  // Views: "LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE" | "GOOGLE"
-  const [view, setView] = useState<"LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE" | "GOOGLE">("LOGIN");
+  // Views: "LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE"
+  const [view, setView] = useState<"LOGIN" | "SIGNUP" | "RECOVERY" | "PIN" | "QRCODE">("LOGIN");
   
   // Login Form State
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-
-  // Google Flow Specific State
-  const [googleEmail, setGoogleEmail] = useState("");
-  const [googleName, setGoogleName] = useState("");
-  const [googleCompany, setGoogleCompany] = useState(companyName || "OST Comércio Geral");
-  const [googlePassword, setGooglePassword] = useState("");
-  const [googleContact, setGoogleContact] = useState("+258 84 000 0000");
 
   // Signup Form State
   const [signupName, setSignupName] = useState("");
@@ -158,55 +151,6 @@ export default function LoginModule({
     }
   }, [employees, selectedEmployeeId]);
 
-  // Monitoramento e Recepção Automática de Sessão Supabase Auth (Google OAuth)
-  useEffect(() => {
-    let isMounted = true;
-    const client = getSupabaseClient();
-    if (!client) return;
-
-    const processSessionUser = async (user: any) => {
-      if (!user || !isMounted) return;
-      try {
-        setLoadingState("LOADING_PERMISSIONS");
-        setLoadingProgress(60);
-
-        const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(user);
-        const targetBranch = userCompany || employee.companyId || companyName || "OST Comércio Geral";
-
-        setAuthenticatedUser(employee);
-        setSelectedBranch(targetBranch);
-        setLoadingProgress(95);
-
-        setTimeout(() => {
-          if (!isMounted) return;
-          setLoadingProgress(100);
-          setLoadingState("IDLE");
-          onShowToast(`Autenticado com sucesso via Google (${employee.name})!`, "success");
-          onLoginSuccess(employee, targetBranch);
-        }, 400);
-      } catch (err) {
-        console.error("Erro ao sincronizar perfil Supabase:", err);
-      }
-    };
-
-    client.auth.getSession().then(({ data: { session } }) => {
-      if (session && session.user) {
-        processSessionUser(session.user);
-      }
-    });
-
-    const { data: authSub } = client.auth.onAuthStateChange((_event, session) => {
-      if (session && session.user) {
-        processSessionUser(session.user);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      authSub?.subscription?.unsubscribe();
-    };
-  }, [employees, companyName, onLoginSuccess, onShowToast]);
-
   // Real-time password strength checker
   const getPasswordStrength = (pass: string) => {
     if (!pass) return { score: 0, label: "Vazia", color: "bg-slate-800" };
@@ -278,7 +222,7 @@ export default function LoginModule({
 
         const result: any = await signInWithEmail(inputEmail, password);
         if (result && result.user) {
-          const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(result.user);
+          const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(result.user, employees);
 
           if (employee.status === "BLOCKED") {
             setLoadingState("IDLE");
@@ -527,161 +471,37 @@ export default function LoginModule({
     }
   };
 
-  // 4. Autenticação & Criação de Conta com Google
-  const handleGoogleSignIn = () => {
+  // 4. Autenticação Oficial com Google OAuth (Via Supabase Auth / Google Identity)
+  const handleGoogleSignIn = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
-    if (email && email.includes("@")) {
-      setGoogleEmail(email);
-    }
-    setView("GOOGLE");
-  };
-
-  // 4b. Registo de Nova Conta / Instância de Vendas via Google
-  const handleGoogleSignUp = () => {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    if (signupEmail && signupEmail.includes("@")) {
-      setGoogleEmail(signupEmail);
-    }
-    if (signupName) {
-      setGoogleName(signupName);
-    }
-    if (signupBranch) {
-      setGoogleCompany(signupBranch);
-    }
-    setView("GOOGLE");
-  };
-
-  // 4c. Ativação Direta de Conta Google via Supabase Auth
-  const handleGoogleDirectAuth = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const targetEmail = (googleEmail || email).trim().toLowerCase();
-    const targetName = (googleName || signupName || targetEmail.split("@")[0].replace(/[._]/g, " ")).trim();
-    const targetCompany = (googleCompany || signupBranch || companyName || "OST Comércio Geral").trim();
-    const targetPass = googlePassword.trim();
-
-    if (!targetEmail || !targetEmail.includes("@")) {
-      setErrorMessage("Por favor, introduza um endereço de e-mail válido.");
-      return;
-    }
-
-    if (!targetPass || targetPass.length < 6) {
-      setErrorMessage("A palavra-passe de acesso deve possuir pelo menos 6 caracteres.");
-      return;
-    }
+    setLoadingState("AUTHENTICATING");
+    setLoadingProgress(30);
 
     try {
-      setLoadingState("AUTHENTICATING");
-      setLoadingProgress(30);
-
-      // 1. Tentar autenticar se a conta já existir no Supabase Auth
-      try {
-        const res: any = await signInWithEmail(targetEmail, targetPass);
-        if (res && res.user) {
-          const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(res.user);
-          const branchToUse = userCompany || employee.companyId || targetCompany;
-          setAuthenticatedUser(employee);
-          setSelectedBranch(branchToUse);
-          setLoadingState("LOADING_PERMISSIONS");
-          setLoadingProgress(90);
-
-          setTimeout(() => {
-            setLoadingProgress(100);
-            setLoadingState("IDLE");
-            onShowToast(`Autenticado com sucesso (${employee.name})!`, "success");
-            onLoginSuccess(employee, branchToUse);
-          }, 400);
-          return;
-        }
-      } catch {
-        // Se não existir, prosseguir para a criação oficial da conta de Administrador
-      }
-
-      // 2. Criar nova conta no Supabase Auth
-      setLoadingProgress(55);
-      await signUpWithEmail(
-        targetEmail,
-        targetPass,
-        targetName,
-        targetCompany,
-        "Administrador",
-        signupPlan || "OURO"
-      );
-
-      // 3. Criar perfil e colaborador
-      const newAdminEmployee: Employee = {
-        id: `emp_${Date.now().toString().slice(-6)}`,
-        name: targetName,
-        email: targetEmail,
-        role: "Administrador",
-        status: "ACTIVE",
-        pin: "",
-        contact: googleContact || "+258 84 000 0000",
-        salary: 0,
-        admissionDate: new Date().toISOString().split("T")[0],
-        companyId: targetCompany
-      };
-
-      // Enviar e-mail de boas-vindas
-      try {
-        const welcomeHtml = renderWelcomeAdminHtml({
-          adminName: targetName,
-          adminEmail: targetEmail,
-          password: targetPass,
-          role: "Administrador do Sistema",
-          branchName: targetCompany,
-          adminCopyEmail: settings?.reportRecipientEmail || ""
-        });
-        sendEmail({
-          to: targetEmail,
-          subject: `Acesso Confirmado - OST Vendas (${targetName})`,
-          body: welcomeHtml,
-          isHtml: true
-        }).catch(() => {});
-      } catch {}
-
-      setLoadingState("LOADING_PERMISSIONS");
-      setLoadingProgress(95);
-
-      setTimeout(() => {
-        setLoadingProgress(100);
-        setLoadingState("IDLE");
-        onShowToast(`Conta criada e ativada com sucesso! Bem-vindo(a), ${targetName}.`, "success");
-        onLoginSuccess(newAdminEmployee, targetCompany);
-      }, 500);
-    } catch (err: any) {
-      setLoadingState("IDLE");
-      setLoadingProgress(0);
-      setErrorMessage(`Erro ao processar conta: ${err.message || "Erro de sincronização."}`);
-      onShowToast("Erro ao processar conta.", "error");
-    }
-  };
-
-  // 4d. Tentativa via Janela Popup Google OAuth
-  const handleGoogleOAuthPopup = async () => {
-    setErrorMessage(null);
-    setSuccessMessage(null);
-    try {
-      setLoadingState("AUTHENTICATING");
-      setLoadingProgress(25);
       const res = await SupabaseSyncService.signInWithGoogle({ popup: true });
-      if (res?.error) {
+      if (res.error) {
         setLoadingState("IDLE");
         setLoadingProgress(0);
-        setErrorMessage("A janela de autenticação Google retornou restrição ou foi cancelada. Utilize o formulário direto com o seu e-mail e palavra-passe.");
-      } else {
-        setLoadingProgress(50);
-        setSuccessMessage("Autenticação Google iniciada. Conclua o login na janela para prosseguir.");
+        setErrorMessage(`Falha na autenticação Google: ${res.error.message || "Erro no serviço OAuth."}`);
+        onShowToast("Erro na autenticação com o Google.", "error");
+        return;
       }
+
+      setLoadingState("CONNECTING");
+      setLoadingProgress(60);
+      onShowToast("A conectar aos servidores seguros da Google...", "info");
     } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
-      setErrorMessage("Restrição de OAuth no ambiente de navegação. Por favor, utilize o login por e-mail e palavra-passe.");
+      setErrorMessage(`Erro ao iniciar autenticação Google: ${err.message || err}`);
+      onShowToast("Erro ao conectar à Google.", "error");
     }
+  };
+
+  // 4b. Registo Oficial de Nova Instância via Google OAuth
+  const handleGoogleSignUp = async () => {
+    await handleGoogleSignIn();
   };
 
   // PIN / Credential Login para Operador de Caixa e Loja
@@ -919,20 +739,6 @@ export default function LoginModule({
                   <p className="text-xs text-slate-400">Cadastre-se para obter um perfil e operar o ERP comercial.</p>
                 </>
               )}
-              {view === "GOOGLE" && (
-                <>
-                  <div className="flex items-center justify-center gap-2">
-                    <svg className="w-6 h-6 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.34 24 12 24z"/>
-                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.9 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
-                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                    </svg>
-                    <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-none">Conta Google</h2>
-                  </div>
-                  <p className="text-xs text-slate-400">Ativação instantânea & registo de Administrador com a sua conta Google.</p>
-                </>
-              )}
               {view === "RECOVERY" && (
                 <>
                   <h2 className="text-3xl font-black text-white tracking-tight leading-none">Recuperar Palavra-passe</h2>
@@ -1054,9 +860,10 @@ export default function LoginModule({
                 {/* Google Sign In Direct Button */}
                 <button
                   type="button"
+                  id="btn-google-login"
                   onClick={handleGoogleSignIn}
                   disabled={loadingState !== "IDLE"}
-                  className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-3 cursor-pointer shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] group disabled:opacity-50"
+                  className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-900 border border-slate-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-3 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] group disabled:opacity-50"
                 >
                   <svg className="w-5 h-5 shrink-0 group-hover:scale-110 transition-transform" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
@@ -1064,12 +871,12 @@ export default function LoginModule({
                     <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.9 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
                     <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                   </svg>
-                  <span className="text-slate-800 font-extrabold">Entrar com Conta Google</span>
+                  <span className="text-slate-900 font-black tracking-wide">Continuar com Google</span>
                 </button>
 
                 {window.self !== window.top && (
                   <p className="text-[10px] text-slate-500 text-center leading-normal pt-1">
-                    Em visualização de iframe. Se a janela de login Google for bloqueada,{" "}
+                    Em visualização protegida de iframe. Se a janela de login Google for bloqueada pelo navegador,{" "}
                     <a 
                       href={window.location.href} 
                       target="_blank" 
@@ -1112,9 +919,10 @@ export default function LoginModule({
                 <div className="space-y-2 pb-1">
                   <button
                     type="button"
+                    id="btn-google-signup"
                     onClick={handleGoogleSignUp}
                     disabled={loadingState !== "IDLE"}
-                    className="w-full py-3.5 px-4 bg-white hover:bg-slate-100 text-slate-900 border border-slate-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-3 cursor-pointer shadow-lg hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] group disabled:opacity-50"
+                    className="w-full py-3.5 px-4 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-900 border border-slate-200 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-3 cursor-pointer shadow-md hover:shadow-lg hover:scale-[1.01] active:scale-[0.99] group disabled:opacity-50"
                   >
                     <svg className="w-5 h-5 shrink-0 group-hover:scale-110 transition-transform" viewBox="0 0 24 24">
                       <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
@@ -1122,7 +930,7 @@ export default function LoginModule({
                       <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.9 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
                       <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
                     </svg>
-                    <span className="text-slate-800 font-extrabold">Criar Nova Conta com Gmail (Google)</span>
+                    <span className="text-slate-900 font-black tracking-wide">Continuar com Google</span>
                   </button>
                   <p className="text-[10px] text-center text-slate-500 font-medium">
                     Regista uma nova empresa e perfil de Administrador com a sua conta Google.
@@ -1388,154 +1196,6 @@ export default function LoginModule({
                   <span>Voltar para o Login</span>
                 </button>
 
-              </form>
-            )}
-
-            {/* ---------------------------------- */}
-            {/* VIEW: GOOGLE ACCOUNT DIRECT / OAUTH */}
-            {/* ---------------------------------- */}
-            {view === "GOOGLE" && (
-              <form onSubmit={handleGoogleDirectAuth} className="space-y-4 animate-in fade-in slide-in-from-right-4 duration-300">
-                <div className="p-3.5 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 bg-white/10 rounded-lg">
-                      <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.34 24 12 24z"/>
-                        <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.9 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
-                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                      </svg>
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-white">Registo e Acesso Rápido Google</h4>
-                      <p className="text-[10.5px] text-slate-400">Ativa a sua conta com permissão de Administrador sem erros de 403.</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Google Email */}
-                <div className="space-y-1">
-                  <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Endereço Gmail / Google</label>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                      <Mail className="w-4 h-4" />
-                    </span>
-                    <input
-                      type="email"
-                      required
-                      value={googleEmail}
-                      onChange={(e) => setGoogleEmail(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                      placeholder="exemplo@gmail.com"
-                    />
-                  </div>
-                </div>
-
-                {/* Full Name & Company */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Nome Completo</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                        <User className="w-4 h-4" />
-                      </span>
-                      <input
-                        type="text"
-                        required
-                        value={googleName}
-                        onChange={(e) => setGoogleName(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                        placeholder="Nome do Administrador"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Nome da Empresa</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                        <Building2 className="w-4 h-4" />
-                      </span>
-                      <input
-                        type="text"
-                        required
-                        value={googleCompany}
-                        onChange={(e) => setGoogleCompany(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 pl-10 pr-4 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                        placeholder="OST Comércio Geral"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Password / Access Security */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-bold text-slate-300 block uppercase tracking-wider">Palavra-passe de Acesso</label>
-                    <span className="text-[10px] text-slate-500">Para segurança da conta</span>
-                  </div>
-                  <div className="relative">
-                    <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                      <Lock className="w-4 h-4" />
-                    </span>
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      required
-                      value={googlePassword}
-                      onChange={(e) => setGooglePassword(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-[#FF6B00] rounded-xl py-2.5 pl-10 pr-10 text-xs text-white outline-none transition placeholder-slate-500 font-medium"
-                      placeholder="Mínimo 6 caracteres"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Primary Action: Direct Google Activation */}
-                <button
-                  type="submit"
-                  disabled={loadingState !== "IDLE"}
-                  className="w-full py-3.5 px-4 bg-gradient-to-r from-orange-500 to-[#FF6B00] hover:to-orange-600 text-white rounded-xl font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2.5 cursor-pointer shadow-lg shadow-orange-950/30 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
-                >
-                  <Crown className="w-4 h-4" />
-                  <span>Confirmar & Iniciar com Conta Google</span>
-                  <ChevronRight className="w-4 h-4" />
-                </button>
-
-                {/* Secondary OAuth popup option */}
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={handleGoogleOAuthPopup}
-                    disabled={loadingState !== "IDLE"}
-                    className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl font-bold text-[11px] uppercase tracking-wider transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                      <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/>
-                      <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.15C3.26 21.36 7.34 24 12 24z"/>
-                      <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.24C.45 8.15 0 9.9 0 12s.45 3.85 1.24 5.42l4.04-3.15z"/>
-                      <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.34 0 3.26 2.64 1.24 6.58l4.04 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
-                    </svg>
-                    <span>Tentar via Janela OAuth Popup</span>
-                  </button>
-                </div>
-
-                {/* Back to Login */}
-                <div className="pt-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => { setView("LOGIN"); setErrorMessage(null); setSuccessMessage(null); }}
-                    className="text-[11px] text-slate-400 hover:text-slate-200 font-bold flex items-center justify-center gap-1.5 mx-auto py-1"
-                  >
-                    <ArrowLeft className="w-4 h-4" />
-                    <span>Voltar para o Login Principal</span>
-                  </button>
-                </div>
               </form>
             )}
 

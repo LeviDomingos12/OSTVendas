@@ -63,6 +63,7 @@ import { authenticatedFetch } from "../lib/apiClient";
 import BatchManager from "./BatchManager";
 import { useConfirm } from "../hooks/useConfirm";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
+import StockThresholdsSettings from "./StockThresholdsSettings";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -109,8 +110,8 @@ export default function StockModule({
 }: StockModuleProps) {
   const confirm = useConfirm();
   
-  // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches" | "suppliers"
-  const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches" | "suppliers">("list");
+  // Local sub-tabs inside Stock module: "list" | "charts" | "reports" | "batches" | "branches" | "suppliers" | "thresholds"
+  const [activeModuleTab, setActiveModuleTab] = useState<"list" | "charts" | "reports" | "batches" | "branches" | "suppliers" | "thresholds">("list");
   const [supplierSubTab, setSupplierSubTab] = useState<"orders" | "finance" | "config">("orders");
   const [selectedFinanceSupplierId, setSelectedFinanceSupplierId] = useState<string | null>(null);
   const [supplierChartLayout, setSupplierChartLayout] = useState<"grouped" | "stacked">("grouped");
@@ -2021,6 +2022,18 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         >
           <Truck className="w-4 h-4" />
           Fornecedores & Pedidos
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveModuleTab("thresholds")}
+          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+            activeModuleTab === "thresholds"
+              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
+              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          Limiares & Alertas
         </button>
       </div>
 
@@ -5961,6 +5974,22 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* SUB-TAB: THRESHOLDS & ALERTS */}
+      {activeModuleTab === "thresholds" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <StockThresholdsSettings
+            products={products}
+            settings={settings || ({} as SystemSettings)}
+            onUpdateSettings={onUpdateSettings || (() => {})}
+            onUpdateProduct={onUpdateProduct}
+            onAddAuditLog={onAddAuditLog}
+            onShowToast={onShowToast}
+            currentRole={currentRole}
+            currency={currency}
+          />
         </div>
       )}
 

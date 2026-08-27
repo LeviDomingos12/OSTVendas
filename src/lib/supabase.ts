@@ -8,10 +8,10 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-// Resolução segura de variáveis de ambiente com fallbacks resilientes
+// Resolução segura de variáveis de ambiente sem secrets ou fallbacks hardcoded
 const env = (import.meta as any).env || {};
-export const SUPABASE_URL: string = env.VITE_SUPABASE_URL || "https://ost-vendas-db.supabase.co";
-export const SUPABASE_ANON_KEY: string = env.VITE_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.anon-key";
+export const SUPABASE_URL: string = env.VITE_SUPABASE_URL || "";
+export const SUPABASE_ANON_KEY: string = env.VITE_SUPABASE_ANON_KEY || "";
 
 /**
  * Retorna o URI de redirecionamento dinâmico e exato para a aplicação cliente,
@@ -26,10 +26,10 @@ export function getAuthRedirectUrl(): string {
 
 /**
  * Retorna o URI de callback OAuth do Supabase correspondente ao projeto.
- * Este URI DEVE ser adicionado nos 'URIs de redirecionamento autorizados' do Google Cloud Console.
  * Formato: https://<project-ref>.supabase.co/auth/v1/callback
  */
 export function getSupabaseOAuthCallbackUrl(): string {
+  if (!SUPABASE_URL) return "";
   try {
     const urlObj = new URL(SUPABASE_URL);
     return `${urlObj.origin}/auth/v1/callback`;
@@ -39,17 +39,22 @@ export function getSupabaseOAuthCallbackUrl(): string {
 }
 
 /**
- * Cliente Singleton do Supabase para uso em toda a aplicação.
+ * Cliente Singleton do Supabase para uso na aplicação.
+ * Inicializa com URL e Chave públicas fornecidas nas variáveis de ambiente.
  */
-export const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storage: typeof window !== "undefined" ? window.localStorage : undefined,
-    flowType: "pkce"
+export const supabase: SupabaseClient = createClient(
+  SUPABASE_URL || "https://unconfigured.supabase.co",
+  SUPABASE_ANON_KEY || "unconfigured-anon-key",
+  {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+      storage: typeof window !== "undefined" ? window.localStorage : undefined,
+      flowType: "pkce"
+    }
   }
-});
+);
 
 /**
  * Retorna a instância singleton do cliente Supabase.
@@ -61,7 +66,7 @@ export function getSupabaseClient(): SupabaseClient {
 /**
  * Inicia o fluxo de autenticação com Google no Supabase com os URIs de redirecionamento corretos.
  */
-export async function signInWithGoogleOAuth(customRedirect?: string) {
+export async function signInWithGoogleOAuth(customRedirect?: string, options?: { skipBrowserRedirect?: boolean }) {
   const targetRedirect = customRedirect || getAuthRedirectUrl();
   return await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -69,8 +74,9 @@ export async function signInWithGoogleOAuth(customRedirect?: string) {
       redirectTo: targetRedirect,
       queryParams: {
         access_type: "offline",
-        prompt: "consent"
-      }
+        prompt: "select_account"
+      },
+      skipBrowserRedirect: options?.skipBrowserRedirect ?? false
     }
   });
 }

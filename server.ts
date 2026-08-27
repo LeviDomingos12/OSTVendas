@@ -15,6 +15,23 @@ import cron from "node-cron";
 import rateLimit from "express-rate-limit";
 import { requireAuth, requireAdmin, AuthenticatedUserContext } from "./src/server/authMiddleware";
 import { commercialRouter } from "./src/server/safeEndpoints";
+import {
+  dbSaveSchema,
+  sanitizeInputData,
+  emailSendSchema,
+  smsSendSchema,
+  whatsappSendSchema,
+  campaignDispatchSchema,
+  geminiChatSchema,
+  geminiForecastSchema,
+  geminiMarketingSmsSchema,
+  geminiMarketingSloganSchema,
+  firewallConfigSchema,
+  rateLimitConfigSchema,
+  productSchema,
+  customerSchema,
+  auditLogSchema
+} from "./src/server/validation";
 
 dotenv.config();
 
@@ -179,8 +196,39 @@ if (fs.existsSync(firebaseConfigPath)) {
   }
 }
 
-const targetProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
-const targetDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId || "ostvendas-clean-db";
+const rawProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
+const rawDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
+
+function cleanProjectId(raw: any): string | undefined {
+  if (!raw || typeof raw !== "string") return undefined;
+  let str = raw.trim();
+  if (str.includes("project/")) {
+    const match = str.match(/project\/([a-zA-Z0-9-]+)/);
+    if (match) return match[1];
+  }
+  if (str.startsWith("http://") || str.startsWith("https://")) {
+    return undefined;
+  }
+  if (/^[a-zA-Z0-9_-]+$/.test(str)) {
+    return str;
+  }
+  return undefined;
+}
+
+function cleanDatabaseId(raw: any): string {
+  if (!raw || typeof raw !== "string") return "(default)";
+  let str = raw.trim();
+  if (str.startsWith("http://") || str.startsWith("https://") || str.includes("/") || str.includes("?") || str.includes(":")) {
+    return "(default)";
+  }
+  if (str === "(default)" || /^[a-zA-Z0-9_-]{1,63}$/.test(str)) {
+    return str;
+  }
+  return "(default)";
+}
+
+const targetProjectId = cleanProjectId(rawProjectId);
+const targetDatabaseId = cleanDatabaseId(rawDatabaseId);
 
 if (targetProjectId) {
   try {
@@ -206,7 +254,7 @@ if (targetProjectId) {
       }
       initializeAdminApp(adminOptions);
     }
-    const dbInstance = getFirestore(targetDatabaseId);
+    const dbInstance = targetDatabaseId === "(default)" ? getFirestore() : getFirestore(targetDatabaseId);
     firebaseDb = dbInstance;
     console.log(`Firebase Admin SDK initialized on the server. Project: ${targetProjectId}, Database: ${targetDatabaseId}`);
 
@@ -284,10 +332,15 @@ app.set("trust proxy", 1);
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ limit: "5mb", extended: true }));
 
-// CORS Policy (Restrict to Authorized Origins)
+// CORS Policy (Strict Authorized Origins Enforcement)
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    const allowedOrigins = [
+    const allowedEnvOrigins = (process.env.ALLOWED_ORIGINS || "")
+      .split(",")
+      .map(o => o.trim())
+      .filter(Boolean);
+
+    const defaultOrigins = [
       process.env.APP_URL,
       process.env.VITE_APP_URL,
       "http://localhost:3000",
@@ -296,14 +349,25 @@ app.use((req, res, next) => {
       "http://127.0.0.1:5173"
     ].filter(Boolean) as string[];
 
-    // Allow requests with no origin (like mobile apps, curl, or same-origin)
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".run.app") || origin.endsWith(".aistudio-build.goog")) {
-      res.setHeader("Access-Control-Allow-Origin", origin || "*");
+    const allowedOrigins = [...defaultOrigins, ...allowedEnvOrigins];
+
+    const isOriginAllowed = origin && (
+      allowedOrigins.includes(origin) ||
+      origin.endsWith(".run.app") ||
+      origin.endsWith(".aistudio-build.goog")
+    );
+
+    if (isOriginAllowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Access-Control-Allow-Credentials", "true");
+      res.setHeader("Vary", "Origin");
+    } else if (!origin) {
+      // Direct same-origin requests
+      res.setHeader("Vary", "Origin");
     }
 
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, X-Tenant-Id");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
 
     if (req.method === "OPTIONS") {
       return res.status(204).end();
@@ -450,7 +514,7 @@ app.use((req, res, next) => {
   });
 
   // Handler for rate limit exceeded violations
-  const handleLimitExceeded = (category: "general" | "ai" | "email" | "db") => {
+  const handleLimitExceeded = (category: "general" | "ai" | "email" | "db" | "financial" | "auth") => {
     return (req: express.Request, res: express.Response) => {
       rateLimitMetrics.totalBlocked429++;
       const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
@@ -462,7 +526,7 @@ app.use((req, res, next) => {
         endpoint: req.originalUrl || req.url,
         method: req.method,
         timestamp: new Date().toISOString(),
-        category
+        category: category as any
       };
 
       rateLimitMetrics.recentViolations.unshift(violation);
@@ -495,10 +559,15 @@ app.use((req, res, next) => {
   // Build rate limiters with dynamic configuration support
   const currentConfig = getRateLimitConfig();
 
-  // Helper key generator for proxy environments
+  // Helper key generator for multi-tenant authenticated and proxy environments (IP + tenant_id + user_id)
   const getClientIpKey = (req: express.Request) => {
     const rawIp = req.headers["x-forwarded-for"] || req.ip || req.socket.remoteAddress || "127.0.0.1";
-    return Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
+    const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(",")[0].trim();
+    const user = (req as any).user;
+    if (user && user.tenantId && user.id) {
+      return `${ip}:${user.tenantId}:${user.id}`;
+    }
+    return ip;
   };
 
   const generalLimiter = rateLimit({
@@ -511,11 +580,32 @@ app.use((req, res, next) => {
     skip: (req) => {
       const cfg = getRateLimitConfig();
       if (!cfg.enabled) return true;
-      // Skip healthchecks and static checks
       if (req.path === "/health" || req.path === "/api/health") return true;
       return false;
     },
     handler: handleLimitExceeded("general")
+  });
+
+  const financialLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 600, // 600 financial transactions/min per tenant-user
+    standardHeaders: true,
+    legacyHeaders: true,
+    validate: false,
+    keyGenerator: getClientIpKey,
+    skip: () => !getRateLimitConfig().enabled,
+    handler: handleLimitExceeded("financial")
+  });
+
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30, // 30 auth attempts per 15 min per IP
+    standardHeaders: true,
+    legacyHeaders: true,
+    validate: false,
+    keyGenerator: getClientIpKey,
+    skip: () => !getRateLimitConfig().enabled,
+    handler: handleLimitExceeded("auth")
   });
 
   const aiLimiter = rateLimit({
@@ -556,14 +646,16 @@ app.use((req, res, next) => {
     skip: (req) => {
       const cfg = getRateLimitConfig();
       if (!cfg.enabled) return true;
-      // Never block internal data hydration/bulk synchronization routes
       if (req.path === "/load" || req.path === "/save") return false;
       return false;
     },
     handler: handleLimitExceeded("db")
   });
 
-  // Mount Commercial Safe Multi-Tenant API Router
+  // Mount Commercial Safe Multi-Tenant API Router with financial limiter
+  app.use("/api/v1/sales/", financialLimiter);
+  app.use("/api/v1/stock/", financialLimiter);
+  app.use("/api/v1/debts/", financialLimiter);
   app.use("/api/v1", commercialRouter);
 
   // Apply Rate Limiters and Strict Auth to Express Route Categories
@@ -2524,7 +2616,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // POST: Save individual table state with strict multi-tenant isolation and RBAC
+  // POST: Save individual table state with strict multi-tenant isolation, Zod validation, and RBAC
   app.post("/api/db/save", async (req, res) => {
     try {
       const user = (req as any).user as AuthenticatedUserContext;
@@ -2533,25 +2625,58 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         return res.status(401).json({ error: "Sessão não autorizada ou tenant_id ausente." });
       }
 
-      const { table, data } = req.body;
-      if (!table || data === undefined) {
-        return res.status(400).json({ error: "Parâmetros table e data são obrigatórios." });
+      const parseResult = dbSaveSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          error: "Dados de payload inválidos para sincronização.",
+          details: parseResult.error.format()
+        });
       }
 
-      const allowedTables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings", "categories", "suppliers"];
-      if (!allowedTables.includes(table)) {
-        return res.status(400).json({ error: `Tabela '${table}' inválida ou não permitida.` });
-      }
+      const { table, data } = parseResult.data;
 
       // Proibir alteração de funcionários ou configurações da empresa por utilizadores sem perfil ADMIN
       if ((table === "employees" || table === "settings") && user.role !== "ADMIN") {
         return res.status(403).json({ error: "Apenas Administradores podem modificar colaboradores ou configurações da empresa." });
       }
 
-      // 1. Cache to tenant local file
+      // Sanitizar dados para prevenir Mass Assignment e injeção de privilégios/tenants indevidos
+      let sanitizedData: any;
+      if (Array.isArray(data)) {
+        sanitizedData = data.map((item: any) => {
+          const clean = sanitizeInputData(item);
+          return {
+            ...clean,
+            tenantId: tenantUid,
+            tenant_id: tenantUid
+          };
+        });
+      } else if (data && typeof data === "object") {
+        sanitizedData = {
+          ...sanitizeInputData(data),
+          tenantId: tenantUid,
+          tenant_id: tenantUid
+        };
+      } else {
+        sanitizedData = data;
+      }
+
+      // 1. Cache to tenant local file (com proteção Append-Only para auditlogs)
       const tenantDir = getTenantDbDir(tenantUid);
       const filePath = path.join(tenantDir, `${table}.json`);
-      safeWriteLocalDbFile(filePath, data);
+
+      if (table === "auditlogs" && Array.isArray(sanitizedData)) {
+        let existingLogs: any[] = [];
+        if (fs.existsSync(filePath)) {
+          try { existingLogs = JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch {}
+        }
+        const existingIds = new Set(existingLogs.map((l: any) => String(l.id)));
+        const newLogs = sanitizedData.filter((l: any) => !existingIds.has(String(l.id)));
+        const combinedLogs = [...existingLogs, ...newLogs];
+        safeWriteLocalDbFile(filePath, combinedLogs);
+      } else {
+        safeWriteLocalDbFile(filePath, sanitizedData);
+      }
 
       // 2. Synchronize to Firestore under tenant partition
       if (firebaseDb && tenantUid) {
@@ -2559,41 +2684,43 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
           await withRetry(async () => {
             const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
             if (table === "settings") {
-              await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(data));
-            } else if (Array.isArray(data)) {
+              await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(sanitizedData));
+            } else if (Array.isArray(sanitizedData)) {
               const collectionRef = tenantRef.collection(table);
 
-              // Clean up orphan documents
-              const snapshot = await collectionRef.get();
-              const newDataIds = new Set(data.map((item: any) => String(item.id)));
-              const refsToDelete: any[] = [];
-              snapshot.forEach((docSnap: any) => {
-                if (!newDataIds.has(String(docSnap.id))) {
-                  refsToDelete.push(docSnap.ref);
-                }
-              });
-
-              if (refsToDelete.length > 0) {
-                const deleteBatchSize = 400;
-                for (let i = 0; i < refsToDelete.length; i += deleteBatchSize) {
-                  const deleteBatch = firebaseDb.batch();
-                  const chunk = refsToDelete.slice(i, i + deleteBatchSize);
-                  for (const ref of chunk) {
-                    deleteBatch.delete(ref);
+              // Clean up orphan documents (exceto para auditlogs que são estritamente append-only)
+              if (table !== "auditlogs") {
+                const snapshot = await collectionRef.get();
+                const newDataIds = new Set(sanitizedData.map((item: any) => String(item.id)));
+                const refsToDelete: any[] = [];
+                snapshot.forEach((docSnap: any) => {
+                  if (!newDataIds.has(String(docSnap.id))) {
+                    refsToDelete.push(docSnap.ref);
                   }
-                  await deleteBatch.commit();
+                });
+
+                if (refsToDelete.length > 0) {
+                  const deleteBatchSize = 400;
+                  for (let i = 0; i < refsToDelete.length; i += deleteBatchSize) {
+                    const deleteBatch = firebaseDb.batch();
+                    const chunk = refsToDelete.slice(i, i + deleteBatchSize);
+                    for (const ref of chunk) {
+                      deleteBatch.delete(ref);
+                    }
+                    await deleteBatch.commit();
+                  }
                 }
               }
 
               // Batch set updated/new items
               const batchSize = 400;
-              for (let i = 0; i < data.length; i += batchSize) {
-                const chunk = data.slice(i, i + batchSize);
+              for (let i = 0; i < sanitizedData.length; i += batchSize) {
+                const chunk = sanitizedData.slice(i, i + batchSize);
                 const batch = firebaseDb.batch();
                 for (const item of chunk) {
                   const docId = item.id || `doc-${Date.now()}-${Math.random()}`;
                   const docRef = collectionRef.doc(String(docId));
-                  batch.set(docRef, sanitizeForFirestore(item));
+                  batch.set(docRef, sanitizeForFirestore(item), { merge: true });
                 }
                 await batch.commit();
               }
@@ -2615,8 +2742,8 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // POST: Setup all tables (initial seed submission with tenant isolation)
-  app.post("/api/db/save-all", async (req, res) => {
+  // POST: Setup all tables (initial seed submission with tenant isolation & sanitization)
+  app.post("/api/db/save-all", requireAdmin, async (req, res) => {
     try {
       const user = (req as any).user as AuthenticatedUserContext;
       const tenantUid = user?.tenantId;
@@ -2628,11 +2755,29 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       const tenantDir = getTenantDbDir(tenantUid);
       const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings"];
       
-      // 1. Save locally in tenant directory
+      // 1. Save locally in tenant directory com sanitização estrita
       for (const t of tables) {
         if (payload[t] !== undefined) {
+          const raw = payload[t];
+          let sanitized: any;
+          if (Array.isArray(raw)) {
+            sanitized = raw.map((item: any) => ({
+              ...sanitizeInputData(item),
+              tenantId: tenantUid,
+              tenant_id: tenantUid
+            }));
+          } else if (raw && typeof raw === "object") {
+            sanitized = {
+              ...sanitizeInputData(raw),
+              tenantId: tenantUid,
+              tenant_id: tenantUid
+            };
+          } else {
+            sanitized = raw;
+          }
+
           const filePath = path.join(tenantDir, `${t}.json`);
-          safeWriteLocalDbFile(filePath, payload[t]);
+          safeWriteLocalDbFile(filePath, sanitized);
         }
       }
 
@@ -2645,7 +2790,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
               if (payload[t] !== undefined) {
                 const data = payload[t];
                 if (t === "settings") {
-                  await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(data));
+                  await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(sanitizeInputData(data)));
                 } else if (Array.isArray(data)) {
                   const collectionRef = tenantRef.collection(t);
                   const batchSize = 400;
@@ -2655,7 +2800,11 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
                     for (const item of chunk) {
                       const docId = item.id || `doc-${Date.now()}-${Math.random()}`;
                       const docRef = collectionRef.doc(String(docId));
-                      batch.set(docRef, sanitizeForFirestore(item));
+                      batch.set(docRef, sanitizeForFirestore({
+                        ...sanitizeInputData(item),
+                        tenantId: tenantUid,
+                        tenant_id: tenantUid
+                      }), { merge: true });
                     }
                     await batch.commit();
                   }

@@ -161,3 +161,57 @@ export const rateLimitConfigSchema = z.object({
   emailMax: z.coerce.number().positive().optional(),
   dbMax: z.coerce.number().positive().optional()
 });
+
+export const replenishStockSchema = z.object({
+  productId: z.string().min(1, "ID do produto é obrigatório"),
+  quantity: z.coerce.number().positive("Quantidade para reabastecimento deve ser positiva"),
+  costPrice: z.coerce.number().min(0).optional().default(0),
+  reason: z.string().max(200).optional().default("Reabastecimento"),
+  idempotencyKey: z.string().max(100).optional()
+});
+
+export const debtPaymentSchema = z.object({
+  debtId: z.string().min(1, "ID da dívida é obrigatório"),
+  customerId: z.string().min(1, "ID do cliente é obrigatório"),
+  amount: z.coerce.number().positive("Valor do pagamento deve ser maior que zero"),
+  paymentMethod: z.string().min(1).max(50).default("Dinheiro"),
+  notes: z.string().max(500).optional().nullable(),
+  idempotencyKey: z.string().max(100).optional()
+});
+
+export const passwordResetSchema = z.object({
+  email: z.string().email("Endereço de e-mail inválido")
+});
+
+/**
+ * Lista de campos proibidos enviados pelo frontend que devem ser removidos para evitar Mass Assignment e Privilege Escalation.
+ */
+export const PROHIBITED_CLIENT_FIELDS = [
+  "tenant_id",
+  "tenantId",
+  "company_id",
+  "companyId",
+  "role",
+  "permissions",
+  "created_by",
+  "createdBy",
+  "updated_by",
+  "updatedBy",
+  "is_admin",
+  "isAdmin",
+  "is_owner",
+  "isOwner"
+] as const;
+
+/**
+ * Higieniza objetos de dados removendo campos administrativos e de privilégio antes de persistir.
+ */
+export function sanitizeInputData<T extends Record<string, any>>(data: T): Partial<T> {
+  if (!data || typeof data !== "object") return data;
+  const copy: Record<string, any> = { ...data };
+  for (const field of PROHIBITED_CLIENT_FIELDS) {
+    delete copy[field];
+  }
+  return copy as Partial<T>;
+}
+

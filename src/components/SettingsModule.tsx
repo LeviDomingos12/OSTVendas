@@ -20,7 +20,8 @@ import {
   Check,
   Cloud,
   MapPin,
-  Phone
+  Phone,
+  Sliders
 } from "lucide-react";
 import { 
   SystemSettings, 
@@ -40,6 +41,7 @@ import GatewayModule from "./GatewayModule";
 import AiForecastModule from "./AiForecastModule";
 import TrainingModule from "./TrainingModule";
 import SubscriptionPlansModule from "./SubscriptionPlansModule";
+import StockThresholdsSettings from "./StockThresholdsSettings";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -61,6 +63,8 @@ interface SettingsModuleProps {
   onResetEmployeePin?: (employeeId: string) => Promise<void> | void;
   onUpdateEmployeeTheme?: (employeeId: string, themeId: string) => Promise<void> | void;
   products?: Product[];
+  onUpdateProduct?: (product: Product) => void;
+  onUpdateProducts?: (products: Product[]) => void;
   transactions?: Transaction[];
   customers?: Customer[];
   onAddEmployee?: (emp: Employee) => void;
@@ -92,6 +96,8 @@ export default function SettingsModule({
   employees = [],
   auditLogs = [],
   products = [],
+  onUpdateProduct,
+  onUpdateProducts,
   transactions = [],
   customers = [],
   onAddEmployee = () => {},
@@ -425,12 +431,12 @@ export default function SettingsModule({
           onClick={() => setActiveSubTab("notificacoes")}
           className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "notificacoes"
-              ? "border-blue-500 text-blue-600 font-extrabold bg-blue-50/20"
+              ? "border-orange-500 text-orange-600 font-extrabold bg-orange-50/20"
               : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
           }`}
         >
-          <MessageSquare className="w-4 h-4 text-blue-500" />
-          Alertas de Estoque
+          <Sliders className="w-4 h-4 text-orange-500" />
+          Limiares & Alertas de Stock
         </button>
 
         <button
@@ -803,98 +809,20 @@ export default function SettingsModule({
         </div>
       )}
 
-      {/* SUB-TAB 4: ALERTAS & NOTIFICAÇÕES */}
+      {/* SUB-TAB 4: ALERTAS & LIMIARES DE STOCK */}
       {activeSubTab === "notificacoes" && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
-          <div className="flex items-center gap-2.5 text-blue-600 border-b pb-3 border-slate-100">
-            <MessageSquare className="w-5 h-5" />
-            <div>
-              <h2 className="font-bold text-slate-850 text-sm">Alertas de Estoque & Notificações de Vendas</h2>
-              <p className="text-[11px] text-slate-400">Configure os avisos de ruptura de produtos e destinatários de relatórios diários de caixa.</p>
-            </div>
-          </div>
-
-          <form onSubmit={handleSaveNotificationSettings} className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5 text-xs">
-              {/* WhatsApp do Gerente */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <label className="block font-bold text-slate-700">WhatsApp do Gerente para Alertas</label>
-                <input
-                  type="text"
-                  value={managerWhatsappPhone}
-                  onChange={(e) => setManagerWhatsappPhone(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="+258 84 000 0000"
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-medium"
-                />
-                <p className="text-[10px] text-slate-400">Número para receber alertas quando um produto atingir o estoque mínimo.</p>
-              </div>
-
-              {/* Email para Relatório Diário */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <label className="block font-bold text-slate-700">Email para Relatório de Fecho</label>
-                <input
-                  type="email"
-                  value={alertsRecipientEmail}
-                  onChange={(e) => setAlertsRecipientEmail(e.target.value)}
-                  disabled={!canEdit}
-                  placeholder="gerencia@empresa.co.mz"
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-medium"
-                />
-                <p className="text-[10px] text-slate-400">Recebe o resumo de faturação e vendas no fecho de turno ou fim do dia.</p>
-              </div>
-
-              {/* Limiar de Estoque Crítico */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <label className="block font-bold text-slate-700">Limite de Estoque Mínimo Geral</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="1000"
-                  value={smsStockThreshold}
-                  onChange={(e) => setSmsStockThreshold(Number(e.target.value))}
-                  disabled={!canEdit}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-bold"
-                />
-                <p className="text-[10px] text-slate-400">Dispara alerta quando qualquer produto atingir ou ficar abaixo desta quantidade.</p>
-              </div>
-
-              {/* Horário de Envio do Relatório */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                <label className="block font-bold text-slate-700">Horário do Resumo Automático</label>
-                <div className="flex gap-2">
-                  <input
-                    type="time"
-                    value={reportHour}
-                    onChange={(e) => setReportHour(e.target.value)}
-                    disabled={!canEdit}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none font-bold"
-                  />
-                  <select
-                    value={reportFrequency}
-                    onChange={(e) => setReportFrequency(e.target.value as any)}
-                    disabled={!canEdit}
-                    className="px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
-                  >
-                    <option value="daily">Diário</option>
-                    <option value="weekly">Semanal</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {canEdit && (
-              <div className="flex justify-end pt-2">
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs shadow-md shadow-blue-600/20 flex items-center gap-2 cursor-pointer transition"
-                >
-                  <Check className="w-4 h-4" />
-                  Guardar Preferências de Alertas
-                </button>
-              </div>
-            )}
-          </form>
+        <div className="animate-in fade-in-50 duration-150">
+          <StockThresholdsSettings
+            products={products}
+            settings={settings}
+            onUpdateSettings={onUpdateSettings}
+            onUpdateProduct={onUpdateProduct}
+            onUpdateProducts={onUpdateProducts}
+            onAddAuditLog={onAddAuditLog}
+            onShowToast={onShowToast}
+            currentRole={currentRole}
+            currency={currencyCode || "MT"}
+          />
         </div>
       )}
 

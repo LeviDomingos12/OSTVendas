@@ -47,7 +47,8 @@ import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
 import { 
   CommercialDataService, 
-  OfflineQueueService, 
+  OfflineQueueService,
+  SyncService, 
   ConnectionService, 
   AuthService, 
   sanitizeServiceError 
@@ -2203,6 +2204,7 @@ export default function App() {
 
   // Advanced top bar metrics states
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => new Date().toLocaleTimeString());
+  const isLoggingOutRef = useRef<boolean>(false);
 
   // GENERAL AUDIT LOGGING WRAPPER
   const handleAddAuditLog = useCallback((action: string, module: string, details: string, customUser?: Employee) => {
@@ -2251,6 +2253,8 @@ export default function App() {
 
   // DB Sync helper with robust offline queueing
   const syncTable = async (tableName: string, updatedData: any) => {
+    if (isLoggingOutRef.current) return;
+    if (!isDbLoaded && Array.isArray(updatedData) && updatedData.length === 0) return;
     setLastSyncTime(new Date().toLocaleTimeString());
     await incrementVersionCounter();
     try {
@@ -2587,7 +2591,7 @@ export default function App() {
       if (activeTab !== "POS") return;
 
       // Intercept POS keyboard shortcuts
-      if (e.key === "F1" || e.key === "F2" || e.key === "F3" || e.key === "F4" || e.key === "F6" || e.key === "F8" || e.key === "F9" || e.key === "Escape") {
+      if (e.key === "F1" || e.key === "F2" || e.key === "F3" || e.key === "F4" || e.key === "F5" || e.key === "F6" || e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "F11" || e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         
@@ -2626,97 +2630,192 @@ export default function App() {
   }, [isAuthenticated, showReplenishModal]);
 
 
-  // Hydrate states from existential server database on mount
-  useEffect(() => {
-    // Run the connection test via abstract service
-    ConnectionService.test();
+  // Hydrate states with Cache-Aside pattern: instant local snapshot + background full integrity verification
+  const hydrateDatabaseForUser = async (user?: Employee | null, customCompanyName?: string) => {
+    try {
+      const cacheKey = user?.id ? `erp_cache_snapshot_${user.id}` : "erp_cache_snapshot_global";
 
-    const fetchExistentialDb = async () => {
-      let loadedData = false;
+      // 1. [CACHE-ASIDE] Leitura Imediata do Snapshot Local
+      try {
+        const cachedRaw = localStorage.getItem(cacheKey) || localStorage.getItem("erp_cache_snapshot_global");
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (cached && typeof cached === "object") {
+            if (Array.isArray(cached.products) && cached.products.length > 0) setProducts(cached.products);
+            if (Array.isArray(cached.customers) && cached.customers.length > 0) setCustomers(cached.customers);
+            if (Array.isArray(cached.transactions) && cached.transactions.length > 0) setTransactions(cached.transactions);
+            if (Array.isArray(cached.cashflow) && cached.cashflow.length > 0) setCashFlow(cached.cashflow);
+            if (Array.isArray(cached.employees) && cached.employees.length > 0) setEmployees(cached.employees);
+            if (Array.isArray(cached.auditlogs) && cached.auditlogs.length > 0) setAuditLogs(cached.auditlogs);
+            if (cached.settings) setSettings(prev => ({ ...prev, ...cached.settings }));
+            
+            // Marca a BD como carregada imediatamente para o operador interagir sem atraso
+            setIsDbLoaded(true);
+            console.log("[CACHE-ASIDE] Snapshot local carregado instantaneamente.");
+          }
+        }
+      } catch (cacheErr) {
+        console.warn("[CACHE-ASIDE] Erro ao ler snapshot em cache:", cacheErr);
+      }
+
+      // 2. [FAST-PREFETCH] Pré-carregamento imediato das transações mais recentes (últimas 24h)
+      try {
+        SyncService.prefetchRecentTransactions24h().then(recentTx => {
+          if (recentTx && recentTx.length > 0) {
+            setTransactions(prev => {
+              const merged = SupabaseSyncService.mergeRecordsById(prev || [], recentTx);
+              return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            });
+            console.log(`[PREFETCH 24H] ${recentTx.length} transações recentes integradas imediatamente ao POS.`);
+          }
+        }).catch(err => {
+          console.warn("[PREFETCH 24H] Falha não impeditiva no prefetch de transações:", err);
+        });
+      } catch {}
+
+      console.log("[HYDRATE] Executando sincronização de integridade em segundo plano...");
+
+      // 3. Fetch remote data from Supabase for this tenant
+      const [sbProducts, sbCustomers, sbTransactions, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
+        CommercialDataService.fetchProducts().catch(() => []),
+        CommercialDataService.fetchCustomers().catch(() => []),
+        CommercialDataService.fetchTransactions().catch(() => []),
+        CommercialDataService.fetchCashFlow().catch(() => []),
+        CommercialDataService.fetchEmployees().catch(() => []),
+        CommercialDataService.fetchSettings().catch(() => null),
+        CommercialDataService.fetchAuditLogs().catch(() => [])
+      ]);
+
+      // 3. Fetch server database state if available
+      let serverData: any = null;
       try {
         const response = await authenticatedFetch("/api/db/load");
         const contentType = response.headers.get("content-type");
         if (response.ok && contentType && contentType.includes("application/json")) {
           const json = await response.json();
           if (json.success && json.hasData) {
-            const d = json.data;
-            if (d.products) setProducts(d.products);
-            else setProducts([]);
-
-            if (d.customers) setCustomers(d.customers);
-            else setCustomers([]);
-
-            if (d.transactions) setTransactions(d.transactions);
-            else setTransactions([]);
-
-            if (d.cashflow) setCashFlow(d.cashflow);
-            else setCashFlow([]);
-
-            if (d.employees && d.employees.length > 0) {
-              setEmployees(d.employees);
-              setActiveUser(d.employees[0]);
-            } else {
-              setEmployees(initialEmployees);
-              setActiveUser(initialEmployees[0]);
-            }
-
-            if (d.auditlogs) setAuditLogs(d.auditlogs);
-            else setAuditLogs([]);
-
-            if (d.settings) setSettings(d.settings);
-            else setSettings(defaultSettings);
-
-            loadedData = true;
+            serverData = json.data;
           }
         }
-      } catch (err) {
-        // Fallback silently to client-side data service
+      } catch {}
+
+      // 4. Merge products by ID (preserving existing local modifications and remote catalog)
+      let finalProducts: Product[] = [];
+      setProducts(prev => {
+        const base = serverData?.products || prev || [];
+        finalProducts = SupabaseSyncService.mergeRecordsById(base, sbProducts || []);
+        return finalProducts;
+      });
+
+      // 5. Merge customers by ID
+      let finalCustomers: Customer[] = [];
+      setCustomers(prev => {
+        const base = serverData?.customers || prev || [];
+        finalCustomers = SupabaseSyncService.mergeRecordsById(base, sbCustomers || []);
+        return finalCustomers;
+      });
+
+      // 6. Merge transactions by ID and sort chronologically
+      let finalTransactions: Transaction[] = [];
+      setTransactions(prev => {
+        const base = serverData?.transactions || prev || [];
+        const merged = SupabaseSyncService.mergeRecordsById(base, sbTransactions || []);
+        finalTransactions = merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        return finalTransactions;
+      });
+
+      // 7. Merge cashflow by ID
+      let finalCashflow: CashFlowEntry[] = [];
+      setCashFlow(prev => {
+        const base = serverData?.cashflow || prev || [];
+        finalCashflow = SupabaseSyncService.mergeRecordsById(base, sbCashflow || []);
+        return finalCashflow;
+      });
+
+      // 8. Merge employees by ID, ensuring user profile integrity and preservation of local PIN/credentials
+      let finalEmployees: Employee[] = [];
+      setEmployees(prev => {
+        const base = (serverData?.employees && serverData.employees.length > 0) ? serverData.employees : (prev.length > 0 ? prev : initialEmployees);
+        const merged = SupabaseSyncService.mergeRecordsById(base, sbEmployees || []);
+        if (user) {
+          const idx = merged.findIndex(e => e.id === user.id || (e.email && e.email.toLowerCase() === user.email?.toLowerCase()));
+          if (idx > -1) {
+            merged[idx] = { ...merged[idx], ...user, pin: merged[idx].pin || user.pin };
+          } else {
+            merged.push(user);
+          }
+        }
+        finalEmployees = merged;
+        return finalEmployees;
+      });
+
+      // 9. Merge settings
+      let finalSettings: SystemSettings | null = null;
+      if (sbSettings) {
+        setSettings(prev => {
+          finalSettings = { ...prev, ...sbSettings, ...(customCompanyName ? { companyName: customCompanyName } : {}) };
+          return finalSettings;
+        });
+      } else if (serverData?.settings) {
+        setSettings(prev => {
+          finalSettings = { ...prev, ...serverData.settings, ...(customCompanyName ? { companyName: customCompanyName } : {}) };
+          return finalSettings;
+        });
+      } else if (customCompanyName) {
+        setSettings(prev => {
+          finalSettings = { ...prev, companyName: customCompanyName };
+          return finalSettings;
+        });
       }
 
-      if (!loadedData) {
-        // Direct Client-Side Supabase Service Fetching
-        try {
-          const [sbProducts, sbCustomers, sbTransactions, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
-            CommercialDataService.fetchProducts().catch(() => []),
-            CommercialDataService.fetchCustomers().catch(() => []),
-            CommercialDataService.fetchTransactions().catch(() => []),
-            CommercialDataService.fetchCashFlow().catch(() => []),
-            CommercialDataService.fetchEmployees().catch(() => []),
-            CommercialDataService.fetchSettings().catch(() => null),
-            CommercialDataService.fetchAuditLogs().catch(() => [])
-          ]);
+      // 10. Merge audit logs
+      let finalAuditLogs: AuditLog[] = [];
+      setAuditLogs(prev => {
+        const base = serverData?.auditlogs || prev || [];
+        finalAuditLogs = SupabaseSyncService.mergeRecordsById(base, sbAuditLogs || []);
+        return finalAuditLogs;
+      });
 
-          setProducts(sbProducts || []);
-          setCustomers(sbCustomers || []);
-          setTransactions(sbTransactions || []);
-          setCashFlow(sbCashflow || []);
-
-          if (sbEmployees && sbEmployees.length > 0) {
-            setEmployees(sbEmployees);
-            setActiveUser(sbEmployees[0]);
-          } else {
-            setEmployees(initialEmployees);
-            setActiveUser(initialEmployees[0]);
-          }
-
-          if (sbSettings) setSettings(sbSettings);
-          else setSettings(defaultSettings);
-
-          setAuditLogs(sbAuditLogs || []);
-        } catch (sbErr) {
-          setProducts([]);
-          setCustomers([]);
-          setTransactions([]);
-          setCashFlow([]);
-          setEmployees(initialEmployees);
-          setAuditLogs([]);
-          setSettings(defaultSettings);
-        }
+      // 11. [CACHE-ASIDE] Atualização Assíncrona do Snapshot Local
+      try {
+        const snapshotToPersist = {
+          products: finalProducts,
+          customers: finalCustomers,
+          transactions: finalTransactions,
+          cashflow: finalCashflow,
+          employees: finalEmployees,
+          auditlogs: finalAuditLogs,
+          settings: finalSettings || settings,
+          cachedAt: new Date().toISOString()
+        };
+        localStorage.setItem(cacheKey, JSON.stringify(snapshotToPersist));
+        localStorage.setItem("erp_cache_snapshot_global", JSON.stringify(snapshotToPersist));
+      } catch (persistErr) {
+        console.warn("[CACHE-ASIDE] Não foi possível atualizar o snapshot em localStorage:", persistErr);
       }
 
       setIsDbLoaded(true);
-    };
-    fetchExistentialDb();
+      console.log("[HYDRATE] Dados sincronizados e snapshot local atualizado.");
+
+      // Flush any pending write operations in IndexedDB
+      SyncService.flushQueue().then(({ processed }) => {
+        if (processed > 0) {
+          console.log(`[HYDRATE] ${processed} operações pendentes offline foram sincronizadas com sucesso.`);
+        }
+      }).catch(err => {
+        console.warn("[HYDRATE] Falha ao processar fila offline:", err);
+      });
+    } catch (err) {
+      console.warn("[HYDRATE] Erro na integridade e hidratação de dados:", err);
+      setIsDbLoaded(true);
+    }
+  };
+
+  // Hydrate states from existential server database on mount
+  useEffect(() => {
+    // Run the connection test via abstract service
+    ConnectionService.test();
+    hydrateDatabaseForUser();
   }, []);
 
   useEffect(() => {
@@ -2729,14 +2828,35 @@ export default function App() {
 
   // Supabase Auth Observer to handle auto-login, load profiles, and synchronize permissions strictly via Supabase
   useEffect(() => {
+    // Check for OAuth Callback Errors in URL Query or Hash
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const rawHash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+      const hashParams = new URLSearchParams(rawHash);
+
+      const oauthError = urlParams.get("error") || hashParams.get("error");
+      const oauthErrorDesc = urlParams.get("error_description") || hashParams.get("error_description");
+
+      if (oauthError) {
+        console.warn("[OAuth Callback] Retorno de erro da autenticação Google:", oauthError, oauthErrorDesc);
+        const friendlyMessage = oauthError === "access_denied"
+          ? "Autenticação Google cancelada pelo utilizador."
+          : (oauthErrorDesc ? decodeURIComponent(oauthErrorDesc.replace(/\+/g, " ")) : "Falha na autenticação com a conta Google.");
+        
+        showToast(friendlyMessage, "error");
+        // Clean URL to prevent error loop on reload
+        window.history.replaceState(null, document.title, window.location.pathname);
+      }
+    }
+
     const handleAuthSync = async (user: any) => {
-      if (!user) {
+      if (!user || isLoggingOutRef.current) {
         setIsAuthenticated(false);
         setActiveUser(null);
         return;
       }
       try {
-        const { employee, companyName } = await SupabaseSyncService.syncUserProfileFromAuth(user);
+        const { employee, companyName } = await SupabaseSyncService.syncUserProfileFromAuth(user, employees);
 
         if (employee.status === "BLOCKED") {
           showToast("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.", "error");
@@ -2762,6 +2882,15 @@ export default function App() {
             companyName: companyName
           }));
         }
+
+        // Hydrate and merge all database records for this tenant/user
+        await hydrateDatabaseForUser(employee, companyName);
+
+        // Clean OAuth hash/query tokens from URL bar without reload for a pristine URL
+        if (typeof window !== "undefined" && (window.location.hash || window.location.search)) {
+          window.history.replaceState(null, document.title, window.location.pathname);
+        }
+
         console.log(`[SUPABASE AUTH] Sessão autoritativa ativa: ${employee.name} (${employee.role}) - Empresa: ${companyName}`);
       } catch (err) {
         console.error("[SUPABASE AUTH] Erro ao sincronizar perfil autoritativo:", err);
@@ -2773,7 +2902,7 @@ export default function App() {
     const client = getSupabaseClient();
     if (client) {
       client.auth.getSession().then(({ data: { session }, error }) => {
-        if (error || !session?.user) {
+        if (error || !session?.user || isLoggingOutRef.current) {
           setIsAuthenticated(false);
           setActiveUser(null);
         } else {
@@ -2785,7 +2914,7 @@ export default function App() {
       });
 
       const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
-        if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
+        if (session?.user && !isLoggingOutRef.current && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
           handleAuthSync(session.user);
         } else if (event === "SIGNED_OUT" || !session) {
           setIsAuthenticated(false);
@@ -3775,18 +3904,25 @@ export default function App() {
             }
           }
 
-          const threshold = settings.smsStockThreshold !== undefined ? settings.smsStockThreshold : 5;
+          // 3. Individual Minimum Stock Alerting & Automation
+          const individualThreshold = (prod.minStock !== undefined && prod.minStock > 0)
+            ? prod.minStock
+            : (settings.smsStockThreshold !== undefined ? settings.smsStockThreshold : 5);
           
-          if (settings.smsAlertsEnabled && updatedStock <= threshold && prod.stock > threshold) {
-            triggerSmsStockAlert(prod.name, updatedStock, threshold);
-          }
+          const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
 
-          if (settings.emailStockAlertsEnabled && updatedStock <= threshold && prod.stock > threshold) {
-            triggerEmailStockAlert(prod.name, updatedStock, threshold);
-          }
+          if (autoSendAlerts) {
+            if (settings.smsAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerSmsStockAlert(prod.name, updatedStock, individualThreshold);
+            }
 
-          if (settings.whatsappEnabled && updatedStock <= threshold && prod.stock > threshold) {
-            triggerWhatsappStockAlert(prod.name, updatedStock, threshold);
+            if (settings.emailStockAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerEmailStockAlert(prod.name, updatedStock, individualThreshold);
+            }
+
+            if (settings.whatsappEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerWhatsappStockAlert(prod.name, updatedStock, individualThreshold);
+            }
           }
 
           return {
@@ -3990,6 +4126,9 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       companyName: branchName
     }));
 
+    // Trigger full entity integrity and hydration
+    hydrateDatabaseForUser(user, branchName);
+
     // Record login audit log
     handleAddAuditLog(
       "Login efetuado",
@@ -4161,6 +4300,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
   };
 
   const handleLogout = async () => {
+    isLoggingOutRef.current = true;
     try {
       if (activeUser) {
         handleAddAuditLog(
@@ -4174,30 +4314,21 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
-      // Clean memory state to prevent cross-user data lingering
-      setProducts([]);
-      setCustomers([]);
-      setTransactions([]);
-      setCashFlow([]);
-      setEmployees([]);
-      setAuditLogs([]);
-      setSettings(defaultSettings);
       showToast("Sessão terminada com sucesso.", "info");
     } catch (err: any) {
       console.error("Erro ao efetuar logout:", err);
-      await SupabaseSyncService.signOut();
+      try {
+        await SupabaseSyncService.signOut();
+      } catch {}
       localStorage.removeItem("erp_logged_in_user");
       localStorage.removeItem("erp_simulated_logged_in_user");
       setActiveUser(null);
       setIsAuthenticated(false);
-      setProducts([]);
-      setCustomers([]);
-      setTransactions([]);
-      setCashFlow([]);
-      setEmployees([]);
-      setAuditLogs([]);
-      setSettings(defaultSettings);
       showToast("Sessão terminada com sucesso.", "info");
+    } finally {
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 1000);
     }
   };
 
@@ -4770,6 +4901,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     employees={employees}
                     auditLogs={auditLogs}
                     products={products}
+                    onUpdateProduct={handleUpdateProduct}
+                    onUpdateProducts={(updatedList) => {
+                      setProducts(updatedList);
+                      syncTable("products", updatedList);
+                    }}
                     transactions={filteredTransactions}
                     customers={customers}
                     onAddEmployee={handleAddEmployee}

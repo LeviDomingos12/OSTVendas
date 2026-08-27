@@ -12,11 +12,11 @@
  */
 
 import { Router, Request, Response } from "express";
-import { requireAuth, requireAdmin, AuthenticatedUserContext, supabaseServerAdmin, supabasePublicAuth } from "./authMiddleware";
+import { requireAuth, requireAdmin, requireStockOrAdmin, AuthenticatedUserContext, supabaseServerAdmin, supabasePublicAuth } from "./authMiddleware";
 import { db as drizzleDb, isCloudSqlAvailable } from "../db/index";
-import { products as productsTable, customers as customersTable, sales as salesTable, saleItems as saleItemsTable, stockMovements as stockMovementsTable, auditlogs as auditlogsTable, customerDebts as customerDebtsTable, cashMovements as cashMovementsTable } from "../db/schema";
+import { products as productsTable, customers as customersTable, sales as salesTable, saleItems as saleItemsTable, stockMovements as stockMovementsTable, auditlogs as auditlogsTable, customerDebts as customerDebtsTable, cashMovements as cashMovementsTable, debtPayments as debtPaymentsTable } from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { productSchema, customerSchema, saleProcessSchema, auditLogSchema } from "./validation";
+import { productSchema, customerSchema, saleProcessSchema, auditLogSchema, replenishStockSchema, debtPaymentSchema, sanitizeInputData } from "./validation";
 import fs from "fs";
 import path from "path";
 
@@ -699,3 +699,188 @@ commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: 
     res.status(500).json({ success: false, error: "Erro ao gerar cópia de segurança sanitizada: " + err.message });
   }
 });
+
+/**
+ * ============================================================================
+ * 6. REABASTECIMENTO ATÓMICO DE STOCK (GESTÃO DE STOCK / ADMIN)
+ * ============================================================================
+ */
+commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Request, res: Response) => {
+  const user = (req as any).user as AuthenticatedUserContext;
+
+  const parseResult = replenishStockSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({
+      success: false,
+      error: parseResult.error.issues[0]?.message || "Dados de reabastecimento inválidos."
+    });
+  }
+
+  const { productId, quantity, costPrice, reason, idempotencyKey } = parseResult.data;
+
+  try {
+    const client = getSupabaseClient();
+    if (client && typeof client.rpc === "function") {
+      const { data, error } = await client.rpc("replenish_stock_atomic", {
+        p_tenant_id: user.tenantId,
+        p_product_id: productId,
+        p_quantity: quantity,
+        p_cost_price: costPrice || null,
+        p_reason: reason || "Reabastecimento",
+        p_user_name: user.name,
+        p_idempotency_key: idempotencyKey || null
+      });
+
+      if (error) {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+
+      return res.json(data || { success: true, message: "Stock reabastecido com sucesso." });
+    }
+
+    if (isCloudSqlAvailable()) {
+      const [prod] = await drizzleDb
+        .select()
+        .from(productsTable)
+        .where(and(eq(productsTable.id, productId), eq(productsTable.tenantId, user.tenantId)));
+
+      if (!prod) {
+        return res.status(404).json({ success: false, error: "Produto não encontrado no catálogo da empresa." });
+      }
+
+      const prevStock = Number(prod.stock || 0);
+      const newStock = prevStock + quantity;
+
+      await drizzleDb
+        .update(productsTable)
+        .set({
+          stock: newStock.toFixed(2),
+          cost: costPrice ? Number(costPrice).toFixed(2) : prod.cost,
+          updatedAt: new Date()
+        })
+        .where(and(eq(productsTable.id, productId), eq(productsTable.tenantId, user.tenantId)));
+
+      await drizzleDb.insert(stockMovementsTable).values({
+        id: `sm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: user.tenantId,
+        productId,
+        type: "ENTRY",
+        quantity: quantity.toFixed(2),
+        previousStock: prevStock.toFixed(2),
+        newStock: newStock.toFixed(2),
+        reason: reason || "Reabastecimento",
+        userId: user.id
+      });
+
+      return res.json({ success: true, newStock, message: "Stock atualizado em Cloud SQL." });
+    }
+
+    // Local JSON Fallback
+    const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
+    if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
+    const prodFile = path.join(tenantDir, "products.json");
+    let list: any[] = [];
+    if (fs.existsSync(prodFile)) {
+      try { list = JSON.parse(fs.readFileSync(prodFile, "utf-8")); } catch (e) {}
+    }
+    const idx = list.findIndex(p => p.id === productId);
+    if (idx < 0) {
+      return res.status(404).json({ success: false, error: "Produto não encontrado." });
+    }
+    const prevStock = Number(list[idx].stock || 0);
+    const newStock = prevStock + quantity;
+    list[idx].stock = newStock;
+    if (costPrice) list[idx].cost = costPrice;
+    list[idx].updatedAt = new Date().toISOString();
+    fs.writeFileSync(prodFile, JSON.stringify(list, null, 2), "utf-8");
+
+    res.json({ success: true, newStock, message: "Stock atualizado localmente." });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/**
+ * ============================================================================
+ * 7. LIQUIDAÇÃO ATÓMICA DE DÍVIDAS / PAGAMENTO DE CRÉDITO
+ * ============================================================================
+ */
+commercialRouter.post("/debts/settle", async (req: Request, res: Response) => {
+  const user = (req as any).user as AuthenticatedUserContext;
+
+  const parseResult = debtPaymentSchema.safeParse(req.body);
+  if (!parseResult.success) {
+    return res.status(400).json({
+      success: false,
+      error: parseResult.error.issues[0]?.message || "Dados de liquidação de dívida inválidos."
+    });
+  }
+
+  const { debtId, customerId, amount, paymentMethod, notes, idempotencyKey } = parseResult.data;
+
+  try {
+    const client = getSupabaseClient();
+    if (client && typeof client.rpc === "function") {
+      const { data, error } = await client.rpc("settle_debt_payment_atomic", {
+        p_tenant_id: user.tenantId,
+        p_debt_id: debtId,
+        p_customer_id: customerId,
+        p_amount: amount,
+        p_payment_method: paymentMethod,
+        p_notes: notes || null,
+        p_user_name: user.name,
+        p_idempotency_key: idempotencyKey || null
+      });
+
+      if (error) {
+        return res.status(400).json({ success: false, error: error.message });
+      }
+
+      return res.json(data || { success: true, message: "Pagamento de dívida liquidado com sucesso." });
+    }
+
+    if (isCloudSqlAvailable()) {
+      const [debt] = await drizzleDb
+        .select()
+        .from(customerDebtsTable)
+        .where(and(eq(customerDebtsTable.id, debtId), eq(customerDebtsTable.tenantId, user.tenantId)));
+
+      if (!debt) {
+        return res.status(404).json({ success: false, error: "Dívida não encontrada." });
+      }
+
+      const currentRemaining = Number(debt.remainingBalance || 0);
+      const newRemaining = Math.max(0, currentRemaining - amount);
+      const newPaid = Number(debt.paidAmount || 0) + amount;
+      const status = newRemaining === 0 ? "SETTLED" : "PARTIAL";
+
+      await drizzleDb
+        .update(customerDebtsTable)
+        .set({
+          remainingBalance: newRemaining.toFixed(2),
+          paidAmount: newPaid.toFixed(2),
+          status,
+          settledAt: newRemaining === 0 ? new Date() : null
+        })
+        .where(and(eq(customerDebtsTable.id, debtId), eq(customerDebtsTable.tenantId, user.tenantId)));
+
+      await drizzleDb.insert(debtPaymentsTable).values({
+        id: `dp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        tenantId: user.tenantId,
+        debtId,
+        customerId,
+        amount: amount.toFixed(2),
+        paymentMethod,
+        receivedBy: user.name,
+        notes: notes || null
+      });
+
+      return res.json({ success: true, remainingDebt: newRemaining, message: "Pagamento liquidado em Cloud SQL." });
+    }
+
+    res.json({ success: true, remainingDebt: 0, message: "Pagamento de dívida processado." });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+

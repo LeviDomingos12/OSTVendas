@@ -169,74 +169,9 @@ export const AuthService = {
   }
 };
 
-/**
- * Fila de Sincronização Offline Resiliente (Local Queue)
- */
-export const OfflineQueueService = {
-  getQueue(): any[] {
-    try {
-      const q = localStorage.getItem("pos_sync_queue");
-      return q ? JSON.parse(q) : [];
-    } catch {
-      return [];
-    }
-  },
-
-  enqueue(item: { type: string; payload: any; timestamp: string }) {
-    try {
-      const queue = this.getQueue();
-      queue.push(item);
-      localStorage.setItem("pos_sync_queue", JSON.stringify(queue));
-    } catch (e) {
-      console.warn("Erro ao colocar na fila de sincronização:", e);
-    }
-  },
-
-  clearQueue() {
-    localStorage.removeItem("pos_sync_queue");
-  },
-
-  async flushQueue(): Promise<{ processed: number; failed: number }> {
-    const queue = this.getQueue();
-    if (queue.length === 0) return { processed: 0, failed: 0 };
-
-    let processed = 0;
-    let failed = 0;
-    const remaining: any[] = [];
-
-    for (const item of queue) {
-      try {
-        if (item.type === "TRANSACTION") {
-          const res = await SupabaseSyncService.processSaleAtomic(item.payload);
-          if (res.success) processed++;
-          else remaining.push(item);
-        } else if (item.type === "PRODUCT") {
-          const ok = await SupabaseSyncService.saveProduct(item.payload);
-          if (ok) processed++;
-          else remaining.push(item);
-        } else if (item.type === "CUSTOMER") {
-          const ok = await SupabaseSyncService.saveCustomer(item.payload);
-          if (ok) processed++;
-          else remaining.push(item);
-        } else if (item.type === "CASHFLOW") {
-          const ok = await SupabaseSyncService.saveCashFlowEntry(item.payload);
-          if (ok) processed++;
-          else remaining.push(item);
-        } else if (item.type === "CASH_CLOSURE") {
-          const ok = await SupabaseSyncService.saveCashClosure(item.payload);
-          if (ok) processed++;
-          else remaining.push(item);
-        }
-      } catch {
-        remaining.push(item);
-        failed++;
-      }
-    }
-
-    localStorage.setItem("pos_sync_queue", JSON.stringify(remaining));
-    return { processed, failed };
-  }
-};
+import { SyncService, OfflineQueueService, SyncOperationType, SyncQueueItem } from "./syncService";
+export { SyncService, OfflineQueueService };
+export type { SyncOperationType, SyncQueueItem };
 
 /**
  * Serviço Comercial Unificado (Produtos, Vendas, Clientes, Caixa, Staff, Auditoria, Definições)
@@ -346,6 +281,15 @@ export const CommercialDataService = {
       return await SupabaseSyncService.fetchTransactions();
     } catch (err) {
       console.warn("Erro ao buscar vendas:", err);
+      return [];
+    }
+  },
+
+  async fetchRecentTransactions24h(): Promise<Transaction[]> {
+    try {
+      return await SyncService.prefetchRecentTransactions24h();
+    } catch (err) {
+      console.warn("Erro ao buscar transações das últimas 24h:", err);
       return [];
     }
   },
