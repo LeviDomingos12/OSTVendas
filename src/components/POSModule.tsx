@@ -27,7 +27,8 @@ import {
   HelpCircle,
   Zap,
   Barcode,
-  Clock
+  Clock,
+  RotateCcw
 } from "lucide-react";
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
 import QrCodeScannerComponent from "./QrCodeScannerComponent";
@@ -38,6 +39,7 @@ import autoTable from "jspdf-autotable";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { printInvoiceHTML, printThermal80mmReceipt } from "../lib/printHelper";
 import { useSystemVersion } from "../lib/versionManager";
+import { generateUUID, generateEntityId, generateDeterministicInvoiceNumber, generateDeterministicCreditNoteNumber, generateDeterministicFinancialReference } from "../lib/deterministic";
 
 // Extends CartItem type locally for inline observations
 interface UpgradedCartItem extends CartItem {
@@ -51,6 +53,12 @@ interface POSModuleProps {
   activeUsername: string;
   settings: SystemSettings;
   onCompleteSale: (tx: Transaction) => void;
+  onReturnSale?: (
+    tx: Transaction,
+    reason: string,
+    returnedItems: { productId: string; quantity: number; price: number }[],
+    refundMethod?: string
+  ) => void;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currency: string;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
@@ -72,7 +80,7 @@ const generateFiscalSignature = (invoiceNum: string, dateStr: string, total: num
   const part1 = hex.slice(0, 4);
   const part2 = hex.slice(4, 8);
   const key1 = invoiceNum.split('-')[2] || "2026";
-  const key2 = Math.floor(1000 + Math.random() * 9000).toString();
+  const key2 = ((Math.abs(hash) % 9000) + 1000).toString();
   return {
     fiscalHash: `FAC-${hex}-${part1}-${part2}-OSTVENDAS`,
     fiscalKeys: `${part1}-${part2}-${key1}-${key2}`,
@@ -87,6 +95,7 @@ export default function POSModule({
   activeUsername,
   settings,
   onCompleteSale,
+  onReturnSale,
   onAddAuditLog,
   currency,
   onShowToast,
@@ -99,6 +108,15 @@ export default function POSModule({
   // Local synchronized state to allow quick registering of customers and updating stock locally in the view
   const [localCustomers, setLocalCustomers] = useState<Customer[]>(customers);
   const [localProducts, setLocalProducts] = useState<Product[]>(products);
+
+  // Return / Devolution & Credit Note Modal State
+  const [selectedTxForReturn, setSelectedTxForReturn] = useState<Transaction | null>(null);
+  const [showReturnModal, setShowReturnModal] = useState<boolean>(false);
+  const [returnReason, setReturnReason] = useState<string>("Defeito / Avaria de Produto");
+  const [customReturnReason, setCustomReturnReason] = useState<string>("");
+  const [returnedItemQuantities, setReturnedItemQuantities] = useState<Record<string, number>>({});
+  const [returnRefundMethod, setReturnRefundMethod] = useState<string>("CASH");
+  const [completedCreditNote, setCompletedCreditNote] = useState<any | null>(null);
   
   // Minimized / Focus mode state
   const [isLocalMinimized, setIsLocalMinimized] = useState<boolean>(() => {
@@ -683,7 +701,8 @@ export default function POSModule({
     if (selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") {
       const provider = selectedPaymentMethod === "MPESA_PAGA_FACIL" ? "MPESA" : "EMOLA";
       setMobilePaymentProvider(provider);
-      setMobileReference(`VND-${Math.floor(100000 + Math.random() * 900000)}`);
+      const nextTxSeq = transactions.length + 1;
+      setMobileReference(generateDeterministicFinancialReference(settings.companyNuit || settings.companyNif || "OST", "VND", calculations.grandTotal, nextTxSeq));
       setMobilePaymentStatus("IDLE");
       setMobilePaymentProgress(0);
       setMobilePaymentTimer(120);
@@ -872,7 +891,8 @@ export default function POSModule({
 
     setShowFinalConfirmModal(false);
 
-    const invoiceNum = `FAC-2026-${Math.floor(100000 + Math.random() * 900000)}`;
+    const nextInvoiceSeq = transactions.length + 1;
+    const invoiceNum = generateDeterministicInvoiceNumber(nextInvoiceSeq, settings.invoiceSeries || "A");
     const nowStr = new Date().toISOString();
 
     const fiscalSign = settings.fiscalModeEnabled !== false
@@ -880,7 +900,7 @@ export default function POSModule({
       : {};
 
     const transaction: Transaction = {
-      id: `tx-${Date.now()}`,
+      id: generateUUID(),
       invoiceNumber: invoiceNum,
       timestamp: nowStr,
       subtotal: calculations.subtotal,
@@ -1125,7 +1145,7 @@ export default function POSModule({
       if (onShowToast) onShowToast("O carrinho está vazio para ser suspenso.", "warning");
       return;
     }
-    const id = `susp-${Date.now()}`;
+    const id = generateEntityId("susp");
     const desc = selectedCustomer?.name || "Consumidor Geral";
     const record = {
       id,
@@ -2009,7 +2029,7 @@ export default function POSModule({
     e.preventDefault();
     if (!quickCustName) return;
     const newCust: Customer = {
-      id: `cust-${Date.now()}`,
+      id: generateEntityId("cust"),
       name: quickCustName,
       phone: quickCustPhone || "Sem Telemóvel",
       email: `${quickCustName.toLowerCase().replace(/\s+/g, "")}@gmail.com`,
@@ -2558,6 +2578,131 @@ export default function POSModule({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pagamentos Mistos (Split Payment Interativo) */}
+          {selectedPaymentMethod === "MIXED" && (
+            <div className="bg-indigo-50/70 p-3 rounded-xl border border-indigo-200 space-y-2.5 animate-in fade-in duration-150 text-xs">
+              <div className="flex justify-between items-center border-b border-indigo-100 pb-1.5">
+                <span className="font-extrabold text-indigo-900 text-[11px] flex items-center gap-1">
+                  <span>💳 Divisão de Pagamento Misto</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                  Math.abs(mixedSumTotal - calculations.grandTotal) <= 1
+                    ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                    : mixedSumTotal < calculations.grandTotal
+                    ? "bg-amber-100 text-amber-800 border border-amber-300"
+                    : "bg-rose-100 text-rose-800 border border-rose-300"
+                }`}>
+                  {Math.abs(mixedSumTotal - calculations.grandTotal) <= 1
+                    ? "✓ Total Coincide"
+                    : mixedSumTotal < calculations.grandTotal
+                    ? `Faltam ${(calculations.grandTotal - mixedSumTotal).toLocaleString()} MT`
+                    : `Excesso de ${(mixedSumTotal - calculations.grandTotal).toLocaleString()} MT`}
+                </span>
+              </div>
+
+              <div className="space-y-1.5">
+                {/* Dinheiro */}
+                <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-700 w-16 shrink-0">💵 Dinheiro:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={mixedCash || ""}
+                    onChange={(e) => setMixedCash(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="flex-1 font-mono font-bold text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const remainder = Math.max(0, calculations.grandTotal - (mixedMpesa + mixedPOS));
+                      setMixedCash(remainder);
+                    }}
+                    className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[9.5px] font-bold rounded cursor-pointer transition"
+                    title="Preencher restante com Dinheiro"
+                  >
+                    Restante
+                  </button>
+                </div>
+
+                {/* M-Pesa */}
+                <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-700 w-16 shrink-0">📱 M-Pesa:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={mixedMpesa || ""}
+                    onChange={(e) => setMixedMpesa(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="flex-1 font-mono font-bold text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const remainder = Math.max(0, calculations.grandTotal - (mixedCash + mixedPOS));
+                      setMixedMpesa(remainder);
+                    }}
+                    className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[9.5px] font-bold rounded cursor-pointer transition"
+                    title="Preencher restante com M-Pesa"
+                  >
+                    Restante
+                  </button>
+                </div>
+
+                {/* Cartão POS */}
+                <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-indigo-100">
+                  <span className="text-[10px] font-bold text-slate-700 w-16 shrink-0">💳 POS:</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={mixedPOS || ""}
+                    onChange={(e) => setMixedPOS(Math.max(0, parseFloat(e.target.value) || 0))}
+                    placeholder="0"
+                    className="flex-1 font-mono font-bold text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const remainder = Math.max(0, calculations.grandTotal - (mixedCash + mixedMpesa));
+                      setMixedPOS(remainder);
+                    }}
+                    className="px-2 py-1 bg-indigo-100 hover:bg-indigo-200 text-indigo-800 text-[9.5px] font-bold rounded cursor-pointer transition"
+                    title="Preencher restante com POS"
+                  >
+                    Restante
+                  </button>
+                </div>
+              </div>
+
+              {/* Quick Split presets */}
+              <div className="flex justify-between items-center pt-1 border-t border-indigo-100 text-[9.5px] font-bold text-indigo-900">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const half = Math.floor(calculations.grandTotal / 2);
+                    setMixedCash(half);
+                    setMixedMpesa(calculations.grandTotal - half);
+                    setMixedPOS(0);
+                  }}
+                  className="hover:underline text-indigo-600 cursor-pointer"
+                >
+                  50% Dinheiro + 50% M-Pesa
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMixedCash(0);
+                    setMixedMpesa(0);
+                    setMixedPOS(0);
+                  }}
+                  className="hover:underline text-rose-600 cursor-pointer"
+                >
+                  Limpar Divisão
+                </button>
+              </div>
             </div>
           )}
 
@@ -3155,6 +3300,26 @@ export default function POSModule({
                       >
                         <Printer className="w-3.5 h-3.5" />
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTxForReturn(tx);
+                          const initQtys: Record<string, number> = {};
+                          (tx.items || []).forEach(it => {
+                            initQtys[it.productId] = it.quantity;
+                          });
+                          setReturnedItemQuantities(initQtys);
+                          setReturnReason("Defeito / Avaria de Produto");
+                          setReturnRefundMethod(tx.paymentMethod === "DEBT" ? "DEBT" : "CASH");
+                          setShowReturnModal(true);
+                          setShowSalesHistoryModal(false);
+                        }}
+                        className="p-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white rounded text-[10px] font-bold text-rose-600 border border-rose-200 transition cursor-pointer flex items-center gap-1"
+                        title="Devolver Artigos / Emitir Nota de Crédito"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Devolver</span>
+                      </button>
                     </div>
                   </div>
                 ))
@@ -3169,6 +3334,255 @@ export default function POSModule({
             >
               Fechar Painel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 17. RETURN / DEVOLUTION & CREDIT NOTE MODAL */}
+      {showReturnModal && selectedTxForReturn && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2 text-rose-600">
+                  <RotateCcw className="w-5 h-5" />
+                  <span>Devolução & Nota de Crédito Fiscal</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Fatura: <span className="font-bold text-slate-700">{selectedTxForReturn.invoiceNumber}</span> • Cliente: {selectedTxForReturn.customerName || "Consumidor Final"}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* List of items to return */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">Artigos a Devolver e Quantidades:</label>
+              <div className="max-h-44 overflow-y-auto space-y-2 border border-slate-200 rounded-xl p-2.5 bg-slate-50">
+                {(selectedTxForReturn.items || []).map((it) => {
+                  const currQty = returnedItemQuantities[it.productId] || 0;
+                  return (
+                    <div key={it.productId} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-xs">
+                      <div className="flex-1 pr-2">
+                        <span className="font-bold text-slate-800 block truncate">{it.productName}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          Preço: {it.price.toLocaleString()} MT • Faturado: {it.quantity} un
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setReturnedItemQuantities(prev => ({ ...prev, [it.productId]: Math.max(0, (prev[it.productId] || 0) - 1) }))}
+                          className="w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold flex items-center justify-center cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <span className="font-mono font-bold w-7 text-center">{currQty}</span>
+                        <button
+                          type="button"
+                          onClick={() => setReturnedItemQuantities(prev => ({ ...prev, [it.productId]: Math.min(it.quantity, (prev[it.productId] || 0) + 1) }))}
+                          className="w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold flex items-center justify-center cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Reason selection */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">Motivo da Devolução:</label>
+                <select
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                >
+                  <option value="Defeito / Avaria de Produto">Defeito / Avaria de Produto</option>
+                  <option value="Troca por Outro Artigo">Troca por Outro Artigo</option>
+                  <option value="Erro de Registo no Caixa">Erro de Registo no Caixa</option>
+                  <option value="Desistência do Cliente">Desistência do Cliente</option>
+                  <option value="Outro Motivo">Outro Motivo</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">Modalidade de Reembolso:</label>
+                <select
+                  value={returnRefundMethod}
+                  onChange={(e) => setReturnRefundMethod(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                >
+                  <option value="CASH">Dinheiro (Caixa)</option>
+                  <option value="MPESA_PAGA_FACIL">M-Pesa</option>
+                  <option value="EMOLA">e-Mola</option>
+                  <option value="POS_CARD">Cartão POS / Bancário</option>
+                  <option value="DEBT">Abate na Conta Corrente (Dívida)</option>
+                </select>
+              </div>
+            </div>
+
+            {returnReason === "Outro Motivo" && (
+              <input
+                type="text"
+                value={customReturnReason}
+                onChange={(e) => setCustomReturnReason(e.target.value)}
+                placeholder="Especifique detalhadamente o motivo..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none"
+              />
+            )}
+
+            {/* Refund Totals Summary */}
+            {(() => {
+              const itemsToReturn = (selectedTxForReturn.items || []).filter(it => (returnedItemQuantities[it.productId] || 0) > 0);
+              const totalRefund = itemsToReturn.reduce((sum, it) => sum + (it.price * (returnedItemQuantities[it.productId] || 0)), 0);
+
+              return (
+                <div className="bg-rose-50 p-3.5 rounded-xl border border-rose-200 space-y-1 text-xs">
+                  <div className="flex justify-between font-bold text-rose-900">
+                    <span>Total a Reembolsar / Creditar:</span>
+                    <span className="text-base font-black font-mono">{totalRefund.toLocaleString()} MT</span>
+                  </div>
+                  <p className="text-[10.5px] text-rose-700">
+                    O stock dos {itemsToReturn.length} artigo(s) selecionados será restaurado automaticamente no inventário e registado em auditoria.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const itemsToReturn = (selectedTxForReturn.items || [])
+                    .filter(it => (returnedItemQuantities[it.productId] || 0) > 0)
+                    .map(it => ({
+                      productId: it.productId,
+                      quantity: returnedItemQuantities[it.productId],
+                      price: it.price
+                    }));
+
+                  if (itemsToReturn.length === 0) {
+                    if (onShowToast) onShowToast("Selecione pelo menos um artigo com quantidade superior a zero para devolver.", "warning");
+                    return;
+                  }
+
+                  const finalReason = returnReason === "Outro Motivo" && customReturnReason.trim() ? customReturnReason.trim() : returnReason;
+                  const totalRefund = itemsToReturn.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+                  const nextReturnSeq = transactions.length + 1;
+                  const creditNoteId = generateDeterministicCreditNoteNumber(nextReturnSeq);
+
+                  if (onReturnSale) {
+                    onReturnSale(selectedTxForReturn, finalReason, itemsToReturn, returnRefundMethod);
+                  } else {
+                    onAddAuditLog(
+                      "Devolução de Venda",
+                      "VENDAS",
+                      `Devolução da fatura ${selectedTxForReturn.invoiceNumber} efetuada por ${activeUsername}. Total: ${totalRefund} MT. Motivo: ${finalReason}`
+                    );
+                    if (onShowToast) onShowToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteId}`, "success");
+                  }
+
+                  setCompletedCreditNote({
+                    id: creditNoteId,
+                    invoiceRef: selectedTxForReturn.invoiceNumber,
+                    date: new Date().toLocaleString(),
+                    customerName: selectedTxForReturn.customerName,
+                    items: itemsToReturn,
+                    totalRefund,
+                    reason: finalReason,
+                    refundMethod: returnRefundMethod
+                  });
+
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-rose-600/20"
+              >
+                Confirmar Devolução & Estorno ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 18. CREDIT NOTE / NOTA DE CRÉDITO SUCCESS & PRINT MODAL */}
+      {completedCreditNote && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-4 text-center animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-slate-900 text-base">Nota de Crédito Emitida!</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                N/Crédito: <span className="font-bold text-slate-700">{completedCreditNote.id}</span>
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-left font-mono text-[11px] text-slate-700 space-y-1.5">
+              <div className="flex justify-between">
+                <span>Fatura Original:</span>
+                <span className="font-bold">{completedCreditNote.invoiceRef}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Total Estornado:</span>
+                <span className="font-bold text-rose-600">{completedCreditNote.totalRefund.toLocaleString()} MT</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Reembolso:</span>
+                <span>{completedCreditNote.refundMethod}</span>
+              </div>
+              <div className="border-t border-slate-200 pt-1 text-[10px] text-slate-500 font-sans">
+                Motivo: {completedCreditNote.reason}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCompletedCreditNote(null)}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    window.print();
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                }}
+                className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir N/C</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

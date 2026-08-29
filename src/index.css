@@ -164,7 +164,7 @@ h1, h2, h3, h4, th {
 /* Global Component Styling Overrides mapped to Elegant Dark theme */
 
 /* Main canvas background mappings */
-.dark .bg-slate-50, .dark .bg-slate-100/30, .dark .bg-slate-50/50, .dark .bg-slate-100\/30, .dark .bg-slate-50\/50, .dark [class*="bg-slate-50"] {
+.dark .bg-slate-50, .dark [class*="bg-slate-100"], .dark [class*="bg-slate-50"] {
   background-color: #09090b !important;
 }
 
@@ -174,7 +174,7 @@ h1, h2, h3, h4, th {
 }
 
 /* Border overrides */
-.dark .border-slate-200, .dark .border-slate-100, .dark .border-slate-300/40, .dark .border-slate-200/50, .dark .border-slate-100/60 {
+.dark .border-slate-200, .dark .border-slate-100, .dark [class*="border-slate-300"], .dark [class*="border-slate-200"], .dark [class*="border-slate-100"] {
   border-color: #27272a !important; /* zinc-800 */
 }
 

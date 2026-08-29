@@ -23,6 +23,7 @@ export interface MultiTenantMetadata {
   createdAt?: string;
   updatedAt?: string;
   companyId?: string;
+  tenantId?: string;
   role?: string;
 }
 
@@ -67,6 +68,7 @@ export interface Customer extends MultiTenantMetadata {
   purchaseCount: number;
   lastPurchaseDate?: string;
   debt: number;
+  creditLimit?: number;
   loyaltyPoints: number;
   creditBlocked?: boolean;
   preferredPaymentMethod?: string;
@@ -78,6 +80,7 @@ export interface Transaction extends MultiTenantMetadata {
   id: string;
   invoiceNumber: string;
   timestamp: string;
+  status?: "COMPLETED" | "CANCELLED" | "REFUNDED";
   items: {
     productId: string;
     productName: string;
@@ -207,6 +210,8 @@ export interface SystemSettings extends MultiTenantMetadata {
   companyName: string;
   companyAddress: string;
   companyNuit: string;
+  companyNif?: string;
+  invoiceSeries?: string;
   securityPin?: string;
   systemVersion?: string;
   nuit?: string;

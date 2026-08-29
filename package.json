@@ -23,8 +23,6 @@
     "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.2",
-    "firebase": "^12.15.0",
-    "firebase-admin": "^14.1.0",
     "html5-qrcode": "^2.3.8",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.8",

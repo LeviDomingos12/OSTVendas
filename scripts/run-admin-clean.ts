@@ -7,8 +7,14 @@ dotenv.config();
 import { createClient } from "@supabase/supabase-js";
 import { isMockRecord } from "../src/services/adminService";
 
-const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "https://xjpvaxxjxtozzylaujkp.supabase.co";
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhqcHZheHhqeHRvenp5bGF1amtwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY4OTMzNjUsImV4cCI6MjA2MjQ2OTM2NX0.f7aUu9h9oGf6Bq-L3qW0ZzK3z4fH8c9o4A";
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error("❌ Erro: Variáveis obrigatórias SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY não encontradas.");
+  console.error("Para executar scripts de limpeza administrativa, forneça as credenciais de serviço no ambiente.");
+  process.exit(1);
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 

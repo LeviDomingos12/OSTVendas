@@ -102,20 +102,20 @@ export function normalizeUserRole(user?: Employee | null): UserRole {
   if (!user || !user.role) return "CASHIER";
   const raw = user.role.toUpperCase().trim();
   
-  if (raw.includes("ADMIN") || raw.includes("GESTOR") || raw.includes("GERENTE GERAL") || raw.includes("DIRETOR")) {
-    return "ADMIN";
-  }
-  if (raw.includes("SUPERVISOR") || raw.includes("SUBGERENTE") || raw.includes("ENCARREGADO")) {
-    return "SUPERVISOR";
-  }
-  if (raw.includes("AUDITOR") || raw.includes("AUDITORIA")) {
-    return "AUDITOR";
+  if (raw.includes("RH") || raw.includes("RECURSOS HUMANOS")) {
+    return "RH";
   }
   if (raw.includes("FINANCEIRO") || raw.includes("CONTABILISTA") || raw.includes("FINANÇAS")) {
     return "FINANCEIRO";
   }
-  if (raw.includes("RH") || raw.includes("RECURSOS HUMANOS")) {
-    return "RH";
+  if (raw.includes("AUDITOR") || raw.includes("AUDITORIA")) {
+    return "AUDITOR";
+  }
+  if (raw.includes("SUPERVISOR") || raw.includes("SUBGERENTE") || raw.includes("ENCARREGADO")) {
+    return "SUPERVISOR";
+  }
+  if (raw.includes("ADMIN") || raw.includes("GESTOR") || raw.includes("GERENTE GERAL") || raw.includes("DIRETOR") || raw.includes("PROPRIETÁRIO")) {
+    return "ADMIN";
   }
   // Caixa, Vendedor, Balconista e demais operadores
   return "CASHIER";

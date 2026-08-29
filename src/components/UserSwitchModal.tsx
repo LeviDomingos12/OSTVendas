@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Users, X, ArrowLeft, Eye, EyeOff, ShieldCheck, ChevronRight, Search, KeyRound } from "lucide-react";
 import { Employee, SystemSettings } from "../types";
+import { verifySecurityPin } from "../lib/security";
 
 interface UserSwitchModalProps {
   isOpen: boolean;
@@ -46,7 +47,7 @@ export const UserSwitchModal: React.FC<UserSwitchModalProps> = ({
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmpId);
 
-  const handleConfirmPin = () => {
+  const handleConfirmPin = async () => {
     if (!selectedEmployee) return;
 
     if (!enteredPin.trim()) {
@@ -57,33 +58,36 @@ export const UserSwitchModal: React.FC<UserSwitchModalProps> = ({
     setIsVerifying(true);
     setPinError("");
 
-    // Dynamic PIN validation:
-    // 1. Employee's specific configured PIN
-    // 2. Settings Master Security PIN
-    // 3. Fallback default if employee was created without explicit PIN
-    const employeePin = selectedEmployee.pin?.trim();
-    const systemMasterPin = settings?.securityPin?.trim();
-    const entered = enteredPin.trim();
+    try {
+      const employeePin = selectedEmployee.pin?.trim();
+      const systemMasterPin = settings?.securityPin?.trim();
+      const entered = enteredPin.trim();
 
-    const isMatch = (employeePin && entered === employeePin) ||
-                    (systemMasterPin && entered === systemMasterPin) ||
-                    (!employeePin && !systemMasterPin && (entered === "123456" || entered === "1234"));
+      const matchEmp = employeePin ? await verifySecurityPin(entered, employeePin) : false;
+      const matchSys = systemMasterPin ? await verifySecurityPin(entered, systemMasterPin) : false;
+      const matchFallback = !employeePin && !systemMasterPin && (entered === "123456" || entered === "1234");
 
-    if (isMatch) {
-      onSelectEmployee(selectedEmployee);
-      if (onAuditLog) {
-        onAuditLog(
-          "Troca de Usuário Autenticada",
-          "SEGURANÇA",
-          `Operador ativo alterado para ${selectedEmployee.name} via autenticação por PIN seguro.`
-        );
+      const isMatch = matchEmp || matchSys || matchFallback;
+
+      if (isMatch) {
+        onSelectEmployee(selectedEmployee);
+        if (onAuditLog) {
+          onAuditLog(
+            "Troca de Usuário Autenticada",
+            "SEGURANÇA",
+            `Operador ativo alterado para ${selectedEmployee.name} via autenticação por PIN seguro.`
+          );
+        }
+        onClose();
+      } else {
+        setPinError("PIN incorreto. Verifique com o administrador ou tente novamente.");
+        setEnteredPin("");
       }
-      onClose();
-    } else {
-      setPinError("PIN incorreto. Verifique com o administrador ou tente novamente.");
-      setEnteredPin("");
+    } catch {
+      setPinError("Falha na validação de segurança. Tente novamente.");
+    } finally {
+      setIsVerifying(false);
     }
-    setIsVerifying(false);
   };
 
   const filteredEmployees = employees.filter((emp) => {

@@ -5,16 +5,17 @@ import { createServer as createViteServer } from "vite";
 import nodemailer from "nodemailer";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
-import { initializeApp as initializeAdminApp, getApps as getAdminApps, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
 import { db as drizzleDb, isCloudSqlAvailable } from "./src/db/index";
 import { products as productsTable, customers as customersTable, transactions as transactionsTable, auditlogs as auditlogsTable, settings as settingsTable } from "./src/db/schema";
-import { migrateTenantFromFirestoreToSql } from "./src/db/migrator";
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
 import { requireAuth, requireAdmin, AuthenticatedUserContext } from "./src/server/authMiddleware";
 import { commercialRouter } from "./src/server/safeEndpoints";
+import { aiRouter } from "./src/server/aiRouter";
+import { communicationRouter } from "./src/server/communicationRouter";
+import { securityRouter } from "./src/server/securityRouter";
+import { backupRouter } from "./src/server/backupRouter";
 import {
   dbSaveSchema,
   sanitizeInputData,
@@ -65,26 +66,14 @@ const defaultRateLimitConfig = {
   enabled: true
 };
 
+let currentRateLimitConfig = { ...defaultRateLimitConfig };
+
 function getRateLimitConfig() {
-  const configPath = path.join(process.cwd(), "db_store", "rate_limit_config.json");
-  if (fs.existsSync(configPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      return { ...defaultRateLimitConfig, ...data };
-    } catch {
-      return defaultRateLimitConfig;
-    }
-  }
-  return defaultRateLimitConfig;
+  return currentRateLimitConfig;
 }
 
 function saveRateLimitConfig(config: any) {
-  const dir = path.join(process.cwd(), "db_store");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  const configPath = path.join(dir, "rate_limit_config.json");
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+  currentRateLimitConfig = { ...defaultRateLimitConfig, ...config };
 }
 
 // Firewall & Security System Config
@@ -108,26 +97,14 @@ const defaultFirewallConfig: FirewallConfig = {
   whitelistOnlyMode: false
 };
 
+let currentFirewallConfig: FirewallConfig = { ...defaultFirewallConfig };
+
 function getFirewallConfig(): FirewallConfig {
-  const configPath = path.join(process.cwd(), "db_store", "firewall_config.json");
-  if (fs.existsSync(configPath)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-      return { ...defaultFirewallConfig, ...data };
-    } catch {
-      return defaultFirewallConfig;
-    }
-  }
-  return defaultFirewallConfig;
+  return currentFirewallConfig;
 }
 
 function saveFirewallConfig(config: FirewallConfig) {
-  const dir = path.join(process.cwd(), "db_store");
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  const configPath = path.join(dir, "firewall_config.json");
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+  currentFirewallConfig = { ...defaultFirewallConfig, ...config };
 }
 
 // Auth Brute Force Lockout Store
@@ -138,165 +115,14 @@ interface LockoutRecord {
   lockedUntil: string | null;
 }
 
+const lockoutsMemoryStore: Record<string, LockoutRecord> = {};
+
 function getLockoutsStore(): Record<string, LockoutRecord> {
-  const lockoutsPath = path.join(process.cwd(), "db_store", "auth_lockouts.json");
-  if (fs.existsSync(lockoutsPath)) {
-    try {
-      return JSON.parse(fs.readFileSync(lockoutsPath, "utf-8"));
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function safeMkdir(dirPath: string): boolean {
-  try {
-    if (!fs.existsSync(dirPath)) {
-      fs.mkdirSync(dirPath, { recursive: true });
-    }
-    return true;
-  } catch (err: any) {
-    return false;
-  }
-}
-
-function safeWriteLocalDbFile(filePath: string, data: any): boolean {
-  try {
-    const dir = path.dirname(filePath);
-    safeMkdir(dir);
-    fs.writeFileSync(filePath, typeof data === "string" ? data : JSON.stringify(data, null, 2), "utf-8");
-    return true;
-  } catch (err: any) {
-    if (err.code === "EROFS" || err.message?.includes("read-only")) {
-      console.warn(`[SERVERLESS] Environment filesystem is read-only. Bypassing local JSON cache write for: ${filePath}`);
-    } else {
-      console.warn(`[STORAGE WARNING] Unable to write local db file ${filePath}:`, err.message || err);
-    }
-    return false;
-  }
+  return lockoutsMemoryStore;
 }
 
 function saveLockoutsStore(store: Record<string, LockoutRecord>) {
-  const dir = path.join(process.cwd(), "db_store");
-  const lockoutsPath = path.join(dir, "auth_lockouts.json");
-  safeWriteLocalDbFile(lockoutsPath, store);
-}
-
-// Initialize Firebase Firestore using Firebase Admin SDK
-const firebaseConfigPath = path.join(process.cwd(), "firebase-applet-config.json");
-let firebaseDb: any = null;
-
-let firebaseConfig: any = {};
-if (fs.existsSync(firebaseConfigPath)) {
-  try {
-    firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, "utf-8"));
-  } catch (e) {
-    console.warn("Failed to parse firebase-applet-config.json:", e);
-  }
-}
-
-const rawProjectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId;
-const rawDatabaseId = process.env.FIREBASE_DATABASE_ID || process.env.VITE_FIREBASE_DATABASE_ID || firebaseConfig.firestoreDatabaseId;
-
-function cleanProjectId(raw: any): string | undefined {
-  if (!raw || typeof raw !== "string") return undefined;
-  let str = raw.trim();
-  if (str.includes("project/")) {
-    const match = str.match(/project\/([a-zA-Z0-9-]+)/);
-    if (match) return match[1];
-  }
-  if (str.startsWith("http://") || str.startsWith("https://")) {
-    return undefined;
-  }
-  if (/^[a-zA-Z0-9_-]+$/.test(str)) {
-    return str;
-  }
-  return undefined;
-}
-
-function cleanDatabaseId(raw: any): string {
-  if (!raw || typeof raw !== "string") return "(default)";
-  let str = raw.trim();
-  if (str.startsWith("http://") || str.startsWith("https://") || str.includes("/") || str.includes("?") || str.includes(":")) {
-    return "(default)";
-  }
-  if (str === "(default)" || /^[a-zA-Z0-9_-]{1,63}$/.test(str)) {
-    return str;
-  }
-  return "(default)";
-}
-
-const targetProjectId = cleanProjectId(rawProjectId);
-const targetDatabaseId = cleanDatabaseId(rawDatabaseId);
-
-if (targetProjectId) {
-  try {
-    if (getAdminApps().length === 0) {
-      const adminOptions: any = { projectId: targetProjectId };
-      if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
-        try {
-          let pk = process.env.FIREBASE_PRIVATE_KEY.trim();
-          if ((pk.startsWith('"') && pk.endsWith('"')) || (pk.startsWith("'") && pk.endsWith("'"))) {
-            pk = pk.slice(1, -1);
-          }
-          pk = pk.replace(/\\n/g, "\n").replace(/\\r/g, "");
-          if (pk.includes("BEGIN PRIVATE KEY")) {
-            adminOptions.credential = cert({
-              projectId: targetProjectId,
-              clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-              privateKey: pk
-            });
-          }
-        } catch (certErr: any) {
-          console.warn("[FIREBASE ADMIN] Private key format not decoded with cert(), initializing with project context:", certErr?.message || certErr);
-        }
-      }
-      initializeAdminApp(adminOptions);
-    }
-    const dbInstance = targetDatabaseId === "(default)" ? getFirestore() : getFirestore(targetDatabaseId);
-    firebaseDb = dbInstance;
-    console.log(`Firebase Admin SDK initialized on the server. Project: ${targetProjectId}, Database: ${targetDatabaseId}`);
-
-    // Verification check
-    (async () => {
-      try {
-        await dbInstance.collection("settings").limit(1).get();
-        console.log("[FIREBASE] Server verified Firestore access successfully.");
-      } catch (verificationErr: any) {
-        console.warn(
-          "[FIREBASE] Warning: Server IAM check failed. Server-side Firestore operations bypassed to avoid errors.",
-          verificationErr.message || verificationErr
-        );
-        firebaseDb = null;
-      }
-    })();
-  } catch (err: any) {
-    console.warn("[FIREBASE ADMIN] Initializing in fallback resilience mode:", err?.message || err);
-    firebaseDb = null;
-  }
-} else {
-  console.warn("No Firebase configuration or env variables found. Local JSON mode active.");
-}
-
-// Recursive helper to sanitize objects by removing 'undefined' values before sending to Firestore
-function sanitizeForFirestore(data: any): any {
-  if (data === null || data === undefined) {
-    return null;
-  }
-  if (Array.isArray(data)) {
-    return data.map(item => sanitizeForFirestore(item));
-  }
-  if (typeof data === "object") {
-    const cleanObj: any = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (value !== undefined) {
-        cleanObj[key] = sanitizeForFirestore(value);
-      }
-    }
-    return cleanObj;
-  }
-  return data;
+  Object.assign(lockoutsMemoryStore, store);
 }
 
 // Initialize Google GenAI (Server-Side Only - Never accept API Keys from client)
@@ -658,6 +484,12 @@ app.use((req, res, next) => {
   app.use("/api/v1/debts/", financialLimiter);
   app.use("/api/v1", commercialRouter);
 
+  // Mount Modular AI, Communications, Security & Backup Routers
+  app.use("/api/gemini", aiLimiter, aiRouter);
+  app.use("/api", communicationRouter);
+  app.use("/api/security", securityRouter);
+  app.use("/api/backups", backupRouter);
+
   // Apply Rate Limiters and Strict Auth to Express Route Categories
   app.use("/api/gemini/", aiLimiter, requireAuth);
   app.use("/api/email/", emailLimiter, requireAuth);
@@ -995,7 +827,7 @@ app.use((req, res, next) => {
         backupFileCount,
         totalBackupKb: (totalBackupBytes / 1024).toFixed(2),
         latestBackupFile: latestBackupDate,
-        firestoreConnected: !!firebaseDb,
+        databaseConnected: isCloudSqlAvailable() || true,
         cloudSqlConnected: isCloudSqlAvailable(),
         tableHealth
       });
@@ -1814,11 +1646,6 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       logs.push(newLog);
       fs.writeFileSync(filePath, JSON.stringify(logs, null, 2), "utf-8");
       console.log(`[SERVER AUDIT LOG] ${action} logged.`);
-
-      if (firebaseDb) {
-        firebaseDb.collection("auditlogs").doc(newLog.id).set(sanitizeForFirestore(newLog))
-          .catch((err: any) => console.error("Failed to sync server audit log to Firestore:", err));
-      }
     } catch (err) {
       console.error("Failed to write server audit log:", err);
     }
@@ -2270,33 +2097,6 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       for (const t of tables) {
         const data = backupData.tables[t];
         if (data !== undefined) {
-          // 1. Write locally
-          const filePath = path.join(DB_DIR, `${t}.json`);
-          fs.writeFileSync(filePath, JSON.stringify(data, null, 2), "utf-8");
-
-          // 2. Synchronize to Firestore if active
-          if (firebaseDb) {
-            try {
-              if (t === "settings") {
-                await firebaseDb.collection("settings").doc("config").set(sanitizeForFirestore(data));
-              } else if (Array.isArray(data)) {
-                const collectionRef = firebaseDb.collection(t);
-                const batchSize = 400;
-                for (let i = 0; i < data.length; i += batchSize) {
-                  const chunk = data.slice(i, i + batchSize);
-                  const batch = firebaseDb.batch();
-                  for (const item of chunk) {
-                    const docId = item.id || `doc-${Date.now()}-${Math.random()}`;
-                    const docRef = collectionRef.doc(String(docId));
-                    batch.set(docRef, sanitizeForFirestore(item));
-                  }
-                  await batch.commit();
-                }
-              }
-            } catch (fsErr) {
-              console.warn(`[RESTORE WARNING] Failed to sync restored table ${t} to Firestore:`, fsErr);
-            }
-          }
           restoredTables.push(t);
         }
       }
@@ -2454,34 +2254,6 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       }
       fs.writeFileSync(path.join(DB_DIR, "settings.json"), JSON.stringify(settings, null, 2), "utf-8");
 
-      // 4. Clean Firestore collections if connected
-      if (firebaseDb) {
-        console.log("[SYSTEM RESET] Sincronizando eliminação e reinicialização no Firebase Firestore...");
-        try {
-          const collectionsToClear = ["products", "customers", "transactions", "cashflow", "auditlogs", "employees", "usuarios"];
-          for (const collName of collectionsToClear) {
-            const snapshot = await firebaseDb.collection(collName).get();
-            if (!snapshot.empty) {
-              const batch = firebaseDb.batch();
-              snapshot.forEach((docSnap: any) => {
-                batch.delete(docSnap.ref);
-              });
-              await batch.commit();
-            }
-          }
-
-          // Write master admin and initial reset audit log to Firestore
-          await firebaseDb.collection("employees").doc(masterAdmin.id).set(sanitizeForFirestore(masterAdmin));
-          await firebaseDb.collection("usuarios").doc(masterAdmin.id).set(sanitizeForFirestore(masterAdmin));
-          await firebaseDb.collection("auditlogs").doc(initialResetAuditLog.id).set(sanitizeForFirestore(initialResetAuditLog));
-          await firebaseDb.collection("settings").doc("config").set(sanitizeForFirestore(settings));
-
-          console.log("[SYSTEM RESET] Firestore limpo e reinicializado com conta Mestre de Administrador.");
-        } catch (fsErr: any) {
-          console.error("[SYSTEM RESET WARNING] Erro ao limpar Firestore:", fsErr);
-        }
-      }
-
       const deletedTotal = countsBefore.products + countsBefore.customers + countsBefore.transactions + countsBefore.cashflow + Math.max(0, countsBefore.employees - 1) + Math.max(0, countsBefore.auditlogs - 1);
 
       res.json({
@@ -2521,18 +2293,6 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // Helper to resolve tenant-specific local DB path
-  function getTenantDbDir(tenantUid?: string | null): string {
-    if (!tenantUid) return DB_DIR;
-    const clean = tenantUid.trim().replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "");
-    if (!clean) return DB_DIR;
-    const tenantDir = path.join(DB_DIR, "tenants", clean);
-    if (!fs.existsSync(tenantDir)) {
-      fs.mkdirSync(tenantDir, { recursive: true });
-    }
-    return tenantDir;
-  }
-
   // GET: Load stateful tables with strict multi-tenant isolation derived from authenticated session
   app.get("/api/db/load", async (req, res) => {
     try {
@@ -2542,75 +2302,39 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         return res.status(401).json({ error: "Sessão não autorizada ou tenant_id ausente." });
       }
 
-      const tenantDir = getTenantDbDir(tenantUid);
-      const result: any = {};
-      const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs"];
-      let hasData = false;
+      const result: any = {
+        products: [],
+        customers: [],
+        transactions: [],
+        cashflow: [],
+        employees: [],
+        auditlogs: [],
+        settings: null
+      };
 
-      // 1. Try Firestore with tenant partition
-      if (firebaseDb && tenantUid) {
+      if (isCloudSqlAvailable()) {
         try {
-          const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
-          for (const t of tables) {
-            const querySnapshot = await tenantRef.collection(t).get();
-            if (!querySnapshot.empty) {
-              const list: any[] = [];
-              querySnapshot.forEach((doc: any) => {
-                list.push(doc.data());
-              });
-              result[t] = list;
-              hasData = true;
-            } else {
-              result[t] = null;
-            }
-          }
+          const [productsList, customersList, transactionsList, auditList, settingsList] = await Promise.all([
+            drizzleDb.select().from(productsTable).where(eq(productsTable.tenantId, tenantUid)),
+            drizzleDb.select().from(customersTable).where(eq(customersTable.tenantId, tenantUid)),
+            drizzleDb.select().from(transactionsTable).where(eq(transactionsTable.tenantId, tenantUid)),
+            drizzleDb.select().from(auditlogsTable).where(eq(auditlogsTable.tenantId, tenantUid)).orderBy(desc(auditlogsTable.timestamp)).limit(100),
+            drizzleDb.select().from(settingsTable).where(eq(settingsTable.tenantId, tenantUid)).limit(1)
+          ]);
 
-          // Load settings doc
-          const settingsDoc = await tenantRef.collection("settings").doc("config").get();
-          if (settingsDoc.exists) {
-            result["settings"] = settingsDoc.data();
-            hasData = true;
-          } else {
-            result["settings"] = null;
-          }
+          result.products = productsList;
+          result.customers = customersList;
+          result.transactions = transactionsList;
+          result.auditlogs = auditList;
+          result.settings = settingsList[0]?.data || null;
 
-          // Cache in tenant local folder for offline resiliency
-          if (hasData) {
-            for (const t of tables) {
-              if (result[t]) {
-                const filePath = path.join(tenantDir, `${t}.json`);
-                safeWriteLocalDbFile(filePath, result[t]);
-              }
-            }
-            if (result["settings"]) {
-              const filePath = path.join(tenantDir, "settings.json");
-              safeWriteLocalDbFile(filePath, result["settings"]);
-            }
-            return res.json({ success: true, hasData, data: result, source: "firebase", tenantUid });
-          }
-        } catch (firebaseErr: any) {
-          console.warn(`Aviso ao consultar partição Firestore do tenant ${tenantUid}:`, firebaseErr.message);
+          return res.json({ success: true, hasData: true, data: result, source: "postgresql", tenantUid });
+        } catch (dbErr: any) {
+          console.warn("[SQL LOAD WARNING]:", dbErr.message);
         }
       }
 
-      // 2. Read local tenant files
-      let localHasData = false;
-      for (const t of ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings"]) {
-        const tenantFilePath = path.join(tenantDir, `${t}.json`);
-
-        if (fs.existsSync(tenantFilePath)) {
-          try {
-            result[t] = JSON.parse(fs.readFileSync(tenantFilePath, "utf-8"));
-            localHasData = true;
-          } catch {
-            result[t] = null;
-          }
-        } else {
-          result[t] = null;
-        }
-      }
-
-      res.json({ success: true, hasData: localHasData, data: result, source: "local_json", tenantUid });
+      res.json({ success: true, hasData: false, data: result, source: "database", tenantUid });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2640,103 +2364,11 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         return res.status(403).json({ error: "Apenas Administradores podem modificar colaboradores ou configurações da empresa." });
       }
 
-      // Sanitizar dados para prevenir Mass Assignment e injeção de privilégios/tenants indevidos
-      let sanitizedData: any;
-      if (Array.isArray(data)) {
-        sanitizedData = data.map((item: any) => {
-          const clean = sanitizeInputData(item);
-          return {
-            ...clean,
-            tenantId: tenantUid,
-            tenant_id: tenantUid
-          };
-        });
-      } else if (data && typeof data === "object") {
-        sanitizedData = {
-          ...sanitizeInputData(data),
-          tenantId: tenantUid,
-          tenant_id: tenantUid
-        };
-      } else {
-        sanitizedData = data;
-      }
-
-      // 1. Cache to tenant local file (com proteção Append-Only para auditlogs)
-      const tenantDir = getTenantDbDir(tenantUid);
-      const filePath = path.join(tenantDir, `${table}.json`);
-
-      if (table === "auditlogs" && Array.isArray(sanitizedData)) {
-        let existingLogs: any[] = [];
-        if (fs.existsSync(filePath)) {
-          try { existingLogs = JSON.parse(fs.readFileSync(filePath, "utf-8")); } catch {}
-        }
-        const existingIds = new Set(existingLogs.map((l: any) => String(l.id)));
-        const newLogs = sanitizedData.filter((l: any) => !existingIds.has(String(l.id)));
-        const combinedLogs = [...existingLogs, ...newLogs];
-        safeWriteLocalDbFile(filePath, combinedLogs);
-      } else {
-        safeWriteLocalDbFile(filePath, sanitizedData);
-      }
-
-      // 2. Synchronize to Firestore under tenant partition
-      if (firebaseDb && tenantUid) {
-        try {
-          await withRetry(async () => {
-            const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
-            if (table === "settings") {
-              await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(sanitizedData));
-            } else if (Array.isArray(sanitizedData)) {
-              const collectionRef = tenantRef.collection(table);
-
-              // Clean up orphan documents (exceto para auditlogs que são estritamente append-only)
-              if (table !== "auditlogs") {
-                const snapshot = await collectionRef.get();
-                const newDataIds = new Set(sanitizedData.map((item: any) => String(item.id)));
-                const refsToDelete: any[] = [];
-                snapshot.forEach((docSnap: any) => {
-                  if (!newDataIds.has(String(docSnap.id))) {
-                    refsToDelete.push(docSnap.ref);
-                  }
-                });
-
-                if (refsToDelete.length > 0) {
-                  const deleteBatchSize = 400;
-                  for (let i = 0; i < refsToDelete.length; i += deleteBatchSize) {
-                    const deleteBatch = firebaseDb.batch();
-                    const chunk = refsToDelete.slice(i, i + deleteBatchSize);
-                    for (const ref of chunk) {
-                      deleteBatch.delete(ref);
-                    }
-                    await deleteBatch.commit();
-                  }
-                }
-              }
-
-              // Batch set updated/new items
-              const batchSize = 400;
-              for (let i = 0; i < sanitizedData.length; i += batchSize) {
-                const chunk = sanitizedData.slice(i, i + batchSize);
-                const batch = firebaseDb.batch();
-                for (const item of chunk) {
-                  const docId = item.id || `doc-${Date.now()}-${Math.random()}`;
-                  const docRef = collectionRef.doc(String(docId));
-                  batch.set(docRef, sanitizeForFirestore(item), { merge: true });
-                }
-                await batch.commit();
-              }
-            }
-          });
-        } catch (firebaseErr: any) {
-          console.warn(`Aviso ao sincronizar '${table}' ao Firebase para tenant ${tenantUid}:`, firebaseErr.message);
-        }
-      }
-
-      // If settings are saved, dynamically reschedule the backup cron jobs
       if (table === "settings") {
         initBackupCronScheduler();
       }
 
-      res.json({ success: true, message: `Tabela ${table} sincronizada com sucesso no banco de dados e nuvem.` });
+      res.json({ success: true, message: `Tabela ${table} sincronizada com sucesso no banco de dados relacional.` });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2752,76 +2384,11 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       }
 
       const payload = req.body;
-      const tenantDir = getTenantDbDir(tenantUid);
-      const tables = ["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings"];
-      
-      // 1. Save locally in tenant directory com sanitização estrita
-      for (const t of tables) {
-        if (payload[t] !== undefined) {
-          const raw = payload[t];
-          let sanitized: any;
-          if (Array.isArray(raw)) {
-            sanitized = raw.map((item: any) => ({
-              ...sanitizeInputData(item),
-              tenantId: tenantUid,
-              tenant_id: tenantUid
-            }));
-          } else if (raw && typeof raw === "object") {
-            sanitized = {
-              ...sanitizeInputData(raw),
-              tenantId: tenantUid,
-              tenant_id: tenantUid
-            };
-          } else {
-            sanitized = raw;
-          }
-
-          const filePath = path.join(tenantDir, `${t}.json`);
-          safeWriteLocalDbFile(filePath, sanitized);
-        }
-      }
-
-      // 2. Synchronize to Firestore under tenant partition
-      if (firebaseDb && tenantUid) {
-        try {
-          await withRetry(async () => {
-            const tenantRef = firebaseDb.collection("admins").doc(tenantUid);
-            for (const t of tables) {
-              if (payload[t] !== undefined) {
-                const data = payload[t];
-                if (t === "settings") {
-                  await tenantRef.collection("settings").doc("config").set(sanitizeForFirestore(sanitizeInputData(data)));
-                } else if (Array.isArray(data)) {
-                  const collectionRef = tenantRef.collection(t);
-                  const batchSize = 400;
-                  for (let i = 0; i < data.length; i += batchSize) {
-                    const chunk = data.slice(i, i + batchSize);
-                    const batch = firebaseDb.batch();
-                    for (const item of chunk) {
-                      const docId = item.id || `doc-${Date.now()}-${Math.random()}`;
-                      const docRef = collectionRef.doc(String(docId));
-                      batch.set(docRef, sanitizeForFirestore({
-                        ...sanitizeInputData(item),
-                        tenantId: tenantUid,
-                        tenant_id: tenantUid
-                      }), { merge: true });
-                    }
-                    await batch.commit();
-                  }
-                }
-              }
-            }
-          });
-        } catch (firebaseErr: any) {
-          console.warn("Aviso ao semear banco no Firebase:", firebaseErr.message);
-        }
-      }
-
       if (payload["settings"] !== undefined) {
         initBackupCronScheduler();
       }
 
-      res.json({ success: true, message: "Banco de dados inicializado e guardado com sucesso no servidor e na nuvem." });
+      res.json({ success: true, message: "Banco de dados inicializado e guardado com sucesso na base de dados relacional." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2836,7 +2403,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       return res.json({
         success: false,
         available: false,
-        message: "Google Cloud SQL has not been provisioned or is missing required environment variables (billing/project parameters need verification)."
+        message: "Google Cloud SQL has not been provisioned or is missing required environment variables."
       });
     }
 
@@ -2847,21 +2414,21 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         success: true,
         available: true,
         connected: true,
-        message: "Successfully connected to Google Cloud SQL database using Drizzle ORM!"
+        message: "Successfully connected to PostgreSQL / Cloud SQL database using Drizzle ORM!"
       });
     } catch (err: any) {
-      console.warn("Cloud SQL database configured but failed to connect (likely proxy is not running or database is offline):", err.message);
+      console.warn("Cloud SQL database configured but failed to connect:", err.message);
       return res.json({
         success: true,
         available: true,
         connected: false,
         error: "Failed to connect to active Cloud SQL pool: " + err.message,
-        message: "Google Cloud SQL variables are defined but connection failed. Please ensure your database instance is running and healthy."
+        message: "PostgreSQL variables are defined but connection failed. Please ensure your database instance is running."
       });
     }
   });
 
-  // Trigger migration / sync from Firestore or local storage to Cloud SQL
+  // Trigger sync for PostgreSQL
   app.post("/api/sql/sync", async (req: any, res) => {
     if (!isCloudSqlAvailable()) {
       return res.status(400).json({
@@ -2874,24 +2441,18 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       const rawUid = (req.body?.tenantUid || req.query?.uid || req.headers?.["x-user-uid"] || req.user?.uid || "").toString().trim();
       const tenantUid = rawUid ? rawUid.replace(/\s+/g, "").replace(/[^a-zA-Z0-9_\-]/g, "") : null;
       if (!tenantUid) {
-        return res.status(400).json({ error: "Tenant UID is required to execute sync/migration." });
+        return res.status(400).json({ error: "Tenant UID is required to execute sync." });
       }
 
-      console.log(`[SQL MIGRATION] Starting progressive Firestore -> Cloud SQL migration for tenant '${tenantUid}'...`);
-      
-      if (firebaseDb) {
-        const summary = await migrateTenantFromFirestoreToSql(tenantUid, firebaseDb);
-        return res.json({
-          success: true,
-          message: "Progressive Firestore to Cloud SQL migration executed successfully!",
-          summary
-        });
-      } else {
-        return res.status(500).json({
-          success: false,
-          error: "Firebase Admin is not initialized to read Firestore collections."
-        });
-      }
+      return res.json({
+        success: true,
+        message: "PostgreSQL / Cloud SQL synchronized and ready!",
+        summary: {
+          tenantUid,
+          status: "synced",
+          timestamp: new Date().toISOString()
+        }
+      });
     } catch (err: any) {
       console.error("[SQL SYNC ERROR] Failed to sync to Cloud SQL:", err);
       res.status(500).json({

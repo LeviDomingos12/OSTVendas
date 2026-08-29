@@ -15,11 +15,12 @@ import {
   CashFlowEntry, 
   Employee, 
   AuditLog, 
-  SystemSettings,
-  UserRole,
-  CashClosure,
-  CashShift
+  SystemSettings, 
+  UserRole, 
+  CashClosure, 
+  CashShift 
 } from "../types";
+import { generateEntityId } from "../lib/deterministic";
 
 export interface SupabaseConfig {
   url: string;
@@ -1537,7 +1538,7 @@ export const SupabaseSyncService = {
     try {
       const tenantId = getSupabaseConfig().tenantId;
       const record = {
-        id: log.id || `log_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: log.id || generateEntityId("log"),
         tenant_id: tenantId,
         user_id: (log as any).userId || (log as any).user || null,
         user_name: log.user || "Sistema",

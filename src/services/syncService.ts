@@ -9,6 +9,7 @@
 
 import { SupabaseSyncService } from "./supabaseService";
 import { Transaction } from "../types";
+import { generateEntityId } from "../lib/deterministic";
 
 export type SyncOperationType = 
   | "TRANSACTION" 
@@ -186,7 +187,7 @@ export const SyncService = {
     timestamp?: string;
     userId?: string;
   }): Promise<string> {
-    const itemId = operation.id || `sync_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const itemId = operation.id || generateEntityId("sync");
     const queueItem: SyncQueueItem = {
       id: itemId,
       type: operation.type,

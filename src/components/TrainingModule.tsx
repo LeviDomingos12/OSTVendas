@@ -59,7 +59,7 @@ const quizQuestions: QuizQuestion[] = [
     options: [
       "Retirar todo o dinheiro e fechar a janela sem salvar",
       "Comparar o saldo teórico calculado pelo sistema com a contagem física real do dinheiro na gaveta e obter validação do supervisor",
-      "Apagar as faturas do dia para diminuir a quota do Firestore",
+      "Apagar as faturas do dia para diminuir o espaço na base de dados",
       "Deixar o caixa aberto para o próximo operador continuar"
     ],
     correctAnswer: 1,

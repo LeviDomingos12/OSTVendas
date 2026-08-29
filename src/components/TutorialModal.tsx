@@ -685,7 +685,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
                     <span>O sistema funciona sem conexão à internet (Offline)?</span>
                   </h4>
                   <p className="text-[11.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                    Sim! O OST Vendas possui um motor de persistência offline. As vendas efetuadas sem internet ficam salvas localmente e sincronizam automaticamente com a nuvem Firestore assim que a conexão for restabelecida.
+                    Sim! O OST Vendas possui um motor de persistência offline (IndexedDB). As vendas efetuadas sem internet ficam salvas localmente e sincronizam automaticamente com a nuvem PostgreSQL assim que a conexão for restabelecida.
                   </p>
                 </div>
 

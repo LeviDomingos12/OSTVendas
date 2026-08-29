@@ -26,6 +26,7 @@ import {
   Phone
 } from "lucide-react";
 import { Employee, SystemSettings, SubscriptionPlan } from "../types";
+import { verifySecurityPin } from "../lib/security";
 import { getSupabaseClient } from "../lib/supabase";
 import { SupabaseSyncService } from "../services/supabaseService";
 import { sendEmail } from "../lib/gmail";
@@ -96,7 +97,6 @@ export default function LoginModule({
   const [loadingState, setLoadingState] = useState<"IDLE" | "AUTHENTICATING" | "CONNECTING" | "LOADING_PERMISSIONS" | "COMPANY_SELECTION">("IDLE");
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [authenticatedUser, setAuthenticatedUser] = useState<Employee | null>(null);
-  const [firebaseUid, setFirebaseUid] = useState<string | null>(null);
 
   // Error/Success Feedback
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -199,7 +199,7 @@ export default function LoginModule({
     onLoginSuccess(authenticatedUser, branchName);
   };
 
-  // 1. Real Firebase Auth - Google Sign-in Handler with E-mail Hint
+  // 1. Supabase Auth - Sign-in Handler with E-mail Hint
   const handleRealSignIn = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
@@ -360,7 +360,7 @@ export default function LoginModule({
     }
   };
 
-  // 3. Real Firebase Auth - Password Recovery Handler
+  // 3. Supabase Auth - Password Recovery Handler
   const handleRealRecovery = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
@@ -378,10 +378,10 @@ export default function LoginModule({
       const empName = matchedEmp ? matchedEmp.name : "Utilizador Externo";
       const empId = matchedEmp ? matchedEmp.id : "";
 
-      // 1. Send the standard Firebase password reset email
+      // 1. Send the standard password reset email
       await recoverPassword(emailVal);
 
-      // 2. Notify the Admin in the Firestore DB
+      // 2. Notify the Admin in the database
       await createRecoveryRequest({
         email: emailVal,
         employeeId: empId,
@@ -540,7 +540,8 @@ export default function LoginModule({
       }
     }
 
-    if (match.pin && match.pin.trim() === pinVal.trim()) {
+    const isPinValid = match.pin ? await verifySecurityPin(pinVal.trim(), match.pin.trim()) : false;
+    if (isPinValid) {
       triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
     } else {
       setErrorMessage(`Palavra-passe ou PIN incorreto para ${match.name}.`);

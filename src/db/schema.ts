@@ -4,7 +4,7 @@ import { pgTable, text, timestamp, numeric, boolean, integer } from "drizzle-orm
 export const companies = pgTable("companies", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  ownerUid: text("owner_uid").notNull(), // Firebase UID of account owner
+  ownerUid: text("owner_uid").notNull(), // Auth UID of account owner (Supabase/PostgreSQL)
   taxId: text("tax_id"),
   email: text("email"),
   phone: text("phone"),

@@ -64,6 +64,13 @@ import BatchManager from "./BatchManager";
 import { useConfirm } from "../hooks/useConfirm";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import StockThresholdsSettings from "./StockThresholdsSettings";
+import { 
+  generateUUID, 
+  generateEntityId, 
+  generateProductCode, 
+  generateDeterministicBarcodeEan13, 
+  generateSecurePin 
+} from "../lib/deterministic";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   try {
@@ -253,7 +260,7 @@ export default function StockModule({
       onAddAuditLog("Editar Fornecedor", "STOCK", `Atualizado fornecedor ${supplierNameInput}.`);
     } else {
       const newSupplier = {
-        id: `supp-${Date.now()}`,
+        id: generateEntityId("supp"),
         name: supplierNameInput,
         phone: supplierPhoneInput,
         email: supplierEmailInput,
@@ -587,7 +594,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
 
     const currentOrders = settings?.supplierOrders || [];
     const newOrder = {
-      id: `order-${Date.now()}`,
+      id: generateEntityId("order"),
       supplierId: orderSupplierId,
       supplierName: chosenSupplier.name,
       productId: orderProductId,
@@ -1273,8 +1280,8 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
   const openCreateForm = () => {
     setEditingProduct(null);
     setName("");
-    setCode(`PROD-${Math.floor(1000 + Math.random() * 9000)}`);
-    setBarcode(`560${Math.floor(100000000 + Math.random() * 900000000)}`);
+    setCode(generateProductCode());
+    setBarcode(generateDeterministicBarcodeEan13("560", products.length + 1));
     setCategory("Mercearia");
     setSupplier("");
     setCostPrice(0);
@@ -1313,10 +1320,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
   const handleDuplicateProduct = (p: Product) => {
     const duplicated: Product = {
       ...p,
-      id: `prod-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      id: generateEntityId("prod"),
       name: `${p.name} (Cópia)`,
       code: `${p.code}-COP`,
-      barcode: p.barcode ? `${p.barcode}-1` : `560${Math.floor(100000000 + Math.random() * 900000000)}`,
+      barcode: p.barcode ? `${p.barcode}-1` : generateDeterministicBarcodeEan13("560", products.length + 2),
       stock: 0
     };
     onAddProduct(duplicated);
@@ -1344,7 +1351,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     }
 
     const payload: Product = {
-      id: editingProduct ? editingProduct.id : `prod-${Date.now()}`,
+      id: editingProduct ? editingProduct.id : generateEntityId("prod"),
       name,
       code,
       barcode: barcode.trim() || undefined,
@@ -1535,7 +1542,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         if (cols.length === 0 || !cols[0]) continue;
 
         const name = cols[0];
-        const code = cols[1] || `PRD-${Date.now().toString().slice(-4)}${i}`;
+        const code = cols[1] || generateProductCode("PRD", i + 1);
         const category = cols[2] || "Geral";
         const supplier = cols[3] || "Fornecedor Local";
         const costPrice = parseFloat(cols[4]?.replace(",", ".")) || 0;
@@ -1546,7 +1553,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         const barcode = cols[9] || "";
 
         const newProd: Product = {
-          id: `imp-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`,
+          id: generateEntityId("imp"),
           name,
           code,
           category,
@@ -3561,7 +3568,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                 if (!prod) return;
 
                 const newBatch = {
-                  id: `batch-${Date.now()}`,
+                  id: generateEntityId("batch"),
                   productId: batchProductId,
                   productName: prod.name,
                   batchCode: batchCode,
@@ -3612,7 +3619,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                       if (prod) {
                         setBatchCost(prod.costPrice);
                         // Generate a suggestion code
-                        setBatchCode(`LT-${prod.name.slice(0, 3).toUpperCase()}-${Math.floor(100 + Math.random() * 900)}`);
+                        setBatchCode(`LT-${prod.name.slice(0, 3).toUpperCase()}-${generateSecurePin(4)}`);
                       }
                     }}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs text-slate-700 outline-none"
@@ -3852,7 +3859,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                 });
 
                 const newTransfer: StockTransfer = {
-                  id: `st-${Date.now()}`,
+                  id: generateEntityId("st"),
                   originBranchId: transferOriginBranchId,
                   destinationBranchId: transferDestBranchId,
                   productId: transferProductId,
@@ -4329,7 +4336,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                     </label>
                     <button
                       type="button"
-                      onClick={() => setBarcode(`560${Math.floor(100000000 + Math.random() * 900000000)}`)}
+                      onClick={() => setBarcode(generateDeterministicBarcodeEan13("560", products.length + 1))}
                       className="text-[9.5px] text-orange-600 hover:text-orange-700 font-bold hover:underline cursor-pointer"
                     >
                       ⚡ Gerar EAN-13
@@ -4502,7 +4509,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                         return;
                       }
                       const tempProduct: Product = {
-                        id: editingProduct ? editingProduct.id : `temp-${Date.now()}`,
+                        id: editingProduct ? editingProduct.id : generateEntityId("temp"),
                         name,
                         code: code || "PROMO-CODE",
                         category,

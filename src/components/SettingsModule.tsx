@@ -34,6 +34,7 @@ import {
   Customer, 
   SubscriptionPlan 
 } from "../types";
+import { generateEntityId } from "../lib/deterministic";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { AdminService } from "../services/adminService";
 import StaffModule from "./StaffModule";
@@ -272,7 +273,7 @@ export default function SettingsModule({
     if (!newBranchName.trim()) return;
 
     const newBranch: Branch = {
-      id: "branch_" + Date.now(),
+      id: generateEntityId("branch"),
       name: newBranchName.trim(),
       address: newBranchAddress.trim() || storeAddress,
       contact: newBranchContact.trim() || storeContact

@@ -12,16 +12,41 @@ import {
   Scale,
   CheckCircle2,
   TrendingDown,
-  RotateCcw
+  RotateCcw,
+  Monitor,
+  Tag,
+  Building2
 } from "lucide-react";
 import { Employee, SystemSettings, CashFlowEntry, CashClosure } from "../../types";
 import DenominationCounter, { DENOMINATIONS } from "../DenominationCounter";
+
+export const CASH_REGISTERS = [
+  { id: "POS-01", name: "Caixa 01 - Balcão Principal" },
+  { id: "POS-02", name: "Caixa 02 - Atendimento Rápido" },
+  { id: "POS-03", name: "Caixa 03 - Bar / Restaurante" },
+  { id: "POS-04", name: "Caixa 04 - Armazém / Atacado" }
+];
+
+export const EXPENSE_CATEGORIES = [
+  { id: "DESPESA_OPERACIONAL", label: "Despesa Operacional Geral" },
+  { id: "LIMPEZA_HIGIENE", label: "Limpeza e Higiene" },
+  { id: "ALIMENTACAO", label: "Alimentação da Equipa" },
+  { id: "TRANSPORTE_FRETE", label: "Transporte / Frete de Emergência" },
+  { id: "ENERGIA_CREDELEC", label: "Eletricidade (Credelec)" },
+  { id: "AGUA_SERVICOS", label: "Água e Serviços Básicos" },
+  { id: "MATERIAL_ESCRITORIO", label: "Material de Escritório / Papelaria" },
+  { id: "MANUTENCAO", label: "Manutenção Rápida" },
+  { id: "PAGAMENTO_FORNECEDOR", label: "Pagamento a Fornecedor Local" },
+  { id: "OUTRO", label: "Outro Motivo" }
+];
 
 interface CashShiftModalsProps {
   activeUsername: string;
   employees: Employee[];
   settings?: SystemSettings;
   currency: string;
+  selectedRegisterId?: string;
+  onSelectRegisterId?: (id: string) => void;
   // Modals visibility
   showOpenModal: boolean;
   onCloseOpenModal: () => void;
@@ -30,10 +55,11 @@ interface CashShiftModalsProps {
   showSangriaModal: boolean;
   onCloseSangriaModal: () => void;
   showEntryModal: boolean;
-  entryModalType: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA";
+  entryModalType: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA" | "SOBRA";
   onCloseEntryModal: () => void;
   showDenomModal: boolean;
   onCloseDenomModal: () => void;
+  onOpenDenomModal?: () => void;
   showAdjustFloatModal?: boolean;
   onCloseAdjustFloatModal?: () => void;
   // Calculations
@@ -48,16 +74,24 @@ interface CashShiftModalsProps {
   expenses: number;
   devolutions: number;
   quebras: number;
+  sobras?: number;
   // Denomination counts state
   denomCounts: { [key: string]: number };
   onChangeDenomCount: (val: number, count: number) => void;
   onResetDenomCounts: () => void;
   onApplyDenomToPhysical: (total: number) => void;
   // Handlers
-  onConfirmOpenShift: (openingFloat: number, supervisor: string, notes: string) => void;
-  onConfirmCloseShift: (physicalCount: number, supervisor: string, notes: string) => void;
-  onConfirmSangria: (amount: number, destination: string, reason: string, supervisor: string) => void;
-  onConfirmEntry: (type: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA", amount: number, reason: string, supplier: string) => void;
+  onConfirmOpenShift: (openingFloat: number, supervisor: string, notes: string, registerId?: string) => void;
+  onConfirmCloseShift: (physicalCount: number, supervisor: string, notes: string, autoPostDifference?: boolean) => void;
+  onConfirmSangria: (amount: number, destination: string, reason: string, supervisor: string, voucherRef?: string) => void;
+  onConfirmEntry: (
+    type: "REINFORCEMENT" | "EXPENSE" | "INPUT" | "DEVOLUTION" | "QUEBRA" | "SOBRA",
+    amount: number,
+    reason: string,
+    supplier: string,
+    category?: string,
+    voucherRef?: string
+  ) => void;
   onConfirmAdjustFloat?: (newFloat: number, reason: string, supervisor: string) => void;
 }
 
@@ -66,6 +100,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   employees = [],
   settings,
   currency,
+  selectedRegisterId = "POS-01",
+  onSelectRegisterId,
   showOpenModal,
   onCloseOpenModal,
   showCloseModal,
@@ -77,6 +113,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   onCloseEntryModal,
   showDenomModal,
   onCloseDenomModal,
+  onOpenDenomModal,
   showAdjustFloatModal = false,
   onCloseAdjustFloatModal,
   theoreticalBalance,
@@ -90,6 +127,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   expenses,
   devolutions,
   quebras,
+  sobras = 0,
   denomCounts,
   onChangeDenomCount,
   onResetDenomCounts,
@@ -110,12 +148,16 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     return employees.length > 0 ? employees : [{ id: "emp-1", name: activeUsername, role: "SUPERVISOR", pin: "0000" } as Employee];
   }, [employees, activeUsername]);
 
-  // Open Shift Form State - strictly empty initially to force manual entry
+  // Terminal State for Modals
+  const [modalRegisterId, setModalRegisterId] = useState<string>(selectedRegisterId);
+
+  // Open Shift Form State
   const [openFloat, setOpenFloat] = useState<string>("");
   const [openSupervisor, setOpenSupervisor] = useState<string>("");
   const [openPin, setOpenPin] = useState<string>("");
   const [openNotes, setOpenNotes] = useState<string>("");
   const [openError, setOpenError] = useState<string>("");
+  const [openTab, setOpenTab] = useState<"direct" | "denoms">("direct");
 
   // Close Shift Form State
   const [closePhysicalCount, setClosePhysicalCount] = useState<number>(physicalBalance);
@@ -124,11 +166,13 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   const [closeNotes, setCloseNotes] = useState<string>("");
   const [closeError, setCloseError] = useState<string>("");
   const [activeCloseTab, setActiveCloseTab] = useState<"summary" | "denoms">("summary");
+  const [autoPostDiff, setAutoPostDiff] = useState<boolean>(true);
 
   // Sangria Form State
   const [sangriaAmount, setSangriaAmount] = useState<number>(0);
   const [sangriaDestination, setSangriaDestination] = useState<string>("Cofre Central");
   const [sangriaReason, setSangriaReason] = useState<string>("");
+  const [sangriaVoucherRef, setSangriaVoucherRef] = useState<string>("");
   const [sangriaSupervisor, setSangriaSupervisor] = useState<string>("");
   const [sangriaPin, setSangriaPin] = useState<string>("");
   const [sangriaError, setSangriaError] = useState<string>("");
@@ -137,6 +181,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   const [entryAmount, setEntryAmount] = useState<number>(0);
   const [entryReason, setEntryReason] = useState<string>("");
   const [entrySupplier, setEntrySupplier] = useState<string>("");
+  const [entryCategory, setEntryCategory] = useState<string>("DESPESA_OPERACIONAL");
+  const [entryVoucherRef, setEntryVoucherRef] = useState<string>("");
   const [entryError, setEntryError] = useState<string>("");
 
   // Adjust Float Modal State
@@ -151,8 +197,9 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     if (showOpenModal) {
       setOpenFloat("");
       setOpenError("");
+      setModalRegisterId(selectedRegisterId);
     }
-  }, [showOpenModal]);
+  }, [showOpenModal, selectedRegisterId]);
 
   // Set default supervisor on init
   useEffect(() => {
@@ -184,15 +231,23 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     if (settings?.securityPin) {
       return settings.securityPin === pinToTest;
     }
-    // Default fallback if no pin is configured
     return pinToTest.length >= 4;
   };
+
+  const calculatedFromDenoms = useMemo(() => {
+    return DENOMINATIONS.reduce((sum, d) => {
+      const count = denomCounts[d.value.toString()] || 0;
+      return sum + (d.value * count);
+    }, 0);
+  }, [denomCounts]);
+
+  const diffVal = closePhysicalCount - theoreticalBalance;
 
   // 1. Submit Open Shift
   const handleOpenSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (openFloat === "" || openFloat.trim() === "" || isNaN(Number(openFloat))) {
-      setOpenError("É obrigatório inserir manualmente o valor inicial da gaveta (insira 0 se abrir sem trocos).");
+      setOpenError("É obrigatório inserir o valor inicial da gaveta (insira 0 se abrir sem trocos).");
       return;
     }
     const floatNumber = Number(openFloat);
@@ -208,7 +263,10 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       }
     }
     setOpenError("");
-    onConfirmOpenShift(floatNumber, openSupervisor || activeUsername, openNotes);
+    onConfirmOpenShift(floatNumber, openSupervisor || activeUsername, openNotes, modalRegisterId);
+    if (onSelectRegisterId) {
+      onSelectRegisterId(modalRegisterId);
+    }
     onCloseOpenModal();
     setOpenPin("");
     setOpenNotes("");
@@ -227,8 +285,12 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       setCloseError("PIN do Supervisor incorreto! Insira o PIN configurado do colaborador.");
       return;
     }
+    if (diffVal !== 0 && (!closeNotes || closeNotes.trim().length < 5)) {
+      setCloseError("Havendo diferença de caixa (quebra ou sobra), é obrigatório fornecer uma justificação detalhada.");
+      return;
+    }
     setCloseError("");
-    onConfirmCloseShift(closePhysicalCount, closeSupervisor, closeNotes);
+    onConfirmCloseShift(closePhysicalCount, closeSupervisor, closeNotes, autoPostDiff);
     onCloseCloseModal();
     setClosePin("");
     setCloseNotes("");
@@ -242,21 +304,22 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       return;
     }
     if (sangriaAmount > theoreticalBalance) {
-      setSangriaError(`O valor da sangria (${sangriaAmount} ${currency}) não pode exceder o saldo atual em caixa (${theoreticalBalance} ${currency}).`);
+      setSangriaError(`O valor da sangria (${sangriaAmount.toLocaleString()} ${currency}) não pode exceder o saldo disponível na gaveta (${theoreticalBalance.toLocaleString()} ${currency}).`);
       return;
     }
     if (sangriaPin) {
       const isValid = validateSupervisorPin(sangriaSupervisor, sangriaPin);
       if (!isValid) {
-        setSangriaError("PIN do supervisor incorreto.");
+        setSangriaError("PIN do supervisor autorizador incorreto.");
         return;
       }
     }
     setSangriaError("");
-    onConfirmSangria(sangriaAmount, sangriaDestination, sangriaReason, sangriaSupervisor);
+    onConfirmSangria(sangriaAmount, sangriaDestination, sangriaReason, sangriaSupervisor, sangriaVoucherRef);
     onCloseSangriaModal();
     setSangriaAmount(0);
     setSangriaReason("");
+    setSangriaVoucherRef("");
     setSangriaPin("");
   };
 
@@ -272,11 +335,12 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       return;
     }
     setEntryError("");
-    onConfirmEntry(entryModalType, entryAmount, entryReason, entrySupplier);
+    onConfirmEntry(entryModalType, entryAmount, entryReason, entrySupplier, entryCategory, entryVoucherRef);
     onCloseEntryModal();
     setEntryAmount(0);
     setEntryReason("");
     setEntrySupplier("");
+    setEntryVoucherRef("");
   };
 
   // 5. Submit Adjust Float
@@ -304,15 +368,6 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     setAdjustFloatReason("");
   };
 
-  const calculatedFromDenoms = useMemo(() => {
-    return DENOMINATIONS.reduce((sum, d) => {
-      const count = denomCounts[d.value.toString()] || 0;
-      return sum + (d.value * count);
-    }, 0);
-  }, [denomCounts]);
-
-  const diffVal = closePhysicalCount - theoreticalBalance;
-
   return (
     <>
       {/* 1. MODAL: ABERTURA DE TURNO */}
@@ -329,33 +384,57 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
               <button
                 type="button"
                 onClick={onCloseOpenModal}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleOpenSubmit} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Operador do Caixa
-                </label>
-                <input
-                  type="text"
-                  disabled
-                  value={activeUsername}
-                  className="w-full p-2.5 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-700 dark:text-slate-200"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Operador
+                  </label>
+                  <input
+                    type="text"
+                    disabled
+                    value={activeUsername}
+                    className="w-full p-2.5 bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-700 dark:text-slate-200 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Terminal / Caixa
+                  </label>
+                  <select
+                    value={modalRegisterId}
+                    onChange={(e) => setModalRegisterId(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none text-xs"
+                  >
+                    {CASH_REGISTERS.map(r => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
+              {/* Fundo inicial */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="font-bold text-slate-700 dark:text-slate-300">
                     Fundo de Maneio Inicial (Trocos) ({currency}) *
                   </label>
-                  <span className="text-[10px] font-bold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/40 px-2 py-0.5 rounded-full border border-orange-200 dark:border-orange-900/40">
-                    Inserção Manual
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenDenomModal();
+                    }}
+                    className="text-[10px] font-bold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/40 px-2 py-0.5 rounded-full border border-orange-200 dark:border-orange-900/40 hover:bg-orange-100 cursor-pointer flex items-center gap-1"
+                  >
+                    <Coins className="w-3 h-3" />
+                    <span>Contar Cédulas</span>
+                  </button>
                 </div>
                 <input
                   type="number"
@@ -382,39 +461,37 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                     </button>
                   ))}
                 </div>
-
-                <span className="text-[10.5px] text-slate-500 dark:text-slate-400 mt-1.5 block">
-                  💡 O <strong>Saldo Teórico da Gaveta</strong> inicia exatamente com este valor inserido pelo operador.
-                </span>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Supervisor Responsável *
-                </label>
-                <select
-                  value={openSupervisor}
-                  onChange={(e) => setOpenSupervisor(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none"
-                >
-                  {availableSupervisors.map(s => (
-                    <option key={s.id} value={s.name}>{s.name} ({s.role || "Supervisor"})</option>
-                  ))}
-                </select>
-              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Supervisor Responsável *
+                  </label>
+                  <select
+                    value={openSupervisor}
+                    onChange={(e) => setOpenSupervisor(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none text-xs"
+                  >
+                    {availableSupervisors.map(s => (
+                      <option key={s.id} value={s.name}>{s.name} ({s.role || "Supervisor"})</option>
+                    ))}
+                  </select>
+                </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  PIN do Supervisor (Opcional)
-                </label>
-                <input
-                  type="password"
-                  maxLength={8}
-                  value={openPin}
-                  onChange={(e) => setOpenPin(e.target.value)}
-                  placeholder="PIN de autorização"
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-center tracking-widest outline-none"
-                />
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    PIN do Supervisor
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={8}
+                    value={openPin}
+                    onChange={(e) => setOpenPin(e.target.value)}
+                    placeholder="PIN de autorização"
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-center tracking-widest outline-none text-xs"
+                  />
+                </div>
               </div>
 
               <div>
@@ -425,8 +502,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                   rows={2}
                   value={openNotes}
                   onChange={(e) => setOpenNotes(e.target.value)}
-                  placeholder="Ex: Turno da manhã, gaveta com notas pequenas."
-                  className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none"
+                  placeholder="Ex: Turno da manhã, gaveta com notas pequenas de troco."
+                  className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none text-xs"
                 />
               </div>
 
@@ -467,7 +544,9 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                   <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
                     Fechamento de Caixa & Homologação de Turno
                   </h3>
-                  <span className="text-[10px] text-slate-400">Reconciliação e conferência física de valores</span>
+                  <span className="text-[10px] text-slate-400">
+                    Terminal: <strong className="text-slate-700 dark:text-slate-300">{selectedRegisterId}</strong> • Operador: <strong className="text-slate-700 dark:text-slate-300">{activeUsername}</strong>
+                  </span>
                 </div>
               </div>
               <button
@@ -544,14 +623,46 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                     </span>
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-slate-400 block">Diferença</span>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 block">
+                      {diffVal === 0 ? "Balanço" : diffVal > 0 ? "Sobra de Caixa" : "Quebra de Caixa"}
+                    </span>
                     <span className={`font-mono font-extrabold text-sm ${
-                      diffVal === 0 ? "text-emerald-600" : diffVal > 0 ? "text-amber-600" : "text-rose-600"
+                      diffVal === 0 ? "text-emerald-600" : diffVal > 0 ? "text-amber-600 font-black" : "text-rose-600 font-black"
                     }`}>
-                      {diffVal > 0 ? "+" : ""}{diffVal.toLocaleString()} {currency}
+                      {diffVal > 0 ? `+${diffVal.toLocaleString()}` : diffVal.toLocaleString()} {currency}
                     </span>
                   </div>
                 </div>
+
+                {/* Diferença Alert Banner */}
+                {diffVal !== 0 && (
+                  <div className={`p-3 rounded-xl border flex items-start gap-2.5 text-xs ${
+                    diffVal < 0 
+                      ? "bg-rose-50 border-rose-200 text-rose-800" 
+                      : "bg-amber-50 border-amber-200 text-amber-800"
+                  }`}>
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <span className="font-extrabold block">
+                        {diffVal < 0 ? "⚠️ QUEBRA DE CAIXA DETETADA" : "💰 SOBRA DE CAIXA DETETADA"}
+                      </span>
+                      <p className="text-[11px] leading-relaxed">
+                        {diffVal < 0 
+                          ? `Falta na gaveta a quantia de ${Math.abs(diffVal).toLocaleString()} ${currency} em relação ao esperado.`
+                          : `Existe um excedente na gaveta de ${diffVal.toLocaleString()} ${currency} em relação ao esperado.`}
+                      </p>
+                      <label className="flex items-center gap-2 pt-1 cursor-pointer font-bold">
+                        <input
+                          type="checkbox"
+                          checked={autoPostDiff}
+                          onChange={(e) => setAutoPostDiff(e.target.checked)}
+                          className="rounded text-orange-600 focus:ring-orange-500"
+                        />
+                        <span>Lançar automaticamente {diffVal < 0 ? "a Quebra" : "a Sobra"} no Livro de Caixa</span>
+                      </label>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
@@ -605,14 +716,19 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
 
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Justificação / Observações de Fechamento
+                    Justificação / Observações de Fechamento {diffVal !== 0 && <span className="text-rose-500">* (Obrigatório devido à diferença)</span>}
                   </label>
                   <textarea
                     rows={2}
+                    required={diffVal !== 0}
                     value={closeNotes}
                     onChange={(e) => setCloseNotes(e.target.value)}
-                    placeholder="Ex: Turno fechado sem divergências ou justificação de quebra/sobra."
-                    className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none"
+                    placeholder={
+                      diffVal === 0 
+                        ? "Ex: Turno fechado com conferência exata de valores."
+                        : "Ex: Justificativa detalhada da causa da quebra/sobra apurada na contagem..."
+                    }
+                    className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none text-xs"
                   />
                 </div>
 
@@ -650,14 +766,17 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
               <div className="flex items-center gap-2">
                 <ArrowUpRight className="w-5 h-5 text-amber-500" />
-                <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                  Sangria de Segurança (Retirada para Cofre)
-                </h3>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
+                    Sangria de Segurança (Retirada para Cofre)
+                  </h3>
+                  <span className="text-[10px] text-slate-400">Terminal: {selectedRegisterId}</span>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={onCloseSangriaModal}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -679,54 +798,69 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                   className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono font-extrabold text-slate-900 dark:text-white text-sm outline-none focus:border-orange-500"
                 />
                 <span className="text-[10px] text-slate-400 mt-1 block">
-                  Disponível em gaveta: {theoreticalBalance.toLocaleString()} {currency}
+                  Disponível em gaveta: <strong className="text-slate-700 dark:text-slate-300">{theoreticalBalance.toLocaleString()} {currency}</strong>
                 </span>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Destino do Dinheiro *
-                </label>
-                <select
-                  value={sangriaDestination}
-                  onChange={(e) => setSangriaDestination(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none"
-                >
-                  <option value="Cofre Central">Cofre Central</option>
-                  <option value="Depósito Bancário BCI">Depósito Bancário BCI</option>
-                  <option value="Depósito Bancário Millennium BIM">Depósito Bancário Millennium BIM</option>
-                  <option value="Depósito Bancário Standard Bank">Depósito Bancário Standard Bank</option>
-                  <option value="Tesouraria Geral">Tesouraria Geral</option>
-                </select>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Destino dos Fundos *
+                  </label>
+                  <select
+                    value={sangriaDestination}
+                    onChange={(e) => setSangriaDestination(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none text-xs"
+                  >
+                    <option value="Cofre Central">Cofre Central</option>
+                    <option value="Depósito Millennium BIM">Depósito Millennium BIM</option>
+                    <option value="Depósito Bancário BCI">Depósito Bancário BCI</option>
+                    <option value="Depósito Standard Bank">Depósito Standard Bank</option>
+                    <option value="Gerência / Tesouraria">Gerência / Tesouraria</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Nº Comprovativo / Guia
+                  </label>
+                  <input
+                    type="text"
+                    value={sangriaVoucherRef}
+                    onChange={(e) => setSangriaVoucherRef(e.target.value)}
+                    placeholder="Ex: GUIA-2026-08"
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-xs outline-none"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Supervisor Autorizador *
-                </label>
-                <select
-                  value={sangriaSupervisor}
-                  onChange={(e) => setSangriaSupervisor(e.target.value)}
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none"
-                >
-                  {availableSupervisors.map(s => (
-                    <option key={s.id} value={s.name}>{s.name} ({s.role || "Supervisor"})</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  PIN do Supervisor (Opcional)
-                </label>
-                <input
-                  type="password"
-                  maxLength={8}
-                  value={sangriaPin}
-                  onChange={(e) => setSangriaPin(e.target.value)}
-                  placeholder="PIN de autorização"
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-center tracking-widest outline-none"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Supervisor Autorizador *
+                  </label>
+                  <select
+                    value={sangriaSupervisor}
+                    onChange={(e) => setSangriaSupervisor(e.target.value)}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none text-xs"
+                  >
+                    {availableSupervisors.map(s => (
+                      <option key={s.id} value={s.name}>{s.name} ({s.role || "Supervisor"})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    PIN do Supervisor
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={8}
+                    value={sangriaPin}
+                    onChange={(e) => setSangriaPin(e.target.value)}
+                    placeholder="PIN"
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-center tracking-widest outline-none text-xs"
+                  />
+                </div>
               </div>
 
               <div>
@@ -737,8 +871,8 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                   rows={2}
                   value={sangriaReason}
                   onChange={(e) => setSangriaReason(e.target.value)}
-                  placeholder="Ex: Excesso de saldo em dinheiro na gaveta recolhido para custódia."
-                  className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none"
+                  placeholder="Ex: Excesso de saldo em dinheiro na gaveta recolhido para custódia no cofre."
+                  className="w-full p-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl outline-none text-xs"
                 />
               </div>
 
@@ -768,7 +902,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
         </div>
       )}
 
-      {/* 4. MODAL: LANÇAMENTO GENÉRICO (REFORÇO / DESPESA / DEVOLUÇÃO / QUEBRA) */}
+      {/* 4. MODAL: LANÇAMENTO GENÉRICO (REFORÇO / DESPESA / DEVOLUÇÃO / QUEBRA / SOBRA) */}
       {showEntryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
           <div className="bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 space-y-4">
@@ -778,17 +912,19 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                 {entryModalType === "EXPENSE" && <TrendingDown className="w-5 h-5 text-rose-600" />}
                 {entryModalType === "DEVOLUTION" && <RotateCcw className="w-5 h-5 text-orange-600" />}
                 {entryModalType === "QUEBRA" && <AlertTriangle className="w-5 h-5 text-purple-600" />}
+                {entryModalType === "SOBRA" && <Coins className="w-5 h-5 text-emerald-600" />}
                 <h3 className="font-extrabold text-slate-900 dark:text-white text-sm">
-                  {entryModalType === "REINFORCEMENT" && "Reforço de Caixa (Trocos)"}
+                  {entryModalType === "REINFORCEMENT" && "Reforço de Caixa (Suprimento de Trocos)"}
                   {entryModalType === "EXPENSE" && "Lançamento de Despesa Operacional"}
-                  {entryModalType === "DEVOLUTION" && "Devolução / Reembolso a Cliente"}
-                  {entryModalType === "QUEBRA" && "Registro de Quebra / Ajuste de Caixa"}
+                  {entryModalType === "DEVOLUTION" && "Devolução / Reembolso de Venda"}
+                  {entryModalType === "QUEBRA" && "Registro de Quebra de Caixa"}
+                  {entryModalType === "SOBRA" && "Registro de Sobra de Caixa"}
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={onCloseEntryModal}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -811,6 +947,37 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                 />
               </div>
 
+              {entryModalType === "EXPENSE" && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Categoria da Despesa *
+                    </label>
+                    <select
+                      value={entryCategory}
+                      onChange={(e) => setEntryCategory(e.target.value)}
+                      className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold text-slate-800 dark:text-slate-200 outline-none text-xs"
+                    >
+                      {EXPENSE_CATEGORIES.map(c => (
+                        <option key={c.id} value={c.id}>{c.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                      Nº Recibo / Fatura
+                    </label>
+                    <input
+                      type="text"
+                      value={entryVoucherRef}
+                      onChange={(e) => setEntryVoucherRef(e.target.value)}
+                      placeholder="Ex: REC-1042"
+                      className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-mono text-xs outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Descrição / Finalidade / Motivo *
@@ -821,25 +988,26 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
                   value={entryReason}
                   onChange={(e) => setEntryReason(e.target.value)}
                   placeholder={
-                    entryModalType === "REINFORCEMENT" ? "Ex: Entrada de trocos em moedas de 5 e 10 MT" :
-                    entryModalType === "EXPENSE" ? "Ex: Compra de papel para impressora térmica" :
-                    entryModalType === "DEVOLUTION" ? "Ex: Reembolso referente à factura #1042" : "Ex: Falta apurada na contagem"
+                    entryModalType === "REINFORCEMENT" ? "Ex: Entrada de trocos em moedas de 5 e 10 MT vindos do cofre" :
+                    entryModalType === "EXPENSE" ? "Ex: Compra de rolos de papel para o POS" :
+                    entryModalType === "DEVOLUTION" ? "Ex: Reembolso de produto devolvido pelo cliente" :
+                    entryModalType === "SOBRA" ? "Ex: Excedente apurado na contagem cega" : "Ex: Falta apurada na contagem física"
                   }
-                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold outline-none focus:border-orange-500"
+                  className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold outline-none focus:border-orange-500 text-xs"
                 />
               </div>
 
-              {(entryModalType === "EXPENSE" || entryModalType === "DEVOLUTION") && (
+              {(entryModalType === "EXPENSE" || entryModalType === "DEVOLUTION" || entryModalType === "REINFORCEMENT") && (
                 <div>
                   <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Fornecedor / Credor / Beneficiário (Opcional)
+                    {entryModalType === "REINFORCEMENT" ? "Origem dos Fundos" : "Fornecedor / Credor / Beneficiário"}
                   </label>
                   <input
                     type="text"
                     value={entrySupplier}
                     onChange={(e) => setEntrySupplier(e.target.value)}
-                    placeholder="Ex: Papelaria Moderna, Lda ou Nome do Cliente"
-                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold outline-none"
+                    placeholder={entryModalType === "REINFORCEMENT" ? "Ex: Cofre Geral ou Banco" : "Ex: Papelaria Moderna, Lda ou Nome do Cliente"}
+                    className="w-full p-2.5 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl font-bold outline-none text-xs"
                   />
                 </div>
               )}
@@ -884,7 +1052,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
               <button
                 type="button"
                 onClick={onCloseDenomModal}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -920,6 +1088,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
           </div>
         </div>
       )}
+
       {/* 6. MODAL: AJUSTE MANUAL DO FUNDO DE GAVETA / SALDO TEÓRICO */}
       {showAdjustFloatModal && onCloseAdjustFloatModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in overflow-y-auto">
@@ -934,7 +1103,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
               <button
                 type="button"
                 onClick={onCloseAdjustFloatModal}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition"
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1035,3 +1204,4 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
     </>
   );
 };
+

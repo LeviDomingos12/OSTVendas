@@ -13,14 +13,18 @@ export const productSchema = z.object({
   barcode: z.string().max(50).optional().default(""),
   category: z.string().max(100).optional().default("Geral"),
   categoryId: z.string().optional().nullable(),
-  price: z.coerce.number().min(0, "Preço não pode ser negativo"),
+  price: z.coerce.number().min(0, "Preço não pode ser negativo").optional().default(0),
+  salePrice: z.coerce.number().min(0).optional(),
   cost: z.coerce.number().min(0, "Custo não pode ser negativo").optional().default(0),
+  costPrice: z.coerce.number().min(0).optional(),
   stock: z.coerce.number().min(0, "Stock não pode ser negativo").optional().default(0),
   minStock: z.coerce.number().min(0).optional().default(0),
   unit: z.string().max(20).optional().default("un"),
   imageUrl: z.string().max(1000).optional().nullable(),
   isActive: z.boolean().optional().default(true),
-  vatRate: z.coerce.number().min(0).max(100).optional().default(16)
+  vatRate: z.coerce.number().min(0).max(100).optional().default(16),
+  taxRate: z.coerce.number().min(0).max(100).optional(),
+  expiryDate: z.string().optional().nullable()
 });
 
 // 2. Clientes
@@ -33,6 +37,7 @@ export const customerSchema = z.object({
   nif: z.string().max(50).optional().nullable().or(z.literal("")),
   nuit: z.string().max(50).optional().nullable().or(z.literal("")),
   creditLimit: z.coerce.number().min(0).optional().default(0),
+  credit_limit: z.coerce.number().min(0).optional(),
   notes: z.string().max(1000).optional().nullable()
 });
 
@@ -204,14 +209,37 @@ export const PROHIBITED_CLIENT_FIELDS = [
 ] as const;
 
 /**
- * Higieniza objetos de dados removendo campos administrativos e de privilégio antes de persistir.
+ * Higieniza objetos de dados removendo campos administrativos e de privilégio antes de persistir,
+ * além de neutralizar potenciais injeções de scripts e tags perigosas em strings.
  */
-export function sanitizeInputData<T extends Record<string, any>>(data: T): Partial<T> {
-  if (!data || typeof data !== "object") return data;
-  const copy: Record<string, any> = { ...data };
-  for (const field of PROHIBITED_CLIENT_FIELDS) {
-    delete copy[field];
+export function sanitizeInputData<T>(data: T): T {
+  if (data === null || data === undefined) return data;
+
+  if (typeof data === "string") {
+    // Sanitização de strings contra XSS e injeções
+    return data
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
+      .replace(/javascript:/gi, "")
+      .trim() as unknown as T;
   }
-  return copy as Partial<T>;
+
+  if (Array.isArray(data)) {
+    return data.map((item) => sanitizeInputData(item)) as unknown as T;
+  }
+
+  if (typeof data === "object") {
+    const copy: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      // Ignorar campos proibidos
+      if (PROHIBITED_CLIENT_FIELDS.includes(key as any)) {
+        continue;
+      }
+      copy[key] = sanitizeInputData(value);
+    }
+    return copy as T;
+  }
+
+  return data;
 }
 

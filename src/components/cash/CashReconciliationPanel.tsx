@@ -1,5 +1,15 @@
 import React from "react";
-import { Smartphone, CreditCard, Landmark, Banknote, CheckCircle2, TrendingUp } from "lucide-react";
+import { 
+  Smartphone, 
+  CreditCard, 
+  Landmark, 
+  Banknote, 
+  CheckCircle2, 
+  TrendingUp, 
+  Clock, 
+  AlertTriangle, 
+  Coins 
+} from "lucide-react";
 
 interface CashReconciliationPanelProps {
   cashSales: number;
@@ -7,6 +17,9 @@ interface CashReconciliationPanelProps {
   emolaSales: number;
   posCardSales: number;
   transferSales: number;
+  debtSales?: number;
+  quebras?: number;
+  sobras?: number;
   currency: string;
 }
 
@@ -16,15 +29,18 @@ export const CashReconciliationPanel: React.FC<CashReconciliationPanelProps> = (
   emolaSales,
   posCardSales,
   transferSales,
+  debtSales = 0,
+  quebras = 0,
+  sobras = 0,
   currency
 }) => {
-  const totalSales = cashSales + mpesaSales + emolaSales + posCardSales + transferSales;
+  const totalSales = cashSales + mpesaSales + emolaSales + posCardSales + transferSales + debtSales;
   const digitalTotal = mpesaSales + emolaSales + posCardSales + transferSales;
 
   const channels = [
     {
       id: "CASH",
-      name: "Dinheiro Físico (Moeda / Notas)",
+      name: "Dinheiro Físico",
       provider: "Gaveta de Caixa",
       amount: cashSales,
       icon: Banknote,
@@ -76,6 +92,17 @@ export const CashReconciliationPanel: React.FC<CashReconciliationPanelProps> = (
       bgColor: "bg-purple-500/10",
       borderColor: "border-purple-500/20",
       percentage: totalSales > 0 ? (transferSales / totalSales) * 100 : 0
+    },
+    {
+      id: "DEBT",
+      name: "Venda a Prazo (Crédito)",
+      provider: "Conta Corrente Cliente",
+      amount: debtSales,
+      icon: Clock,
+      color: "text-orange-600 dark:text-orange-400",
+      bgColor: "bg-orange-500/10",
+      borderColor: "border-orange-500/20",
+      percentage: totalSales > 0 ? (debtSales / totalSales) * 100 : 0
     }
   ];
 
@@ -86,14 +113,14 @@ export const CashReconciliationPanel: React.FC<CashReconciliationPanelProps> = (
         <div>
           <span className="text-xs uppercase font-extrabold text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
             <TrendingUp className="w-4 h-4 text-orange-500" />
-            Reconciliação por Métodos de Pagamento (Moçambique)
+            Reconciliação e Conferência de Pagamentos (Moçambique)
           </span>
           <p className="text-[11px] text-slate-500 dark:text-slate-400">
-            Discriminação de faturamento: Dinheiro em caixa vs. Valores creditados digitalmente
+            Discriminação de faturamento: Dinheiro em caixa vs. Valores digitais vs. Contas a Receber
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="text-right">
             <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Faturado</span>
             <span className="text-sm font-extrabold font-mono text-slate-900 dark:text-white">
@@ -106,11 +133,20 @@ export const CashReconciliationPanel: React.FC<CashReconciliationPanelProps> = (
               {digitalTotal.toLocaleString()} {currency}
             </span>
           </div>
+          {(quebras > 0 || sobras > 0) && (
+            <div className="text-right pl-3 border-l border-slate-200 dark:border-zinc-800">
+              <span className="text-[10px] uppercase font-bold text-slate-400 block">Diferenças</span>
+              <div className="flex items-center gap-1 text-xs font-mono font-bold">
+                {quebras > 0 && <span className="text-rose-500">Quebra: -{quebras.toLocaleString()}</span>}
+                {sobras > 0 && <span className="text-emerald-500">Sobra: +{sobras.toLocaleString()}</span>}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Grid of Channels */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
         {channels.map(ch => {
           const Icon = ch.icon;
           return (
@@ -156,3 +192,4 @@ export const CashReconciliationPanel: React.FC<CashReconciliationPanelProps> = (
     </div>
   );
 };
+

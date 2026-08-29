@@ -45,6 +45,7 @@ import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
 import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
 import { SupabaseSyncService } from "../services/supabaseService";
+import { generateSecurePin, generateEntityId } from "../lib/deterministic";
 const getRecoveryRequests = async () => SupabaseSyncService.getRecoveryRequests();
 const resolveRecoveryRequest = async (id: string) => SupabaseSyncService.resolveRecoveryRequest(id);
 import { useConfirm } from "../hooks/useConfirm";
@@ -292,7 +293,7 @@ export default function StaffModule({
     setRole("Operador de Caixa");
     setContact("");
     setSalary(18000);
-    const newPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const newPin = generateSecurePin(6);
     setPin(newPin);
     setEmail("");
     setIsFormOpen(true);
@@ -326,8 +327,8 @@ export default function StaffModule({
   const [isExportStaffDropdownOpen, setIsExportStaffDropdownOpen] = useState(false);
   const [isExportAuditDropdownOpen, setIsExportAuditDropdownOpen] = useState(false);
 
-  // Firestore Errors Friendly Translation helper
-  const translateFirestoreMessage = (details: string | undefined | null): string => {
+  // Database Errors Friendly Translation helper
+  const translateDatabaseMessage = (details: string | undefined | null): string => {
     const dStr = details || "";
     if (dStr.toLowerCase().includes("permission-denied") || dStr.toLowerCase().includes("permissions") || dStr.toLowerCase().includes("insufficient")) {
       return "Acesso negado ao recurso solicitado (permissões insuficientes de base de dados).";
@@ -338,10 +339,10 @@ export default function StaffModule({
     return dStr;
   };
 
-  const isFirestoreError = (details: string | undefined | null): boolean => {
+  const isDatabaseError = (details: string | undefined | null): boolean => {
     const dStr = details || "";
     const lower = dStr.toLowerCase();
-    return lower.includes("permission") || lower.includes("insufficient") || lower.includes("firestore error");
+    return lower.includes("permission") || lower.includes("insufficient") || lower.includes("database error") || lower.includes("sql error");
   };
 
   // Staff CSV Export (enhanced to standard comma-separated Excel format)
@@ -599,7 +600,7 @@ export default function StaffModule({
         log.userRole || "N/D",
         log.action || "Ação",
         log.module || "Geral",
-        translateFirestoreMessage(log.details || "")
+        translateDatabaseMessage(log.details || "")
       ]);
 
       autoTable(doc, {
@@ -962,7 +963,7 @@ export default function StaffModule({
     setLocalError("");
 
     const payload: Employee = {
-      id: `emp-${Date.now()}`,
+      id: generateEntityId("emp"),
       name,
       role,
       contact,
@@ -979,7 +980,7 @@ export default function StaffModule({
 
     onAddEmployee(payload);
     
-    let auditDetails = `Novo funcionário/admin '${payload.name}' (${role}) registado com username '${finalUsername}', Senha Temporária '${formattedPin}' e salário de ${payload.salary.toLocaleString()} ${currency}.`;
+    let auditDetails = `Novo funcionário/admin '${payload.name}' (${role}) registado com username '${finalUsername}', Senha de Acesso: [DEFINIDA COM SUCESSO / MASCARADA] e salário de ${payload.salary.toLocaleString()} ${currency}.`;
 
     const recipientToNotify = email.trim() || (isAdminRole ? "levidomingos12@gmail.com" : "");
     if (recipientToNotify && (isAdminRole || sendEmailCredentials)) {
@@ -1099,7 +1100,7 @@ export default function StaffModule({
 
     if (!confirmReset) return;
 
-    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const generatedPin = generateSecurePin(6);
 
     const updated = employees.map(e => {
       if (e.id === emp.id) {
@@ -1649,7 +1650,7 @@ export default function StaffModule({
     setSalary(emp.salary);
     setEmployeeStatus(emp.status as any || "ACTIVE");
     
-    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+    const generatedPin = generateSecurePin(6);
     setPin(generatedPin);
     
     setEmail(emp.email || "");
@@ -2496,7 +2497,7 @@ export default function StaffModule({
                     const isGroupExpanded = expandedLogId === log.id;
                     
                     // Nível de severidade (Item 11: Info green, Warning yellow, Error red)
-                    const isError = log.module === "ERRO_FRONTEND" || (log.action || "").toLowerCase().includes("erro") || isFirestoreError(log.details);
+                    const isError = log.module === "ERRO_FRONTEND" || (log.action || "").toLowerCase().includes("erro") || isDatabaseError(log.details);
                     const isWarning = (log.action || "").toLowerCase().includes("falha") || (log.action || "").toLowerCase().includes("unauthorized") || (log.action || "").toLowerCase().includes("bloque");
                     
                     const severityLabel = isError ? "ERRO" : isWarning ? "AVISO" : "INFO";
@@ -2567,7 +2568,7 @@ export default function StaffModule({
                                 {group.count} ocorrências ({group.lastTime} ➔ {group.firstTime})
                               </span>
                             )}
-                            {translateFirestoreMessage(log.details)}
+                            {translateDatabaseMessage(log.details)}
                           </td>
                         </tr>
 
@@ -2578,7 +2579,7 @@ export default function StaffModule({
                               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <div className="space-y-1">
                                   <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Mensagem do Evento</span>
-                                  <span className="font-medium text-slate-800 block leading-relaxed">{translateFirestoreMessage(log.details)}</span>
+                                  <span className="font-medium text-slate-800 block leading-relaxed">{translateDatabaseMessage(log.details)}</span>
                                 </div>
                                 <div className="space-y-1">
                                   <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">ID de Auditoria</span>
@@ -2631,7 +2632,7 @@ export default function StaffModule({
                                 </div>
                                 <div className="leading-relaxed">
                                   <p>Dispositivo / Navegador: {log.device || "Desktop (Chrome)"}</p>
-                                  <p className="mt-1">Firestore Database ID: ai-studio-e2d52f5d-b57f-430e-9d24-e415e95b0744</p>
+                                  <p className="mt-1">Base de Dados: PostgreSQL / Cloud SQL</p>
                                   <p className="mt-1 text-slate-400">Timestamp ISO: {log.timestamp}</p>
                                   <p className="mt-2 text-rose-400 font-bold">Traceback: {log.details}</p>
                                 </div>
@@ -2671,7 +2672,7 @@ export default function StaffModule({
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
-                  {navigator.onLine ? "Sincronização com Cloud Firestore ativa" : "Operando com Cache e Banco Local Offline"}
+                  {navigator.onLine ? "Sincronização com Base de Dados ativa" : "Operando com Cache e Banco Local Offline"}
                 </span>
               </div>
             </div>
@@ -2769,7 +2770,7 @@ export default function StaffModule({
                       </div>
 
                       <div className="bg-white p-3 rounded-lg border border-slate-200/60 flex flex-col justify-center">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase font-mono">Banco de Dados / Firestore</span>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase font-mono">Banco de Dados PostgreSQL</span>
                         <span className={`text-xs font-bold mt-1.5 flex items-center gap-1.5 ${
                           diagnosticResult.db === "ok" ? "text-emerald-600" : "text-red-600"
                         }`}>
@@ -2864,7 +2865,7 @@ export default function StaffModule({
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-slate-700">
                                   <div className="space-y-1">
                                     <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Origem / Rota</span>
-                                    <span className="font-mono text-slate-800 block text-[11px] break-all">{log.details.match(/https?:\/\/[^\s]+/)?.[0] || "API interna / Firestore"}</span>
+                                    <span className="font-mono text-slate-800 block text-[11px] break-all">{log.details.match(/https?:\/\/[^\s]+/)?.[0] || "API interna / PostgreSQL"}</span>
                                   </div>
                                   <div className="space-y-1">
                                     <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Identificador Único</span>
@@ -3880,7 +3881,7 @@ export default function StaffModule({
                       </div>
                       <div>
                         <span className="text-slate-400 block text-[9.5px]">SENHA DE ACESSO</span>
-                        <span className="font-mono text-orange-600 block font-extrabold mt-0.5">{selectedEmp.pin || "Não definido"}</span>
+                        <span className="font-mono text-emerald-600 block font-extrabold mt-0.5">{selectedEmp.pin ? "•••••••• (Ativa)" : "Não definida"}</span>
                       </div>
                       <div>
                         <span className="text-slate-400 block text-[9.5px]">E-MAIL (GMAIL)</span>

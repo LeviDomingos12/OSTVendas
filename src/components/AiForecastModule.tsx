@@ -31,6 +31,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, Transaction, SystemSettings } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
+import { generateEntityId } from "../lib/deterministic";
 
 interface AiForecastModuleProps {
   products: Product[];
@@ -300,7 +301,7 @@ Analisei os registos reais da **${settings.companyName || "OST Vendas"}**:
     if (!text.trim() || isChatLoading) return;
 
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: generateEntityId("user_msg"),
       sender: "user",
       text,
       timestamp: new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit" })
@@ -348,7 +349,7 @@ Analisei os registos reais da **${settings.companyName || "OST Vendas"}**:
       const data = await response.json();
       
       const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
+        id: generateEntityId("ai_msg"),
         sender: "ai",
         text: data.answer || "Desculpe, não consegui processar a resposta no momento. Pode tentar de novo?",
         timestamp: new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit" })
@@ -358,7 +359,7 @@ Analisei os registos reais da **${settings.companyName || "OST Vendas"}**:
       console.error(err);
       // Smart local response generator fallback
       const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
+        id: generateEntityId("ai_msg"),
         sender: "ai",
         text: `### 🧠 Insight do Assistente OST Vendas AI (Modo Local)
         
@@ -645,7 +646,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
     }
     
     const newQuote = {
-      id: `quote-${Date.now()}`,
+      id: generateEntityId("quote"),
       productName: selectedProductForQuote.name,
       quantity: quoteQuantity,
       supplier: selectedProductForQuote.supplier || "Distribuidor Parceiro",

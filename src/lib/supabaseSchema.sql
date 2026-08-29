@@ -348,7 +348,7 @@ CREATE INDEX IF NOT EXISTS idx_profiles_company ON public.profiles(company_id);
 -- 4. TENANT ISOLATION HELPERS & TRIGGER FOR GOOGLE AUTH
 -- ============================================================================
 
--- Helper: Obtém o tenant/empresa_id do utilizador autenticado
+-- Helper: Obtém o tenant/empresa_id exclusivo do utilizador autenticado a partir do perfil
 CREATE OR REPLACE FUNCTION public.get_my_company_id()
 RETURNS TEXT
 LANGUAGE sql
@@ -357,9 +357,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT COALESCE(
-    (SELECT company_id FROM public.profiles WHERE id = auth.uid() LIMIT 1),
-    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text LIMIT 1),
-    auth.uid()::text
+    (SELECT company_id FROM public.profiles WHERE id = auth.uid() AND company_id IS NOT NULL AND company_id <> '' LIMIT 1),
+    (SELECT tenant_id FROM public.colaboradores WHERE auth_uid = auth.uid()::text AND status = 'ACTIVE' AND tenant_id IS NOT NULL AND tenant_id <> '' LIMIT 1),
+    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text AND id IS NOT NULL AND id <> '' LIMIT 1)
   );
 $$;
 
@@ -467,7 +467,7 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================================================
--- 5. ROW LEVEL SECURITY (RLS) - STRICT TENANT ISOLATION POLICIES
+-- 5. ROW LEVEL SECURITY (RLS) - STRICT TENANT ISOLATION POLICIES (AUTHENTICATED PROFILE ONLY)
 -- ============================================================================
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
@@ -489,146 +489,333 @@ ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
 
--- COMPANIES: Apenas o dono ou membros da mesma empresa podem ver/editar
+-- COMPANIES: Apenas membros da mesma empresa autenticada ou o proprietário com tenant ativo
 DROP POLICY IF EXISTS "Companies Isolation" ON public.companies;
 CREATE POLICY "Companies Isolation" ON public.companies
   FOR ALL TO authenticated
-  USING (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
-  WITH CHECK (id = public.get_my_company_id() OR owner_uid = auth.uid()::text);
+  USING (
+    public.get_my_company_id() IS NOT NULL AND 
+    (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
+  )
+  WITH CHECK (
+    public.get_my_company_id() IS NOT NULL AND 
+    (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
+  );
 
--- PROFILES: Cada utilizador acede ao seu próprio perfil ou aos da sua empresa
+-- PROFILES: Cada utilizador acede ao seu próprio perfil ou aos da sua empresa vinculada
 DROP POLICY IF EXISTS "Profiles Isolation" ON public.profiles;
 CREATE POLICY "Profiles Isolation" ON public.profiles
   FOR ALL TO authenticated
-  USING (id = auth.uid() OR company_id = public.get_my_company_id())
-  WITH CHECK (id = auth.uid() OR company_id = public.get_my_company_id());
+  USING (
+    id = auth.uid() OR 
+    (public.get_my_company_id() IS NOT NULL AND company_id = public.get_my_company_id())
+  )
+  WITH CHECK (
+    id = auth.uid() OR 
+    (public.get_my_company_id() IS NOT NULL AND company_id = public.get_my_company_id())
+  );
 
--- PRODUTOS: Isolamento por tenant_id
+-- Helper para verificar papel do utilizador corrente no JWT/Metadados
+CREATE OR REPLACE FUNCTION public.get_my_role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT COALESCE(
+    (current_setting('request.jwt.claims', true)::jsonb -> 'user_metadata' ->> 'role'),
+    (current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'role'),
+    'GUEST'
+  );
+$$;
+
+-- PRODUTOS: Leitura para todos do tenant; Escrita e Atualização para Vendedores/Supervisores/Admin; Eliminação estrita para ADMIN
 DROP POLICY IF EXISTS "Produtos Tenant Isolation" ON public.produtos;
-CREATE POLICY "Produtos Tenant Isolation" ON public.produtos
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Produtos Select" ON public.produtos;
+DROP POLICY IF EXISTS "Produtos Insert" ON public.produtos;
+DROP POLICY IF EXISTS "Produtos Update" ON public.produtos;
+DROP POLICY IF EXISTS "Produtos Delete" ON public.produtos;
 
--- CLIENTES: Isolamento por tenant_id
+CREATE POLICY "Produtos Select" ON public.produtos
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Produtos Insert" ON public.produtos
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Produtos Update" ON public.produtos
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
+
+CREATE POLICY "Produtos Delete" ON public.produtos
+  FOR DELETE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN');
+
+-- CLIENTES: Leitura e criação para todos do tenant; Atualização para Operadores/Supervisores/Admin; Eliminação estrita para ADMIN
 DROP POLICY IF EXISTS "Clientes Tenant Isolation" ON public.clientes;
-CREATE POLICY "Clientes Tenant Isolation" ON public.clientes
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Clientes Select" ON public.clientes;
+DROP POLICY IF EXISTS "Clientes Insert" ON public.clientes;
+DROP POLICY IF EXISTS "Clientes Update" ON public.clientes;
+DROP POLICY IF EXISTS "Clientes Delete" ON public.clientes;
 
--- VENDAS: Isolamento por tenant_id
+CREATE POLICY "Clientes Select" ON public.clientes
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Clientes Insert" ON public.clientes
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Clientes Update" ON public.clientes
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id())
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Clientes Delete" ON public.clientes
+  FOR DELETE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN');
+
+-- VENDAS: Leitura para todos do tenant; Criação para Caixas/Vendedores/Admin; Proibida eliminação arbitrária (Append-Only fiscal)
 DROP POLICY IF EXISTS "Vendas Tenant Isolation" ON public.vendas;
-CREATE POLICY "Vendas Tenant Isolation" ON public.vendas
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Vendas Select" ON public.vendas;
+DROP POLICY IF EXISTS "Vendas Insert" ON public.vendas;
+DROP POLICY IF EXISTS "Vendas Update" ON public.vendas;
 
--- VENDA ITENS: Isolamento por tenant_id
+CREATE POLICY "Vendas Select" ON public.vendas
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Vendas Insert" ON public.vendas
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Vendas Update" ON public.vendas
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'));
+
+-- VENDA ITENS: Leitura e Inserção para o tenant; Bloqueado DELETE
 DROP POLICY IF EXISTS "Venda Itens Tenant Isolation" ON public.venda_itens;
-CREATE POLICY "Venda Itens Tenant Isolation" ON public.venda_itens
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Venda Itens Select" ON public.venda_itens;
+DROP POLICY IF EXISTS "Venda Itens Insert" ON public.venda_itens;
 
--- CAIXA: Isolamento por tenant_id
+CREATE POLICY "Venda Itens Select" ON public.venda_itens
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Venda Itens Insert" ON public.venda_itens
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+-- CAIXA E MOVIMENTAÇÕES:
 DROP POLICY IF EXISTS "Caixa Tenant Isolation" ON public.caixa;
-CREATE POLICY "Caixa Tenant Isolation" ON public.caixa
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Caixa Select" ON public.caixa;
+DROP POLICY IF EXISTS "Caixa Insert" ON public.caixa;
 
--- CASH REGISTERS & SHIFTS: Isolamento por tenant_id
+CREATE POLICY "Caixa Select" ON public.caixa
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Caixa Insert" ON public.caixa
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+-- CASH REGISTERS & SHIFTS:
 DROP POLICY IF EXISTS "Cash Registers Tenant Isolation" ON public.cash_registers;
-CREATE POLICY "Cash Registers Tenant Isolation" ON public.cash_registers
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Cash Registers Select" ON public.cash_registers;
+DROP POLICY IF EXISTS "Cash Registers Insert" ON public.cash_registers;
+DROP POLICY IF EXISTS "Cash Registers Update" ON public.cash_registers;
+
+CREATE POLICY "Cash Registers Select" ON public.cash_registers
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Cash Registers Insert" ON public.cash_registers
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Cash Registers Update" ON public.cash_registers
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'));
 
 DROP POLICY IF EXISTS "Cash Shifts Tenant Isolation" ON public.cash_shifts;
-CREATE POLICY "Cash Shifts Tenant Isolation" ON public.cash_shifts
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Cash Shifts Select" ON public.cash_shifts;
+DROP POLICY IF EXISTS "Cash Shifts Insert" ON public.cash_shifts;
+DROP POLICY IF EXISTS "Cash Shifts Update" ON public.cash_shifts;
+
+CREATE POLICY "Cash Shifts Select" ON public.cash_shifts
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Cash Shifts Insert" ON public.cash_shifts
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Cash Shifts Update" ON public.cash_shifts
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id())
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
 DROP POLICY IF EXISTS "Cash Closures Tenant Isolation" ON public.cash_closures;
-CREATE POLICY "Cash Closures Tenant Isolation" ON public.cash_closures
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Cash Closures Select" ON public.cash_closures;
+DROP POLICY IF EXISTS "Cash Closures Insert" ON public.cash_closures;
 
--- COLABORADORES: Isolamento por tenant_id
+CREATE POLICY "Cash Closures Select" ON public.cash_closures
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Cash Closures Insert" ON public.cash_closures
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+-- COLABORADORES: Leitura para o tenant; Modificação e Eliminação estrita para ADMIN
 DROP POLICY IF EXISTS "Colaboradores Tenant Isolation" ON public.colaboradores;
-CREATE POLICY "Colaboradores Tenant Isolation" ON public.colaboradores
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Colaboradores Select" ON public.colaboradores;
+DROP POLICY IF EXISTS "Colaboradores Insert" ON public.colaboradores;
+DROP POLICY IF EXISTS "Colaboradores Update" ON public.colaboradores;
+DROP POLICY IF EXISTS "Colaboradores Delete" ON public.colaboradores;
 
--- AUDIT LOGS: Append-Only (Permitir apenas INSERT e SELECT por tenant_id, PROIBIR UPDATE e DELETE)
+CREATE POLICY "Colaboradores Select" ON public.colaboradores
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Colaboradores Insert" ON public.colaboradores
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'));
+
+CREATE POLICY "Colaboradores Update" ON public.colaboradores
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR'));
+
+CREATE POLICY "Colaboradores Delete" ON public.colaboradores
+  FOR DELETE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN');
+
+-- AUDIT LOGS: Append-Only por tenant_id (Apenas SELECT e INSERT)
 DROP POLICY IF EXISTS "Audit Logs Tenant Isolation" ON public.audit_logs;
+DROP POLICY IF EXISTS "Audit Logs Tenant Select" ON public.audit_logs;
+DROP POLICY IF EXISTS "Audit Logs Tenant Insert" ON public.audit_logs;
+
 CREATE POLICY "Audit Logs Tenant Select" ON public.audit_logs
   FOR SELECT TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
 CREATE POLICY "Audit Logs Tenant Insert" ON public.audit_logs
   FOR INSERT TO authenticated
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
--- SETTINGS: Isolamento por tenant_id
+-- SETTINGS: Leitura para todos; Alteração estrita para ADMIN
 DROP POLICY IF EXISTS "Settings Tenant Isolation" ON public.settings;
-CREATE POLICY "Settings Tenant Isolation" ON public.settings
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Settings Select" ON public.settings;
+DROP POLICY IF EXISTS "Settings Insert" ON public.settings;
+DROP POLICY IF EXISTS "Settings Update" ON public.settings;
 
--- STOCK MOVEMENTS: Isolamento por tenant_id (Append-Only)
+CREATE POLICY "Settings Select" ON public.settings
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Settings Insert" ON public.settings
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN');
+
+CREATE POLICY "Settings Update" ON public.settings
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN')
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() = 'ADMIN');
+
+-- STOCK MOVEMENTS: Isolamento estrito por tenant_id (Append-Only)
 DROP POLICY IF EXISTS "Stock Movements Tenant Isolation" ON public.stock_movements;
+DROP POLICY IF EXISTS "Stock Movements Tenant Select" ON public.stock_movements;
+DROP POLICY IF EXISTS "Stock Movements Tenant Insert" ON public.stock_movements;
+
 CREATE POLICY "Stock Movements Tenant Select" ON public.stock_movements
   FOR SELECT TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
 CREATE POLICY "Stock Movements Tenant Insert" ON public.stock_movements
   FOR INSERT TO authenticated
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
--- CUSTOMER DEBTS & PAYMENTS: Isolamento por tenant_id
+-- CUSTOMER DEBTS & PAYMENTS:
 DROP POLICY IF EXISTS "Debts Tenant Isolation" ON public.customer_debts;
-CREATE POLICY "Debts Tenant Isolation" ON public.customer_debts
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Debts Select" ON public.customer_debts;
+DROP POLICY IF EXISTS "Debts Insert" ON public.customer_debts;
+DROP POLICY IF EXISTS "Debts Update" ON public.customer_debts;
+
+CREATE POLICY "Debts Select" ON public.customer_debts
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Debts Insert" ON public.customer_debts
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Debts Update" ON public.customer_debts
+  FOR UPDATE TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id())
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
 DROP POLICY IF EXISTS "Debt Payments Tenant Isolation" ON public.debt_payments;
-CREATE POLICY "Debt Payments Tenant Isolation" ON public.debt_payments
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Debt Payments Select" ON public.debt_payments;
+DROP POLICY IF EXISTS "Debt Payments Insert" ON public.debt_payments;
 
--- CATEGORIES & SUPPLIERS: Isolamento por tenant_id
+CREATE POLICY "Debt Payments Select" ON public.debt_payments
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Debt Payments Insert" ON public.debt_payments
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+-- CATEGORIES & SUPPLIERS:
 DROP POLICY IF EXISTS "Categories Tenant Isolation" ON public.categories;
-CREATE POLICY "Categories Tenant Isolation" ON public.categories
+DROP POLICY IF EXISTS "Categories Select" ON public.categories;
+DROP POLICY IF EXISTS "Categories Modify" ON public.categories;
+
+CREATE POLICY "Categories Select" ON public.categories
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Categories Modify" ON public.categories
   FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
 
 DROP POLICY IF EXISTS "Suppliers Tenant Isolation" ON public.suppliers;
-CREATE POLICY "Suppliers Tenant Isolation" ON public.suppliers
-  FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+DROP POLICY IF EXISTS "Suppliers Select" ON public.suppliers;
+DROP POLICY IF EXISTS "Suppliers Modify" ON public.suppliers;
 
--- RECOVERY REQUESTS: Isolamento por tenant_id
-DROP POLICY IF EXISTS "Recovery Requests Tenant Isolation" ON public.recovery_requests;
-CREATE POLICY "Recovery Requests Tenant Isolation" ON public.recovery_requests
+CREATE POLICY "Suppliers Select" ON public.suppliers
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Suppliers Modify" ON public.suppliers
   FOR ALL TO authenticated
-  USING (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text)
-  WITH CHECK (tenant_id = public.get_my_company_id() OR tenant_id = auth.uid()::text);
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'))
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
+
+-- RECOVERY REQUESTS:
+DROP POLICY IF EXISTS "Recovery Requests Tenant Isolation" ON public.recovery_requests;
+DROP POLICY IF EXISTS "Recovery Requests Select" ON public.recovery_requests;
+DROP POLICY IF EXISTS "Recovery Requests Insert" ON public.recovery_requests;
+
+CREATE POLICY "Recovery Requests Select" ON public.recovery_requests
+  FOR SELECT TO authenticated
+  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
+
+CREATE POLICY "Recovery Requests Insert" ON public.recovery_requests
+  FOR INSERT TO authenticated
+  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
 -- ============================================================================
 -- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC) - HARDENED
 -- ============================================================================
 
--- RPC 1: PROCESS SALE ATOMIC (Idempotent, Transactional & Tenant-Hardened)
+-- RPC 1: PROCESS SALE ATOMIC (Idempotent, Transactional, Stock-Validated & Tenant-Hardened)
 CREATE OR REPLACE FUNCTION public.process_sale_atomic(
   p_tenant_id TEXT,
   p_sale_id TEXT,
@@ -670,19 +857,20 @@ BEGIN
   -- 0. Determinar e validar autoritativamente o tenant da sessão (não confiar no frontend)
   IF auth.uid() IS NOT NULL THEN
     v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      v_tenant_id := auth.uid()::TEXT;
-    END IF;
   ELSE
-    -- Contexto de serviço backend (service_role)
     v_tenant_id := p_tenant_id;
   END IF;
 
   IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado.');
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado ou utilizador sem empresa.');
   END IF;
 
-  -- 0.1 Verificação de Idempotência: Se a venda já foi registada para este tenant, devolver com sucesso
+  -- 0.1 Validação de valores monetários
+  IF p_subtotal < 0 OR p_discount_total < 0 OR p_vat_total < 0 OR p_grand_total < 0 OR p_amount_paid < 0 OR p_change_amount < 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Valores monetários inválidos ou negativos.');
+  END IF;
+
+  -- 0.2 Verificação de Idempotência: Se a venda já foi registada para este tenant, devolver com sucesso
   IF EXISTS (SELECT 1 FROM public.vendas WHERE id = p_sale_id AND tenant_id = v_tenant_id) THEN
     RETURN jsonb_build_object(
       'success', true,
@@ -692,6 +880,51 @@ BEGIN
       'message', 'Venda já processada anteriormente (idempotente).'
     );
   END IF;
+
+  -- 0.3 Validação de cliente (se fornecido, deve pertencer ao mesmo tenant)
+  IF p_customer_id IS NOT NULL AND p_customer_id <> '' THEN
+    IF NOT EXISTS (SELECT 1 FROM public.clientes WHERE id = p_customer_id AND tenant_id = v_tenant_id) THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Cliente especificado não existe ou pertence a outra empresa.');
+    END IF;
+  END IF;
+
+  -- 0.4 Validação de itens e integridade de stock (Passo atómico de pré-validação)
+  IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'A venda deve conter pelo menos um artigo.');
+  END IF;
+
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+  LOOP
+    v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
+    v_qty := COALESCE((v_item->>'quantity')::NUMERIC, (v_item->>'quantidade')::NUMERIC, 0.00);
+    v_unit_price := COALESCE((v_item->>'salePrice')::NUMERIC, (v_item->>'unitPrice')::NUMERIC, (v_item->>'price')::NUMERIC, -1.00);
+
+    IF v_prod_id IS NULL OR v_prod_id = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Identificador de produto não especificado num dos itens.');
+    END IF;
+
+    IF v_qty <= 0 THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Quantidade inválida para o artigo.');
+    END IF;
+
+    IF v_unit_price < 0 THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Preço unitário inválido para o artigo.');
+    END IF;
+
+    -- Bloquear e validar produto no inventário do tenant
+    SELECT stock, name INTO v_curr_stock, v_prod_name 
+    FROM public.produtos 
+    WHERE id = v_prod_id AND tenant_id = v_tenant_id AND is_active = TRUE 
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Artigo (' || v_prod_id || ') não existe, está desativado ou não pertence à sua empresa.');
+    END IF;
+
+    IF v_curr_stock < v_qty THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Stock insuficiente para o artigo "' || v_prod_name || '". Stock atual: ' || v_curr_stock || ', Solicitado: ' || v_qty);
+    END IF;
+  END LOOP;
 
   -- 1. Inserir registo mestre de venda
   INSERT INTO public.vendas (
@@ -732,26 +965,25 @@ BEGIN
 
     -- Buscar e atualizar stock do produto pertencente ao mesmo tenant
     SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id FOR UPDATE;
-    IF FOUND THEN
-      v_new_stock := GREATEST(0.00, v_curr_stock - v_qty);
-      UPDATE public.produtos 
-      SET stock = v_new_stock, updated_at = NOW() 
-      WHERE id = v_prod_id AND tenant_id = v_tenant_id;
+    v_new_stock := GREATEST(0.00, v_curr_stock - v_qty);
 
-      -- Registar movimento no Kardex
-      INSERT INTO public.stock_movements (
-        id, tenant_id, product_id, type, quantity,
-        previous_stock, new_stock, cost_price, reason, reference_id, user_name, timestamp
-      ) VALUES (
-        uuid_generate_v4()::TEXT, v_tenant_id, v_prod_id, 'EXIT_SALE', v_qty,
-        v_curr_stock, v_new_stock, v_cost_price, 'Venda ' || p_invoice_number, p_sale_id, p_seller_name, NOW()
-      );
-    END IF;
+    UPDATE public.produtos 
+    SET stock = v_new_stock, updated_at = NOW() 
+    WHERE id = v_prod_id AND tenant_id = v_tenant_id;
+
+    -- Registar movimento no Kardex
+    INSERT INTO public.stock_movements (
+      id, tenant_id, product_id, type, quantity,
+      previous_stock, new_stock, cost_price, reason, reference_id, user_name, timestamp
+    ) VALUES (
+      uuid_generate_v4()::TEXT, v_tenant_id, v_prod_id, 'EXIT_SALE', v_qty,
+      v_curr_stock, v_new_stock, v_cost_price, 'Venda ' || p_invoice_number, p_sale_id, p_seller_name, NOW()
+    );
   END LOOP;
 
   -- 3. Gestão de Dívida se a venda foi a prazo
   v_is_credit := p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT');
-  IF v_is_credit AND p_customer_id IS NOT NULL THEN
+  IF v_is_credit AND p_customer_id IS NOT NULL AND p_customer_id <> '' THEN
     v_remaining_debt := GREATEST(0.00, p_grand_total - p_amount_paid);
     
     INSERT INTO public.customer_debts (
@@ -794,7 +1026,7 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- RPC 2: REPLENISH STOCK ATOMIC
+-- RPC 2: REPLENISH STOCK ATOMIC (Validated, Authorized & Tenant-Hardened)
 CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
   p_tenant_id TEXT,
   p_product_id TEXT,
@@ -817,11 +1049,20 @@ DECLARE
 BEGIN
   IF auth.uid() IS NOT NULL THEN
     v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      v_tenant_id := auth.uid()::TEXT;
-    END IF;
   ELSE
     v_tenant_id := p_tenant_id;
+  END IF;
+
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado ou utilizador sem empresa.');
+  END IF;
+
+  IF p_quantity <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Quantidade de reabastecimento deve ser superior a zero.');
+  END IF;
+
+  IF p_cost_price IS NOT NULL AND p_cost_price < 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Preço de custo não pode ser negativo.');
   END IF;
 
   SELECT stock, cost_price INTO v_curr_stock, v_curr_cost 
@@ -829,7 +1070,7 @@ BEGIN
   WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no inventário da empresa.');
+    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no inventário da empresa ou pertence a outra organização.');
   END IF;
 
   v_new_stock := v_curr_stock + p_quantity;
@@ -856,7 +1097,7 @@ BEGIN
 END;
 $$;
 
--- RPC 3: SETTLE DEBT PAYMENT ATOMIC
+-- RPC 3: SETTLE DEBT PAYMENT ATOMIC (Hardened against Overpayment & Cross-Tenant Access)
 CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
   p_tenant_id TEXT,
   p_debt_id TEXT,
@@ -874,22 +1115,43 @@ DECLARE
   v_tenant_id TEXT;
   v_remaining NUMERIC;
   v_new_remaining NUMERIC;
+  v_debt_customer_id TEXT;
 BEGIN
   IF auth.uid() IS NOT NULL THEN
     v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      v_tenant_id := auth.uid()::TEXT;
-    END IF;
   ELSE
     v_tenant_id := p_tenant_id;
   END IF;
 
-  SELECT remaining_balance INTO v_remaining 
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado ou utilizador sem empresa.');
+  END IF;
+
+  IF p_amount <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'O valor do pagamento de dívida deve ser superior a zero.');
+  END IF;
+
+  -- 1. Validar que a dívida pertence ao tenant
+  SELECT remaining_balance, customer_id INTO v_remaining, v_debt_customer_id 
   FROM public.customer_debts 
   WHERE id = p_debt_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado.');
+    RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado ou pertence a outra organização.');
+  END IF;
+
+  -- 2. Validar que o cliente corresponde à dívida e pertence ao mesmo tenant
+  IF p_customer_id IS NOT NULL AND p_customer_id <> '' AND v_debt_customer_id <> p_customer_id THEN
+    RETURN jsonb_build_object('success', false, 'error', 'O cliente informado não corresponde ao titular deste registo de dívida.');
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.clientes WHERE id = v_debt_customer_id AND tenant_id = v_tenant_id) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Cliente titular da dívida não encontrado na organização.');
+  END IF;
+
+  -- 3. Impedir pagamento superior ao saldo devedor
+  IF p_amount > v_remaining THEN
+    RETURN jsonb_build_object('success', false, 'error', 'O valor do pagamento (' || p_amount || ') é superior ao saldo devedor pendente (' || v_remaining || ').');
   END IF;
 
   v_new_remaining := GREATEST(0.00, v_remaining - p_amount);
@@ -905,17 +1167,17 @@ BEGIN
   INSERT INTO public.debt_payments (
     id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, v_tenant_id, p_debt_id, p_customer_id, p_amount, p_payment_method, p_received_by, NOW()
+    uuid_generate_v4()::TEXT, v_tenant_id, p_debt_id, v_debt_customer_id, p_amount, p_payment_method, p_received_by, NOW()
   );
 
   UPDATE public.clientes 
   SET balance = GREATEST(0.00, balance - p_amount), updated_at = NOW()
-  WHERE id = p_customer_id AND tenant_id = v_tenant_id;
+  WHERE id = v_debt_customer_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.caixa (
     id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || p_customer_id || ')', p_received_by, p_debt_id, NOW()
+    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || v_debt_customer_id || ')', p_received_by, p_debt_id, NOW()
   );
 
   RETURN jsonb_build_object(

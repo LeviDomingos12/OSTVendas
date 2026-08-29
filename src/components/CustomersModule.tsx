@@ -36,6 +36,7 @@ import { Customer, UserRole, Transaction, SystemSettings } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 import { useConfirm } from "../hooks/useConfirm";
 import { printInvoiceHTML } from "../lib/printHelper";
+import { generateEntityId, generateReceiptNumber } from "../lib/deterministic";
 
 interface CustomersModuleProps {
   customers: Customer[];
@@ -203,7 +204,7 @@ export default function CustomersModule({
     setLocalError("");
 
     const payload: Customer = {
-      id: `cust-${Date.now()}`,
+      id: generateEntityId("cust"),
       name,
       phone,
       email: email || "consumidor@geral.com",
@@ -281,7 +282,7 @@ export default function CustomersModule({
     // Simulate network processing and sending SMS/Email
     setTimeout(async () => {
       const settlementRecord = {
-        id: `set-${Date.now()}`,
+        id: generateEntityId("set"),
         date: new Date().toISOString(),
         amount: amountToPay,
         method: "Numerário"
@@ -296,7 +297,7 @@ export default function CustomersModule({
 
       // 2. Add cash flow entry
       onAddCashFlowEntry({
-        id: `cash-${Date.now()}`,
+        id: generateEntityId("cash"),
         timestamp: new Date().toISOString(),
         type: "INPUT",
         amount: amountToPay,
@@ -311,7 +312,7 @@ export default function CustomersModule({
         `Dívida de ${settleDebtCustomer.name} liquidada em ${amountToPay} MT.`
       );
 
-      const receiptNumber = `REC-${Date.now()}`;
+      const receiptNumber = generateReceiptNumber();
       const operatorName = activeUsername || "Operador Atual";
       const remainingBalance = settleDebtCustomer.debt - amountToPay;
       const paymentMethodStr = "Numerário";

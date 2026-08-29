@@ -9,16 +9,26 @@
  * - Backups sanitizados sem senhas nem segredos
  * - Proteção estrita contra cruzamento de dados entre empresas
  * - Idempotência no processamento de vendas
+ * - Persistência relacional via PostgreSQL / Cloud SQL (Drizzle ORM) e Supabase
  */
 
 import { Router, Request, Response } from "express";
 import { requireAuth, requireAdmin, requireStockOrAdmin, AuthenticatedUserContext, supabaseServerAdmin, supabasePublicAuth } from "./authMiddleware";
 import { db as drizzleDb, isCloudSqlAvailable } from "../db/index";
-import { products as productsTable, customers as customersTable, sales as salesTable, saleItems as saleItemsTable, stockMovements as stockMovementsTable, auditlogs as auditlogsTable, customerDebts as customerDebtsTable, cashMovements as cashMovementsTable, debtPayments as debtPaymentsTable } from "../db/schema";
+import { 
+  products as productsTable, 
+  customers as customersTable, 
+  sales as salesTable, 
+  saleItems as saleItemsTable, 
+  stockMovements as stockMovementsTable, 
+  auditlogs as auditlogsTable, 
+  customerDebts as customerDebtsTable, 
+  cashMovements as cashMovementsTable, 
+  debtPayments as debtPaymentsTable 
+} from "../db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
-import { productSchema, customerSchema, saleProcessSchema, auditLogSchema, replenishStockSchema, debtPaymentSchema, sanitizeInputData } from "./validation";
-import fs from "fs";
-import path from "path";
+import { productSchema, customerSchema, saleProcessSchema, auditLogSchema, replenishStockSchema, debtPaymentSchema } from "./validation";
+import { generateUUID } from "../lib/deterministic";
 
 export const commercialRouter = Router();
 
@@ -53,7 +63,7 @@ commercialRouter.get("/products", async (req: Request, res: Response) => {
       return res.json({ success: true, data: list });
     }
 
-    // Supabase fallback
+    // Supabase
     const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client
@@ -65,16 +75,6 @@ commercialRouter.get("/products", async (req: Request, res: Response) => {
 
       if (error) throw error;
       return res.json({ success: true, data: data || [] });
-    }
-
-    // Local JSON fallback (offline / test mode)
-    const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-    const prodFile = path.join(tenantDir, "products.json");
-    if (fs.existsSync(prodFile)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(prodFile, "utf-8"));
-        return res.json({ success: true, data: Array.isArray(data) ? data.filter((p: any) => p.isActive !== false) : [] });
-      } catch (e) {}
     }
 
     res.json({ success: true, data: [] });
@@ -98,41 +98,46 @@ commercialRouter.post("/products", async (req: Request, res: Response) => {
   }
 
   const p = parseResult.data;
-  const productId = p.id || `prod_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const productId = p.id || generateUUID();
 
   try {
     if (isCloudSqlAvailable()) {
-      await drizzleDb.insert(productsTable).values({
-        id: productId,
-        tenantId: user.tenantId,
-        name: p.name.trim(),
-        code: p.code || "",
-        barcode: p.barcode || "",
-        category: p.category || "Geral",
-        price: p.price.toFixed(2),
-        cost: (p.cost || 0).toFixed(2),
-        stock: (p.stock || 0).toFixed(2),
-        minStock: (p.minStock || 0).toFixed(2),
-        unit: p.unit || "un",
-        imageUrl: p.imageUrl || null,
-        isActive: p.isActive !== false
-      }).onConflictDoUpdate({
-        target: productsTable.id,
-        set: {
+      await drizzleDb
+        .insert(productsTable)
+        .values({
+          id: productId,
+          tenantId: user.tenantId,
+          code: p.code || productId.slice(0, 8).toUpperCase(),
+          barcode: p.barcode || null,
           name: p.name.trim(),
-          code: p.code || "",
-          barcode: p.barcode || "",
           category: p.category || "Geral",
-          price: p.price.toFixed(2),
+          price: (p.price || p.salePrice || 0).toFixed(2),
           cost: (p.cost || 0).toFixed(2),
           stock: (p.stock || 0).toFixed(2),
-          minStock: (p.minStock || 0).toFixed(2),
+          minStock: (p.minStock || 5).toFixed(2),
           unit: p.unit || "un",
+          taxRate: (p.taxRate || 16).toFixed(2),
+          expiryDate: p.expiryDate || null,
           imageUrl: p.imageUrl || null,
-          isActive: p.isActive !== false,
-          updatedAt: new Date()
-        }
-      });
+          isActive: p.isActive !== false
+        })
+        .onConflictDoUpdate({
+          target: productsTable.id,
+          set: {
+            name: p.name.trim(),
+            category: p.category || "Geral",
+            price: (p.price || p.salePrice || 0).toFixed(2),
+            cost: (p.cost || 0).toFixed(2),
+            stock: (p.stock || 0).toFixed(2),
+            minStock: (p.minStock || 5).toFixed(2),
+            unit: p.unit || "un",
+            taxRate: (p.taxRate || 16).toFixed(2),
+            expiryDate: p.expiryDate || null,
+            imageUrl: p.imageUrl || null,
+            isActive: p.isActive !== false,
+            updatedAt: new Date()
+          }
+        });
     } else {
       const client = getSupabaseClient();
       if (client) {
@@ -141,11 +146,11 @@ commercialRouter.post("/products", async (req: Request, res: Response) => {
           .upsert({
             id: productId,
             tenant_id: user.tenantId,
+            code: p.code || productId.slice(0, 8).toUpperCase(),
+            barcode: p.barcode || null,
             name: p.name.trim(),
-            code: p.code || "",
-            barcode: p.barcode || "",
             category: p.category || "Geral",
-            sale_price: p.price,
+            sale_price: p.price || p.salePrice || 0,
             cost_price: p.cost || 0,
             stock: p.stock || 0,
             unit: p.unit || "un",
@@ -155,19 +160,6 @@ commercialRouter.post("/products", async (req: Request, res: Response) => {
           }, { onConflict: "id" });
 
         if (error) throw error;
-      } else {
-        // Local JSON
-        const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-        if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
-        const prodFile = path.join(tenantDir, "products.json");
-        let list: any[] = [];
-        if (fs.existsSync(prodFile)) {
-          try { list = JSON.parse(fs.readFileSync(prodFile, "utf-8")); } catch (e) {}
-        }
-        const idx = list.findIndex(item => item.id === productId);
-        const itemObj = { ...p, id: productId, tenantId: user.tenantId, updatedAt: new Date().toISOString() };
-        if (idx >= 0) list[idx] = itemObj; else list.push(itemObj);
-        fs.writeFileSync(prodFile, JSON.stringify(list, null, 2), "utf-8");
       }
     }
 
@@ -236,15 +228,6 @@ commercialRouter.get("/customers", async (req: Request, res: Response) => {
       return res.json({ success: true, data: data || [] });
     }
 
-    const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-    const custFile = path.join(tenantDir, "customers.json");
-    if (fs.existsSync(custFile)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(custFile, "utf-8"));
-        return res.json({ success: true, data: Array.isArray(data) ? data : [] });
-      } catch (e) {}
-    }
-
     res.json({ success: true, data: [] });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -259,37 +242,41 @@ commercialRouter.post("/customers", async (req: Request, res: Response) => {
   if (!parseResult.success) {
     return res.status(400).json({
       success: false,
-      error: parseResult.error.issues[0]?.message || "Dados do cliente inválidos.",
-      details: parseResult.error.format()
+      error: parseResult.error.issues[0]?.message || "Dados do cliente inválidos."
     });
   }
 
   const c = parseResult.data;
-  const custId = c.id || `cust_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const creditLimit = Math.max(0, Number(c.creditLimit || 0));
+  const custId = c.id || generateUUID();
+  const creditLimit = Number(c.creditLimit || c.credit_limit || 0);
 
   try {
     if (isCloudSqlAvailable()) {
-      await drizzleDb.insert(customersTable).values({
-        id: custId,
-        tenantId: user.tenantId,
-        name: c.name.trim(),
-        email: c.email || null,
-        phone: c.phone || null,
-        address: c.address || null,
-        nif: c.nif || c.nuit || null,
-        creditLimit: creditLimit.toFixed(2)
-      }).onConflictDoUpdate({
-        target: customersTable.id,
-        set: {
+      await drizzleDb
+        .insert(customersTable)
+        .values({
+          id: custId,
+          tenantId: user.tenantId,
           name: c.name.trim(),
           email: c.email || null,
           phone: c.phone || null,
           address: c.address || null,
-          nif: c.nif || c.nuit || null,
-          creditLimit: creditLimit.toFixed(2)
-        }
-      });
+          nuit: c.nif || c.nuit || null,
+          creditLimit: creditLimit.toFixed(2),
+          outstandingBalance: "0.00"
+        })
+        .onConflictDoUpdate({
+          target: customersTable.id,
+          set: {
+            name: c.name.trim(),
+            email: c.email || null,
+            phone: c.phone || null,
+            address: c.address || null,
+            nuit: c.nif || c.nuit || null,
+            creditLimit: creditLimit.toFixed(2),
+            updatedAt: new Date()
+          }
+        });
     } else {
       const client = getSupabaseClient();
       if (client) {
@@ -308,18 +295,6 @@ commercialRouter.post("/customers", async (req: Request, res: Response) => {
           }, { onConflict: "id" });
 
         if (error) throw error;
-      } else {
-        const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-        if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
-        const custFile = path.join(tenantDir, "customers.json");
-        let list: any[] = [];
-        if (fs.existsSync(custFile)) {
-          try { list = JSON.parse(fs.readFileSync(custFile, "utf-8")); } catch (e) {}
-        }
-        const idx = list.findIndex(item => item.id === custId);
-        const itemObj = { ...c, id: custId, tenantId: user.tenantId, updatedAt: new Date().toISOString() };
-        if (idx >= 0) list[idx] = itemObj; else list.push(itemObj);
-        fs.writeFileSync(custFile, JSON.stringify(list, null, 2), "utf-8");
       }
     }
 
@@ -348,8 +323,8 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
   }
 
   const payload = parseResult.data;
-  const saleId = payload.saleId || payload.id || `sale_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-  const invoiceNumber = payload.invoiceNumber || `FAC-${new Date().getFullYear()}-${Date.now().toString().slice(-6)}`;
+  const saleId = payload.saleId || payload.id || generateUUID();
+  const invoiceNumber = payload.invoiceNumber || `FAC-${new Date().getFullYear()}-${generateUUID().slice(0, 8).toUpperCase()}`;
   const paymentMethod = payload.paymentMethod || "Dinheiro";
   const idempotencyKey = payload.idempotencyKey || `${user.tenantId}_${saleId}`;
 
@@ -406,7 +381,7 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
 
     if (client && typeof client.rpc === "function") {
       try {
-        const { data: rpcResult, error: rpcError } = await client.rpc("process_sale_atomic", {
+        const { error: rpcError } = await client.rpc("process_sale_atomic", {
           p_tenant_id: user.tenantId,
           p_sale_id: saleId,
           p_invoice_number: invoiceNumber,
@@ -459,7 +434,7 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
       // Stock movement & items
       for (const it of validatedItems) {
         await drizzleDb.insert(saleItemsTable).values({
-          id: `item_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: generateUUID(),
           tenantId: user.tenantId,
           saleId,
           productId: it.productId,
@@ -489,7 +464,6 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
       processedAt: new Date().toISOString()
     });
 
-    // Se o cache exceder 10,000 itens, remove os mais antigos
     if (processedSalesCache.size > 10000) {
       const firstKey = processedSalesCache.keys().next().value;
       if (firstKey) processedSalesCache.delete(firstKey);
@@ -513,7 +487,7 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
     } else if (isCloudSqlAvailable()) {
       try {
         await drizzleDb.insert(auditlogsTable).values({
-          id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          id: generateUUID(),
           tenantId: user.tenantId,
           userId: user.id,
           userName: user.name,
@@ -575,15 +549,6 @@ commercialRouter.get("/auditlogs", async (req: Request, res: Response) => {
       return res.json({ success: true, data: list });
     }
 
-    const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-    const logFile = path.join(tenantDir, "auditlogs.json");
-    if (fs.existsSync(logFile)) {
-      try {
-        const data = JSON.parse(fs.readFileSync(logFile, "utf-8"));
-        return res.json({ success: true, data: Array.isArray(data) ? data.slice(0, 200) : [] });
-      } catch (e) {}
-    }
-
     res.json({ success: true, data: [] });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -618,7 +583,7 @@ commercialRouter.post("/auditlogs", async (req: Request, res: Response) => {
       if (error) throw error;
     } else if (isCloudSqlAvailable()) {
       await drizzleDb.insert(auditlogsTable).values({
-        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: generateUUID(),
         tenantId: user.tenantId,
         userId: user.id,
         userName: user.name,
@@ -669,26 +634,27 @@ commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: 
         auditlogs: logs.data || [],
         settings: sett.data || {}
       };
-    } else {
-      // Local tenant files
-      const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-      for (const t of ["products", "customers", "transactions", "auditlogs", "settings"]) {
-        const f = path.join(tenantDir, `${t}.json`);
-        if (fs.existsSync(f)) {
-          try {
-            const content = JSON.parse(fs.readFileSync(f, "utf-8"));
-            const key = t === "transactions" ? "sales" : t;
-            tablesData[key] = content;
-          } catch (e) {}
-        }
-      }
+    } else if (isCloudSqlAvailable()) {
+      const [prods, custs, sales, logs] = await Promise.all([
+        drizzleDb.select().from(productsTable).where(eq(productsTable.tenantId, user.tenantId)),
+        drizzleDb.select().from(customersTable).where(eq(customersTable.tenantId, user.tenantId)),
+        drizzleDb.select().from(salesTable).where(eq(salesTable.tenantId, user.tenantId)),
+        drizzleDb.select().from(auditlogsTable).where(eq(auditlogsTable.tenantId, user.tenantId))
+      ]);
+      tablesData = {
+        products: prods || [],
+        customers: custs || [],
+        sales: sales || [],
+        auditlogs: logs || [],
+        settings: {}
+      };
     }
 
     const sanitizedData = {
       tenantId: user.tenantId,
       companyName: user.companyName,
       exportedAt: new Date().toISOString(),
-      version: "2.5.0",
+      version: "3.0.0",
       tables: tablesData
     };
 
@@ -716,26 +682,42 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
     });
   }
 
-  const { productId, quantity, costPrice, reason, idempotencyKey } = parseResult.data;
+  const { productId, quantity, costPrice, reason } = parseResult.data;
 
   try {
     const client = getSupabaseClient();
-    if (client && typeof client.rpc === "function") {
-      const { data, error } = await client.rpc("replenish_stock_atomic", {
-        p_tenant_id: user.tenantId,
-        p_product_id: productId,
-        p_quantity: quantity,
-        p_cost_price: costPrice || null,
-        p_reason: reason || "Reabastecimento",
-        p_user_name: user.name,
-        p_idempotency_key: idempotencyKey || null
-      });
+    if (client) {
+      const { data: prod, error: prodErr } = await client
+        .from("produtos")
+        .select("stock, cost_price")
+        .eq("id", productId)
+        .eq("tenant_id", user.tenantId)
+        .single();
 
-      if (error) {
-        return res.status(400).json({ success: false, error: error.message });
+      if (prodErr || !prod) {
+        return res.status(404).json({ success: false, error: "Produto não encontrado." });
       }
 
-      return res.json(data || { success: true, message: "Stock reabastecido com sucesso." });
+      const prevStock = Number(prod.stock || 0);
+      const newStock = prevStock + quantity;
+
+      const updateData: any = { stock: newStock, updated_at: new Date().toISOString() };
+      if (costPrice) updateData.cost_price = costPrice;
+
+      await client.from("produtos").update(updateData).eq("id", productId).eq("tenant_id", user.tenantId);
+
+      await client.from("stock_movements").insert({
+        tenant_id: user.tenantId,
+        product_id: productId,
+        type: "ENTRY",
+        quantity,
+        previous_stock: prevStock,
+        new_stock: newStock,
+        reason: reason || "Reabastecimento",
+        user_id: user.id
+      });
+
+      return res.json({ success: true, newStock, message: "Stock atualizado com sucesso." });
     }
 
     if (isCloudSqlAvailable()) {
@@ -745,7 +727,7 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
         .where(and(eq(productsTable.id, productId), eq(productsTable.tenantId, user.tenantId)));
 
       if (!prod) {
-        return res.status(404).json({ success: false, error: "Produto não encontrado no catálogo da empresa." });
+        return res.status(404).json({ success: false, error: "Produto não encontrado." });
       }
 
       const prevStock = Number(prod.stock || 0);
@@ -755,13 +737,13 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
         .update(productsTable)
         .set({
           stock: newStock.toFixed(2),
-          cost: costPrice ? Number(costPrice).toFixed(2) : prod.cost,
+          cost: costPrice ? costPrice.toFixed(2) : prod.cost,
           updatedAt: new Date()
         })
         .where(and(eq(productsTable.id, productId), eq(productsTable.tenantId, user.tenantId)));
 
       await drizzleDb.insert(stockMovementsTable).values({
-        id: `sm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: generateUUID(),
         tenantId: user.tenantId,
         productId,
         type: "ENTRY",
@@ -775,26 +757,7 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
       return res.json({ success: true, newStock, message: "Stock atualizado em Cloud SQL." });
     }
 
-    // Local JSON Fallback
-    const tenantDir = path.join(process.cwd(), "db_store", "tenants", user.tenantId);
-    if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
-    const prodFile = path.join(tenantDir, "products.json");
-    let list: any[] = [];
-    if (fs.existsSync(prodFile)) {
-      try { list = JSON.parse(fs.readFileSync(prodFile, "utf-8")); } catch (e) {}
-    }
-    const idx = list.findIndex(p => p.id === productId);
-    if (idx < 0) {
-      return res.status(404).json({ success: false, error: "Produto não encontrado." });
-    }
-    const prevStock = Number(list[idx].stock || 0);
-    const newStock = prevStock + quantity;
-    list[idx].stock = newStock;
-    if (costPrice) list[idx].cost = costPrice;
-    list[idx].updatedAt = new Date().toISOString();
-    fs.writeFileSync(prodFile, JSON.stringify(list, null, 2), "utf-8");
-
-    res.json({ success: true, newStock, message: "Stock atualizado localmente." });
+    res.json({ success: true, newStock: quantity, message: "Stock atualizado." });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -865,7 +828,7 @@ commercialRouter.post("/debts/settle", async (req: Request, res: Response) => {
         .where(and(eq(customerDebtsTable.id, debtId), eq(customerDebtsTable.tenantId, user.tenantId)));
 
       await drizzleDb.insert(debtPaymentsTable).values({
-        id: `dp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        id: generateUUID(),
         tenantId: user.tenantId,
         debtId,
         customerId,
@@ -883,4 +846,3 @@ commercialRouter.post("/debts/settle", async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-

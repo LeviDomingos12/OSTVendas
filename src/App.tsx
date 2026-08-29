@@ -44,6 +44,7 @@ import QuickLogoModal from "./components/QuickLogoModal";
 import TutorialModal from "./components/TutorialModal";
 import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
+import { sanitizeUserSession } from "./lib/security";
 import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
 import { 
   CommercialDataService, 
@@ -57,6 +58,7 @@ import { getSupabaseClient } from "./lib/supabase";
 import { authenticatedFetch } from "./lib/apiClient";
 import { SupabaseSyncService } from "./services/supabaseService";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
+import { generateUUID, generateEntityId, generateDeterministicCreditNoteNumber, generateSecurePin } from "./lib/deterministic";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
 import QRCode from "qrcode";
@@ -1206,7 +1208,7 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const showToast = useCallback((message: string, type: "success" | "error" | "info" | "warning" = "info", title?: string) => {
-    const id = `toast-${Date.now()}-${Math.random()}`;
+    const id = generateEntityId("toast");
     const defaultTitles = {
       success: "Operação Concluída",
       error: "Ocorreu um Erro",
@@ -1520,21 +1522,7 @@ export default function App() {
   const handleResetPin = async () => {
     if (!activeUser) return;
 
-    let newTempPin = "";
-    let attempts = 0;
-    while (attempts < 100) {
-      const candidate = Math.floor(100000 + Math.random() * 900000).toString();
-      const isRepeated = /^(\d)\1+$/.test(candidate);
-      const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789"];
-      const isSequential = seqs.some(s => s.includes(candidate));
-      if (!isRepeated && !isSequential) {
-        newTempPin = candidate;
-        break;
-      }
-      attempts++;
-    }
-    if (!newTempPin) newTempPin = "839251";
-
+    const newTempPin = generateSecurePin(6);
     const nowIso = new Date().toISOString();
 
     const updatedEmployees = employees.map(emp => {
@@ -1612,7 +1600,7 @@ export default function App() {
         }
       }).catch(() => null);
 
-      const credId = credential ? (credential as any).id || `cred_${Date.now()}` : `cred_sim_${Date.now()}`;
+      const credId = credential ? (credential as any).id || generateEntityId("cred") : generateEntityId("cred_sim");
       
       setProfileWebAuthnEnabled(true);
       setProfileWebAuthnCredentialId(credId);
@@ -1638,7 +1626,7 @@ export default function App() {
       );
     } catch (err: any) {
       console.error("WebAuthn Registration Error:", err);
-      const credId = `cred_passkey_${Date.now()}`;
+      const credId = generateEntityId("cred_passkey");
       setProfileWebAuthnEnabled(true);
       setProfileWebAuthnCredentialId(credId);
       localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
@@ -2224,7 +2212,7 @@ export default function App() {
       const devStr = deviceInfo || "Desktop (Chrome)";
 
       const newLog: AuditLog = {
-        id: `log-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        id: generateEntityId("log"),
         timestamp: new Date().toISOString(),
         user: username,
         userRole: authRole,
@@ -3962,12 +3950,125 @@ export default function App() {
       });
     }
 
-    // 4. Record strict auditor trace logs
+    // 4. Atomic PostgreSQL / Supabase Sale persistence with offline queue fallback
+    CommercialDataService.saveTransaction(transaction).catch(err => {
+      console.warn("Processamento atómico em segundo plano (offline queue):", err);
+    });
+
+    // 5. Record cash inflow entry in cashFlow if paid via Cash/POS/Mobile
+    if (transaction.paymentMethod !== "DEBT") {
+      const cashEntry: CashFlowEntry = {
+        id: `cf-sale-${transaction.id}`,
+        timestamp: transaction.timestamp || new Date().toISOString(),
+        type: "INPUT",
+        amount: transaction.grandTotal,
+        reason: `Recebimento Venda POS - Fatura ${transaction.invoiceNumber}`,
+        responsibleUser: transaction.cashierName || activeUser?.name || "Operador",
+        paymentMethod: transaction.paymentMethod as any,
+        category: "OUTRO",
+        reference: transaction.invoiceNumber,
+        tenantId: activeUser?.tenantId || "default_company"
+      };
+      setCashFlow(prev => {
+        const updated = [cashEntry, ...prev];
+        syncTable("cashflow", updated);
+        return updated;
+      });
+    }
+
+    // 6. Record strict auditor trace logs
     handleAddAuditLog(
       "Completar Transação de POS",
       "VENDAS",
       `Fatura ${transaction.invoiceNumber} processada na filial ${activeBranch}. Cliente: ${transaction.customerName}, Método: ${transaction.paymentMethod}. Total Pago: ${transaction.grandTotal} MT. Abate de Stock concluído.`
     );
+  };
+
+  // CENTRAL POS RETURN / DEVOLUTION & CREDIT NOTE HANDLER
+  const handleReturnSaleAction = (
+    transaction: Transaction,
+    returnReason: string,
+    returnedItems: { productId: string; quantity: number; price: number }[],
+    refundMethod: string = "CASH"
+  ) => {
+    if (!transaction || !returnedItems || returnedItems.length === 0) return;
+
+    const refundTotal = returnedItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    const activeBranch = transaction.branchId || settings.activeBranchId || "central";
+    const creditNoteNum = generateDeterministicCreditNoteNumber(transactions.length + 1);
+
+    // 1. Restock products in inventory
+    setProducts(prevProducts => {
+      const updated = prevProducts.map(prod => {
+        const match = returnedItems.find(it => it.productId === prod.id);
+        if (match) {
+          const restoredStock = prod.stock + match.quantity;
+          const updatedBranchStocks = { ...(prod.branchStocks || {}) };
+          const currentBranch = updatedBranchStocks[activeBranch] !== undefined ? updatedBranchStocks[activeBranch] : prod.stock;
+          updatedBranchStocks[activeBranch] = currentBranch + match.quantity;
+
+          return {
+            ...prod,
+            stock: restoredStock,
+            branchStocks: updatedBranchStocks
+          };
+        }
+        return prod;
+      });
+      syncTable("products", updated);
+      return updated;
+    });
+
+    // 2. Record cash refund in cashflow if refunded from register
+    if (refundMethod !== "DEBT" && refundTotal > 0) {
+      const refundCashEntry: CashFlowEntry = {
+        id: generateEntityId("cf_refund"),
+        timestamp: new Date().toISOString(),
+        type: "DEVOLUTION",
+        amount: refundTotal,
+        reason: `Devolução/Estorno de Venda - ${creditNoteNum} (Ref: ${transaction.invoiceNumber}) - Motivo: ${returnReason}`,
+        responsibleUser: activeUser?.name || "Supervisor",
+        paymentMethod: refundMethod as any,
+        category: "DEVOLUCAO_VENDA",
+        reference: creditNoteNum,
+        tenantId: activeUser?.tenantId || "default_company"
+      };
+      setCashFlow(prev => {
+        const updated = [refundCashEntry, ...prev];
+        syncTable("cashflow", updated);
+        return updated;
+      });
+    }
+
+    // 3. Adjust customer balance if credit / debt
+    if (transaction.customerId && transaction.customerId !== "WALK_IN") {
+      setCustomers(prev => {
+        const updated = prev.map(c => {
+          if (c.id === transaction.customerId) {
+            const newDebt = transaction.paymentMethod === "DEBT" ? Math.max(0, (c.debt || 0) - refundTotal) : c.debt;
+            return {
+              ...c,
+              debt: newDebt,
+              totalSpent: Math.max(0, c.totalSpent - refundTotal)
+            };
+          }
+          return c;
+        });
+        syncTable("customers", updated);
+        return updated;
+      });
+    }
+
+    // 4. Audit Log
+    handleAddAuditLog(
+      "Devolução de Venda / Nota de Crédito",
+      "VENDAS",
+      `Nota de Crédito ${creditNoteNum} emitida para a fatura ${transaction.invoiceNumber}. Total Reembolsado: ${refundTotal} MT. Motivo: ${returnReason}. Stock de ${returnedItems.length} artigo(s) restaurado.`
+    );
+
+    if (showToast) {
+      showToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteNum}`, "success", "Devolução Concluída");
+    }
   };
 
   // Trigger Gemini AI sales forecasting
@@ -4117,9 +4218,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       return;
     }
 
-    localStorage.setItem("erp_logged_in_user", JSON.stringify(user));
+    const safeUser = sanitizeUserSession(user);
+    localStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
     localStorage.removeItem("erp_simulated_logged_in_user");
-    setActiveUser(user);
+    setActiveUser(safeUser);
     setIsAuthenticated(true);
     setSettings(prev => ({
       ...prev,
@@ -4644,6 +4746,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     customers={customers}
                     transactions={filteredTransactions}
                     onCompleteSale={handleCompleteSaleAction}
+                    onReturnSale={handleReturnSaleAction}
                     activeUsername={activeUser.name}
                     settings={settings}
                     onAddAuditLog={handleAddAuditLog}
@@ -4925,7 +5028,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     onResetEmployeePin={async (empId) => {
                       const target = employees.find(e => e.id === empId);
                       if (!target) return;
-                      const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
+                      const generatedPin = generateSecurePin(6);
                       const updatedEmployees = employees.map(emp => {
                         if (emp.id === empId) {
                           return {

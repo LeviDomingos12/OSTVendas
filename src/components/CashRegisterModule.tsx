@@ -22,6 +22,7 @@ import {
   Employee, 
   CashClosure 
 } from "../types";
+import { generateEntityId, generateUUID } from "../lib/deterministic";
 import { CommercialDataService } from "../services/dataService";
 import { CashKpiCards } from "./cash/CashKpiCards";
 import { CashQuickActions } from "./cash/CashQuickActions";
@@ -412,8 +413,8 @@ export default function CashRegisterModule({
     const now = new Date().toISOString();
 
     const newClosure: CashClosure = {
-      id: `FECHO-${Date.now()}`,
-      shiftId: `TURNO-${Date.now()}`,
+      id: generateEntityId("FECHO"),
+      shiftId: generateEntityId("TURNO"),
       openedAt: shiftOpenedAt,
       closedAt: now,
       openedBy: shiftOpenedBy,
@@ -469,7 +470,7 @@ export default function CashRegisterModule({
 
   const handleSangria = useCallback((amt: number, dest: string, reason: string, supervisor: string) => {
     const entry: CashFlowEntry = {
-      id: `flow-sangria-${Date.now()}`,
+      id: generateEntityId("flow_sangria"),
       timestamp: new Date().toISOString(),
       type: "EXPENSE",
       amount: amt,
@@ -493,7 +494,7 @@ export default function CashRegisterModule({
     }
 
     const entry: CashFlowEntry = {
-      id: `flow-${type.toLowerCase()}-${Date.now()}`,
+      id: generateEntityId(`flow_${type.toLowerCase()}`),
       timestamp: new Date().toISOString(),
       type,
       amount: amt,
