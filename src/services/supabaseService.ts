@@ -491,7 +491,7 @@ export const SupabaseSyncService = {
     const fullName = meta.full_name || meta.name || email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase());
     const avatarUrl = meta.avatar_url || meta.picture || "";
     const phone = meta.phone || meta.contact || "+258 84 000 0000";
-    const defaultCompanyName = meta.company_name || meta.branch || `${fullName} - Vendas`;
+    const defaultCompanyName = meta.company_name || meta.branch || "";
     
     // Verificar se já existe colaborador local com este email ou ID correspondente para preservar PIN e configurações
     const localMatch = localEmployees.find(e => 
@@ -502,7 +502,7 @@ export const SupabaseSyncService = {
 
     let role: string = localMatch?.role || "ADMIN";
     let companyId = "comp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
-    let companyName = localMatch?.companyId || defaultCompanyName;
+    let companyName = defaultCompanyName || (localMatch?.companyId && !localMatch.companyId.startsWith("comp_") ? localMatch.companyId : "");
     let status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED" = localMatch?.status || "ACTIVE";
     let subscriptionPlan: any = localMatch?.subscriptionPlan || meta.subscription_plan || "OURO";
     let existingEmpId = localMatch?.id || "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);

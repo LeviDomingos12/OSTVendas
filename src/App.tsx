@@ -2739,19 +2739,23 @@ export default function App() {
 
       // 9. Merge settings
       let finalSettings: SystemSettings | null = null;
+      const validCustomName = customCompanyName && customCompanyName.trim() && !customCompanyName.startsWith("comp_") ? customCompanyName.trim() : "";
       if (sbSettings) {
         setSettings(prev => {
-          finalSettings = { ...prev, ...sbSettings, ...(customCompanyName ? { companyName: customCompanyName } : {}) };
+          const chosenName = (sbSettings.companyName && !sbSettings.companyName.startsWith("comp_")) ? sbSettings.companyName : (validCustomName || prev.companyName);
+          finalSettings = { ...prev, ...sbSettings, ...(chosenName ? { companyName: chosenName } : {}) };
           return finalSettings;
         });
       } else if (serverData?.settings) {
         setSettings(prev => {
-          finalSettings = { ...prev, ...serverData.settings, ...(customCompanyName ? { companyName: customCompanyName } : {}) };
+          const chosenName = (serverData.settings.companyName && !serverData.settings.companyName.startsWith("comp_")) ? serverData.settings.companyName : (validCustomName || prev.companyName);
+          finalSettings = { ...prev, ...serverData.settings, ...(chosenName ? { companyName: chosenName } : {}) };
           return finalSettings;
         });
-      } else if (customCompanyName) {
+      } else if (validCustomName) {
         setSettings(prev => {
-          finalSettings = { ...prev, companyName: customCompanyName };
+          if (prev.companyName === validCustomName) return prev;
+          finalSettings = { ...prev, companyName: validCustomName };
           return finalSettings;
         });
       }
@@ -2862,13 +2866,21 @@ export default function App() {
           return;
         }
 
-        setActiveUser(employee);
+        setActiveUser(prev => {
+          if (prev && prev.id === employee.id && prev.name === employee.name && prev.role === employee.role && prev.status === employee.status && prev.pin === employee.pin) {
+            return prev;
+          }
+          return employee;
+        });
         setIsAuthenticated(true);
-        if (companyName) {
-          setSettings(prev => ({
-            ...prev,
-            companyName: companyName
-          }));
+        if (companyName && companyName.trim() && !companyName.startsWith("comp_")) {
+          setSettings(prev => {
+            if (prev.companyName === companyName.trim()) return prev;
+            return {
+              ...prev,
+              companyName: companyName.trim()
+            };
+          });
         }
 
         // Hydrate and merge all database records for this tenant/user
@@ -4140,6 +4152,23 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     return normalizeUserRole(activeUser);
   }, [activeUser]);
 
+  // Memoized stable company and user display values to prevent UI cycling/flickering
+  const companyDisplayName = useMemo(() => {
+    const raw = settings?.companyName?.trim();
+    if (!raw || raw.startsWith("comp_")) {
+      return "OST Vendas";
+    }
+    return raw;
+  }, [settings?.companyName]);
+
+  const activeUserDisplayName = useMemo(() => {
+    return activeUser?.name?.trim() || "Administrador";
+  }, [activeUser?.name]);
+
+  const activeUserRoleDisplay = useMemo(() => {
+    return activeUser?.role || "Operador";
+  }, [activeUser?.role]);
+
   // Redirecionamento automático de segurança caso a aba ativa não seja permitida para o perfil do utilizador
   useEffect(() => {
     if (!isAuthenticated || !activeUser) return;
@@ -4223,13 +4252,19 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     localStorage.removeItem("erp_simulated_logged_in_user");
     setActiveUser(safeUser);
     setIsAuthenticated(true);
-    setSettings(prev => ({
-      ...prev,
-      companyName: branchName
-    }));
+    const cleanBranchName = branchName && !branchName.startsWith("comp_") ? branchName.trim() : "";
+    if (cleanBranchName) {
+      setSettings(prev => {
+        if (prev.companyName === cleanBranchName) return prev;
+        return {
+          ...prev,
+          companyName: cleanBranchName
+        };
+      });
+    }
 
     // Trigger full entity integrity and hydration
-    hydrateDatabaseForUser(user, branchName);
+    hydrateDatabaseForUser(user, cleanBranchName || undefined);
 
     // Record login audit log
     handleAddAuditLog(
@@ -4456,7 +4491,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       <>
         <LoginModule
           employees={employees}
-          companyName={settings.companyName}
+          companyName={companyDisplayName}
           logoUrl={settings.logoUrl}
           branches={settings.branches || []}
           onLoginSuccess={handleLoginSuccess}
@@ -4588,7 +4623,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
             setActiveTab(mod.toUpperCase());
             setIsSidebarOpen(false);
           }}
-          companyName={settings.companyName}
+          companyName={companyDisplayName}
           logoUrl={settings.logoUrl}
           onLogout={handleLogout}
           theme={theme}
@@ -4636,7 +4671,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
               <span className={`font-bold text-xs tracking-tight ${
                 theme === "night" ? "text-slate-200" : "text-slate-800"
               }`}>
-                {activeUser ? activeUser.name : "Administrador"}
+                {activeUserDisplayName}
               </span>
 
               {/* Botão Alterar usuário */}
@@ -4747,7 +4782,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     transactions={filteredTransactions}
                     onCompleteSale={handleCompleteSaleAction}
                     onReturnSale={handleReturnSaleAction}
-                    activeUsername={activeUser.name}
+                    activeUsername={activeUserDisplayName}
                     settings={settings}
                     onAddAuditLog={handleAddAuditLog}
                     currency={currency}
@@ -4829,7 +4864,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     cashFlow={filteredCashFlow}
                     transactions={filteredTransactions}
                     onAddCashFlowEntry={handleAddCashFlowEntry}
-                    activeUsername={activeUser.name}
+                    activeUsername={activeUserDisplayName}
                     activeUser={activeUser}
                     employees={employees}
                     currentRole={simplifiedRole}
@@ -4924,7 +4959,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
                     onDeleteCustomer={handleDeleteCustomer}
                     onAddAuditLog={handleAddAuditLog}
                     currentRole={simplifiedRole}
-                    activeUsername={activeUser.name}
+                    activeUsername={activeUserDisplayName}
                     currency={currency}
                     onShowToast={showToast}
                   />
@@ -5651,7 +5686,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         isOpen={isQuickLogoModalOpen}
         onClose={() => setIsQuickLogoModalOpen(false)}
         currentLogoUrl={settings.logoUrl}
-        companyName={settings.companyName}
+        companyName={companyDisplayName}
         theme={theme}
         onSaveLogo={(newLogoUrl) => {
           handleUpdateSettings({ logoUrl: newLogoUrl });
@@ -5677,7 +5712,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         isOpen={isSystemInfoHubOpen}
         onClose={() => setIsSystemInfoHubOpen(false)}
         isOnline={isOnline}
-        companyName={settings.companyName || "OST Vendas"}
+        companyName={companyDisplayName}
         logoUrl={settings.logoUrl}
         version={currentSystemVersion}
         sessionSeconds={Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)}

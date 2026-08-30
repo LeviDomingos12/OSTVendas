@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, memo } from "react";
 import { 
   Users, 
   Plus, 
@@ -53,7 +53,7 @@ interface CustomersModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
 }
 
-export default function CustomersModule({
+function CustomersModule({
   customers,
   transactions = [],
   settings,
@@ -1964,3 +1964,5 @@ export default function CustomersModule({
     </div>
   );
 }
+
+export default memo(CustomersModule);

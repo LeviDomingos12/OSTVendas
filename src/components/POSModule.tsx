@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, memo } from "react";
 import QRCode from "qrcode";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -88,7 +88,7 @@ const generateFiscalSignature = (invoiceNum: string, dateStr: string, total: num
   };
 };
 
-export default function POSModule({
+function POSModule({
   products,
   customers,
   transactions,
@@ -4931,3 +4931,5 @@ export default function POSModule({
     </div>
   );
 }
+
+export default memo(POSModule);

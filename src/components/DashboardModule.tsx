@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, memo } from "react";
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -66,7 +66,7 @@ interface DashboardModuleProps {
 
 const PAYMENT_COLORS = ["#f97316", "#10b981", "#3b82f6", "#8b5cf6", "#64748b"];
 
-export default function DashboardModule({
+function DashboardModule({
   products,
   transactions,
   currency,
@@ -1128,3 +1128,5 @@ export default function DashboardModule({
     </div>
   );
 }
+
+export default memo(DashboardModule);

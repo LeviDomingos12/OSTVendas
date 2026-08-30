@@ -1,3 +1,4 @@
+import React, { memo } from "react";
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -33,7 +34,7 @@ interface SidebarProps {
   subscriptionPlan?: SubscriptionPlan;
 }
 
-export default function Sidebar({
+function Sidebar({
   currentRole,
   activeModule,
   onChangeModule,
@@ -225,3 +226,5 @@ export default function Sidebar({
     </>
   );
 }
+
+export default memo(Sidebar);

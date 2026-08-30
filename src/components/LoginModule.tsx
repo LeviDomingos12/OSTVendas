@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, FormEvent } from "react";
+import React, { useState, useEffect, useMemo, FormEvent, memo } from "react";
 import { 
   Lock, 
   User, 
@@ -48,7 +48,7 @@ interface LoginModuleProps {
   settings?: SystemSettings;
 }
 
-export default function LoginModule({
+function LoginModule({
   employees,
   companyName,
   logoUrl,
@@ -235,7 +235,7 @@ export default function LoginModule({
             return;
           }
 
-          const branchToUse = userCompany || employee.companyId || selectedBranch || companyName || "OST Comércio Geral";
+          const branchToUse = (userCompany && !userCompany.startsWith("comp_") ? userCompany : "") || selectedBranch || (companyName && !companyName.startsWith("comp_") ? companyName : "") || (settings?.companyName && !settings.companyName.startsWith("comp_") ? settings.companyName : "OST Vendas");
           setAuthenticatedUser(employee);
           setSelectedBranch(branchToUse);
           setLoadingState("LOADING_PERMISSIONS");
@@ -1414,3 +1414,5 @@ export default function LoginModule({
     </div>
   );
 }
+
+export default memo(LoginModule);

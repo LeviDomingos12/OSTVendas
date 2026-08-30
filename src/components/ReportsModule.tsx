@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, memo } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { 
@@ -187,7 +187,7 @@ interface ReportsModuleProps {
   auditLogs?: AuditLog[];
 }
 
-export default function ReportsModule({
+function ReportsModule({
   transactions,
   settings,
   onUpdateSettings,
@@ -3672,3 +3672,5 @@ export default function ReportsModule({
     </div>
   );
 }
+
+export default memo(ReportsModule);

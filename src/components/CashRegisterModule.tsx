@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, memo } from "react";
 import { 
   PiggyBank, 
   LayoutDashboard, 
@@ -49,7 +49,7 @@ interface CashRegisterModuleProps {
   onShowToast?: (msg: string, type?: "success" | "error" | "warning" | "info") => void;
 }
 
-export default function CashRegisterModule({
+function CashRegisterModule({
   cashFlow,
   transactions,
   onAddCashFlowEntry,
@@ -794,3 +794,5 @@ export default function CashRegisterModule({
     </div>
   );
 }
+
+export default memo(CashRegisterModule);

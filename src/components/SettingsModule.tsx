@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, memo } from "react";
 import { 
   Settings, 
   Building, 
@@ -79,7 +79,7 @@ interface SettingsModuleProps {
   onPurgeMockData?: () => Promise<void> | void;
 }
 
-export default function SettingsModule({
+function SettingsModule({
   settings,
   onUpdateSettings,
   onAddAuditLog,
@@ -1126,3 +1126,5 @@ export default function SettingsModule({
     </div>
   );
 }
+
+export default memo(SettingsModule);

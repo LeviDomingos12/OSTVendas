@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, memo } from "react";
 import { 
   Plus, 
   Edit3, 
@@ -102,7 +102,7 @@ interface StockModuleProps {
   onUpdateSettings?: (settings: Partial<SystemSettings>) => void;
 }
 
-export default function StockModule({
+function StockModule({
   products,
   transactions = [],
   onAddProduct,
@@ -6020,3 +6020,5 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     </div>
   );
 }
+
+export default memo(StockModule);
