@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Employee, UserRole, AuditLog } from "../types";
+import { generateUUID } from "../lib/deterministic";
 
 // ==========================================
 // Phase 8: HR, Staff, RBAC & Payroll Logic
@@ -131,7 +132,7 @@ export function createAuditTrailEntry(
   ipAddress: string = "127.0.0.1"
 ): AuditLog {
   return {
-    id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    id: `audit_${Date.now()}_${generateUUID().slice(0, 6)}`,
     timestamp: new Date().toISOString(),
     user: actor.name,
     userRole: actor.role as UserRole,

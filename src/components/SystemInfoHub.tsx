@@ -18,6 +18,7 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { useSystemVersion } from "../lib/versionManager";
+import { AppUser } from "../types";
 
 interface SystemInfoHubProps {
   isOpen: boolean;
@@ -27,7 +28,7 @@ interface SystemInfoHubProps {
   logoUrl?: string;
   version: string;
   sessionSeconds: number;
-  activeUser?: any;
+  activeUser?: AppUser | null;
   onSwitchUser: () => void;
   onOpenLogoModal: () => void;
   onOpenTutorial: () => void;

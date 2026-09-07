@@ -18,9 +18,11 @@ import {
   SystemSettings, 
   UserRole, 
   CashClosure, 
-  CashShift 
+  CashShift,
+  SubscriptionPlan
 } from "../types";
 import { generateEntityId } from "../lib/deterministic";
+import { hashSecurityPin } from "../lib/security";
 
 export interface SupabaseConfig {
   url: string;
@@ -56,6 +58,132 @@ export interface CloudBackupItem {
   downloadUrl: string;
 }
 
+export interface RecoveryRequestEntry {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  email?: string;
+  status: "PENDING" | "RESOLVED" | "REJECTED";
+  timestamp: string;
+}
+
+interface ProductDbRow {
+  id: string;
+  name: string;
+  code?: string;
+  category?: string;
+  cost_price?: number | string;
+  sale_price?: number | string;
+  stock?: number | string;
+  min_stock?: number | string;
+  vat_rate?: number | string;
+  unit?: string;
+  barcode?: string;
+  supplier?: string;
+  image_url?: string;
+}
+
+interface CustomerDbRow {
+  id: string;
+  name: string;
+  nuit?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  total_spent?: number | string;
+  purchase_count?: number | string;
+  debt?: number | string;
+  balance?: number | string;
+  loyalty_points?: number | string;
+  notes?: string;
+}
+
+interface TransactionDbRow {
+  id: string;
+  invoice_number?: string;
+  customer_name?: string;
+  customer_id?: string;
+  grand_total?: number | string;
+  subtotal?: number | string;
+  vat_total?: number | string;
+  discount_total?: number | string;
+  payment_method: Transaction["paymentMethod"];
+  operator_name?: string;
+  seller_name?: string;
+  items?: Transaction["items"];
+  timestamp?: string;
+  created_at?: string;
+  payment_status?: "PAID" | "PENDING" | "CANCELLED";
+}
+
+interface CashFlowDbRow {
+  id: string;
+  type?: CashFlowEntry["type"];
+  amount?: number | string;
+  reason?: string;
+  responsible_user?: string;
+  timestamp?: string;
+}
+
+interface CashClosureDbRow {
+  id: string;
+  shift_id?: string;
+  opened_at: string;
+  closed_at?: string;
+  opened_by: string;
+  closed_by?: string;
+  opening_supervisor?: string;
+  closing_supervisor?: string;
+  opening_balance?: number | string;
+  theoretical_balance?: number | string;
+  physical_balance?: number | string;
+  difference?: number | string;
+  difference_type?: "EXACT" | "SURPLUS" | "SHORTAGE";
+  reconciliation?: Record<string, number>;
+  denominations?: Record<string, number>;
+  closing_notes?: string;
+}
+
+interface EmployeeDbRow {
+  id: string;
+  name: string;
+  email?: string;
+  contact?: string;
+  whatsapp?: string;
+  role?: string;
+  salary?: number | string;
+  admission_date?: string;
+  status?: Employee["status"];
+  pin?: string;
+  pin_created_at?: string;
+  pin_changed?: boolean;
+  foto_perfil?: string;
+  subscription_plan?: SubscriptionPlan;
+  branch?: string;
+}
+
+interface RecoveryRequestDbRow {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  email?: string;
+  status: "PENDING" | "RESOLVED" | "REJECTED";
+  created_at: string;
+}
+
+interface AuditLogDbRow {
+  id: string;
+  user_name?: string;
+  user_role?: string;
+  user_id?: string;
+  action: string;
+  module: string;
+  details?: string;
+  ip_address?: string;
+  device?: string;
+  timestamp?: string;
+}
+
 const STORAGE_KEY_CONFIG = "ostvendas_supabase_config";
 const DEFAULT_TENANT_ID = "ost-tenant-001";
 
@@ -63,12 +191,13 @@ const DEFAULT_TENANT_ID = "ost-tenant-001";
  * Obtém a configuração ativa do Supabase (lê de variáveis de ambiente ou do armazenamento local)
  */
 export function getSupabaseConfig(): SupabaseConfig {
-  const metaEnv = (import.meta as any).env || {};
-  const envUrl = (metaEnv.VITE_SUPABASE_URL as string) || "";
-  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY as string) || "";
+  const metaEnv = (import.meta as { env?: Record<string, string | undefined> }).env || {};
+  const envUrl = metaEnv.VITE_SUPABASE_URL || "";
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || "";
 
   try {
     const stored = localStorage.getItem(STORAGE_KEY_CONFIG);
+    const activeTenant = localStorage.getItem("erp_current_tenant_id");
     if (stored) {
       const parsed = JSON.parse(stored);
       return {
@@ -76,7 +205,16 @@ export function getSupabaseConfig(): SupabaseConfig {
         anonKey: parsed.anonKey || envKey,
         enabled: parsed.enabled ?? Boolean(envUrl && envKey),
         autoSync: parsed.autoSync ?? true,
-        tenantId: parsed.tenantId || DEFAULT_TENANT_ID
+        tenantId: activeTenant || parsed.tenantId || DEFAULT_TENANT_ID
+      };
+    }
+    if (activeTenant) {
+      return {
+        url: envUrl,
+        anonKey: envKey,
+        enabled: Boolean(envUrl && envKey),
+        autoSync: true,
+        tenantId: activeTenant
       };
     }
   } catch (e) {
@@ -99,6 +237,9 @@ export function saveSupabaseConfig(config: Partial<SupabaseConfig>): void {
   const current = getSupabaseConfig();
   const updated: SupabaseConfig = { ...current, ...config };
   localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(updated));
+  if (config.tenantId) {
+    localStorage.setItem("erp_current_tenant_id", config.tenantId);
+  }
   cachedClient = null;
 }
 
@@ -179,7 +320,7 @@ export async function measureSupabaseLatency(customUrl?: string, customKey?: str
       message,
       timestamp: new Date().toISOString()
     };
-  } catch (err: any) {
+  } catch (err) {
     const endTime = performance.now();
     return {
       latencyMs: Math.round(endTime - startTime),
@@ -239,10 +380,10 @@ export async function validateSupabaseSession(): Promise<SessionValidationResult
       session,
       expiresAt: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : null,
       email: session.user.email || null,
-      role: session.user.role || (session.user.user_metadata as any)?.role || "Utilizador Autenticado",
+      role: session.user.role || (session.user.user_metadata as Record<string, string>)?.role || "Utilizador Autenticado",
       message: `Sessão ativa e válida para ${session.user.email || "Utilizador"}`
     };
-  } catch (err: any) {
+  } catch (err) {
     return {
       isValid: false,
       user: null,
@@ -276,7 +417,7 @@ export async function testSupabaseConnection(url?: string, key?: string): Promis
       message: `Conexão estabelecida com sucesso! (${latency.latencyMs}ms)`, 
       latencyMs: latency.latencyMs 
     };
-  } catch (err: any) {
+  } catch (err) {
     return { success: false, message: err.message || "Erro desconhecido ao conectar ao Supabase." };
   }
 }
@@ -336,7 +477,7 @@ export const SupabaseSyncService = {
       }
 
       return data;
-    } catch (err: any) {
+    } catch (err) {
       console.error("[Supabase Auth] Exceção no signUpWithEmail:", err?.message);
       return { user: null, error: err };
     }
@@ -359,7 +500,7 @@ export const SupabaseSyncService = {
         return { user: null, error };
       }
       return data;
-    } catch (err: any) {
+    } catch (err) {
       console.error("[Supabase Auth] Exceção no signInWithEmail:", err?.message);
       return { user: null, error: err };
     }
@@ -412,7 +553,7 @@ export const SupabaseSyncService = {
       }
 
       return { data, error: null, url: data?.url || null };
-    } catch (err: any) {
+    } catch (err) {
       console.error("[Supabase Auth] Exceção no signInWithOAuth Google:", err?.message || err);
       return { data: null, error: err, url: null };
     }
@@ -431,7 +572,7 @@ export const SupabaseSyncService = {
         console.warn("[Supabase Auth] Aviso no resetPasswordForEmail:", error.message);
       }
       return data;
-    } catch (err: any) {
+    } catch (err) {
       console.warn("[Supabase Auth] Exceção no resetPasswordForEmail:", err);
       return null;
     }
@@ -465,12 +606,14 @@ export const SupabaseSyncService = {
           map.set(remote.id, remote);
         } else {
           // Merge inteligente preservando campos não vazios locais
+          const localObj = local as Record<string, unknown>;
+          const remoteObj = remote as Record<string, unknown>;
           map.set(remote.id, {
             ...local,
             ...remote,
             // Preserva chaves locais sensíveis se o remoto vier em branco
-            ...((local as any).pin && !(remote as any).pin ? { pin: (local as any).pin } : {}),
-            ...((local as any).password && !(remote as any).password ? { password: (local as any).password } : {})
+            ...(localObj.pin && !remoteObj.pin ? { pin: localObj.pin } : {}),
+            ...(localObj.password && !remoteObj.password ? { password: localObj.password } : {})
           });
         }
       }
@@ -504,7 +647,7 @@ export const SupabaseSyncService = {
     let companyId = "comp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
     let companyName = defaultCompanyName || (localMatch?.companyId && !localMatch.companyId.startsWith("comp_") ? localMatch.companyId : "");
     let status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED" = localMatch?.status || "ACTIVE";
-    let subscriptionPlan: any = localMatch?.subscriptionPlan || meta.subscription_plan || "OURO";
+    let subscriptionPlan: SubscriptionPlan = (localMatch?.subscriptionPlan || meta.subscription_plan || "OURO") as SubscriptionPlan;
     let existingEmpId = localMatch?.id || "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
     let pin = localMatch?.pin || "";
     let pinChanged = localMatch?.pinChanged ?? true;
@@ -524,7 +667,7 @@ export const SupabaseSyncService = {
           if (existingColab.id) existingEmpId = existingColab.id;
           if (existingColab.tenant_id) companyId = existingColab.tenant_id;
           if (existingColab.role) role = existingColab.role as UserRole;
-          if (existingColab.status) status = existingColab.status as any;
+          if (existingColab.status) status = existingColab.status as "ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED";
           if (existingColab.branch) companyName = existingColab.branch;
           if (existingColab.subscription_plan) subscriptionPlan = existingColab.subscription_plan;
           if (existingColab.foto_perfil) fotoPerfil = existingColab.foto_perfil;
@@ -618,10 +761,17 @@ export const SupabaseSyncService = {
 
         // 4. Configurar tenant_id do Supabase Service para isolamento estrito
         saveSupabaseConfig({ tenantId: companyId });
+        if (typeof window !== "undefined") {
+          localStorage.setItem("erp_current_tenant_id", companyId);
+        }
 
       } catch (dbErr) {
         console.warn("[Supabase Sync Profile] Falha ao sincronizar perfil:", dbErr);
       }
+    }
+
+    if (typeof window !== "undefined" && companyId) {
+      localStorage.setItem("erp_current_tenant_id", companyId);
     }
 
     const employee: Employee = {
@@ -637,7 +787,8 @@ export const SupabaseSyncService = {
       pin: pin,
       pinCreatedAt: pinCreatedAt,
       pinChanged: pinChanged,
-      companyId: companyName,
+      companyId: companyName || "OST Vendas",
+      tenantId: companyId,
       subscriptionPlan: subscriptionPlan,
       fotoPerfil: fotoPerfil,
       theme: localMatch?.theme
@@ -673,7 +824,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as ProductDbRow[]).map(row => ({
         id: row.id,
         name: row.name,
         code: row.code || row.id,
@@ -712,8 +863,8 @@ export const SupabaseSyncService = {
         stock: product.stock || 0,
         min_stock: product.minStock || 0,
         vat_rate: product.vatRate ?? 16,
-        unit: (product as any).unit || "un",
-        image_url: product.image || (product as any).imageUrl || "",
+        unit: product.unit || "un",
+        image_url: product.image || product.imageUrl || "",
         is_active: true,
         updated_at: new Date().toISOString()
       };
@@ -744,8 +895,8 @@ export const SupabaseSyncService = {
         stock: p.stock || 0,
         min_stock: p.minStock || 0,
         vat_rate: p.vatRate ?? 16,
-        unit: (p as any).unit || "un",
-        image_url: p.image || (p as any).imageUrl || "",
+        unit: p.unit || "un",
+        image_url: p.image || p.imageUrl || "",
         is_active: true,
         updated_at: new Date().toISOString()
       }));
@@ -793,7 +944,7 @@ export const SupabaseSyncService = {
 
       if (error) return { success: false, error: error.message };
       return data || { success: true };
-    } catch (err: any) {
+    } catch (err) {
       return { success: false, error: err.message };
     }
   },
@@ -811,7 +962,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as CustomerDbRow[]).map(row => ({
         id: row.id,
         name: row.name,
         nuit: row.nuit || "",
@@ -843,13 +994,13 @@ export const SupabaseSyncService = {
         email: customer.email || "",
         phone: customer.phone || "",
         address: customer.address || "",
-        debt: customer.debt || (customer as any).balance || 0,
-        balance: (customer as any).balance || customer.debt || 0,
+        debt: customer.debt || customer.balance || 0,
+        balance: customer.balance || customer.debt || 0,
         total_spent: customer.totalSpent || 0,
         purchase_count: customer.purchaseCount || 0,
         loyalty_points: customer.loyaltyPoints || 0,
-        credit_limit: (customer as any).creditLimit || 0,
-        notes: (customer as any).notes || "",
+        credit_limit: customer.creditLimit || 0,
+        notes: customer.notes || "",
         updated_at: new Date().toISOString()
       };
 
@@ -874,13 +1025,13 @@ export const SupabaseSyncService = {
         email: c.email || "",
         phone: c.phone || "",
         address: c.address || "",
-        debt: c.debt || (c as any).balance || 0,
-        balance: (c as any).balance || c.debt || 0,
+        debt: c.debt || c.balance || 0,
+        balance: c.balance || c.debt || 0,
         total_spent: c.totalSpent || 0,
         purchase_count: c.purchaseCount || 0,
         loyalty_points: c.loyaltyPoints || 0,
-        credit_limit: (c as any).creditLimit || 0,
-        notes: (c as any).notes || "",
+        credit_limit: c.creditLimit || 0,
+        notes: c.notes || "",
         updated_at: new Date().toISOString()
       }));
 
@@ -922,7 +1073,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as TransactionDbRow[]).map(row => ({
         id: row.id,
         invoiceNumber: row.invoice_number || row.id,
         customerName: row.customer_name || "Consumidor Final",
@@ -963,7 +1114,7 @@ export const SupabaseSyncService = {
     grandTotal: number;
     amountPaid: number;
     changeAmount: number;
-    items: any[];
+    items: Record<string, unknown>[];
     notes?: string;
     idempotencyKey?: string;
   }): Promise<{ success: boolean; error?: string }> {
@@ -999,7 +1150,7 @@ export const SupabaseSyncService = {
       }
 
       return data || { success: true };
-    } catch (err: any) {
+    } catch (err) {
       console.error("Erro inesperado em processSaleAtomic:", err.message);
       return { success: false, error: err.message };
     }
@@ -1032,68 +1183,79 @@ export const SupabaseSyncService = {
 
       if (error) return { success: false, error: error.message };
       return data || { success: true };
-    } catch (err: any) {
+    } catch (err) {
       return { success: false, error: err.message };
     }
   },
 
-  async saveTransactionDirect(params: any): Promise<{ success: boolean; error?: string }> {
-    const client = getSupabaseClient();
-    if (!client) return { success: false, error: "Supabase não configurado." };
-
-    try {
-      const tenantId = getSupabaseConfig().tenantId;
-      const record = {
-        id: params.saleId,
-        tenant_id: tenantId,
-        invoice_number: params.invoiceNumber || params.saleId,
-        customer_name: params.customerName || "Consumidor Final",
-        customer_id: params.customerId || null,
-        grand_total: params.grandTotal || 0,
-        subtotal: params.subtotal || params.grandTotal || 0,
-        vat_total: params.vatTotal || 0,
-        discount_total: params.discountTotal || 0,
-        payment_method: params.paymentMethod,
-        operator_name: params.sellerName || "",
-        items: params.items || [],
-        timestamp: new Date().toISOString()
-      };
-
-      const { error } = await client.from("vendas").upsert(record, { onConflict: "id" });
-      return { success: !error, error: error?.message };
-    } catch (err: any) {
-      return { success: false, error: err.message };
-    }
+  async saveTransactionDirect(params: {
+    saleId: string;
+    invoiceNumber?: string;
+    customerId?: string;
+    customerName?: string;
+    customerNuit?: string;
+    sellerId?: string;
+    sellerName?: string;
+    paymentMethod: string;
+    subtotal?: number;
+    discountTotal?: number;
+    vatTotal?: number;
+    grandTotal: number;
+    amountPaid?: number;
+    changeAmount?: number;
+    items: Record<string, unknown>[];
+    notes?: string;
+    idempotencyKey?: string;
+  }): Promise<{ success: boolean; error?: string }> {
+    return this.processSaleAtomic({
+      saleId: params.saleId,
+      invoiceNumber: params.invoiceNumber || params.saleId,
+      customerId: params.customerId,
+      customerName: params.customerName || "Consumidor Final",
+      customerNuit: params.customerNuit,
+      sellerId: params.sellerId,
+      sellerName: params.sellerName || "Operador",
+      paymentMethod: params.paymentMethod || "Dinheiro",
+      subtotal: params.subtotal ?? params.grandTotal,
+      discountTotal: params.discountTotal || 0,
+      vatTotal: params.vatTotal || 0,
+      grandTotal: params.grandTotal,
+      amountPaid: params.amountPaid ?? params.grandTotal,
+      changeAmount: params.changeAmount || 0,
+      items: params.items || [],
+      notes: params.notes,
+      idempotencyKey: params.idempotencyKey || params.saleId
+    });
   },
 
   async syncTransactions(transactions: Transaction[]): Promise<boolean> {
-    const client = getSupabaseClient();
-    if (!client || transactions.length === 0) return false;
-
-    try {
-      const tenantId = getSupabaseConfig().tenantId;
-      const records = transactions.map((t) => ({
-        id: t.id,
-        tenant_id: tenantId,
-        invoice_number: t.invoiceNumber || t.id,
-        customer_name: t.customerName || "Consumidor Final",
-        customer_id: t.customerId || null,
-        grand_total: t.grandTotal || t.subtotal || 0,
-        subtotal: t.subtotal || t.grandTotal || 0,
-        vat_total: t.vatTotal || 0,
-        discount_total: t.discountTotal || 0,
-        payment_method: t.paymentMethod,
-        operator_name: t.cashierName || "",
+    if (!transactions || transactions.length === 0) return false;
+    let allOk = true;
+    for (const t of transactions) {
+      const res = await this.processSaleAtomic({
+        saleId: t.id,
+        invoiceNumber: t.invoiceNumber || t.id,
+        customerId: t.customerId,
+        customerName: t.customerName || "Consumidor Final",
+        customerNuit: t.nuit,
+        sellerId: t.cashierName,
+        sellerName: t.cashierName || "Operador",
+        paymentMethod: t.paymentMethod || "Dinheiro",
+        subtotal: t.subtotal ?? t.grandTotal,
+        discountTotal: t.discountTotal || 0,
+        vatTotal: t.vatTotal || 0,
+        grandTotal: t.grandTotal,
+        amountPaid: t.grandTotal,
+        changeAmount: 0,
         items: t.items || [],
-        created_at: t.timestamp || new Date().toISOString(),
-        timestamp: t.timestamp || new Date().toISOString()
-      }));
-
-      const { error } = await client.from("vendas").upsert(records, { onConflict: "id" });
-      return !error;
-    } catch {
-      return false;
+        notes: t.paymentDetails,
+        idempotencyKey: t.id
+      });
+      if (!res.success) {
+        allOk = false;
+      }
     }
+    return allOk;
   },
 
   // --- FLUXO DE CAIXA ---
@@ -1109,7 +1271,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as CashFlowDbRow[]).map(row => ({
         id: row.id,
         type: row.type || "INPUT",
         amount: Number(row.amount || 0),
@@ -1181,7 +1343,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as CashClosureDbRow[]).map(row => ({
         id: row.id,
         shiftId: row.shift_id || row.id,
         openedAt: row.opened_at,
@@ -1344,14 +1506,16 @@ export const SupabaseSyncService = {
     if (!client) return [];
 
     try {
-      const { data, error } = await client
-        .from("colaboradores")
-        .select("*")
-        .order("name", { ascending: true });
+      const tenantId = getSupabaseConfig().tenantId;
+      let query = client.from("colaboradores").select("*");
+      if (tenantId && tenantId.trim()) {
+        query = query.eq("tenant_id", tenantId);
+      }
+      const { data, error } = await query.order("name", { ascending: true });
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as EmployeeDbRow[]).map(row => ({
         id: row.id,
         name: row.name,
         email: row.email || "",
@@ -1379,23 +1543,28 @@ export const SupabaseSyncService = {
 
     try {
       const tenantId = getSupabaseConfig().tenantId;
+      let safePin = employee.pin || "";
+      if (safePin && safePin.length !== 64) {
+        safePin = await hashSecurityPin(safePin);
+      }
+
       const record = {
         id: employee.id,
         tenant_id: tenantId,
         name: employee.name,
         email: employee.email || "",
         contact: employee.contact || "",
-        whatsapp: (employee as any).whatsapp || "",
+        whatsapp: employee.whatsapp || "",
         role: employee.role || "Operador",
         salary: employee.salary || 0,
         admission_date: employee.admissionDate || new Date().toISOString().split("T")[0],
         status: employee.status || "ACTIVE",
-        pin: employee.pin || "",
-        pin_created_at: (employee as any).pinCreatedAt || new Date().toISOString(),
-        pin_changed: (employee as any).pinChanged ?? true,
-        foto_perfil: (employee as any).fotoPerfil || "",
-        subscription_plan: (employee as any).subscriptionPlan || "OURO",
-        branch: (employee as any).branch || "Sede Principal",
+        pin: safePin,
+        pin_created_at: employee.pinCreatedAt || new Date().toISOString(),
+        pin_changed: employee.pinChanged ?? true,
+        foto_perfil: employee.fotoPerfil || "",
+        subscription_plan: employee.subscriptionPlan || "OURO",
+        branch: employee.branch || "Sede Principal",
         updated_at: new Date().toISOString()
       };
 
@@ -1412,24 +1581,30 @@ export const SupabaseSyncService = {
 
     try {
       const tenantId = getSupabaseConfig().tenantId;
-      const records = employees.map((emp) => ({
-        id: emp.id,
-        tenant_id: tenantId,
-        name: emp.name,
-        email: emp.email || "",
-        contact: emp.contact || "",
-        whatsapp: (emp as any).whatsapp || "",
-        role: emp.role || "Operador",
-        salary: emp.salary || 0,
-        admission_date: emp.admissionDate || new Date().toISOString().split("T")[0],
-        status: emp.status || "ACTIVE",
-        pin: emp.pin || "",
-        pin_created_at: (emp as any).pinCreatedAt || new Date().toISOString(),
-        pin_changed: (emp as any).pinChanged ?? true,
-        foto_perfil: (emp as any).fotoPerfil || "",
-        subscription_plan: (emp as any).subscriptionPlan || "OURO",
-        branch: (emp as any).branch || "Sede Principal",
-        updated_at: new Date().toISOString()
+      const records = await Promise.all(employees.map(async (emp) => {
+        let safePin = emp.pin || "";
+        if (safePin && safePin.length !== 64) {
+          safePin = await hashSecurityPin(safePin);
+        }
+        return {
+          id: emp.id,
+          tenant_id: tenantId,
+          name: emp.name,
+          email: emp.email || "",
+          contact: emp.contact || "",
+          whatsapp: emp.whatsapp || "",
+          role: emp.role || "Operador",
+          salary: emp.salary || 0,
+          admission_date: emp.admissionDate || new Date().toISOString().split("T")[0],
+          status: emp.status || "ACTIVE",
+          pin: safePin,
+          pin_created_at: emp.pinCreatedAt || new Date().toISOString(),
+          pin_changed: emp.pinChanged ?? true,
+          foto_perfil: emp.fotoPerfil || "",
+          subscription_plan: emp.subscriptionPlan || "OURO",
+          branch: emp.branch || "Sede Principal",
+          updated_at: new Date().toISOString()
+        };
       }));
 
       const { error } = await client.from("colaboradores").upsert(records, { onConflict: "id" });
@@ -1440,7 +1615,7 @@ export const SupabaseSyncService = {
   },
 
   // --- PEDIDOS DE RECUPERAÇÃO DE ACESSO ---
-  async getRecoveryRequests(): Promise<any[]> {
+  async getRecoveryRequests(): Promise<RecoveryRequestEntry[]> {
     const client = getSupabaseClient();
     if (!client) return [];
 
@@ -1452,7 +1627,7 @@ export const SupabaseSyncService = {
         .order("created_at", { ascending: false });
 
       if (error || !data) return [];
-      return data.map((r: any) => ({
+      return (data as RecoveryRequestDbRow[]).map(r => ({
         id: r.id,
         employeeId: r.employee_id,
         employeeName: r.employee_name,
@@ -1514,7 +1689,7 @@ export const SupabaseSyncService = {
 
       if (error || !data) return [];
 
-      return data.map((row: any) => ({
+      return (data as AuditLogDbRow[]).map(row => ({
         id: row.id,
         user: row.user_name || "Sistema",
         userRole: (row.user_role as UserRole) || "ADMIN",
@@ -1540,7 +1715,7 @@ export const SupabaseSyncService = {
       const record = {
         id: log.id || generateEntityId("log"),
         tenant_id: tenantId,
-        user_id: (log as any).userId || (log as any).user || null,
+        user_id: log.userId || log.user || null,
         user_name: log.user || "Sistema",
         user_role: log.userRole || "ADMIN",
         action: log.action,
@@ -1567,7 +1742,7 @@ export const SupabaseSyncService = {
       const records = logs.map((l) => ({
         id: l.id,
         tenant_id: tenantId,
-        user_id: (l as any).userId || (l as any).user || null,
+        user_id: l.userId || l.user || null,
         user_name: l.user || "Sistema",
         user_role: l.userRole || "ADMIN",
         action: l.action,
@@ -1591,13 +1766,40 @@ export const SupabaseSyncService = {
     if (!client) return null;
 
     try {
-      const { data, error } = await client
+      const tenantId = getSupabaseConfig().tenantId;
+      const configId = tenantId && tenantId.trim() ? `config_${tenantId}` : "config";
+
+      let data: Record<string, unknown> | null = null;
+
+      // 1. Tentar carregar a configuração específica deste tenant
+      const resSpecific = await client
         .from("settings")
         .select("*")
-        .eq("id", "config")
-        .single();
+        .eq("id", configId)
+        .maybeSingle();
 
-      if (error || !data) return null;
+      if (resSpecific.data) {
+        data = resSpecific.data;
+      } else if (tenantId && tenantId.trim()) {
+        const resTenant = await client
+          .from("settings")
+          .select("*")
+          .eq("tenant_id", tenantId)
+          .maybeSingle();
+        if (resTenant.data) data = resTenant.data;
+      }
+
+      // 2. Fallback para id global 'config' se ainda não existirem dados específicos
+      if (!data) {
+        const resGlobal = await client
+          .from("settings")
+          .select("*")
+          .eq("id", "config")
+          .maybeSingle();
+        if (resGlobal.data) data = resGlobal.data;
+      }
+
+      if (!data) return null;
 
       return {
         companyName: data.company_name,
@@ -1626,7 +1828,7 @@ export const SupabaseSyncService = {
         reportRecipientEmail: "",
         reportHour: "18:00",
         reportFrequency: "daily",
-        ...(data.val_json || {})
+        ...(typeof data.val_json === "object" && data.val_json !== null ? (data.val_json as Record<string, unknown>) : {})
       } as SystemSettings;
     } catch {
       return null;
@@ -1639,20 +1841,21 @@ export const SupabaseSyncService = {
 
     try {
       const tenantId = getSupabaseConfig().tenantId;
+      const configId = tenantId && tenantId.trim() ? `config_${tenantId}` : "config";
       const record = {
-        id: "config",
+        id: configId,
         tenant_id: tenantId,
         company_name: settings.companyName,
         company_address: settings.companyAddress || settings.storeAddress || "",
         company_nuit: settings.companyNuit || settings.nuit || "",
-        company_phone: (settings as any).companyPhone || settings.storeContact || "",
-        company_email: settings.email || settings.storeEmail || (settings as any).companyEmail || "",
-        receipt_footer_message: (settings as any).receiptFooterMessage || settings.slogan || "",
-        enable_vat: (settings as any).enableVat ?? true,
+        company_phone: settings.companyPhone || settings.storeContact || "",
+        company_email: settings.email || settings.storeEmail || settings.companyEmail || "",
+        receipt_footer_message: settings.receiptFooterMessage || settings.slogan || "",
+        enable_vat: settings.enableVat ?? true,
         vat_percentage: settings.defaultVat ?? settings.vatDefaultRate ?? 16,
         currency: settings.currency || "MT",
-        low_stock_threshold: settings.smsStockThreshold ?? (settings as any).lowStockThreshold ?? 5,
-        default_printer: settings.printerName || (settings as any).defaultPrinter || "thermal_80mm",
+        low_stock_threshold: settings.smsStockThreshold ?? settings.lowStockThreshold ?? 5,
+        default_printer: settings.printerName || settings.defaultPrinter || "thermal_80mm",
         cloud_backup_enabled: settings.cloudBackupEnabled ?? true,
         backup_frequency: settings.backupFrequency || "daily",
         backup_time: settings.backupTime || "18:00",
@@ -1738,7 +1941,7 @@ export const SupabaseSyncService = {
   },
 
   // --- REALTIME CHANNEL SUBSCRIPTIONS ---
-  subscribeToTableChanges(table: string, onUpdate: (payload: any) => void): { unsubscribe: () => void } {
+  subscribeToTableChanges(table: string, onUpdate: (payload: Record<string, unknown>) => void): { unsubscribe: () => void } {
     const client = getSupabaseClient();
     if (!client) return { unsubscribe: () => {} };
 
@@ -1816,7 +2019,7 @@ export const SupabaseSyncService = {
       }
 
       return { success: true, count: synced };
-    } catch (err: any) {
+    } catch (err) {
       return { success: false, count: synced, error: err.message };
     }
   }

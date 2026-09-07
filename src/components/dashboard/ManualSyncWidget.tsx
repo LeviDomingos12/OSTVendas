@@ -25,7 +25,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { measureSupabaseLatency, LatencyResult } from "../../services/supabaseService";
 
 export interface ManualSyncWidgetProps {
-  pendingSyncQueue?: Record<string, any>;
+  pendingSyncQueue?: Record<string, unknown>;
   isManualSyncing?: boolean;
   isOnline?: boolean;
   onManualSync?: () => Promise<void> | void;
@@ -91,7 +91,7 @@ export const ManualSyncWidget: React.FC<ManualSyncWidgetProps> = ({
   // Calculate detailed pending items breakdown
   const queueStats = useMemo(() => {
     let totalItems = 0;
-    const breakdown: { key: string; label: string; count: number; icon: any; color: string }[] = [];
+    const breakdown: { key: string; label: string; count: number; icon: React.ComponentType<{ className?: string }>; color: string }[] = [];
 
     const keys = Object.keys(pendingSyncQueue);
     for (const key of keys) {
@@ -160,7 +160,7 @@ export const ManualSyncWidget: React.FC<ManualSyncWidgetProps> = ({
         localStorage.setItem("pos_last_sync_timestamp", nowStr);
         setWasOffline(false);
         checkNetworkLatency();
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Erro ao sincronizar manualmente:", err);
       }
     }

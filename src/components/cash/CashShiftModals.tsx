@@ -18,6 +18,7 @@ import {
   Building2
 } from "lucide-react";
 import { Employee, SystemSettings, CashFlowEntry, CashClosure } from "../../types";
+import { verifySecurityPin } from "../../lib/security";
 import DenominationCounter, { DENOMINATIONS } from "../DenominationCounter";
 
 export const CASH_REGISTERS = [
@@ -222,16 +223,16 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   }, [physicalBalance]);
 
   // Helper to validate supervisor PIN securely against database
-  const validateSupervisorPin = (supervisorName: string, pinToTest: string): boolean => {
+  const validateSupervisorPin = async (supervisorName: string, pinToTest: string): Promise<boolean> => {
     if (!pinToTest || pinToTest.trim() === "") return false;
     const sup = employees.find(e => e.name === supervisorName);
     if (sup && sup.pin) {
-      return sup.pin === pinToTest;
+      return await verifySecurityPin(pinToTest.trim(), sup.pin.trim());
     }
     if (settings?.securityPin) {
-      return settings.securityPin === pinToTest;
+      return await verifySecurityPin(pinToTest.trim(), settings.securityPin.trim());
     }
-    return pinToTest.length >= 4;
+    return false;
   };
 
   const calculatedFromDenoms = useMemo(() => {
@@ -244,7 +245,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   const diffVal = closePhysicalCount - theoreticalBalance;
 
   // 1. Submit Open Shift
-  const handleOpenSubmit = (e: React.FormEvent) => {
+  const handleOpenSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (openFloat === "" || openFloat.trim() === "" || isNaN(Number(openFloat))) {
       setOpenError("É obrigatório inserir o valor inicial da gaveta (insira 0 se abrir sem trocos).");
@@ -256,7 +257,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       return;
     }
     if (openPin) {
-      const isValid = validateSupervisorPin(openSupervisor, openPin);
+      const isValid = await validateSupervisorPin(openSupervisor, openPin);
       if (!isValid) {
         setOpenError("PIN de homologação do Supervisor incorreto!");
         return;
@@ -274,13 +275,13 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   };
 
   // 2. Submit Close Shift
-  const handleCloseSubmit = (e: React.FormEvent) => {
+  const handleCloseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!closeSupervisor) {
       setCloseError("Selecione o supervisor homologador do fechamento.");
       return;
     }
-    const isValid = validateSupervisorPin(closeSupervisor, closePin);
+    const isValid = await validateSupervisorPin(closeSupervisor, closePin);
     if (!isValid) {
       setCloseError("PIN do Supervisor incorreto! Insira o PIN configurado do colaborador.");
       return;
@@ -297,7 +298,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   };
 
   // 3. Submit Sangria
-  const handleSangriaSubmit = (e: React.FormEvent) => {
+  const handleSangriaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (sangriaAmount <= 0) {
       setSangriaError("Introduza um valor válido para a sangria de caixa.");
@@ -308,7 +309,7 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
       return;
     }
     if (sangriaPin) {
-      const isValid = validateSupervisorPin(sangriaSupervisor, sangriaPin);
+      const isValid = await validateSupervisorPin(sangriaSupervisor, sangriaPin);
       if (!isValid) {
         setSangriaError("PIN do supervisor autorizador incorreto.");
         return;
@@ -344,14 +345,14 @@ export const CashShiftModals: React.FC<CashShiftModalsProps> = ({
   };
 
   // 5. Submit Adjust Float
-  const handleAdjustFloatSubmit = (e: React.FormEvent) => {
+  const handleAdjustFloatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (adjustFloatVal < 0) {
       setAdjustFloatError("O fundo de gaveta não pode ser negativo.");
       return;
     }
     if (adjustFloatPin) {
-      const isValid = validateSupervisorPin(adjustFloatSupervisor, adjustFloatPin);
+      const isValid = await validateSupervisorPin(adjustFloatSupervisor, adjustFloatPin);
       if (!isValid) {
         setAdjustFloatError("PIN de homologação do Supervisor incorreto!");
         return;

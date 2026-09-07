@@ -79,7 +79,7 @@ export function initErrorCapturing() {
   const originalConsoleError = console.error;
   let isReporting = false;
 
-  console.error = (...args: any[]) => {
+  console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);
 
     if (isReporting || isLogging) return;
@@ -88,7 +88,7 @@ export function initErrorCapturing() {
       const message = args
         .map(arg => {
           if (arg instanceof Error) return `${arg.message} | Stack: ${arg.stack?.split("\n").slice(0, 2).join(" | ")}`;
-          if (typeof arg === "object") {
+          if (typeof arg === "object" && arg !== null) {
             try { return JSON.stringify(arg); } catch { return String(arg); }
           }
           return String(arg);
@@ -123,18 +123,22 @@ export function initErrorCapturing() {
   let fetchPatched = false;
 
   try {
-    const wrappedFetch = async function(...args: any[]) {
-      const rawUrl = typeof args[0] === 'string' ? args[0] : args[0] instanceof URL ? args[0].href : (args[0] as any)?.url || 'Desconhecido';
+    const wrappedFetch = async function(...args: Parameters<typeof window.fetch>) {
+      const input = args[0];
+      const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request)?.url || 'Desconhecido';
       
       try {
-        const response = await originalFetch.apply(window, args as any);
+        const response = await originalFetch(...args);
         if (!response.ok) {
-          // CRITICAL: NEVER log failures from sync/db/storage/telemetry endpoints to prevent infinite feedback loops!
+          // CRITICAL: NEVER log failures from sync/db/storage/telemetry endpoints or 429 rate limits to prevent infinite feedback loops!
           if (
+            response.status !== 429 &&
             !rawUrl.includes("ipify.org") &&
-            !rawUrl.includes("/api/db/") &&
-            !rawUrl.includes("/api/security/") &&
+            !rawUrl.includes("/api/db") &&
+            !rawUrl.includes("/api/security") &&
             !rawUrl.includes("/api/backup") &&
+            !rawUrl.includes("/api/health") &&
+            !rawUrl.includes("/api/system") &&
             !rawUrl.includes("googleapis.com") &&
             !rawUrl.includes("supabase.co")
           ) {
@@ -145,18 +149,21 @@ export function initErrorCapturing() {
           }
         }
         return response;
-      } catch (error: any) {
+      } catch (error: unknown) {
         if (
           !rawUrl.includes("ipify.org") &&
-          !rawUrl.includes("/api/db/") &&
-          !rawUrl.includes("/api/security/") &&
+          !rawUrl.includes("/api/db") &&
+          !rawUrl.includes("/api/security") &&
           !rawUrl.includes("/api/backup") &&
+          !rawUrl.includes("/api/health") &&
+          !rawUrl.includes("/api/system") &&
           !rawUrl.includes("googleapis.com") &&
           !rawUrl.includes("supabase.co")
         ) {
+          const errMessage = error instanceof Error ? error.message : String(error);
           logErrorToSystem(
             "FALHA_REDE",
-            `Falha de conexão ao acessar ${rawUrl.substring(0, 100)}. Erro: ${error?.message || error}`
+            `Falha de conexão ao acessar ${rawUrl.substring(0, 100)}. Erro: ${errMessage}`
           );
         }
         throw error;

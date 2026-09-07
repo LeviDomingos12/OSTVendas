@@ -23,7 +23,7 @@ import {
 import { CashFlowEntry, Transaction } from "../../types";
 
 interface CashbookLedgerProps {
-  entries: any[];
+  entries: CashFlowEntry[];
   startDate: string;
   endDate: string;
   onStartDateChange: (val: string) => void;
@@ -47,7 +47,7 @@ export const CashbookLedger: React.FC<CashbookLedgerProps> = ({
   const [filterType, setFilterType] = useState<string>("TODOS");
   const [selectedTerminal, setSelectedTerminal] = useState<string>("TODOS");
   const [selectedOperator, setSelectedOperator] = useState<string>("TODOS");
-  const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<CashFlowEntry | null>(null);
 
   // Extract unique operators and terminals
   const availableOperators = useMemo(() => {

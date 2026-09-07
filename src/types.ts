@@ -40,6 +40,8 @@ export interface Product extends MultiTenantMetadata {
   minStock: number;
   expiryDate?: string;
   image?: string;
+  imageUrl?: string;
+  unit?: string;
   emoji?: string;
   promotion?: string; // e.g. "PROMO", "MAIS_VENDIDO", "NOVO", "DESCONTO"
   isFavorite?: boolean;
@@ -48,6 +50,8 @@ export interface Product extends MultiTenantMetadata {
   barcode?: string;
   branchStocks?: Record<string, number>; // Stock per branch ID
   batches?: ProductBatch[]; // Batches associated with this product
+  isDemo?: boolean;
+  isSample?: boolean;
 }
 
 export interface CartItem {
@@ -68,12 +72,16 @@ export interface Customer extends MultiTenantMetadata {
   purchaseCount: number;
   lastPurchaseDate?: string;
   debt: number;
+  balance?: number;
+  notes?: string;
   creditLimit?: number;
   loyaltyPoints: number;
   creditBlocked?: boolean;
   preferredPaymentMethod?: string;
   oneClickCheckoutEnabled?: boolean;
   settlements?: { id: string, date: string, amount: number, method: string }[];
+  isDemo?: boolean;
+  isSample?: boolean;
 }
 
 export interface Transaction extends MultiTenantMetadata {
@@ -169,6 +177,7 @@ export interface AuditLog extends MultiTenantMetadata {
   id: string;
   timestamp: string;
   user: string;
+  userId?: string;
   userRole: UserRole;
   action: string;
   module: string;
@@ -204,6 +213,9 @@ export interface Employee extends MultiTenantMetadata {
   webAuthnCredentialId?: string;
   subscriptionPlan?: SubscriptionPlan;
   planGrantedBy?: string;
+  branch?: string;
+  isDemo?: boolean;
+  isSample?: boolean;
 }
 
 export interface SystemSettings extends MultiTenantMetadata {
@@ -238,6 +250,12 @@ export interface SystemSettings extends MultiTenantMetadata {
   slogan?: string;
   storeAddress?: string;
   storeContact?: string;
+  companyPhone?: string;
+  companyEmail?: string;
+  receiptFooterMessage?: string;
+  enableVat?: boolean;
+  lowStockThreshold?: number;
+  defaultPrinter?: string;
   defaultVat?: number;
   cloudBackupEnabled?: boolean;
   backupFrequency?: string;
@@ -332,6 +350,7 @@ export interface SupplierOrder {
   totalValue: number;
   status: "Pendente" | "Recebido" | "Cancelado";
   paymentStatus: "Pago" | "Crédito" | "Pendente";
+  paymentDueDate?: string;
   requestDate: string;
   receivedDate?: string;
 }
@@ -410,3 +429,233 @@ export interface RecurringReminder {
   time?: string;
   active: boolean;
 }
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+}
+
+export interface DatabaseState {
+  products: Product[];
+  customers: Customer[];
+  transactions: Transaction[];
+  cashFlow: CashFlowEntry[];
+  employees: Employee[];
+  auditLogs: AuditLog[];
+  settings: SystemSettings;
+}
+
+export interface BackupLogEntry {
+  id: string;
+  date: string;
+  type: "Manual" | "Automático";
+  frequency: string;
+  size: number;
+  itemCount: number;
+  status: string;
+}
+
+export interface GeoLocationInfo {
+  ip: string;
+  city: string;
+  region: string;
+  country: string;
+  loc: string;
+  org: string;
+  timezone: string;
+}
+
+export interface OfflineMutationEntry {
+  id?: string;
+  type: string;
+  action: string;
+  data: unknown;
+  timestamp: string;
+  tenantId?: string;
+  retryCount?: number;
+}
+
+export interface PosBudgetData {
+  budgetNumber: string;
+  timestamp: number;
+  customerName: string;
+  customerEmail?: string;
+  customerPhone?: string;
+  customerNuit?: string;
+  items: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    price: number;
+  }[];
+  subtotal: number;
+  vatTotal?: number;
+  discountTotal?: number;
+  grandTotal?: number;
+}
+
+export interface SupabaseProductRow {
+  id: string;
+  name: string;
+  code?: string;
+  category?: string;
+  supplier?: string;
+  cost_price?: number;
+  sale_price?: number;
+  vat_rate?: number;
+  stock?: number;
+  min_stock?: number;
+  expiry_date?: string;
+  image_url?: string;
+  barcode?: string;
+  unit?: string;
+  branch_stocks?: Record<string, number>;
+  batches?: ProductBatch[];
+  tenant_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SupabaseCustomerRow {
+  id: string;
+  name: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  nuit?: string;
+  total_spent?: number;
+  purchase_count?: number;
+  last_purchase_date?: string;
+  debt?: number;
+  balance?: number;
+  credit_limit?: number;
+  loyalty_points?: number;
+  credit_blocked?: boolean;
+  notes?: string;
+  tenant_id?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface SupabaseTransactionRow {
+  id: string;
+  invoice_number: string;
+  created_at?: string;
+  timestamp?: string;
+  subtotal?: number;
+  vat_total?: number;
+  discount_total?: number;
+  grand_total?: number;
+  payment_method?: string;
+  payment_details?: string;
+  cashier_name?: string;
+  customer_name?: string;
+  customer_id?: string;
+  customer_phone?: string;
+  customer_email?: string;
+  nuit?: string;
+  branch_id?: string;
+  status?: "COMPLETED" | "CANCELLED" | "REFUNDED";
+  fiscal_hash?: string;
+  fiscal_keys?: string;
+  fiscal_certified?: boolean;
+  tenant_id?: string;
+  items?: Transaction["items"];
+}
+
+export interface SupabaseCashFlowRow {
+  id: string;
+  created_at?: string;
+  timestamp?: string;
+  type: string;
+  amount: number;
+  reason?: string;
+  responsible_user?: string;
+  shift_id?: string;
+  register_id?: string;
+  payment_method?: string;
+  category?: string;
+  reference?: string;
+  tenant_id?: string;
+}
+
+export interface SupabaseEmployeeRow {
+  id: string;
+  name: string;
+  role?: string;
+  contact?: string;
+  salary?: number;
+  admission_date?: string;
+  status?: string;
+  email?: string;
+  username?: string;
+  pin?: string;
+  password?: string;
+  foto_perfil?: string;
+  pin_created_at?: string;
+  pin_changed?: boolean;
+  subscription_plan?: SubscriptionPlan;
+  branch?: string;
+  tenant_id?: string;
+  auth_uid?: string;
+}
+
+export interface SupabaseAuditLogRow {
+  id: string;
+  created_at?: string;
+  timestamp?: string;
+  user_name?: string;
+  user_role?: UserRole;
+  action: string;
+  module?: string;
+  details?: string;
+  ip?: string;
+  device?: string;
+  tenant_id?: string;
+}
+
+export interface PasswordRecoveryRequest {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  requestedAt: string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  processedAt?: string;
+  processedBy?: string;
+  tenantId?: string;
+}
+
+export interface LocalBackupEntry {
+  id: string;
+  date: string;
+  type: string;
+  frequency: string;
+  size: number;
+  itemCount: number;
+  status: string;
+}
+
+export interface AiForecastResult {
+  next7DaysRevenue?: number;
+  next30DaysRevenue?: number;
+  confidence?: number;
+  topMovingProducts?: { name: string; estimatedUnits: number }[];
+  lowStockAlerts?: { name: string; currentStock: number; suggestedOrder: number }[];
+  insights?: string[];
+  recommendations?: string[];
+  generatedAt?: string;
+}
+
+export interface AppUser {
+  id: string;
+  name: string;
+  role: UserRole | string;
+  email?: string;
+  tenantId?: string;
+  companyId?: string;
+  avatar?: string;
+  pin?: string;
+}
+
+

@@ -28,12 +28,19 @@ export function generateUUID(): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  // Fallback para ambientes sem Web Crypto
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+  // Fallback para ambientes Node.js sem crypto global
+  try {
+    if (typeof window === "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nodeCrypto = require("crypto");
+      if (nodeCrypto && typeof nodeCrypto.randomUUID === "function") {
+        return nodeCrypto.randomUUID();
+      }
+    }
+  } catch {}
+
+  // Sem Web Crypto disponível, interrompe a geração estritamente em vez de usar entropia previsível
+  throw new Error("Ambiente inseguro: Web Crypto API não está disponível para geração criptográfica de identificadores críticos.");
 }
 
 /**
@@ -125,18 +132,31 @@ export function generateDeterministicFinancialReference(
  * Gera um PIN numérico seguro de 4 ou 6 dígitos usando entropia criptográfica.
  */
 export function generateSecurePin(length: 4 | 6 = 6): string {
+  const min = length === 4 ? 1000 : 100000;
+  const max = length === 4 ? 9999 : 999999;
+  const range = max - min + 1;
+
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
     const array = new Uint32Array(1);
     crypto.getRandomValues(array);
-    const min = length === 4 ? 1000 : 100000;
-    const max = length === 4 ? 9999 : 999999;
-    const range = max - min + 1;
     const val = min + (array[0] % range);
     return val.toString();
   }
-  const min = length === 4 ? 1000 : 100000;
-  const max = length === 4 ? 9999 : 999999;
-  return Math.floor(min + Math.random() * (max - min + 1)).toString();
+
+  // Node.js crypto fallback
+  try {
+    if (typeof window === "undefined") {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const nodeCrypto = require("crypto");
+      if (nodeCrypto && typeof nodeCrypto.randomBytes === "function") {
+        const buf = nodeCrypto.randomBytes(4);
+        const val = min + (buf.readUInt32BE(0) % range);
+        return val.toString();
+      }
+    }
+  } catch {}
+
+  throw new Error("Ambiente inseguro: Web Crypto API não está disponível para geração criptográfica de PIN.");
 }
 
 /**

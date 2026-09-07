@@ -8,7 +8,16 @@
  */
 
 import { SupabaseSyncService } from "./supabaseService";
-import { Transaction } from "../types";
+import { 
+  Transaction, 
+  Product, 
+  Customer, 
+  CashFlowEntry, 
+  CashClosure, 
+  Employee, 
+  SystemSettings, 
+  AuditLog 
+} from "../types";
 import { generateEntityId } from "../lib/deterministic";
 
 export type SyncOperationType = 
@@ -21,15 +30,27 @@ export type SyncOperationType =
   | "SETTINGS" 
   | "AUDIT_LOG";
 
+export type SyncPayload = 
+  | Transaction 
+  | Product 
+  | Customer 
+  | CashFlowEntry 
+  | CashClosure 
+  | Employee 
+  | Partial<SystemSettings> 
+  | AuditLog 
+  | Record<string, unknown>;
+
 export interface SyncQueueItem {
   id: string;
   type: SyncOperationType;
-  payload: any;
+  payload: SyncPayload;
   timestamp: string;
   userId?: string;
   retryCount: number;
   lastError?: string;
   status: "PENDING" | "PROCESSING" | "FAILED";
+  idempotencyKey?: string;
 }
 
 const DB_NAME = "ost_vendas_sync_db";
@@ -38,6 +59,7 @@ const STORE_NAME = "sync_queue";
 
 class IndexedDBQueueManager {
   private dbPromise: Promise<IDBDatabase> | null = null;
+  private memoryFallback: Map<string, SyncQueueItem> = new Map();
 
   private getDB(): Promise<IDBDatabase> {
     if (typeof window === "undefined" || !window.indexedDB) {
@@ -84,13 +106,9 @@ class IndexedDBQueueManager {
         req.onerror = () => reject(req.error);
       });
     } catch {
-      // Fallback para localStorage
-      try {
-        const raw = localStorage.getItem("pos_sync_queue");
-        return raw ? JSON.parse(raw) : [];
-      } catch {
-        return [];
-      }
+      const items = Array.from(this.memoryFallback.values());
+      items.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      return items;
     }
   }
 
@@ -105,17 +123,7 @@ class IndexedDBQueueManager {
         req.onerror = () => reject(req.error);
       });
     } catch {
-      // Fallback de contingência
-      try {
-        const raw = localStorage.getItem("pos_sync_queue");
-        const list: SyncQueueItem[] = raw ? JSON.parse(raw) : [];
-        const idx = list.findIndex(i => i.id === item.id);
-        if (idx >= 0) list[idx] = item;
-        else list.push(item);
-        localStorage.setItem("pos_sync_queue", JSON.stringify(list));
-      } catch (e) {
-        console.warn("Falha no fallback de escrita:", e);
-      }
+      this.memoryFallback.set(item.id, item);
     }
   }
 
@@ -130,14 +138,7 @@ class IndexedDBQueueManager {
         req.onerror = () => reject(req.error);
       });
     } catch {
-      try {
-        const raw = localStorage.getItem("pos_sync_queue");
-        if (raw) {
-          const list: SyncQueueItem[] = JSON.parse(raw);
-          const filtered = list.filter(i => i.id !== id);
-          localStorage.setItem("pos_sync_queue", JSON.stringify(filtered));
-        }
-      } catch {}
+      this.memoryFallback.delete(id);
     }
   }
 
@@ -152,9 +153,7 @@ class IndexedDBQueueManager {
         req.onerror = () => reject(req.error);
       });
     } catch {}
-    try {
-      localStorage.removeItem("pos_sync_queue");
-    } catch {}
+    this.memoryFallback.clear();
   }
 }
 
@@ -182,7 +181,7 @@ export const SyncService = {
    */
   async enqueue(operation: {
     type: SyncOperationType;
-    payload: any;
+    payload: SyncPayload;
     id?: string;
     timestamp?: string;
     userId?: string;
@@ -291,52 +290,71 @@ export const SyncService = {
       try {
         switch (item.type) {
           case "TRANSACTION": {
-            const res = await SupabaseSyncService.processSaleAtomic(item.payload);
+            const tx = item.payload as Transaction & { saleId?: string; amountPaid?: number; changeAmount?: number };
+            const res = await SupabaseSyncService.processSaleAtomic({
+              saleId: tx.saleId || tx.id,
+              invoiceNumber: tx.invoiceNumber || tx.id,
+              customerId: tx.customerId,
+              customerName: tx.customerName,
+              customerNuit: tx.nuit,
+              sellerId: tx.cashierName,
+              sellerName: tx.cashierName,
+              paymentMethod: tx.paymentMethod || "CASH",
+              subtotal: tx.subtotal ?? tx.grandTotal,
+              discountTotal: tx.discountTotal || 0,
+              vatTotal: tx.vatTotal || 0,
+              grandTotal: tx.grandTotal || 0,
+              amountPaid: tx.amountPaid ?? tx.grandTotal,
+              changeAmount: tx.changeAmount || 0,
+              items: tx.items || [],
+              notes: tx.paymentDetails,
+              idempotencyKey: item.idempotencyKey || tx.id
+            });
             success = !!res.success;
             if (!res.success) errorMsg = res.error || "Falha ao processar venda no Supabase";
             break;
           }
           case "PRODUCT": {
-            success = await SupabaseSyncService.saveProduct(item.payload);
+            success = await SupabaseSyncService.saveProduct(item.payload as Product);
             if (!success) errorMsg = "Falha ao gravar produto no Supabase";
             break;
           }
           case "CUSTOMER": {
-            success = await SupabaseSyncService.saveCustomer(item.payload);
+            success = await SupabaseSyncService.saveCustomer(item.payload as Customer);
             if (!success) errorMsg = "Falha ao gravar cliente no Supabase";
             break;
           }
           case "CASHFLOW": {
-            success = await SupabaseSyncService.saveCashFlowEntry(item.payload);
+            success = await SupabaseSyncService.saveCashFlowEntry(item.payload as CashFlowEntry);
             if (!success) errorMsg = "Falha ao gravar fluxo de caixa";
             break;
           }
           case "CASH_CLOSURE": {
-            success = await SupabaseSyncService.saveCashClosure(item.payload);
+            success = await SupabaseSyncService.saveCashClosure(item.payload as CashClosure);
             if (!success) errorMsg = "Falha ao gravar fechamento de caixa";
             break;
           }
           case "EMPLOYEE": {
-            success = await SupabaseSyncService.saveEmployee(item.payload);
+            success = await SupabaseSyncService.saveEmployee(item.payload as Employee);
             if (!success) errorMsg = "Falha ao sincronizar colaborador";
             break;
           }
           case "SETTINGS": {
-            success = await SupabaseSyncService.saveSettings(item.payload);
+            success = await SupabaseSyncService.saveSettings(item.payload as SystemSettings);
             if (!success) errorMsg = "Falha ao sincronizar configurações";
             break;
           }
           case "AUDIT_LOG": {
-            success = await SupabaseSyncService.saveAuditLog(item.payload);
+            success = await SupabaseSyncService.saveAuditLog(item.payload as AuditLog);
             if (!success) errorMsg = "Falha ao sincronizar log de auditoria";
             break;
           }
           default:
             success = true;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         success = false;
-        errorMsg = err?.message || String(err);
+        errorMsg = err instanceof Error ? err.message : String(err);
       }
 
       if (success) {
@@ -364,15 +382,10 @@ export const SyncService = {
  * Alias de compatibilidade retroativa para módulos existentes
  */
 export const OfflineQueueService = {
-  getQueue: () => {
-    try {
-      const q = localStorage.getItem("pos_sync_queue");
-      return q ? JSON.parse(q) : [];
-    } catch {
-      return [];
-    }
+  getQueue: async () => {
+    return await SyncService.getQueue();
   },
-  enqueue: (item: { type: SyncOperationType; payload: any; timestamp?: string; id?: string; userId?: string }) => {
+  enqueue: (item: { type: SyncOperationType; payload: SyncPayload; timestamp?: string; id?: string; userId?: string }) => {
     SyncService.enqueue(operationMapper(item));
   },
   clearQueue: () => {
@@ -383,9 +396,9 @@ export const OfflineQueueService = {
   }
 };
 
-function operationMapper(item: any): { type: SyncOperationType; payload: any; id?: string; timestamp?: string; userId?: string } {
+function operationMapper(item: { type: SyncOperationType; payload: SyncPayload; id?: string; timestamp?: string; userId?: string }): { type: SyncOperationType; payload: SyncPayload; id?: string; timestamp?: string; userId?: string } {
   return {
-    type: item.type as SyncOperationType,
+    type: item.type,
     payload: item.payload,
     id: item.id,
     timestamp: item.timestamp,

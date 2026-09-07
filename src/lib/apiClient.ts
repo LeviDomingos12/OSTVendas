@@ -27,7 +27,29 @@ export async function authenticatedFetch(input: string | URL, init: ApiFetchOpti
     console.warn("[ApiClient] Não foi possível obter o token de sessão do Supabase:", err);
   }
 
+  // Anexar Tenant ID ativo da sessão para validação no backend
+  try {
+    const storedTenant = typeof window !== "undefined" ? (localStorage.getItem("erp_current_tenant_id") || localStorage.getItem("supabase_config")) : null;
+    let tenantId = "";
+    if (storedTenant) {
+      try {
+        const parsed = JSON.parse(storedTenant);
+        if (typeof parsed === "string") tenantId = parsed;
+        else if (parsed.tenantId) tenantId = parsed.tenantId;
+      } catch {
+        tenantId = storedTenant;
+      }
+    }
+    if (tenantId && tenantId.trim() && !headers.has("X-Tenant-Id")) {
+      headers.set("X-Tenant-Id", tenantId.trim());
+    }
+  } catch {}
+
   // Prevenir caching de respostas de dados sensíveis
+  if (!headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "no-cache, no-store, must-revalidate");
+  }
+
   if (!headers.has("Content-Type") && init.body && typeof init.body === "string") {
     headers.set("Content-Type", "application/json");
   }
@@ -51,7 +73,7 @@ export async function authenticatedFetch(input: string | URL, init: ApiFetchOpti
 /**
  * Wrapper conveniente para chamadas JSON autenticadas
  */
-export async function apiPost<T = any>(endpoint: string, bodyData: any): Promise<T> {
+export async function apiPost<T = unknown>(endpoint: string, bodyData: unknown): Promise<T> {
   const res = await authenticatedFetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -66,7 +88,7 @@ export async function apiPost<T = any>(endpoint: string, bodyData: any): Promise
   return res.json();
 }
 
-export async function apiGet<T = any>(endpoint: string): Promise<T> {
+export async function apiGet<T = unknown>(endpoint: string): Promise<T> {
   const res = await authenticatedFetch(endpoint, {
     method: "GET"
   });

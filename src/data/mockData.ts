@@ -4,23 +4,7 @@ export const initialProducts: Product[] = [];
 
 export const initialCustomers: Customer[] = [];
 
-export const initialEmployees: Employee[] = [
-  { 
-    id: "emp-master-admin-001", 
-    name: "Administrador do Sistema", 
-    role: "Administrador", 
-    contact: "+258840000000", 
-    whatsapp: "+258840000000", 
-    salary: 0, 
-    admissionDate: "2026-08-01", 
-    status: "ACTIVE", 
-    pin: "123456", 
-    email: "admin@empresa.co.mz", 
-    username: "admin", 
-    pinCreatedAt: "2026-08-01T00:00:00.000Z", 
-    pinChanged: true
-  }
-];
+export const initialEmployees: Employee[] = [];
 
 export const initialCashFlow: CashFlowEntry[] = [];
 
@@ -172,7 +156,7 @@ export const masterclassVideos: MasterclassVideo[] = [
     instructor: "Levi Domingos (Fundador & CEO)",
     steps: [
       "Aceda ao módulo 'Previsão IA' no menu de navegação do sistema.",
-      "Gere previsões preditivas alimentadas com as faturas reais contidas na base do Firestore.",
+      "Gere previsões preditivas alimentadas com as faturas reais contidas na base de dados Supabase PostgreSQL.",
       "Analise as projeções de faturamento e margem estimadas para os próximos 30 dias.",
       "Reveja as sugestões de compra para produtos de alta rotação para evitar roturas de stock."
     ]

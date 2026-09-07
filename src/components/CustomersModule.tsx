@@ -32,7 +32,7 @@ import {
   Check
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
-import { Customer, UserRole, Transaction, SystemSettings } from "../types";
+import { Customer, UserRole, Transaction, SystemSettings, CashFlowEntry } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 import { useConfirm } from "../hooks/useConfirm";
 import { printInvoiceHTML } from "../lib/printHelper";
@@ -44,7 +44,7 @@ interface CustomersModuleProps {
   settings?: SystemSettings;
   onAddCustomer: (c: Customer) => void;
   onUpdateCustomer?: (c: Customer) => void;
-  onAddCashFlowEntry?: (entry: any) => void;
+  onAddCashFlowEntry?: (entry: CashFlowEntry) => void;
   onDeleteCustomer: (cId: string) => void;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currentRole: UserRole;
@@ -574,10 +574,11 @@ function CustomersModule({
           "SMS Disparados com Sucesso"
         );
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSmsDispatchStatus("idle");
+      const errTxt = err instanceof Error ? err.message : "Falha ao despachar a campanha de SMS.";
       if (onShowToast) {
-        onShowToast(err.message || "Falha ao despachar a campanha de SMS.", "error", "Falha de Envio");
+        onShowToast(errTxt, "error", "Falha de Envio");
       }
     }
   };
@@ -674,7 +675,7 @@ function CustomersModule({
 
             <select
               value={campaignTarget}
-              onChange={(e) => setCampaignTarget(e.target.value as any)}
+              onChange={(e) => setCampaignTarget(e.target.value as typeof campaignTarget)}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-semibold text-white outline-none focus:border-lime-500 transition"
             >
               <option value="LOYALTY_REDEEMABLE">🌟 Clientes com Saldo de Pontos Resgatáveis (&gt; 0 Pts) - ({customers.filter(c => (c.loyaltyPoints || 0) > 0).length})</option>

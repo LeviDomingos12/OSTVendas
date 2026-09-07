@@ -93,7 +93,7 @@ export const auditLogSchema = z.object({
 // 7. Base de Dados / Armazenamento (db/save)
 export const dbSaveSchema = z.object({
   table: z.enum(["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings", "categories", "suppliers"]),
-  data: z.union([z.array(z.record(z.string(), z.any())), z.record(z.string(), z.any())])
+  data: z.union([z.array(z.record(z.string(), z.unknown())), z.record(z.string(), z.unknown())])
 });
 
 // 8. Envio de E-mail
@@ -131,8 +131,8 @@ export const geminiChatSchema = z.object({
 });
 
 export const geminiForecastSchema = z.object({
-  salesHistory: z.array(z.any()).optional().default([]),
-  inventoryStatus: z.array(z.any()).optional().default([]),
+  salesHistory: z.array(z.unknown()).optional().default([]),
+  inventoryStatus: z.array(z.unknown()).optional().default([]),
   businessType: z.string().max(200).optional().default("Comércio Geral")
 });
 
@@ -229,10 +229,10 @@ export function sanitizeInputData<T>(data: T): T {
   }
 
   if (typeof data === "object") {
-    const copy: Record<string, any> = {};
-    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+    const copy: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
       // Ignorar campos proibidos
-      if (PROHIBITED_CLIENT_FIELDS.includes(key as any)) {
+      if ((PROHIBITED_CLIENT_FIELDS as readonly string[]).includes(key)) {
         continue;
       }
       copy[key] = sanitizeInputData(value);

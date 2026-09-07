@@ -3,7 +3,7 @@ import {
   Printer, Copy, Sparkles, 
   Download, MessageSquare, Check, RefreshCw, Palette, Trash2, Search
 } from "lucide-react";
-import { Product } from "../types";
+import { Product, SystemSettings } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 
 interface PromoFlyerGeneratorProps {
@@ -12,7 +12,7 @@ interface PromoFlyerGeneratorProps {
   onClose: () => void;
   currency?: string;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
-  settings?: any; // App settings including company logo, name, and slogan
+  settings?: SystemSettings; // App settings including company logo, name, and slogan
   allProducts?: Product[]; // Available products list for multi-product poster mode
 }
 
@@ -233,66 +233,58 @@ export function PromoFlyerGenerator({
     window.open(`https://wa.me/?text=${text}`, "_blank");
   };
 
-  // Print function
+  // Print function (Safe DOM-cloned hidden iframe, zero innerHTML or document.write)
   const handlePrint = () => {
-    const printContent = flyerRef.current?.innerHTML;
-    if (!printContent) return;
+    const flyerEl = flyerRef.current;
+    if (!flyerEl) return;
 
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      if (onShowToast) onShowToast("Por favor, permita popups para imprimir.", "warning");
-      return;
+    let iframe = document.getElementById("flyer-print-iframe") as HTMLIFrameElement | null;
+    if (!iframe) {
+      iframe = document.createElement("iframe");
+      iframe.id = "flyer-print-iframe";
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      document.body.appendChild(iframe);
     }
 
-    const themeStyles = `
-      body {
-        margin: 0;
-        padding: 20px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        min-height: 100vh;
-        background-color: #ffffff;
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      }
-      .printable-card {
-        width: 600px;
-        min-height: 800px;
-        border: 1px solid #e2e8f0;
-        border-radius: 28px;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
-        overflow: hidden;
-        page-break-inside: avoid;
-        -webkit-print-color-adjust: exact;
-        print-color-adjust: exact;
-      }
-      @media print {
-        body { padding: 0; background: none; }
-        .printable-card { border: none; box-shadow: none; margin: 0 auto; width: 100%; max-width: 800px; }
-      }
-    `;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) return;
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Cartaz Promocional - ${settings?.companyName || "OST Vendas"}</title>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <style>${themeStyles}</style>
-        </head>
-        <body>
-          <div class="printable-card">
-            ${printContent}
-          </div>
-          <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 500);
-            }
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
+    iframeDoc.open();
+    iframeDoc.close();
+
+    // Copy head styles
+    const styles = document.querySelectorAll("style, link[rel='stylesheet']");
+    styles.forEach(s => {
+      iframeDoc.head.appendChild(s.cloneNode(true));
+    });
+
+    const styleEl = iframeDoc.createElement("style");
+    styleEl.textContent = `
+      @page { margin: 10mm; }
+      body { margin: 0; padding: 20px; display: flex; justify-content: center; background: white; font-family: system-ui, sans-serif; }
+      .printable-card { width: 100%; max-width: 700px; margin: 0 auto; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      @media print { body { padding: 0; } }
+    `;
+    iframeDoc.head.appendChild(styleEl);
+
+    const wrapper = iframeDoc.createElement("div");
+    wrapper.className = "printable-card";
+    wrapper.appendChild(flyerEl.cloneNode(true));
+    iframeDoc.body.replaceChildren(wrapper);
+
+    setTimeout(() => {
+      try {
+        iframe?.contentWindow?.focus();
+        iframe?.contentWindow?.print();
+      } catch {
+        if (onShowToast) onShowToast("Erro ao invocar impressão.", "error");
+      }
+    }, 250);
   };
 
   // Drawing helper for individual product in high-resolution canvas
@@ -897,7 +889,7 @@ export function PromoFlyerGenerator({
       if (onShowToast) {
         onShowToast("Cartaz promocional baixado como imagem PNG de alta resolução! 🚀", "success");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Flyer creation failed:", err);
       if (onShowToast) {
         onShowToast("Falha de permissão ao criar arquivo de imagem.", "error");

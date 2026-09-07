@@ -24,6 +24,7 @@ import {
   Shield
 } from "lucide-react";
 import { SubscriptionPlan, Employee, SystemSettings } from "../types";
+import { verifySecurityPin } from "../lib/security";
 
 interface SubscriptionPlansModuleProps {
   currentPlan: SubscriptionPlan;
@@ -105,7 +106,7 @@ export default function SubscriptionPlansModule({
     setShowAuthModal(true);
   };
 
-  const handleConfirmPinAuth = (e?: React.FormEvent) => {
+  const handleConfirmPinAuth = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!pendingAction) return;
 
@@ -115,19 +116,28 @@ export default function SubscriptionPlansModule({
       return;
     }
 
-    // Check against active user pin, settings pin, master codes, or employee pins
+    // Check against active user pin, settings pin, or admin employee pins using secure hash verification
     const userPin = activeUser?.pin?.trim();
     const settingsPin = settings?.securityPin?.trim();
-    const masterCodes = ["1234", "8888", "202612", "0000", "9999"];
     
-    const isValidPin = 
-      (userPin && trimmedPin === userPin) ||
-      (settingsPin && trimmedPin === settingsPin) ||
-      masterCodes.includes(trimmedPin) ||
-      employees.some(emp => emp.pin && emp.pin.trim() === trimmedPin);
+    let isValidPin = false;
+    if (userPin && await verifySecurityPin(trimmedPin, userPin)) {
+      isValidPin = true;
+    } else if (settingsPin && await verifySecurityPin(trimmedPin, settingsPin)) {
+      isValidPin = true;
+    } else {
+      for (const emp of employees) {
+        if ((emp.role === "Administrador" || emp.role === "ADMIN") && emp.pin) {
+          if (await verifySecurityPin(trimmedPin, emp.pin.trim())) {
+            isValidPin = true;
+            break;
+          }
+        }
+      }
+    }
 
     if (!isValidPin) {
-      setAuthError("❌ Código de Autenticação / PIN Incorreto. Permissão negada.");
+      setAuthError("❌ Código de Autenticação / PIN Incorreto. Apenas Administradores têm permissão.");
       return;
     }
 
@@ -741,7 +751,7 @@ export default function SubscriptionPlansModule({
               </div>
 
               <div className="text-[10px] text-slate-400 font-mono text-center">
-                Dica: Introduza o seu PIN de operador (ex: 1234) ou código mestre.
+                Introduza o PIN de Administrador ou o PIN de Segurança das Configurações.
               </div>
 
               {/* Modal Action Buttons */}

@@ -21,161 +21,22 @@ import {
   AlertTriangle, 
   Flame 
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer
-} from "recharts";
 import { Transaction, SystemSettings, AuditLog } from "../types";
 import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
 import { SYSTEM_THEMES } from "../lib/themes";
-import { printInvoiceHTML } from "../lib/printHelper";
+import { ReportsGeneralTab } from "./reports/ReportsGeneralTab";
+import { ReportsIvaTab } from "./reports/ReportsIvaTab";
+import { ReportsActivityTab } from "./reports/ReportsActivityTab";
+import { ReportsEmailModal } from "./reports/ReportsEmailModal";
+import { ReportsPrintModal } from "./reports/ReportsPrintModal";
+import { ReportsMonthlyModal } from "./reports/ReportsMonthlyModal";
+import { getBase64ImageFromUrl, getFormatFromBase64 } from "./reports/reportsExportHelper";
 
-interface ReportTransactionRowProps {
-  transaction: Transaction;
-  currency: string;
-  onOpenEmail: (t: Transaction) => void;
-  onOpenPrint: (t: Transaction) => void;
-  formatMZ: (val: number) => string;
+interface AutoTableDoc extends jsPDF {
+  lastAutoTable?: { finalY: number };
 }
-
-const ReportTransactionRow = React.memo(({
-  transaction,
-  currency,
-  onOpenEmail,
-  onOpenPrint,
-  formatMZ
-}: ReportTransactionRowProps) => {
-  return (
-    <tr className="hover:bg-slate-50/50 transition">
-      <td className="p-3 font-bold font-mono text-slate-800">{transaction.invoiceNumber}</td>
-      <td className="p-3 text-[11px] whitespace-nowrap">{new Date(transaction.timestamp).toLocaleString()}</td>
-      <td className="p-3 font-semibold text-slate-700">{transaction.customerName || "Consumidor Geral"}</td>
-      <td className="p-3">
-        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-          transaction.paymentMethod === "CASH" ? "bg-amber-50 text-amber-700" :
-          (transaction.paymentMethod as string) === "MPESA_PAGA_FACIL" || (transaction.paymentMethod as string) === "M-PESA" ? "bg-red-50 text-red-600" :
-          "bg-sky-50 text-sky-700"
-        }`}>{transaction.paymentMethod}</span>
-      </td>
-      <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(transaction.subtotal)}</td>
-      <td className="p-3 text-right font-mono text-red-500 font-medium">-{formatMZ(transaction.discountTotal)}</td>
-      <td className="p-3 text-right font-mono text-slate-500 font-medium">{formatMZ(transaction.vatTotal)}</td>
-      <td className="p-3 text-right font-mono font-bold text-slate-800">{formatMZ(transaction.grandTotal)}</td>
-      <td className="p-3 text-center flex items-center justify-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => onOpenEmail(transaction)}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
-          title="Enviar Fatura por E-mail"
-        >
-          <Mail className="w-4 h-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onOpenPrint(transaction)}
-          className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1.5 rounded-lg inline-flex items-center justify-center transition cursor-pointer"
-          title="Imprimir Fatura / Recibo"
-        >
-          <Printer className="w-4 h-4" />
-        </button>
-      </td>
-    </tr>
-  );
-});
-ReportTransactionRow.displayName = "ReportTransactionRow";
-
-interface ReportVatRowProps {
-  transaction: Transaction;
-  formatMZ: (val: number) => string;
-}
-
-const ReportVatRow = React.memo(({
-  transaction,
-  formatMZ
-}: ReportVatRowProps) => {
-  return (
-    <tr className="hover:bg-slate-50/50 transition">
-      <td className="p-3 font-bold font-mono text-slate-800">{transaction.invoiceNumber}</td>
-      <td className="p-3 text-[11px] whitespace-nowrap">{new Date(transaction.timestamp).toLocaleString()}</td>
-      <td className="p-3 font-semibold text-slate-700">{transaction.customerName || "Consumidor Geral"}</td>
-      <td className="p-3 text-right font-mono font-medium text-slate-600">{formatMZ(transaction.subtotal)}</td>
-      <td className="p-3 text-center font-bold">
-        <span className={`px-2 py-0.5 rounded text-[10px] ${
-          transaction.vatTotal > 0 ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-500"
-        }`}>
-          {transaction.vatTotal > 0 ? "16%" : "0% (Isento)"}
-        </span>
-      </td>
-      <td className="p-3 text-right font-mono font-medium text-slate-800">{formatMZ(transaction.vatTotal)}</td>
-      <td className="p-3 text-right font-mono font-bold text-slate-900">{formatMZ(transaction.grandTotal)}</td>
-    </tr>
-  );
-});
-ReportVatRow.displayName = "ReportVatRow";
-
-interface ReportAuditLogRowProps {
-  log: AuditLog;
-}
-
-const ReportAuditLogRow = React.memo(({ log }: ReportAuditLogRowProps) => {
-  return (
-    <tr className="hover:bg-slate-50/50 transition">
-      <td className="p-3 text-slate-500 font-mono text-[10px] whitespace-nowrap">
-        {new Date(log.timestamp).toLocaleString("pt-MZ")}
-      </td>
-      <td className="p-3 font-semibold text-slate-800">{log.user || "Sistema"}</td>
-      <td className="p-3">
-        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-150 text-slate-600 uppercase">
-          {log.module}
-        </span>
-      </td>
-      <td className="p-3 font-bold text-slate-800">{log.action}</td>
-      <td className="p-3 text-slate-500 max-w-xs truncate" title={log.details}>
-        {log.details}
-      </td>
-      <td className="p-3 text-right font-mono text-[10px] text-slate-400">
-        {log.ip || "127.0.0.1"}
-      </td>
-    </tr>
-  );
-});
-ReportAuditLogRow.displayName = "ReportAuditLogRow";
-
-const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
-  if (!imageUrl) return "";
-  if (imageUrl.startsWith("data:")) {
-    return imageUrl;
-  }
-  try {
-    const res = await fetch(imageUrl);
-    const blob = await res.blob();
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  } catch (err) {
-    console.error("Error loading logo for PDF:", err);
-    return "";
-  }
-};
-
-const getFormatFromBase64 = (base64: string): string => {
-  if (!base64) return "JPEG";
-  if (base64.startsWith("data:image/png")) return "PNG";
-  if (base64.startsWith("data:image/webp")) return "WEBP";
-  if (base64.startsWith("data:image/gif")) return "GIF";
-  if (base64.startsWith("data:image/svg")) return "SVG";
-  return "JPEG";
-};
 
 interface ReportsModuleProps {
   transactions: Transaction[];
@@ -555,7 +416,7 @@ function ReportsModule({
       } else {
         throw new Error(data.error || "O servidor SMTP recusou a entrega do relatório.");
       }
-    } catch (err: any) {
+    } catch (err) {
       setTestSendStatus("idle");
       const errMsg = err.message || "Erro desconhecido ao despachar correio.";
       if (onShowToast) {
@@ -607,7 +468,7 @@ function ReportsModule({
         headStyles: { fillColor: [249, 115, 22] }
       });
       
-      const finalY = (doc as any).lastAutoTable.finalY || 50;
+      const finalY = (doc as AutoTableDoc).lastAutoTable?.finalY || 50;
       doc.setFont("helvetica", "bold");
       doc.text(`Subtotal: ${showEmailModal.subtotal.toLocaleString()} MT`, 14, finalY + 10);
       doc.text(`IVA (16%): ${showEmailModal.vatTotal.toLocaleString()} MT`, 14, finalY + 16);
@@ -633,7 +494,7 @@ function ReportsModule({
       
       setShowEmailModal(null);
       setTargetEmail("");
-    } catch (error: any) {
+    } catch (error) {
       if (onShowToast) onShowToast(`Falha ao enviar e-mail: ${error.message}`, "error");
       onAddAuditLog("Erro no Envio de Fatura (Gmail)", "RELATÓRIOS", `Falha ao enviar fatura ${showEmailModal.invoiceNumber} para ${targetEmail}: ${error.message}`);
     } finally {
@@ -999,7 +860,7 @@ function ReportsModule({
           }
         });
 
-        const finalY = (doc as any).lastAutoTable.finalY || 120;
+        const finalY = (doc as AutoTableDoc).lastAutoTable?.finalY || 120;
 
         const drawSignatures = (targetDoc: typeof doc, startY: number) => {
           targetDoc.setDrawColor(203, 213, 225);
@@ -1037,7 +898,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Resumo executivo impresso (A4 PDF) pronto!", "success", "Relatório PDF Gerado");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar resumo financeiro PDF:", err);
         setExportMessage(`Erro ao compilar PDF: ${err.message || err}`);
         if (onShowToast) {
@@ -1176,7 +1037,7 @@ function ReportsModule({
           }
         });
 
-        const secondStartY = (doc as any).lastAutoTable.finalY + 12;
+        const secondStartY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 12;
 
         // 7. Section: Top Products Table
         doc.setFontSize(11);
@@ -1213,7 +1074,7 @@ function ReportsModule({
           }
         });
 
-        const finalY = (doc as any).lastAutoTable.finalY || secondStartY + 40;
+        const finalY = (doc as AutoTableDoc).lastAutoTable?.finalY || secondStartY + 40;
 
         const drawSignatures = (targetDoc: typeof doc, startY: number) => {
           targetDoc.setDrawColor(203, 213, 225);
@@ -1252,7 +1113,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Resumo Mensal exportado com sucesso em PDF!", "success", "Relatório Gerado");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar resumo mensal PDF:", err);
         if (onShowToast) {
           onShowToast("Falha ao exportar relatório PDF mensal.", "error", "Erro de Exportação");
@@ -1502,7 +1363,7 @@ function ReportsModule({
           }
         });
 
-        let nextY = (doc as any).lastAutoTable.finalY + 10;
+        let nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         // 7. Section: Detailed Sales List for the Day
         doc.setFontSize(11);
@@ -1519,10 +1380,10 @@ function ReportsModule({
             timeStr = t.timestamp.split("T")[1]?.slice(0, 5) || "";
           }
 
-          let readableMethod = t.paymentMethod;
-          if (t.paymentMethod === "CASH") readableMethod = "DINHEIRO" as any;
-          else if (t.paymentMethod === "MPESA_PAGA_FACIL") readableMethod = "M-PESA" as any;
-          else if (t.paymentMethod === "POS_CARD") readableMethod = "CARTÃO" as any;
+          let readableMethod: string = t.paymentMethod;
+          if (t.paymentMethod === "CASH") readableMethod = "DINHEIRO";
+          else if (t.paymentMethod === "MPESA_PAGA_FACIL") readableMethod = "M-PESA";
+          else if (t.paymentMethod === "POS_CARD") readableMethod = "CARTÃO";
 
           return [
             t.invoiceNumber,
@@ -1559,7 +1420,7 @@ function ReportsModule({
           }
         });
 
-        nextY = (doc as any).lastAutoTable.finalY + 10;
+        nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         // 8. Signatures Section
         const drawDocSignatures = (targetDoc: typeof doc, startY: number) => {
@@ -1601,7 +1462,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Resumo Financeiro Diário gerado com sucesso!", "success", "PDF Exportado");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar PDF de resumo diário:", err);
         setExportMessage(`Erro ao compilar PDF diário: ${err.message || err}`);
         if (onShowToast) {
@@ -1756,7 +1617,7 @@ function ReportsModule({
           }
         });
 
-        let nextY = (doc as any).lastAutoTable.finalY + 10;
+        let nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         // 7. Section: Top Products Sold
         doc.setFontSize(11);
@@ -1803,7 +1664,7 @@ function ReportsModule({
           }
         });
 
-        nextY = (doc as any).lastAutoTable.finalY + 10;
+        nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         // 8. Signatures Section (draw at page bottom or next page if no space)
         const drawDocSignatures = (targetDoc: typeof doc, startY: number) => {
@@ -1845,7 +1706,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Sumário de Vendas Profissional gerado com sucesso!", "success", "PDF Exportado");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar PDF de sumário de vendas:", err);
         setExportMessage(`Erro ao compilar PDF de vendas: ${err.message || err}`);
         if (onShowToast) {
@@ -1943,7 +1804,7 @@ function ReportsModule({
           }
         });
 
-        let nextY = (doc as any).lastAutoTable.finalY + 10;
+        let nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         // Table 2: Detailed Transactions within selection
         doc.setFontSize(10);
@@ -1977,7 +1838,7 @@ function ReportsModule({
         });
 
         // Signature block
-        const lastY = (doc as any).lastAutoTable.finalY + 12;
+        const lastY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 12;
         if (lastY + 35 > 280) {
           doc.addPage();
           doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
@@ -2004,7 +1865,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Declaração de IVA compilada com sucesso!", "success", "Exportação PDF Concluída");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar PDF de IVA:", err);
         setExportMessage(`Erro ao gerar PDF: ${err.message}`);
         if (onShowToast) {
@@ -2053,7 +1914,7 @@ function ReportsModule({
       if (onShowToast) {
         onShowToast("Demonstrativo de IVA CSV descarregado!", "success");
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error(err);
       if (onShowToast) {
         onShowToast("Falha ao exportar CSV de IVA.", "error");
@@ -2140,7 +2001,7 @@ function ReportsModule({
           }
         });
 
-        let nextY = (doc as any).lastAutoTable.finalY + 10;
+        let nextY = ((doc as AutoTableDoc).lastAutoTable?.finalY || 0) + 10;
 
         doc.setFontSize(10);
         doc.setFont("helvetica", "bold");
@@ -2178,7 +2039,7 @@ function ReportsModule({
         if (onShowToast) {
           onShowToast("Relatório de Auditoria em PDF gerado com sucesso!", "success", "PDF Exportado");
         }
-      } catch (err: any) {
+      } catch (err) {
         console.error("Erro ao gerar PDF de Auditoria:", err);
         setExportMessage(`Erro ao gerar PDF: ${err.message}`);
         if (onShowToast) {
@@ -2269,1405 +2130,112 @@ function ReportsModule({
       </div>
 
       {activeSubTab === "general" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4.5">
-        
-        {/* Sales Card mini */}
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 flex items-center justify-between">
-          <div>
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Faturação Coletada (Acumulada)</span>
-            <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{formatMZ(financialTotals.salesTotal)}</h4>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">{filteredTransactions.length} vendas registradas no período</span>
-          </div>
-          <div className="bg-orange-50 text-orange-600 p-2.5 rounded-xl text-center">
-            <TrendingUp className="w-5 h-5" />
-          </div>
-        </div>
-
-        {/* VAT Tax collection widget */}
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 flex items-center justify-between">
-          <div>
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Imposto IVA Acumulado</span>
-            <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{formatMZ(financialTotals.vatTotal)}</h4>
-            <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block mt-1 leading-none">IVA Oficial 16%</span>
-          </div>
-          <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl text-center">
-            <Calculator className="w-5 h-5" />
-          </div>
-        </div>
-
-        {/* Profits metrics */}
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200 flex items-center justify-between">
-          <div>
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Lucro Líquido Sazonal</span>
-            <h4 className="text-xl font-mono font-bold text-emerald-700 mt-1">+{formatMZ(financialTotals.profitTotal)}</h4>
-            <span className="text-[10px] text-slate-400 mt-0.5 block">Lucro com base em margens operacionais</span>
-          </div>
-          <div className="bg-emerald-50 text-emerald-600 p-2.5 rounded-xl text-center">
-            <DollarSign className="w-5 h-5" />
-          </div>
-        </div>
-
-      </div>
-
-      {/* Grid: Left - Manual Query & Exports, Right - Automatiic email scheduler */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        
-        {/* LEFT COLUMN: Manual Report compilers */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between min-h-[480px] space-y-4">
-          <div className="space-y-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-sm">Gerador Manual de Relatórios Fiscais</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Selecione o intervalo de datas e o formato de exportação.</p>
-            </div>
-
-            {/* Date filter inputs */}
-            <div className="grid grid-cols-2 gap-3.5 bg-slate-50 p-3 rounded-xl border">
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase font-mono block">Data Inicial</label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-slate-650 font-semibold outline-none focus:ring-1 focus:ring-orange-400/50"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-400 uppercase font-mono block">Data Final</label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs text-slate-650 font-semibold outline-none focus:ring-1 focus:ring-orange-400/50"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-1 rounded-xl text-xs font-bold border">
-              <button 
-                type="button"
-                onClick={() => setReportType("SALES")}
-                className={`py-2 rounded-lg cursor-pointer transition ${reportType === "SALES" ? "bg-white text-slate-900 shadow-sm border" : "text-slate-500"}`}
-              >
-                Relatório de Vendas
-              </button>
-              <button 
-                type="button"
-                onClick={() => setReportType("FINANCE")}
-                className={`py-2 rounded-lg cursor-pointer transition ${reportType === "FINANCE" ? "bg-white text-slate-900 shadow-sm border py-2" : "text-slate-500"}`}
-              >
-                Relatório Financeiro
-              </button>
-              <button 
-                type="button"
-                onClick={() => setReportType("VAT")}
-                className={`py-2 rounded-lg cursor-pointer transition ${reportType === "VAT" ? "bg-white text-slate-900 shadow-sm border py-2" : "text-slate-500"}`}
-              >
-                Balanço de IVA
-              </button>
-            </div>
-
-            <div className="flex items-center gap-4.5 justify-between py-2 text-xs text-slate-650">
-              <span>Selecione Formato Digital para Exportar:</span>
-              <div className="flex bg-slate-100 rounded-lg p-0.5 text-xs font-bold font-mono">
-                {["PDF", "EXCEL", "CSV"].map(format => (
-                  <button
-                    key={format}
-                    type="button"
-                    onClick={() => setExportFormat(format as any)}
-                    className={`px-3 py-1 rounded-md cursor-pointer ${exportFormat === format ? "bg-slate-900 text-white shadow" : "text-slate-500"}`}
-                  >
-                    {format}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-50 p-3 rounded-xl border flex flex-col gap-1 text-[11px] text-slate-500 leading-relaxed max-h-36 overflow-y-auto">
-              {reportType === "SALES" && (
-                <p>O Relatório de Vendas consolidação inclui: faturas geradas, faturamento bruto em Meticais (MT), cupons aplicados de desconto e divisão por utilizador (caixa).</p>
-              )}
-              {reportType === "FINANCE" && (
-                <p>O Relatório Financeiro compila receitas de mercadoria versus despesas registadas no fluxo de caixa da empresa, com estimativa líquida de lucros fiscais.</p>
-              )}
-              {reportType === "VAT" && (
-                <p>O Relatório de Imposto IVA reúne todas as taxas isentas fiscais, taxas padrão acumuladas de 16% de Moçambique, e faturas parametrizadas para submissão das declarações.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-3 pt-3.5 border-t border-slate-100">
-            {exportMessage && (
-              <p className="bg-green-50 border border-green-200 text-green-700 text-xs p-2.5 rounded-lg font-bold flex items-center gap-1.5">
-                <CheckCircle className="w-4 h-4 text-green-700 shrink-0" />
-                {exportMessage}
-              </p>
-            )}
-
-            <button
-              type="button"
-              id="btn-generate-monthly-summary"
-              onClick={() => setShowMonthlySummaryModal(true)}
-              className="w-full py-3.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md shadow-orange-500/20 hover:shadow-orange-500/35 transition-all duration-250 active:scale-[0.98]"
-            >
-              <Activity className="w-4.5 h-4.5 text-white shrink-0" />
-              Visualizar Resumo Mensal ({monthlyStats.monthName})
-            </button>
-
-            <button
-              type="button"
-              id="btn-export-monthly-pdf"
-              onClick={handleExportMonthlySummaryPDF}
-              disabled={isExporting}
-              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
-                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
-              }`}
-            >
-              <Download className="w-4 h-4 text-amber-500 shrink-0" />
-              {isExporting ? "Exportando PDF Mensal..." : `Exportar Resumo Financeiro Mensal (PDF - ${monthlyStats.monthName})`}
-            </button>
-
-            <button
-              onClick={handlePerformExport}
-              disabled={isExporting}
-              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg transition-all ${
-                isExporting 
-                  ? "bg-slate-200 text-slate-400" 
-                  : "bg-slate-900 hover:bg-slate-800 text-white shadow-slate-900/10"
-              }`}
-            >
-              <Download className="w-4 h-4 shrink-0" />
-              {isExporting ? "Gerando Ficheiro e compilando bases de dados..." : `Gerar e Descarregar Relatório em ${exportFormat}`}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExportSalesSummaryPDF}
-              disabled={isExporting}
-              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
-                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
-              }`}
-            >
-              <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
-              Exportar Sumário de Vendas do Período (PDF)
-            </button>
-
-            <button
-              type="button"
-              onClick={handleExportDailyFinancialSummaryPDF}
-              disabled={isExporting}
-              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
-                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
-              }`}
-            >
-              <Calendar className="w-4 h-4 text-blue-500 shrink-0" />
-              Exportar Resumo Financeiro Diário (A4 PDF)
-            </button>
-
-            <button
-              type="button"
-              onClick={handlePerformExecutivePrintPDF}
-              disabled={isExporting}
-              className={`w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-250 hover:bg-slate-50 text-slate-700 bg-white transition-all shadow-sm ${
-                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
-              }`}
-            >
-              <Printer className="w-4 h-4 text-orange-500 shrink-0" />
-              Imprimir Resumo Financeiro Executivo (A4 PDF)
-            </button>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: Automatic email setup scheduler */}
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm h-[420px] flex flex-col justify-between">
-          <form onSubmit={handleSaveEmailConfig} className="space-y-4">
-            {localError && (
-              <div className="bg-red-500/10 text-red-400 p-2.5 rounded-lg text-xs font-semibold border border-red-500/20">
-                {localError}
-              </div>
-            )}
-            <div>
-              <div className="flex items-center gap-1 text-orange-600">
-                <Mail className="w-4.5 h-4.5" />
-                <h3 className="font-bold text-slate-800 text-sm">Relatórios Automáticos por Email (SMTP/Robô)</h3>
-              </div>
-              <p className="text-xs text-slate-400 mt-0.5">Venda o sistema para as empresas configurando o e-mail de destino do administrador.</p>
-            </div>
-
-            <div className="space-y-3 md:text-xs">
-              {/* Recipient Address */}
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase">E-mail Destinatário Administrativo *</label>
-                <input
-                  type="email"
-                  required
-                  value={recipientEmail}
-                  onChange={(e) => setRecipientEmail(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-mono font-semibold text-slate-750 outline-none text-xs"
-                  placeholder="Ex: levidomingos12@gmail.com"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3.5">
-                {/* Send Hour */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Horário de Envio Automático</label>
-                  <div className="relative">
-                    <Clock className="absolute left-2.5 top-2 h-4 w-4 text-slate-400" />
-                    <select
-                      value={reportHour}
-                      onChange={(e) => setReportHour(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-8 pr-2 font-semibold cursor-pointer outline-none text-slate-650 text-xs"
-                    >
-                      <option value="02:00">02h00 (Padrão sugerido)</option>
-                      <option value="18:00">18h00 (Fecho operacional)</option>
-                      <option value="20:00">20h00</option>
-                      <option value="22:00">22h00</option>
-                    </select>
-                  </div>
-                </div>
-
-                {/* Send Frequency */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">Frequência do Robô</label>
-                  <select
-                    value={reportFrequency}
-                    onChange={(e) => setReportFrequency(e.target.value as any)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 font-semibold cursor-pointer outline-none text-xs"
-                  >
-                    <option value="daily">Todos os Dias (Diário)</option>
-                    <option value="weekly">Semanalmente (Sábados às 02h00)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-2 bg-slate-100 hover:bg-slate-250 text-slate-700 font-bold rounded-lg text-xs cursor-pointer transition border border-slate-200"
-            >
-              {saveSettingsSuccess ? "Definições de Email Gravadas ✓" : "Salvar Configuração SMTP de Relatórios"}
-            </button>
-          </form>
-
-          {/* Test Action Trigger Area */}
-          <div className="p-3.5 bg-orange-50/50 rounded-xl border border-orange-100 flex items-center justify-between gap-3.5 mt-2 text-xs text-slate-500">
-            <div className="max-w-[200px]">
-              <span className="text-[9.5px] font-extrabold text-orange-800 uppercase tracking-widest font-mono">Disparador de Piloto</span>
-              <p className="text-[10.5px] mt-0.5 leading-tight">Quer receber as estatísticas correntes do OST Vendas agora?</p>
-            </div>
-
-            {testSendStatus === "idle" ? (
-              <button
-                type="button"
-                onClick={handleTriggerTestEmail}
-                className="bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs py-2 px-3 rounded-lg flex items-center gap-1 cursor-pointer shrink-0"
-              >
-                <Play className="w-3.5 h-3.5 shrink-0" />
-                Testar Envio PDF
-              </button>
-            ) : testSendStatus === "sending" ? (
-              <div className="text-xs font-bold text-orange-600 flex items-center gap-1">
-                <span className="w-3 h-3 rounded-full border-2 border-orange-500 border-t-transparent animate-spin"></span>
-                A Disparar...
-              </div>
-            ) : (
-              <div className="bg-emerald-50 text-emerald-800 border border-emerald-100 p-2 rounded-lg text-[10px] leading-snug font-bold">
-                ✓ Despachado! Verifique a sua caixa {recipientEmail}!
-              </div>
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* Visual Table Segment inside ReportsModule */}
-      <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
-        <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col md:flex-row gap-3.5 items-center justify-between">
-          <div>
-            <span className="text-xs font-bold text-slate-800">Visualização Prévia da Tabela de Relatórios ({filteredTransactions.length} registros)</span>
-            <p className="text-[10px] text-slate-400 mt-0.5">Exibindo transações faturadas de {startDate} até {endDate}</p>
-          </div>
-          <div className="flex gap-2.5">
-            <button
-              onClick={() => {
-                setExportFormat("CSV");
-                setTimeout(() => {
-                  setIsExporting(true);
-                  setTimeout(() => {
-                    setIsExporting(false);
-                    let csvContent = "\uFEFF"; // UTF-8 BOM
-                    csvContent += "OST Vendas - Relatorio de Faturamento e Vendas\n";
-                    csvContent += `Periodo Escolhido: ${startDate} ate ${endDate}\n`;
-                    csvContent += `Documento Gerado Em: ${new Date().toLocaleString()}\n`;
-                    csvContent += `Faturamento Total: ${financialTotals.salesTotal} MT\n\n`;
-                    csvContent += "FATURA;DATA;CLIENTE;METODO DE PAGAMENTO;SUBTOTAL (MT);DESCONTO;IVA COBRADO;TOTAL PAGO (MT)\n";
-                    filteredTransactions.forEach(t => {
-                      csvContent += `${t.invoiceNumber};${new Date(t.timestamp).toLocaleDateString()};${t.customerName || "Consumidor Geral"};${t.paymentMethod};${t.subtotal};${t.discountTotal};${t.vatTotal};${t.grandTotal}\n`;
-                    });
-                    const finalBlob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-                    const url = URL.createObjectURL(finalBlob);
-                    const link = document.createElement("a");
-                    link.href = url;
-                    link.download = `Relatorio_Faturamento_${startDate}_a_${endDate}.csv`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                    setExportMessage(`Relatório CSV descarregado com sucesso!`);
-                    onAddAuditLog("Exportar Relatório por Datas", "RELATÓRIOS", `Relatório de vendas exportado em formato CSV.`);
-                  }, 200);
-                }, 50);
-              }}
-              className="border border-slate-200 hover:bg-slate-50 text-slate-705 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer bg-white transition shadow-sm"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              Exportar CSV
-            </button>
-            <button
-              onClick={async () => {
-                setExportFormat("PDF");
-                setIsExporting(true);
-                
-                try {
-                  const { jsPDF } = await import("jspdf");
-                  const { default: autoTable } = await import("jspdf-autotable");
-                  const doc = new jsPDF();
-                  
-                  const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
-                  if (logoData) {
-                    const format = getFormatFromBase64(logoData);
-                    doc.addImage(logoData, format, 165, 8, 30, 30);
-                  }
-                  
-                  doc.setFontSize(16);
-                  doc.setFont("helvetica", "bold");
-                  doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 20);
-                  
-                  doc.setFontSize(10);
-                  doc.setFont("helvetica", "normal");
-                  doc.text(`NUIT: ${settings.companyNuit || "400293112"} | ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 26);
-                  doc.text(`Relatório Consolidado de Vendas e Faturamento`, 14, 32);
-                  doc.text(`Período Selecionado: ${startDate} até ${endDate} | Emitido em: ${new Date().toLocaleString()}`, 14, 38);
-                  
-                  doc.setFillColor(245, 245, 245);
-                  doc.rect(14, 44, 182, 24, "F");
-                  doc.setFontSize(10);
-                  doc.setFont("helvetica", "bold");
-                  doc.text("Resumo Financeiro:", 18, 50);
-                  doc.setFont("helvetica", "normal");
-                  doc.text(`Faturação Coletada: ${formatMZ(financialTotals.salesTotal)}`, 18, 58);
-                  doc.text(`Imposto IVA Liquidado: ${formatMZ(financialTotals.vatTotal)}`, 18, 64);
-                  doc.text(`Vendas Fechadas: ${filteredTransactions.length} Operações`, 116, 58);
-                  
-                  autoTable(doc, {
-                    startY: 74,
-                    head: [["FATURA", "DATA", "CLIENTE", "MÉTODO", "VALOR MT"]],
-                    body: filteredTransactions.map(t => [
-                      t.invoiceNumber,
-                      new Date(t.timestamp).toLocaleDateString(),
-                      t.customerName || "Consumidor Geral",
-                      t.paymentMethod,
-                      formatMZ(t.grandTotal)
-                    ]),
-                    theme: "striped",
-                    styles: { fontSize: 8, cellPadding: 3 },
-                    headStyles: { fillColor: [241, 245, 249], textColor: [71, 85, 105], fontStyle: "bold" },
-                    columnStyles: {
-                      4: { halign: "right", fontStyle: "bold" }
-                    }
-                  });
-                  
-                  doc.save(`Relatorio_Faturamento_${startDate}_a_${endDate}.pdf`);
-                  setExportMessage(`Relatório PDF compilado e descarregado com sucesso!`);
-                  onAddAuditLog("Exportar Relatório por Datas", "RELATÓRIOS", `Relatório de faturamento exportado em formato PDF correspondente.`);
-                } catch (error) {
-                  console.error("Erro ao gerar PDF:", error);
-                  setExportMessage("Ocorreu um erro ao gerar o PDF.");
-                } finally {
-                  setIsExporting(false);
-                }
-              }}
-              className="border border-slate-200 hover:bg-slate-50 text-slate-705 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer bg-white transition shadow-sm"
-            >
-              <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              Exportar PDF
-            </button>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto overflow-y-hidden">
-          <table className="w-full min-w-[800px] text-left text-slate-650 text-xs">
-            <thead>
-              <tr className="bg-slate-100 uppercase text-[10px] font-bold text-slate-500 tracking-wider">
-                <th className="p-3">Fatura</th>
-                <th className="p-3">Data</th>
-                <th className="p-3">Cliente</th>
-                <th className="p-3">Método</th>
-                <th className="p-3 text-right">Subtotal</th>
-                <th className="p-3 text-right">Desconto</th>
-                <th className="p-3 text-right">IVA (16%)</th>
-                <th className="p-3 text-right">Total Pago</th>
-                <th className="p-3 text-center">Acções</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 bg-white font-sans">
-              {filteredTransactions.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400 italic">
-                    Nenhuma fatura encontrada neste intervalo de datas.
-                  </td>
-                </tr>
-              ) : (
-                filteredTransactions.slice(0, 10).map((t) => (
-                  <ReportTransactionRow
-                    key={t.id}
-                    transaction={t}
-                    currency={currency}
-                    onOpenEmail={handleOpenEmailModal}
-                    onOpenPrint={handleOpenPrintModal}
-                    formatMZ={formatMZ}
-                  />
-                ))
-              )}
-              {filteredTransactions.length > 10 && (
-                <tr>
-                  <td colSpan={9} className="p-3 text-center bg-slate-50 text-[10.5px] font-semibold text-slate-400">
-                    ... e mais {filteredTransactions.length - 10} vendas faturadas no período selecionadas para a exportação oficial.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-            {filteredTransactions.length > 0 && (
-              <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
-                <tr>
-                  <td colSpan={4} className="p-3 text-right text-[10px] uppercase text-slate-500">Totais da Visualização:</td>
-                  <td className="p-3 text-right font-mono text-slate-800">{formatMZ(financialTotals.subtotalTotal)}</td>
-                  <td className="p-3 text-right font-mono text-red-600">-{formatMZ(financialTotals.discountTotal)}</td>
-                  <td className="p-3 text-right font-mono text-slate-800">{formatMZ(financialTotals.vatTotal)}</td>
-                  <td className="p-3 text-right font-mono text-emerald-700">{formatMZ(financialTotals.salesTotal)}</td>
-                  <td className="p-3"></td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-      </div>
-      </div>
+        <ReportsGeneralTab
+          financialTotals={financialTotals}
+          filteredTransactions={filteredTransactions}
+          startDate={startDate}
+          setStartDate={setStartDate}
+          endDate={endDate}
+          setEndDate={setEndDate}
+          reportType={reportType}
+          setReportType={setReportType}
+          exportFormat={exportFormat}
+          setExportFormat={setExportFormat}
+          exportMessage={exportMessage}
+          setExportMessage={setExportMessage}
+          isExporting={isExporting}
+          setIsExporting={setIsExporting}
+          monthlyStats={monthlyStats}
+          setShowMonthlySummaryModal={setShowMonthlySummaryModal}
+          onExportMonthlySummaryPDF={handleExportMonthlySummaryPDF}
+          onPerformExport={handlePerformExport}
+          onExportSalesSummaryPDF={handleExportSalesSummaryPDF}
+          onExportDailyFinancialSummaryPDF={handleExportDailyFinancialSummaryPDF}
+          onPerformExecutivePrintPDF={handlePerformExecutivePrintPDF}
+          localError={localError}
+          recipientEmail={recipientEmail}
+          setRecipientEmail={setRecipientEmail}
+          reportHour={reportHour}
+          setReportHour={setReportHour}
+          reportFrequency={reportFrequency}
+          setReportFrequency={setReportFrequency}
+          saveSettingsSuccess={saveSettingsSuccess}
+          onSaveEmailConfig={handleSaveEmailConfig}
+          testSendStatus={testSendStatus}
+          onTriggerTestEmail={handleTriggerTestEmail}
+          currency={currency}
+          settings={settings}
+          formatMZ={formatMZ}
+          onOpenEmail={handleOpenEmailModal}
+          onOpenPrint={handleOpenPrintModal}
+          onAddAuditLog={onAddAuditLog}
+        />
       )}
 
       {activeSubTab === "iva" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg space-y-3">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Percent className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Calculadora & Declaração de IVA</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Apuração automatizada e cálculo periódico do Imposto sobre Valor Acrescentado (IVA) de Moçambique (16%).
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Date and Input Config Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* Date Picker */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
-                <Clock className="w-4 h-4 text-orange-500" />
-                Intervalo de Apuração
-              </div>
-              <div className="grid grid-cols-2 gap-3.5">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Data Inicial</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-650 font-semibold outline-none focus:ring-1 focus:ring-orange-400/50"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase block">Data Final</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs text-slate-650 font-semibold outline-none focus:ring-1 focus:ring-orange-400/50"
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1">
-                Modifique as datas para recalcular instantaneamente os valores agregados das faturas.
-              </p>
-            </div>
-
-            {/* Input VAT / Manual Deductions */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
-                <Calculator className="w-4 h-4 text-blue-500" />
-                Deduções de IVA (Compras/Custos)
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-slate-500 uppercase block">IVA Dedutível Suportado (MT)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-2 text-xs font-bold text-slate-400">MT</span>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0.00"
-                    value={manualIvaDeduction || ""}
-                    onChange={(e) => setManualIvaDeduction(parseFloat(e.target.value) || 0)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg py-2 pl-9 pr-3 text-xs text-slate-800 font-semibold font-mono outline-none focus:ring-1 focus:ring-blue-400/50"
-                  />
-                </div>
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Insira o IVA total pago em facturas de compras a fornecedores para compensar contra o IVA retido das vendas.
-              </p>
-            </div>
-
-            {/* Simulated Rate Selector */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
-                <Percent className="w-4 h-4 text-emerald-500" />
-                Simulação de Alíquota Diferencial
-              </div>
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                  <span>Alíquota do Simulador:</span>
-                  <span className="text-emerald-600 font-mono text-xs">{simulatedIvaRate}%</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="30"
-                  step="1"
-                  value={simulatedIvaRate}
-                  onChange={(e) => setSimulatedIvaRate(parseInt(e.target.value) || 0)}
-                  className="w-full accent-emerald-500 cursor-pointer"
-                />
-              </div>
-              <p className="text-[11px] text-slate-400">
-                Alíquota oficial de Moçambique: 16%. Ajuste o slider para simular o imposto arrecadado com alíquotas diferentes.
-              </p>
-            </div>
-          </div>
-
-          {/* IVA Cards Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4.5">
-            {/* Brut Sales */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Faturamento Bruto</span>
-              <h4 className="text-lg font-mono font-bold text-slate-800 mt-1">{formatMZ(financialTotals.salesTotal)}</h4>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">{filteredTransactions.length} faturas faturadas</span>
-            </div>
-
-            {/* Output VAT Collected */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">IVA Liquidado (Vendas)</span>
-              <h4 className="text-lg font-mono font-bold text-slate-800 mt-1">{formatMZ(vatCalculations.realVatCollected)}</h4>
-              <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block mt-1 leading-none text-[9px]">Taxa Aplicada de 16%</span>
-            </div>
-
-            {/* Input VAT Deductible */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">IVA Dedutível (Compras)</span>
-              <h4 className="text-lg font-mono font-bold text-slate-800 mt-1">{formatMZ(manualIvaDeduction)}</h4>
-              <span className="text-[10px] text-slate-400 mt-0.5 block">Crédito fiscal dedutível</span>
-            </div>
-
-            {/* Net VAT Balance Payable/Refundable */}
-            <div className={`p-4.5 rounded-2xl border ${
-              vatCalculations.netVatPayable >= 0 
-                ? "bg-red-50/50 border-red-200 text-red-900" 
-                : "bg-emerald-50/50 border-emerald-200 text-emerald-900"
-            }`}>
-              <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Saldo Final (IVA Net)</span>
-              <h4 className="text-lg font-mono font-bold mt-1">
-                {vatCalculations.netVatPayable >= 0 ? "+" : "-"}
-                {formatMZ(Math.abs(vatCalculations.netVatPayable))}
-              </h4>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full inline-block mt-1 leading-none text-[9px] ${
-                vatCalculations.netVatPayable >= 0 
-                  ? "bg-red-100 text-red-800" 
-                  : "bg-emerald-100 text-emerald-800"
-              }`}>
-                {vatCalculations.netVatPayable >= 0 ? "Imposto a Pagar ao Estado" : "Crédito Fiscal a Recuperar"}
-              </span>
-            </div>
-          </div>
-
-          {/* Grid Layout: Left (Detailed Official Sheet), Right (Simulations, Controls, Exports) */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-            {/* LEFT Column: Detailed Sheet (occupies 2 cols) */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 lg:col-span-2">
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">Resumo da Apuração de IVA (Modelo Oficial)</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Balancete simulado em conformidade com o regulamento do IVA de Moçambique.</p>
-              </div>
-
-              {/* Sheet Table */}
-              <div className="border border-slate-100 rounded-xl overflow-hidden text-xs">
-                {/* Headers */}
-                <div className="grid grid-cols-3 bg-slate-100 p-3 font-bold text-slate-700 border-b border-slate-200">
-                  <div className="col-span-2">Rubricas de Apuração e Base Legal</div>
-                  <div className="text-right">Montante Consolidado</div>
-                </div>
-
-                {/* Line 1 */}
-                <div className="grid grid-cols-3 p-3 text-slate-600 border-b border-slate-100 font-sans hover:bg-slate-50 transition">
-                  <div className="col-span-2 flex gap-2">
-                    <span className="font-bold text-slate-400 font-mono">01.</span>
-                    <span>Total de Vendas / Faturamento Bruto Comercial</span>
-                  </div>
-                  <div className="text-right font-mono font-semibold text-slate-800">{formatMZ(financialTotals.salesTotal)}</div>
-                </div>
-
-                {/* Line 2 */}
-                <div className="grid grid-cols-3 p-3 text-slate-600 border-b border-slate-100 font-sans hover:bg-slate-50 transition">
-                  <div className="col-span-2 flex gap-2">
-                    <span className="font-bold text-slate-400 font-mono">02.</span>
-                    <span>Base Tributável de Vendas (Sujeitas a IVA à taxa normal)</span>
-                  </div>
-                  <div className="text-right font-mono font-semibold text-slate-800">{formatMZ(vatCalculations.taxableSalesSubtotal)}</div>
-                </div>
-
-                {/* Line 3 */}
-                <div className="grid grid-cols-3 p-3 text-slate-600 border-b border-slate-100 font-sans hover:bg-slate-50 transition">
-                  <div className="col-span-2 flex gap-2">
-                    <span className="font-bold text-slate-400 font-mono">03.</span>
-                    <span>Operações Isentas ou Não Sujeitas (IVA 0%)</span>
-                  </div>
-                  <div className="text-right font-mono font-semibold text-slate-800">{formatMZ(vatCalculations.exemptSalesSubtotal)}</div>
-                </div>
-
-                {/* Line 4 */}
-                <div className="grid grid-cols-3 p-3 text-slate-600 border-b border-slate-100 font-sans hover:bg-slate-50 transition">
-                  <div className="col-span-2 flex gap-2">
-                    <span className="font-bold text-slate-400 font-mono">04.</span>
-                    <span>IVA Liquidado (Imposto retido nas vendas a taxa de 16%)</span>
-                  </div>
-                  <div className="text-right font-mono font-extrabold text-slate-800">{formatMZ(vatCalculations.realVatCollected)}</div>
-                </div>
-
-                {/* Line 5 */}
-                <div className="grid grid-cols-3 p-3 text-slate-600 border-b border-slate-100 font-sans hover:bg-slate-50 transition">
-                  <div className="col-span-2 flex gap-2">
-                    <span className="font-bold text-slate-400 font-mono">05.</span>
-                    <span>IVA Dedutível Autorizado (Suportado nas compras declaradas)</span>
-                  </div>
-                  <div className="text-right font-mono font-extrabold text-blue-600">-{formatMZ(manualIvaDeduction)}</div>
-                </div>
-
-                {/* Saldo Final */}
-                <div className={`grid grid-cols-3 p-3.5 font-bold text-xs ${
-                  vatCalculations.netVatPayable >= 0 ? "bg-red-50 text-red-950" : "bg-emerald-50 text-emerald-950"
-                }`}>
-                  <div className="col-span-2 flex gap-2 items-center">
-                    <span className="font-mono text-slate-500">06.</span>
-                    <span>
-                      {vatCalculations.netVatPayable >= 0 
-                        ? "IMPOSTO LÍQUIDO A ENTREGAR AO ESTADO" 
-                        : "CRÉDITO FISCAL DE IVA A RECUPERAR / REPORTAR"}
-                    </span>
-                  </div>
-                  <div className="text-right font-mono font-extrabold text-sm">
-                    {formatMZ(Math.abs(vatCalculations.netVatPayable))}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT Column: Exports & Summary */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between space-y-4">
-              <div className="space-y-4">
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm">Resumos Exportáveis & Ações</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Gere relatórios certificados de auditoria de impostos de forma segura.</p>
-                </div>
-
-                {/* Simulated Rate Stats Card if slider adjusted */}
-                {simulatedIvaRate !== 16 && (
-                  <div className="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-100 text-xs space-y-1">
-                    <span className="text-[9px] font-bold text-emerald-700 uppercase block tracking-wider">Cenário de Simulação Diferencial</span>
-                    <p className="text-slate-600 text-[11px] leading-snug">
-                      Se a alíquota de IVA fosse <span className="font-bold">{simulatedIvaRate}%</span>, o IVA coletado seria de <span className="font-bold">{formatMZ(vatCalculations.simulatedVatCollected)}</span> (diferença de <span className="font-bold">{formatMZ(vatCalculations.simulatedVatCollected - vatCalculations.realVatCollected)}</span>).
-                    </p>
-                  </div>
-                )}
-
-                <div className="bg-slate-50 p-3.5 rounded-xl border space-y-2 text-[11px] text-slate-500 leading-snug">
-                  <div className="flex gap-2">
-                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Período fiscal fechado localmente e pronto para exportação.</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                    <span>Compatível com as finanças de Moçambique.</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 pt-3">
-                {exportMessage && (
-                  <p className="bg-green-50 border border-green-200 text-green-700 text-xs p-2.5 rounded-lg font-bold flex items-center gap-1.5 animate-in fade-in">
-                    <CheckCircle className="w-4 h-4 text-green-700 shrink-0" />
-                    {exportMessage}
-                  </p>
-                )}
-
-                <button
-                  id="btn-export-iva-pdf"
-                  type="button"
-                  onClick={handleExportIvaPdf}
-                  disabled={isExporting}
-                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-lg shadow-slate-950/15"
-                >
-                  <Download className="w-4 h-4 text-orange-400 shrink-0" />
-                  {isExporting ? "A processar..." : "Descarregar Declaração IVA Oficial (PDF)"}
-                </button>
-
-                <button
-                  id="btn-export-iva-csv"
-                  type="button"
-                  onClick={handleExportIvaCsv}
-                  disabled={isExporting}
-                  className="w-full py-3 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition shadow-sm"
-                >
-                  <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-                  Descarregar Ficheiro de Apoio (CSV)
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Interactive Transactions list inside IVA tab */}
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
-            <div className="p-4 bg-slate-50 border-b border-slate-100 flex flex-col md:flex-row gap-3.5 items-center justify-between">
-              <div>
-                <span className="text-xs font-bold text-slate-800">Transações Auditadas no Período ({filteredTransactions.length} registros)</span>
-                <p className="text-[10px] text-slate-400 mt-0.5">Exibindo detalhes fiscais de faturas emitidas de {startDate} até {endDate}</p>
-              </div>
-
-              {/* Class filters */}
-              <div className="flex gap-1.5 bg-slate-100 p-1 rounded-xl text-xs font-bold border">
-                <button
-                  type="button"
-                  onClick={() => setVatFilterClass("all")}
-                  className={`px-3 py-1.5 rounded-lg cursor-pointer transition ${vatFilterClass === "all" ? "bg-white text-slate-900 shadow-sm border" : "text-slate-500"}`}
-                >
-                  Todas
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVatFilterClass("taxable")}
-                  className={`px-3 py-1.5 rounded-lg cursor-pointer transition ${vatFilterClass === "taxable" ? "bg-white text-slate-900 shadow-sm border" : "text-slate-500"}`}
-                >
-                  Tributadas (16%)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVatFilterClass("exempt")}
-                  className={`px-3 py-1.5 rounded-lg cursor-pointer transition ${vatFilterClass === "exempt" ? "bg-white text-slate-900 shadow-sm border" : "text-slate-500"}`}
-                >
-                  Isentas (0%)
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto overflow-y-hidden">
-              <table className="w-full min-w-[800px] text-left text-slate-650 text-xs font-sans">
-                <thead>
-                  <tr className="bg-slate-100 uppercase text-[10px] font-bold text-slate-500 tracking-wider">
-                    <th className="p-3">Fatura</th>
-                    <th className="p-3">Data</th>
-                    <th className="p-3">Cliente</th>
-                    <th className="p-3 text-right">Base Tributável (Subtotal)</th>
-                    <th className="p-3 text-center">Alíquota</th>
-                    <th className="p-3 text-right">IVA Coletado</th>
-                    <th className="p-3 text-right">Valor Total Pago</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white font-sans">
-                  {filteredTransactions
-                    .filter(t => {
-                      if (vatFilterClass === "taxable") return t.vatTotal > 0;
-                      if (vatFilterClass === "exempt") return t.vatTotal === 0;
-                      return true;
-                    })
-                    .length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-8 text-center text-slate-400 italic font-sans">
-                        Nenhuma transação correspondente a este filtro de classe de IVA neste período.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredTransactions
-                      .filter(t => {
-                        if (vatFilterClass === "taxable") return t.vatTotal > 0;
-                        if (vatFilterClass === "exempt") return t.vatTotal === 0;
-                        return true;
-                      })
-                      .slice(0, 15)
-                      .map((t) => (
-                        <ReportVatRow key={t.id} transaction={t} formatMZ={formatMZ} />
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <ReportsIvaTab
+          startDate={startDate}
+          setStartDate={setStartDate}
+          endDate={endDate}
+          setEndDate={setEndDate}
+          manualIvaDeduction={manualIvaDeduction}
+          setManualIvaDeduction={setManualIvaDeduction}
+          simulatedIvaRate={simulatedIvaRate}
+          setSimulatedIvaRate={setSimulatedIvaRate}
+          financialTotals={financialTotals}
+          vatCalculations={vatCalculations}
+          filteredTransactions={filteredTransactions}
+          vatFilterClass={vatFilterClass}
+          setVatFilterClass={setVatFilterClass}
+          exportMessage={exportMessage}
+          isExporting={isExporting}
+          onExportIvaPdf={handleExportIvaPdf}
+          onExportIvaCsv={handleExportIvaCsv}
+          formatMZ={formatMZ}
+        />
       )}
 
       {activeSubTab === "activity" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          {/* Header Card */}
-          <div className="bg-slate-900 text-white p-6 rounded-2xl border border-slate-800 shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-orange-500 text-slate-950 p-2.5 rounded-xl shrink-0">
-                <Activity className="w-5 h-5 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="font-extrabold text-white text-base">Atividade & Auditoria do Sistema</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Análise visual dos logs de auditoria para monitorar a frequência de ações, identificar picos operacionais e rastrear acessos ou modificações.
-                </p>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              id="btn-export-activity-pdf-header"
-              onClick={handleExportActivityLogsPDF}
-              disabled={isExporting}
-              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-slate-950 font-extrabold text-xs rounded-xl shadow-md transition-all cursor-pointer shrink-0 active:scale-95"
-            >
-              <Printer className="w-4 h-4 text-slate-950 shrink-0" />
-              <span>Exportar Auditoria (PDF com Logotipo)</span>
-            </button>
-          </div>
-
-          {/* KPI Row */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4.5">
-            {/* KPI 1 */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase block">Total de Ações</span>
-                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{filteredLogs.length}</h4>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">Registros no período</span>
-              </div>
-              <div className="bg-blue-50 text-blue-600 p-2.5 rounded-xl">
-                <Activity className="w-5 h-5" />
-              </div>
-            </div>
-
-            {/* KPI 2 */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase block">Pico de Atividade</span>
-                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{activityAnalytics.peakActivityValue} ações</h4>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">em {activityAnalytics.peakActivityDate || "N/D"}</span>
-              </div>
-              <div className="bg-orange-50 text-orange-600 p-2.5 rounded-xl">
-                <Flame className="w-5 h-5 animate-bounce" />
-              </div>
-            </div>
-
-            {/* KPI 3 */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase block">Módulos Ativos</span>
-                <h4 className="text-xl font-mono font-bold text-slate-800 mt-1">{activityAnalytics.activeModulesCount}</h4>
-                <span className="text-[10px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded-full inline-block mt-1 leading-none text-[9px]">{activityAnalytics.mostActiveModule || "N/A"}</span>
-              </div>
-              <div className="bg-emerald-50 text-emerald-600 p-2.5 rounded-xl">
-                <ShieldAlert className="w-5 h-5" />
-              </div>
-            </div>
-
-            {/* KPI 4 */}
-            <div className="bg-white p-4.5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div>
-                <span className="text-[10px] text-slate-400 font-bold uppercase block">Operador Mais Ativo</span>
-                <h4 className="text-sm font-bold text-slate-800 mt-1 truncate max-w-[130px]">{activityAnalytics.mostActiveUser || "N/D"}</h4>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">{activityAnalytics.mostActiveUserLogsCount} ações registradas</span>
-              </div>
-              <div className="bg-indigo-50 text-indigo-600 p-2.5 rounded-xl">
-                <User className="w-5 h-5" />
-              </div>
-            </div>
-          </div>
-
-          {/* Chart Controls & Recharts Visualization */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="font-bold text-slate-800 text-sm">Cronograma Frequencial de Logs e Ações</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Representação gráfica da densidade de transações, acessos, exportações e alterações.</p>
-              </div>
-
-              {/* Grouping Toggle buttons */}
-              <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold font-mono">
-                {(["daily", "hourly", "module"] as const).map(group => (
-                  <button
-                    key={group}
-                    type="button"
-                    onClick={() => setActivityGrouping(group)}
-                    className={`px-3.5 py-1.5 rounded-lg cursor-pointer transition ${
-                      activityGrouping === group ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {group === "daily" ? "Por Dia" : group === "hourly" ? "Por Hora" : "Por Módulo"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Chart Container */}
-            <div className="h-[350px] w-full text-xs font-mono">
-              {chartData.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 bg-slate-50/50 rounded-2xl border border-dashed p-10">
-                  <AlertTriangle className="w-8 h-8 text-slate-350" />
-                  <span>Nenhuma atividade registrada no período selecionado.</span>
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} margin={{ top: 10, right: 10, left: -25, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="label" stroke="#94a3b8" />
-                    <YAxis stroke="#94a3b8" allowDecimals={false} />
-                    <RechartsTooltip 
-                      contentStyle={{ background: "#0f172a", border: "none", borderRadius: "12px", color: "#fff", fontSize: "11px" }}
-                      itemStyle={{ color: "#38bdf8" }}
-                    />
-                    <Bar 
-                      dataKey="count" 
-                      name="Ações Executadas" 
-                      fill={SYSTEM_THEMES.find(t => t.id === settings.theme)?.rgb ? `rgb(${SYSTEM_THEMES.find(t => t.id === settings.theme)?.rgb})` : "#f97316"} 
-                      radius={[4, 4, 0, 0]} 
-                      maxBarSize={45}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-
-          {/* Audit Logs Table for context */}
-          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-sm">Registro Operacional em Tempo Real</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Lista detalhada dos últimos logs de auditoria correspondentes ao período.</p>
-            </div>
-
-            <div className="border border-slate-150 rounded-xl overflow-x-auto custom-scrollbar text-xs">
-              <table className="w-full text-left border-collapse min-w-[850px]">
-                <thead className="bg-slate-50 border-b border-slate-200 font-bold text-slate-700">
-                  <tr>
-                    <th className="p-3">Data/Hora</th>
-                    <th className="p-3">Operador</th>
-                    <th className="p-3">Módulo</th>
-                    <th className="p-3">Ação</th>
-                    <th className="p-3">Detalhes</th>
-                    <th className="p-3 text-right">IP/Dispositivo</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredLogs.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-slate-400 font-medium">Nenhum registro encontrado.</td>
-                    </tr>
-                  ) : (
-                    [...filteredLogs].reverse().slice(0, 15).map((log, idx) => (
-                      <ReportAuditLogRow key={`${log.id || 'log'}-${idx}`} log={log} />
-                    ))
-                  )}
-                </tbody>
-              </table>
-              {filteredLogs.length > 15 && (
-                <div className="p-3 bg-slate-50 border-t border-slate-150 text-center text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  Exibindo as 15 ações mais recentes de {filteredLogs.length} logs totais no período.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <ReportsActivityTab
+          filteredLogs={filteredLogs}
+          activityAnalytics={activityAnalytics}
+          chartData={chartData}
+          activityGrouping={activityGrouping}
+          setActivityGrouping={setActivityGrouping}
+          onExportActivityLogsPDF={handleExportActivityLogsPDF}
+          isExporting={isExporting}
+          settings={settings}
+        />
       )}
 
-      {showEmailModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-slate-50 border-b border-slate-100 p-5 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-slate-800">Enviar Fatura por E-mail</h3>
-                <p className="text-xs text-slate-500 mt-0.5">Disparo via Gmail Oficial</p>
-              </div>
-              <div className="bg-orange-50 text-orange-600 p-2 rounded-xl">
-                <Send className="w-5 h-5" />
-              </div>
-            </div>
-            
-            <form onSubmit={handleSendInvoiceEmail} className="p-5 space-y-4">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 mb-2">
-                <p className="text-xs text-slate-600 font-semibold mb-1">Fatura Selecionada:</p>
-                <div className="flex justify-between items-center font-mono">
-                  <span className="font-bold text-slate-900">{showEmailModal.invoiceNumber}</span>
-                  <span className="font-bold text-emerald-600">{showEmailModal.grandTotal.toLocaleString()} {currency}</span>
-                </div>
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-600">E-mail do Cliente</label>
-                <input
-                  type="email"
-                  required
-                  autoFocus
-                  placeholder="cliente@email.com"
-                  value={targetEmail}
-                  onChange={(e) => setTargetEmail(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl p-3 text-sm font-semibold text-slate-800 outline-none focus:border-slate-400 focus:ring-2 focus:ring-slate-100"
-                />
-              </div>
+      <ReportsEmailModal
+        showEmailModal={showEmailModal}
+        targetEmail={targetEmail}
+        setTargetEmail={setTargetEmail}
+        sendingInvoiceId={sendingInvoiceId}
+        currency={currency}
+        onClose={() => {
+          setShowEmailModal(null);
+          setTargetEmail("");
+        }}
+        onSubmit={handleSendInvoiceEmail}
+      />
 
-              <div className="flex gap-3 pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowEmailModal(null);
-                    setTargetEmail("");
-                  }}
-                  disabled={sendingInvoiceId === showEmailModal.id}
-                  className="w-1/2 py-2.5 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={sendingInvoiceId === showEmailModal.id || !targetEmail}
-                  className="w-1/2 py-2.5 font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-slate-900/20 disabled:opacity-70"
-                >
-                  {sendingInvoiceId === showEmailModal.id ? (
-                    <>
-                      <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0"></span>
-                      Enviando...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="w-3.5 h-3.5" />
-                      Enviar Agora
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ReportsPrintModal
+        showPrintModal={showPrintModal}
+        settings={settings}
+        currency={currency}
+        onClose={() => setShowPrintModal(null)}
+      />
 
-      {showPrintModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200 p-6 flex flex-col gap-4">
-            
-            {/* Modal Header (No-Print) */}
-            <div className="no-print flex justify-between items-center border-b border-slate-100 pb-3">
-              <div className="flex items-center gap-2">
-                <Printer className="w-5 h-5 text-orange-500" />
-                <h3 className="font-extrabold text-slate-900 text-sm">Comprovativo de Venda</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowPrintModal(null)}
-                className="text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
-              >
-                Fechar ×
-              </button>
-            </div>
-
-            {/* Printable Receipt Layout */}
-            <div id="print-modal-container" className="bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-[11px] leading-tight text-slate-705 max-h-[420px] overflow-y-auto select-all">
-              <style>{`
-                @media print {
-                  body * {
-                    visibility: hidden !important;
-                  }
-                  #print-modal-container, #print-modal-container * {
-                    visibility: visible !important;
-                  }
-                  #print-modal-container {
-                    position: absolute !important;
-                    left: 0 !important;
-                    top: 0 !important;
-                    width: 100% !important;
-                    height: auto !important;
-                    border: none !important;
-                    background: white !important;
-                    color: black !important;
-                    padding: 20px !important;
-                    margin: 0 !important;
-                    box-shadow: none !important;
-                    overflow: visible !important;
-                  }
-                  .no-print {
-                    display: none !important;
-                  }
-                }
-              `}</style>
-
-              <div className="text-center font-bold text-slate-800 mb-2 border-b border-dashed border-slate-300 pb-2">
-                {settings.logoUrl && (
-                  <img
-                    src={settings.logoUrl}
-                    alt="Logo Recibo"
-                    className="w-10 h-10 object-contain mx-auto mb-1.5 bg-white p-0.5 rounded border border-slate-200"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-                <p className="uppercase">{settings.companyName || "OST COMÉRCIO CENTRAL"}</p>
-                <p className="font-normal text-[9px] text-slate-500 font-sans">{settings.storeAddress || "Av. Marginal, Kiosk 14, Maputo"}</p>
-                <p className="font-normal text-[9px] text-slate-500 font-sans">NUIT: {settings.companyNuit || "400293112"}</p>
-              </div>
-
-              <div className="space-y-1 mb-2">
-                <p><span className="text-slate-500">Fatura:</span> {showPrintModal.invoiceNumber}</p>
-                <p><span className="text-slate-500">Data/Hora:</span> {new Date(showPrintModal.timestamp).toLocaleString()}</p>
-                <p><span className="text-slate-500">Operador:</span> {showPrintModal.cashierName}</p>
-                <p><span className="text-slate-500">Cliente:</span> {showPrintModal.customerName || "Consumidor Geral"}</p>
-                {showPrintModal.nuit && <p><span className="text-slate-500">NUIT Cli:</span> {showPrintModal.nuit}</p>}
-              </div>
-
-              <div className="border-b border-dashed border-slate-300 py-1 mb-2">
-                <div className="grid grid-cols-12 gap-1 font-bold text-slate-800 text-[10px]">
-                  <span className="col-span-6 truncate">PRODUTO</span>
-                  <span className="col-span-2 text-center">QTD</span>
-                  <span className="col-span-4 text-right">VALOR</span>
-                </div>
-                {showPrintModal.items.map((item, i) => (
-                  <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
-                    <span className="col-span-6 truncate">{item.productName}</span>
-                    <span className="col-span-2 text-center">{item.quantity}</span>
-                    <span className="col-span-4 text-right">{(item.price * item.quantity).toLocaleString()} {currency}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="space-y-1 text-slate-600 text-right">
-                <p>SUBTOTAL: {showPrintModal.subtotal.toLocaleString()} {currency}</p>
-                {showPrintModal.discountTotal > 0 && <p className="text-red-650 font-bold">DESC. GER: -{showPrintModal.discountTotal.toLocaleString()} {currency}</p>}
-                <p>TOTAL IVA COBRADO: {showPrintModal.vatTotal.toLocaleString()} {currency}</p>
-                <p className="text-slate-900 font-bold text-xs border-t border-dashed border-slate-300 pt-1">
-                  TOTAL PAGO: {showPrintModal.grandTotal.toLocaleString()} {currency}
-                </p>
-                <p className="text-[10px] text-slate-500 font-medium italic mt-1">Método: {showPrintModal.paymentMethod}</p>
-                {showPrintModal.paymentDetails && (
-                  <p className="text-[9.5px] text-red-600 font-semibold italic mt-0.5">{showPrintModal.paymentDetails}</p>
-                )}
-              </div>
-
-              <p className="text-center font-semibold text-[9px] text-slate-500 mt-3 border-t border-dashed border-slate-300 pt-2 block">
-                *** Muito Obrigado Pela Visita! ***
-              </p>
-
-              {/* Unique QR Code Generator for Digital Receipt */}
-              <div className="mt-3 pt-3 border-t border-dashed border-slate-300 flex flex-col items-center justify-center gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-sm no-print">
-                <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-200">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(showPrintModal.invoiceNumber)}`}
-                    alt={`QR Code Fatura ${showPrintModal.invoiceNumber}`}
-                    className="w-20 h-20 object-contain"
-                  />
-                </div>
-                <div className="text-center">
-                  <span className="text-[8px] font-black text-slate-700 tracking-wider font-sans uppercase">RECIBO DIGITAL</span>
-                  <p className="text-[7.5px] text-slate-400 font-sans mt-0.5 max-w-[180px] mx-auto leading-tight">
-                    Aponte a câmara para visualizar a fatura digital <strong className="font-semibold text-slate-600">#{showPrintModal.invoiceNumber}</strong>
-                  </p>
-                </div>
-              </div>
-
-              {showPrintModal.fiscalCertified && (
-                <div className="mt-3 pt-2 border-t border-dashed border-slate-300 text-center text-[9px] text-slate-500 font-sans space-y-2">
-                  <div className="space-y-0.5">
-                    <p className="font-extrabold text-slate-700 tracking-wider">DOCUMENTO FISCAL HOMOLOGADO</p>
-                    <p className="text-[8px]">Certificação Nº: {settings.fiscalCertificationNumber || "OST/CERT/00249/2026"}</p>
-                    {showPrintModal.fiscalKeys && <p className="font-mono text-[8px] bg-white py-0.5 rounded border border-slate-200 px-1 font-bold text-slate-800 select-all">Chave: {showPrintModal.fiscalKeys}</p>}
-                    {showPrintModal.fiscalHash && <p className="font-mono text-[6.5px] text-slate-400 break-all leading-tight">Assinatura: {showPrintModal.fiscalHash}</p>}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Print Action Buttons (No-Print) */}
-            <div className="no-print flex flex-col gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  try {
-                    printInvoiceHTML(showPrintModal, settings);
-                  } catch (err) {
-                    console.error(err);
-                  }
-                }}
-                className="w-full py-2.5 font-bold text-white bg-orange-600 hover:bg-orange-700 rounded-xl text-xs flex items-center justify-center gap-2 transition shadow-lg shadow-orange-650/20 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Imprimir Fatura (Nova Janela)
-              </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowPrintModal(null)}
-                  className="w-1/2 py-2 font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs transition cursor-pointer text-center"
-                >
-                  Fechar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    try {
-                      window.print();
-                    } catch (err) {
-                      console.warn(err);
-                    }
-                  }}
-                  className="w-1/2 py-2 font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                >
-                  Via Térmica
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      )}
-
-      {showMonthlySummaryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 p-4">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="bg-slate-900 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="bg-orange-500 text-white p-2 rounded-xl">
-                  <Activity className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="font-extrabold text-sm md:text-base leading-tight">
-                    Resumo Executivo Mensal
-                  </h3>
-                  <p className="text-[10px] text-slate-300 font-mono mt-0.5">
-                    {monthlyStats.monthName.toUpperCase()} DE {monthlyStats.year}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowMonthlySummaryModal(false)}
-                className="text-slate-400 hover:text-white font-bold text-lg cursor-pointer px-2 transition-colors"
-              >
-                ×
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1">
-              {/* Metrics Grid */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Faturamento</span>
-                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
-                    {formatMZ(monthlyStats.totalSales)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Ticket Médio</span>
-                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
-                    {formatMZ(monthlyStats.averageTicket)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 border border-slate-150 rounded-2xl p-3 text-center">
-                  <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Qtd Vendida</span>
-                  <span className="text-xs md:text-sm font-bold font-mono text-slate-800 mt-1 block">
-                    {monthlyStats.totalItemsCount} un
-                  </span>
-                </div>
-              </div>
-
-              {/* Tax & Discounts info card */}
-              <div className="bg-orange-50/50 border border-orange-100 rounded-2xl p-4 space-y-2.5">
-                <h4 className="text-xs font-extrabold text-orange-950 uppercase tracking-wide">
-                  Impostos & Encargos do Mês
-                </h4>
-                <div className="text-xs space-y-1.5 font-medium text-slate-700">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Transações no período:</span>
-                    <span className="font-mono font-bold text-slate-800">{monthlyStats.monthlyTx.length} vendas</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Imposto IVA Acumulado (16%):</span>
-                    <span className="font-mono font-bold text-slate-800">{formatMZ(monthlyStats.totalVat)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500">Descontos Geral Concedidos:</span>
-                    <span className="font-mono font-bold text-red-650">-{formatMZ(monthlyStats.totalDiscount)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Top Products */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">
-                  Produtos Mais Vendidos (Top 5)
-                </h4>
-                {monthlyStats.topProducts.length === 0 ? (
-                  <div className="text-center py-4 text-xs text-slate-400 italic">
-                    Nenhuma venda registrada neste mês corrente ainda.
-                  </div>
-                ) : (
-                  <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100 text-xs bg-white shadow-sm">
-                    {monthlyStats.topProducts.map((p, index) => (
-                      <div key={index} className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                        <div className="flex items-center gap-2.5">
-                          <span className="font-bold text-slate-400 w-4 font-mono">#{index + 1}</span>
-                          <span className="font-semibold text-slate-700">{p.name}</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="font-bold text-slate-800 block">{p.qty} un</span>
-                          <span className="text-[10px] text-slate-400 font-mono">{formatMZ(p.revenue)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3">
-              <button
-                type="button"
-                onClick={() => setShowMonthlySummaryModal(false)}
-                className="flex-1 py-2.5 rounded-xl text-xs font-bold text-slate-700 border border-slate-200 hover:bg-slate-100 transition cursor-pointer text-center"
-              >
-                Fechar
-              </button>
-              <button
-                type="button"
-                onClick={handleExportMonthlySummaryPDF}
-                disabled={isExporting}
-                className="flex-1 py-2.5 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 transition shadow-md cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                {isExporting ? "A processar..." : "Exportar PDF"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ReportsMonthlyModal
+        showMonthlySummaryModal={showMonthlySummaryModal}
+        monthlyStats={monthlyStats}
+        isExporting={isExporting}
+        formatMZ={formatMZ}
+        onClose={() => setShowMonthlySummaryModal(false)}
+        onExportPDF={handleExportMonthlySummaryPDF}
+      />
 
     </div>
   );

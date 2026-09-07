@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from "react";
 import { Html5Qrcode } from "html5-qrcode";
+import { generateEntityId } from "../lib/deterministic";
 
 interface QrScannerComponentProps {
-  onResult?: (result: { text: string } | null, error?: any) => void;
+  onResult?: (result: { text: string } | null, error?: unknown) => void;
   scanDelay?: number;
   facingMode?: "environment" | "user";
 }
@@ -12,7 +13,7 @@ export const QrCodeScannerComponent: React.FC<QrScannerComponentProps> = ({
   scanDelay = 400,
   facingMode = "environment",
 }) => {
-  const containerIdRef = useRef(`qr-reader-container-${Math.random().toString(36).substring(2, 9)}`);
+  const containerIdRef = useRef(generateEntityId("qr-reader-container"));
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
 
   useEffect(() => {

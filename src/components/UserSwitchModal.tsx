@@ -65,9 +65,8 @@ export const UserSwitchModal: React.FC<UserSwitchModalProps> = ({
 
       const matchEmp = employeePin ? await verifySecurityPin(entered, employeePin) : false;
       const matchSys = systemMasterPin ? await verifySecurityPin(entered, systemMasterPin) : false;
-      const matchFallback = !employeePin && !systemMasterPin && (entered === "123456" || entered === "1234");
 
-      const isMatch = matchEmp || matchSys || matchFallback;
+      const isMatch = matchEmp || matchSys;
 
       if (isMatch) {
         onSelectEmployee(selectedEmployee);

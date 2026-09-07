@@ -18,8 +18,22 @@ import {
   AuditLog, 
   SystemSettings, 
   UserRole,
-  SubscriptionPlan
+  SubscriptionPlan,
+  AiForecastResult
 } from "./types";
+import type { User } from "@supabase/supabase-js";
+
+interface DatabaseSnapshotPayload {
+  products?: Product[];
+  customers?: Customer[];
+  transactions?: Transaction[];
+  cashFlow?: CashFlowEntry[];
+  cashflow?: CashFlowEntry[];
+  employees?: Employee[];
+  settings?: SystemSettings;
+  auditLogs?: AuditLog[];
+  auditlogs?: AuditLog[];
+}
 
 // Import modules
 import Sidebar from "./components/Sidebar";
@@ -38,13 +52,23 @@ import { RoleAccessDeniedScreen } from "./components/RoleAccessDeniedScreen";
 import { canRoleAccessModule, normalizeUserRole, getDefaultModuleForRole } from "./lib/rolePermissions";
 import LoginModule from "./components/LoginModule";
 import { UserSwitchModal } from "./components/UserSwitchModal";
+import { PinVerificationModal } from "./components/modals/PinVerificationModal";
+import { ForcePinChangeModal } from "./components/modals/ForcePinChangeModal";
+import { AppHeader } from "./components/layout/AppHeader";
+import { ToastContainer } from "./components/layout/ToastContainer";
+import { FloatingNavFab } from "./components/layout/FloatingNavFab";
+import { createLocalBackup, shouldRunAutoBackup } from "./services/backupService";
+import { triggerPanicAlert, fetchGeoLocationInfo, detectDeviceType } from "./services/securityAlertService";
+import { processSaleDeductions, processDevolutionRestock } from "./services/posTransactionProcessor";
+import { loadSyncQueue, processSyncQueue as syncOfflineQueueService } from "./services/syncQueueService";
 import AiForecastModule from "./components/AiForecastModule";
 import StockReplenishModal from "./components/StockReplenishModal";
 import QuickLogoModal from "./components/QuickLogoModal";
 import TutorialModal from "./components/TutorialModal";
+import OnboardingTutorial from "./components/OnboardingTutorial";
 import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
-import { sanitizeUserSession } from "./lib/security";
+import { sanitizeUserSession, hashSecurityPin, verifySecurityPin } from "./lib/security";
 import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
 import { 
   CommercialDataService, 
@@ -56,7 +80,8 @@ import {
 } from "./services/dataService";
 import { getSupabaseClient } from "./lib/supabase";
 import { authenticatedFetch } from "./lib/apiClient";
-import { SupabaseSyncService } from "./services/supabaseService";
+import { SupabaseSyncService, saveSupabaseConfig } from "./services/supabaseService";
+import { operationalCache, ErpSnapshotData } from "./lib/indexedDbStorage";
 import { setLogCallback, initErrorCapturing } from "./lib/logger";
 import { generateUUID, generateEntityId, generateDeterministicCreditNoteNumber, generateSecurePin } from "./lib/deterministic";
 import { sendEmail } from "./lib/gmail";
@@ -149,1058 +174,7 @@ const NAV_MENU_ITEMS = [
   { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
 ];
 
-const safeLocalStorageSetItem = (key: string, value: string): boolean => {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch (e: any) {
-    // Catch any error during localStorage.setItem as a storage quota warning
-    console.warn(`[QUOTA] Erro de escrita no localStorage para '${key}'. Iniciando limpeza de emergência...`, e);
-
-    // Tier 1: Identify all backup keys and cached profile keys
-    const backupKeys: string[] = [];
-    const profileKeys: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k) {
-        if (k.startsWith("erp_backup_slot_")) {
-          backupKeys.push(k);
-        } else if (k.startsWith("cached_profile_")) {
-          profileKeys.push(k);
-        }
-      }
-    }
-
-    // Sort backups to remove oldest first
-    backupKeys.sort();
-
-    // Remove backup slots one by one and retry
-    for (const bk of backupKeys) {
-      console.warn(`[QUOTA] Removendo backup antigo: ${bk}`);
-      localStorage.removeItem(bk);
-      try {
-        localStorage.setItem(key, value);
-        console.warn(`[QUOTA] Gravado '${key}' com sucesso após libertar espaço do backup.`);
-        return true;
-      } catch (retryErr) {
-        // continue
-      }
-    }
-
-    // Tier 2: Remove auto-backup and other less critical keys
-    localStorage.removeItem("erp_auto_backup_local_db");
-    localStorage.removeItem("erp_local_backups_log");
-    try {
-      localStorage.setItem(key, value);
-      console.warn(`[QUOTA] Gravado '${key}' com sucesso após libertar auto-backup.`);
-      return true;
-    } catch (retryErr) {
-      // continue
-    }
-
-    // Tier 3: Remove cached profiles
-    for (const pk of profileKeys) {
-      console.warn(`[QUOTA] Removendo cache de perfil: ${pk}`);
-      localStorage.removeItem(pk);
-      try {
-        localStorage.setItem(key, value);
-        console.warn(`[QUOTA] Gravado '${key}' com sucesso após remover perfis cached.`);
-        return true;
-      } catch (retryErr) {
-        // continue
-      }
-    }
-
-    // Tier 4: If still failing and key is 'pos_sync_queue', let's try to prune the value
-    if (key === "pos_sync_queue") {
-      try {
-        const queueObj = JSON.parse(value);
-        let pruned = false;
-        for (const qKey of Object.keys(queueObj)) {
-          if (Array.isArray(queueObj[qKey]) && queueObj[qKey].length > 10) {
-            console.warn(`[QUOTA] Reduzindo tamanho da fila '${qKey}' de ${queueObj[qKey].length} para 10 itens.`);
-            queueObj[qKey] = queueObj[qKey].slice(-10);
-            pruned = true;
-          }
-        }
-        if (pruned) {
-          const prunedValue = JSON.stringify(queueObj);
-          try {
-            localStorage.setItem(key, prunedValue);
-            console.warn(`[QUOTA] Gravado '${key}' com sucesso em formato compactado.`);
-            return true;
-          } catch (retryErr) {
-            // continue
-          }
-        }
-      } catch (parseErr) {
-        // ignore
-      }
-    }
-
-    console.warn(`[QUOTA-CRITICAL] Falha total ao gravar '${key}' no localStorage. Sem espaço disponível.`);
-    return false;
-  }
-};
-
-function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const [timeRange, setTimeRange] = useState<number>(14); // 7, 14, 30, 60, 90 days
-  const [isZoomed, setIsZoomed] = useState(false);
-  const [zoomScale, setZoomScale] = useState(1);
-  const [zoomMode, setZoomMode] = useState<"box" | "pan">("box");
-  const [showPrevWeekTrend, setShowPrevWeekTrend] = useState(false);
-  const [hoveredDay, setHoveredDay] = useState<{
-    label: string;
-    dateStr: string;
-    count: number;
-    prevWeekCount: number;
-    xPos: number;
-    yPos: number;
-  } | null>(null);
-  
-  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
-
-  // High activity moving average calculation (30-day window)
-  const { isHighActivity, movingAvg30Val } = useMemo(() => {
-    if (!logs || logs.length === 0) return { isHighActivity: false, movingAvg30Val: 0 };
-    let logs30dCount = 0;
-    const now30 = new Date();
-    (logs || []).forEach(log => {
-      if (!log.timestamp) return;
-      try {
-        const logDate = new Date(log.timestamp);
-        const diffMs = now30.getTime() - logDate.getTime();
-        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
-          logs30dCount++;
-        }
-      } catch {}
-    });
-    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : 0;
-    const threshold50 = avg30 * 1.5;
-
-    const cutoff = new Date(now30);
-    cutoff.setDate(cutoff.getDate() - timeRange);
-    const recentLogs = logs.filter(l => l.timestamp && new Date(l.timestamp) >= cutoff);
-    const avgRecent = recentLogs.length / Math.max(1, timeRange);
-    const exceedsThreshold = avg30 > 0 && avgRecent > threshold50;
-
-    return { isHighActivity: exceedsThreshold, movingAvg30Val: avg30 };
-  }, [logs, timeRange]);
-
-  // Trend indicator calculation (current period vs previous period)
-  const trendData = useMemo(() => {
-    if (!logs || logs.length === 0) {
-      return { currentCount: 0, previousCount: 0, percentage: 0, direction: "neutral" as const };
-    }
-    const now = new Date();
-    
-    let currentCount = 0;
-    let previousCount = 0;
-
-    const currentCutoff = new Date(now);
-    currentCutoff.setDate(currentCutoff.getDate() - timeRange);
-    currentCutoff.setHours(0, 0, 0, 0);
-
-    const previousCutoff = new Date(now);
-    previousCutoff.setDate(previousCutoff.getDate() - (timeRange * 2));
-    previousCutoff.setHours(0, 0, 0, 0);
-
-    logs.forEach(log => {
-      if (!log.timestamp) return;
-      try {
-        const logDate = new Date(log.timestamp);
-        if (logDate >= currentCutoff) {
-          currentCount++;
-        } else if (logDate >= previousCutoff) {
-          previousCount++;
-        }
-      } catch {
-        // ignore
-      }
-    });
-
-    if (previousCount === 0) {
-      if (currentCount === 0) {
-        return { currentCount, previousCount, percentage: 0, direction: "neutral" as const };
-      }
-      return { currentCount, previousCount, percentage: 100, direction: "up" as const };
-    }
-
-    const diff = currentCount - previousCount;
-    const percentage = Math.round((diff / previousCount) * 100);
-
-    return {
-      currentCount,
-      previousCount,
-      percentage: Math.abs(percentage),
-      direction: diff > 0 ? ("up" as const) : diff < 0 ? ("down" as const) : ("neutral" as const)
-    };
-  }, [logs, timeRange]);
-
-  // Zoom Control Handlers
-  const handleZoomIn = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
-        .transition()
-        .duration(300)
-        .call(zoomRef.current.scaleBy, 1.4);
-    }
-  };
-
-  const handleZoomOut = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
-        .transition()
-        .duration(300)
-        .call(zoomRef.current.scaleBy, 0.714);
-    }
-  };
-
-  const handlePanLeft = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
-        .transition()
-        .duration(250)
-        .call(zoomRef.current.translateBy, 90, 0);
-    }
-  };
-
-  const handlePanRight = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
-        .transition()
-        .duration(250)
-        .call(zoomRef.current.translateBy, -90, 0);
-    }
-  };
-
-  const handleResetZoom = () => {
-    if (svgRef.current && zoomRef.current) {
-      d3.select(svgRef.current)
-        .transition()
-        .duration(400)
-        .call(zoomRef.current.transform, d3.zoomIdentity);
-      setIsZoomed(false);
-      setZoomScale(1);
-    }
-  };
-
-  // Switch time range and reset zoom
-  const handleTimeRangeChange = (daysCount: number) => {
-    setTimeRange(daysCount);
-    handleResetZoom();
-  };
-
-  // Export Chart as PNG
-  const handleExportPNG = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!svgRef.current) return;
-
-    try {
-      const svgElement = svgRef.current;
-      const serializer = new XMLSerializer();
-      let svgString = serializer.serializeToString(svgElement);
-
-      // Ensure proper SVG namespace attributes
-      if (!svgString.includes('xmlns="http://www.w3.org/2000/svg"')) {
-        svgString = svgString.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-      }
-
-      // High resolution export dimensions
-      const width = 960 * 2;
-      const height = 280 * 2;
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      // Fill background matching theme
-      ctx.fillStyle = "#020617";
-      ctx.fillRect(0, 0, width, height);
-
-      const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(svgBlob);
-      const img = new Image();
-
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, width, height);
-        URL.revokeObjectURL(url);
-
-        const pngUrl = canvas.toDataURL("image/png");
-        const downloadLink = document.createElement("a");
-        downloadLink.href = pngUrl;
-        downloadLink.download = `grafico_activity_logs_${timeRange}D_${new Date().toISOString().slice(0, 10)}.png`;
-        document.body.appendChild(downloadLink);
-        downloadLink.click();
-        document.body.removeChild(downloadLink);
-      };
-
-      img.src = url;
-    } catch (err) {
-      console.error("Erro ao exportar gráfico em PNG:", err);
-    }
-  };
-
-  useEffect(() => {
-    if (!svgRef.current) return;
-
-    // Generate daily log data points based on selected timeRange
-    const days: { dateStr: string; label: string; count: number; prevWeekCount: number }[] = [];
-    const now = new Date();
-    
-    for (let i = timeRange - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().slice(0, 10);
-
-      // Corresponding date 7 days before
-      const dPrev = new Date(d);
-      dPrev.setDate(dPrev.getDate() - 7);
-      const dateStrPrev = dPrev.toISOString().slice(0, 10);
-      
-      // Label formatting adapted to time range
-      const dayLabel = timeRange <= 14 
-        ? d.toLocaleDateString("pt-MZ", { weekday: "short", day: "2-digit" })
-        : d.toLocaleDateString("pt-MZ", { day: "2-digit", month: "2-digit" });
-      
-      let count = 0;
-      let prevWeekCount = 0;
-
-      (logs || []).forEach(log => {
-        if (!log.timestamp) return;
-        try {
-          const logDateStr = new Date(log.timestamp).toISOString().slice(0, 10);
-          if (logDateStr === dateStr) {
-            count++;
-          } else if (logDateStr === dateStrPrev) {
-            prevWeekCount++;
-          }
-        } catch {
-          // ignore
-        }
-      });
-
-      days.push({ dateStr, label: dayLabel, count, prevWeekCount });
-    }
-
-    const svg = d3.select(svgRef.current);
-    svg.selectAll("*").remove();
-
-    const width = 480;
-    const height = 125;
-    const margin = { top: 18, right: 12, bottom: 22, left: 24 };
-
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
-
-    const x = d3.scaleBand()
-      .domain(days.map(d => d.label))
-      .range([0, innerWidth])
-      .padding(timeRange > 30 ? 0.2 : 0.32);
-
-    const maxCount = Math.max(
-      d3.max(days, d => Math.max(d.count, showPrevWeekTrend ? d.prevWeekCount : 0)) || 1, 
-      3
-    );
-    const y = d3.scaleLinear()
-      .domain([0, maxCount])
-      .nice()
-      .range([innerHeight, 0]);
-
-    // Clip path to keep bars & elements strictly within bounds during zoom/pan
-    const defs = svg.append("defs");
-    defs.append("clipPath")
-      .attr("id", "audit-chart-clip")
-      .append("rect")
-      .attr("x", 0)
-      .attr("y", -15)
-      .attr("width", innerWidth)
-      .attr("height", innerHeight + 20);
-
-    const g = svg
-      .attr("viewBox", `0 0 ${width} ${height}`)
-      .attr("preserveAspectRatio", "xMidYMid meet")
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    // Background overlay for pan/drag events (behind content)
-    const bgOverlay = g.append("rect")
-      .attr("width", innerWidth)
-      .attr("height", innerHeight)
-      .attr("fill", "transparent")
-      .attr("cursor", "grab");
-
-    // Gridlines (fixed background)
-    const yTicks = y.ticks(3);
-    g.append("g")
-      .attr("class", "grid")
-      .selectAll("line")
-      .data(yTicks)
-      .enter()
-      .append("line")
-      .attr("x1", 0)
-      .attr("x2", innerWidth)
-      .attr("y1", d => y(d))
-      .attr("y2", d => y(d))
-      .attr("stroke", "#334155")
-      .attr("stroke-dasharray", "2,2")
-      .attr("stroke-opacity", 0.5);
-
-    // Content group with clip-path
-    const chartContent = g.append("g")
-      .attr("clip-path", "url(#audit-chart-clip)");
-
-    // Bars - initial zero-height state at x-axis
-    const bars = chartContent.selectAll(".bar")
-      .data(days)
-      .enter()
-      .append("rect")
-      .attr("class", "bar")
-      .attr("x", d => x(d.label) || 0)
-      .attr("y", innerHeight)
-      .attr("width", Math.max(1, x.bandwidth()))
-      .attr("height", 0)
-      .attr("fill", "#f97316")
-      .attr("rx", Math.min(3, Math.max(1, x.bandwidth() / 3)))
-      .attr("ry", Math.min(3, Math.max(1, x.bandwidth() / 3)))
-      .attr("opacity", d => d.count > 0 ? 0.95 : 0.25)
-      .attr("cursor", "pointer");
-
-    // D3 Transition: Smooth growth from x-axis
-    bars.transition()
-      .duration(500)
-      .delay((_, i) => Math.min(i * 20, 400))
-      .ease(d3.easeCubicOut)
-      .attr("y", d => y(d.count))
-      .attr("height", d => innerHeight - y(d.count));
-
-    // Hover tooltip events on bars
-    bars
-      .on("pointerover", function(event, d) {
-        d3.select(this)
-          .transition()
-          .duration(120)
-          .attr("fill", "#fb923c")
-          .attr("stroke", "#ffffff")
-          .attr("stroke-width", 1.5)
-          .attr("opacity", 1);
-
-        if (svgRef.current) {
-          const rect = svgRef.current.getBoundingClientRect();
-          const xPos = event.clientX - rect.left;
-          const yPos = event.clientY - rect.top;
-          setHoveredDay({
-            label: d.label,
-            dateStr: d.dateStr,
-            count: d.count,
-            prevWeekCount: d.prevWeekCount,
-            xPos,
-            yPos
-          });
-        }
-      })
-      .on("pointermove", function(event, d) {
-        if (svgRef.current) {
-          const rect = svgRef.current.getBoundingClientRect();
-          const xPos = event.clientX - rect.left;
-          const yPos = event.clientY - rect.top;
-          setHoveredDay({
-            label: d.label,
-            dateStr: d.dateStr,
-            count: d.count,
-            prevWeekCount: d.prevWeekCount,
-            xPos,
-            yPos
-          });
-        }
-      })
-      .on("pointerout", function(event, d) {
-        d3.select(this)
-          .transition()
-          .duration(150)
-          .attr("fill", "#f97316")
-          .attr("stroke", "none")
-          .attr("opacity", d.count > 0 ? 0.95 : 0.25);
-
-        setHoveredDay(null);
-      });
-
-    // Value Labels above bars
-    const labels = chartContent.selectAll(".label")
-      .data(days)
-      .enter()
-      .append("text")
-      .attr("class", "bar-label")
-      .attr("x", d => (x(d.label) || 0) + x.bandwidth() / 2)
-      .attr("y", innerHeight - 2)
-      .attr("text-anchor", "middle")
-      .attr("fill", d => d.count > 0 ? "#fb923c" : "#64748b")
-      .attr("font-size", "8.5px")
-      .attr("font-weight", "bold")
-      .attr("pointer-events", "none")
-      .attr("opacity", 0)
-      .text(d => d.count);
-
-    labels.transition()
-      .duration(500)
-      .delay((_, i) => Math.min(i * 20, 400))
-      .ease(d3.easeCubicOut)
-      .attr("y", d => y(d.count) - 3)
-      .attr("opacity", x.bandwidth() >= 8 ? 1 : 0);
-
-    // Calculate Moving Average & 30-day Moving Average Threshold
-    const totalCount = days.reduce((sum, d) => sum + d.count, 0);
-    const avgCount = days.length > 0 ? totalCount / days.length : 0;
-    const yAvg = y(avgCount);
-
-    // Calculate 30-day moving average for high activity detection (>50% above moving average)
-    let logs30dCount = 0;
-    const now30 = new Date();
-    (logs || []).forEach(log => {
-      if (!log.timestamp) return;
-      try {
-        const logDate = new Date(log.timestamp);
-        const diffMs = now30.getTime() - logDate.getTime();
-        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
-          logs30dCount++;
-        }
-      } catch {}
-    });
-    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : avgCount;
-    const threshold50 = avg30 * 1.5;
-
-    // Dotted horizontal line representing average volume
-    chartContent.append("line")
-      .attr("class", "avg-line")
-      .attr("x1", 0)
-      .attr("x2", innerWidth)
-      .attr("y1", yAvg)
-      .attr("y2", yAvg)
-      .attr("stroke", "#38bdf8")
-      .attr("stroke-width", 1.5)
-      .attr("stroke-dasharray", "4,3")
-      .attr("pointer-events", "none");
-
-    // Moving average label on the line
-    chartContent.append("text")
-      .attr("x", innerWidth - 4)
-      .attr("y", yAvg > 12 ? yAvg - 4 : yAvg + 11)
-      .attr("text-anchor", "end")
-      .attr("fill", "#38bdf8")
-      .attr("font-size", "8.5px")
-      .attr("font-weight", "bold")
-      .attr("pointer-events", "none")
-      .text(`Média: ${avgCount.toFixed(1)}/dia`);
-
-    // Threshold Line (+50% over 30-day Moving Average)
-    if (threshold50 > 0 && threshold50 <= maxCount) {
-      const yThreshold = y(threshold50);
-      chartContent.append("line")
-        .attr("class", "threshold-line")
-        .attr("x1", 0)
-        .attr("x2", innerWidth)
-        .attr("y1", yThreshold)
-        .attr("y2", yThreshold)
-        .attr("stroke", "#f59e0b")
-        .attr("stroke-width", 1.5)
-        .attr("stroke-dasharray", "3,2")
-        .attr("pointer-events", "none");
-
-      chartContent.append("text")
-        .attr("x", 4)
-        .attr("y", yThreshold > 12 ? yThreshold - 3 : yThreshold + 9)
-        .attr("fill", "#f59e0b")
-        .attr("font-size", "8px")
-        .attr("font-weight", "bold")
-        .attr("pointer-events", "none")
-        .text(`Limiar (+50% Média 30D: ${threshold50.toFixed(1)})`);
-    }
-
-    // Previous Week Trend Line Overlay (Linha de Tendência da Semana Anterior)
-    if (showPrevWeekTrend && days.length > 0) {
-      const lineGenerator = d3.line<{ label: string; prevWeekCount: number }>()
-        .x(d => (x(d.label) || 0) + x.bandwidth() / 2)
-        .y(d => y(d.prevWeekCount))
-        .curve(d3.curveMonotoneX);
-
-      const prevLinePath = chartContent.append("path")
-        .datum(days)
-        .attr("class", "prev-week-line")
-        .attr("fill", "none")
-        .attr("stroke", "#c084fc")
-        .attr("stroke-width", 2)
-        .attr("stroke-dasharray", "4,3")
-        .attr("pointer-events", "none")
-        .attr("d", lineGenerator);
-
-      const totalLength = (prevLinePath.node() as SVGPathElement)?.getTotalLength() || 500;
-      prevLinePath
-        .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
-        .attr("stroke-dashoffset", totalLength)
-        .transition()
-        .duration(700)
-        .ease(d3.easeCubicOut)
-        .attr("stroke-dashoffset", 0)
-        .on("end", function() {
-          d3.select(this).attr("stroke-dasharray", "4,3");
-        });
-
-      const prevDots = chartContent.selectAll(".prev-dot")
-        .data(days)
-        .enter()
-        .append("circle")
-        .attr("class", "prev-dot")
-        .attr("cx", d => (x(d.label) || 0) + x.bandwidth() / 2)
-        .attr("cy", d => y(d.prevWeekCount))
-        .attr("r", Math.min(3.5, Math.max(1.5, x.bandwidth() / 4)))
-        .attr("fill", "#c084fc")
-        .attr("stroke", "#020617")
-        .attr("stroke-width", 1.5)
-        .attr("pointer-events", "none")
-        .attr("opacity", 0);
-
-      prevDots.transition()
-        .duration(500)
-        .delay((_, i) => Math.min(i * 15, 300))
-        .attr("opacity", 1);
-    }
-
-    // X Axis Setup
-    const xAxisGroup = g.append("g")
-      .attr("class", "x-axis")
-      .attr("transform", `translate(0,${innerHeight})`);
-
-    const renderXAxis = (scaleToUse: d3.ScaleBand<string>) => {
-      const axis = d3.axisBottom(scaleToUse).tickSize(0);
-      
-      // Filter tick labels if bandwidth is narrow to prevent overlapping
-      const currentBandwidth = scaleToUse.bandwidth();
-      if (currentBandwidth < 14) {
-        const step = Math.ceil(18 / Math.max(1, currentBandwidth));
-        axis.tickValues(scaleToUse.domain().filter((_, idx) => idx % step === 0));
-      }
-
-      xAxisGroup.call(axis);
-      xAxisGroup.select(".domain").attr("stroke", "#475569");
-      xAxisGroup.selectAll("text")
-        .attr("fill", "#94a3b8")
-        .attr("font-size", "8.5px")
-        .attr("dy", "8px");
-    };
-
-    renderXAxis(x);
-
-    // Y Axis Setup
-    const yAxis = d3.axisLeft(y).ticks(3).tickSize(0);
-    const yAxisGroup = g.append("g").call(yAxis);
-    yAxisGroup.select(".domain").remove();
-    yAxisGroup.selectAll("text")
-      .attr("fill", "#64748b")
-      .attr("font-size", "8.5px");
-
-    // D3 Brush for Box / Area Selection Zoom (Zoom de Área por Clique e Arraste)
-    const brushGroup = g.append("g").attr("class", "brush-group");
-
-    const brush = d3.brushX<SVGSVGElement>()
-      .extent([[0, 0], [innerWidth, innerHeight]])
-      .on("end", (event) => {
-        if (!event.selection) return;
-
-        const [x0, x1] = event.selection as [number, number];
-        const dx = x1 - x0;
-
-        if (dx >= 8) {
-          const currentTransform = d3.zoomTransform(svgRef.current!);
-          
-          // Map pixel boundaries back to unscaled domain space
-          const x0Data = (x0 - currentTransform.x) / currentTransform.k;
-          const x1Data = (x1 - currentTransform.x) / currentTransform.k;
-          const dxData = x1Data - x0Data;
-
-          if (dxData > 1) {
-            const targetK = Math.min(10, Math.max(1, innerWidth / dxData));
-            const targetX = -x0Data * targetK;
-
-            d3.select(svgRef.current)
-              .transition()
-              .duration(500)
-              .ease(d3.easeCubicOut)
-              .call(
-                zoomBehavior.transform,
-                d3.zoomIdentity.translate(targetX, 0).scale(targetK)
-              );
-            
-            setIsZoomed(true);
-            setZoomScale(targetK);
-          }
-        }
-
-        // Reset brush selection rect overlay after zoom completes
-        brushGroup.call(brush.move as any, null);
-      });
-
-    brushGroup.call(brush);
-
-    // Style brush selection overlay box
-    brushGroup.selectAll(".selection")
-      .attr("fill", "rgba(249, 115, 22, 0.28)")
-      .attr("stroke", "#f97316")
-      .attr("stroke-width", "1.5")
-      .attr("stroke-dasharray", "4,2")
-      .attr("rx", "3");
-
-    brushGroup.selectAll(".handle")
-      .attr("fill", "#f97316")
-      .attr("width", "3");
-
-    if (zoomMode === "pan") {
-      brushGroup.style("pointer-events", "none");
-    } else {
-      brushGroup.style("pointer-events", "all");
-    }
-
-    // D3 Zoom & Pan Behavior Definition
-    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
-      .scaleExtent([1, 10])
-      .translateExtent([[ -innerWidth * 2, 0 ], [ innerWidth * 3, innerHeight ]])
-      .extent([[0, 0], [innerWidth, innerHeight]])
-      .on("zoom", (event) => {
-        const transform = event.transform;
-        
-        setZoomScale(transform.k);
-        const isActive = transform.k > 1.02 || Math.abs(transform.x) > 2;
-        setIsZoomed(isActive);
-
-        if (isActive) {
-          bgOverlay.attr("cursor", "grabbing");
-        } else {
-          bgOverlay.attr("cursor", "grab");
-        }
-
-        // Rescale x scale band range based on current zoom/pan transformation
-        const xRescaled = x.copy().range([0, innerWidth].map(d => transform.applyX(d)));
-
-        // Update bars positioning and bandwidth
-        bars
-          .attr("x", d => xRescaled(d.label) || 0)
-          .attr("width", Math.max(0.5, xRescaled.bandwidth()));
-
-        // Update bar value labels
-        labels
-          .attr("x", d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
-          .attr("opacity", xRescaled.bandwidth() >= 7 ? 1 : 0);
-
-        // Update prev week trend line & dots on zoom/pan
-        if (showPrevWeekTrend) {
-          const lineGeneratorRescaled = d3.line<{ label: string; prevWeekCount: number }>()
-            .x(d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
-            .y(d => y(d.prevWeekCount))
-            .curve(d3.curveMonotoneX);
-
-          chartContent.select(".prev-week-line")
-            .attr("d", lineGeneratorRescaled as any);
-
-          chartContent.selectAll(".prev-dot")
-            .attr("cx", d => (xRescaled((d as any).label) || 0) + xRescaled.bandwidth() / 2);
-        }
-
-        // Update X Axis ticks & labels dynamically
-        renderXAxis(xRescaled);
-      });
-
-    zoomRef.current = zoomBehavior;
-    svg.call(zoomBehavior as any);
-
-  }, [logs, timeRange, zoomMode, showPrevWeekTrend]);
-
-  return (
-    <div id="activity-log-d3-chart-container" className="p-3 bg-slate-950/90 border border-slate-800/80 rounded-xl space-y-2 cursor-pointer relative group shadow-xl transition-all">
-      {/* Header with Title, Period Selector & Action Badges */}
-      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-300 px-0.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
-          <span className="text-slate-200">Volume de Activity Logs (D3 Zoom & Pan)</span>
-          
-          {/* Trend Indicator Badge */}
-          <div 
-            title={`Período Atual: ${trendData.currentCount} logs vs Anterior: ${trendData.previousCount} logs (${timeRange}D)`}
-            className={`flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-extrabold border transition-all ${
-              trendData.direction === "up"
-                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
-                : trendData.direction === "down"
-                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
-                : "bg-slate-800 text-slate-400 border-slate-700"
-            }`}
-          >
-            {trendData.direction === "up" && <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0" />}
-            {trendData.direction === "down" && <TrendingDown className="w-3 h-3 text-rose-400 shrink-0" />}
-            {trendData.direction === "neutral" && <Minus className="w-3 h-3 text-slate-400 shrink-0" />}
-            <span>
-              {trendData.direction === "up" ? `+${trendData.percentage}%` : trendData.direction === "down" ? `-${trendData.percentage}%` : "0%"} vs ant.
-            </span>
-          </div>
-
-          {/* High Activity Warning Badge */}
-          {isHighActivity && (
-            <div 
-              title={`Atividade Elevada: Volume excede a média móvel de 30 dias (${movingAvg30Val.toFixed(1)} logs/dia) em mais de 50%`}
-              className="flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse shrink-0"
-            >
-              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
-              <span>Alta Atividade</span>
-            </div>
-          )}
-
-          {isZoomed && (
-            <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse flex items-center gap-1">
-              <Crop className="w-2.5 h-2.5 text-orange-400" />
-              <span>Zoom {(zoomScale * 100).toFixed(0)}%</span>
-            </span>
-          )}
-        </div>
-
-        {/* Time Period Filter Selector & Actions */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Previous Week Overlay Toggle */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowPrevWeekTrend(prev => !prev);
-            }}
-            className={`flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold border transition-all cursor-pointer ${
-              showPrevWeekTrend
-                ? "bg-purple-600/30 text-purple-300 border-purple-500/50 shadow-sm shadow-purple-500/20"
-                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800"
-            }`}
-            title="Sobrepor a linha de tendência da semana anterior (7 dias atrás) no gráfico"
-          >
-            <TrendingUp className={`w-3.5 h-3.5 ${showPrevWeekTrend ? "text-purple-400" : "text-slate-400"}`} />
-            <span>Semana Anterior</span>
-            <span className={`w-2 h-2 rounded-full ${showPrevWeekTrend ? "bg-purple-400 animate-pulse" : "bg-slate-600"}`} />
-          </button>
-
-          {/* Export PNG Button */}
-          <button
-            type="button"
-            onClick={handleExportPNG}
-            className="flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md hover:shadow-orange-500/20 transition-all cursor-pointer border border-orange-400/30"
-            title="Exportar a visualização atual do gráfico em formato de imagem PNG"
-          >
-            <Download className="w-3.5 h-3.5 text-white shrink-0" />
-            <span>Exportar Gráfico (PNG)</span>
-          </button>
-
-          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-            <span className="text-[9.5px] text-slate-400 font-mono px-1 flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-slate-400" />
-              <span className="hidden sm:inline">Período:</span>
-            </span>
-            {[7, 14, 30, 60, 90].map((daysCount) => (
-              <button
-                key={daysCount}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleTimeRangeChange(daysCount);
-                }}
-                className={`text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
-                  timeRange === daysCount
-                    ? "bg-orange-500 text-white font-extrabold shadow-sm"
-                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-                }`}
-              >
-                {daysCount}D
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Controls Bar for Zoom & Pan Navigation */}
-      <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/60 text-[10px] flex-wrap sm:flex-nowrap">
-        {/* Interaction Mode Selector: Box Zoom vs Pan */}
-        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-md border border-slate-800">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setZoomMode("box");
-            }}
-            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
-              zoomMode === "box"
-                ? "bg-orange-500 text-white font-extrabold shadow"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-            }`}
-            title="Modo Seleção de Área: Clique e arraste no gráfico para selecionar uma região e aplicar zoom"
-          >
-            <Crop className="w-3 h-3" />
-            <span>Zoom de Área</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setZoomMode("pan");
-            }}
-            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
-              zoomMode === "pan"
-                ? "bg-sky-500 text-white font-extrabold shadow"
-                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
-            }`}
-            title="Modo Panorâmico: Arraste com o mouse para mover o gráfico lateralmente"
-          >
-            <MousePointer className="w-3 h-3" />
-            <span>Mover / Pan</span>
-          </button>
-        </div>
-
-        {/* Pan Navigation Buttons */}
-        <div className="flex items-center gap-1">
-          <span className="text-slate-400 text-[9px] font-mono hidden md:inline mr-0.5">Pan:</span>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePanLeft();
-            }}
-            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
-            title="Pan para a esquerda (Navegar no tempo)"
-          >
-            <MoveLeft className="w-3 h-3 text-orange-400" />
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePanRight();
-            }}
-            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
-            title="Pan para a direita (Navegar no tempo)"
-          >
-            <MoveRight className="w-3 h-3 text-orange-400" />
-          </button>
-        </div>
-
-        {/* Zoom Step Buttons */}
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleZoomOut();
-            }}
-            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
-            title="Reduzir Zoom (-)"
-          >
-            <ZoomOut className="w-3 h-3 text-sky-400" />
-          </button>
-
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleZoomIn();
-            }}
-            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
-            title="Ampliar Zoom (+)"
-          >
-            <ZoomIn className="w-3 h-3 text-sky-400" />
-          </button>
-
-          {isZoomed && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                handleResetZoom();
-              }}
-              className="text-[9.5px] text-orange-400 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 px-2 py-0.5 rounded transition flex items-center gap-1 font-mono cursor-pointer ml-1"
-              title="Restaurar visualização original"
-            >
-              <RotateCcw className="w-3 h-3" />
-              <span>Reset</span>
-            </button>
-          )}
-        </div>
-
-        {/* Info Badges & Hint */}
-        <div className="flex items-center gap-1.5 ml-auto">
-          {showPrevWeekTrend && (
-            <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-purple-300 font-mono bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
-              <span className="w-2.5 h-0 border-b-2 border-dashed border-purple-400" />
-              <span>Semana Ant.</span>
-            </span>
-          )}
-          {zoomMode === "box" && (
-            <span className="hidden lg:inline text-[9px] text-amber-400 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-              💡 Arraste no gráfico p/ Zoom de Área
-            </span>
-          )}
-          <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-sky-400 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
-            <span className="w-2 h-0 border-b-2 border-dashed border-sky-400" />
-            <span>Média</span>
-          </span>
-          <span className="text-[9.5px] text-orange-400 font-mono bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
-            {(logs || []).length} logs total
-          </span>
-        </div>
-      </div>
-
-      {/* SVG Canvas Area with Zoom and Pan Interaction */}
-      <div className="w-full relative touch-pan-x">
-        <svg ref={svgRef} className="w-full h-[125px] overflow-visible select-none" />
-
-        {/* Active Hover Tooltip */}
-        {hoveredDay && (
-          <div
-            className="absolute z-30 pointer-events-none bg-slate-900/95 text-slate-100 text-[10.5px] py-1.5 px-3 rounded-lg border border-orange-500/50 shadow-2xl backdrop-blur-md transition-all duration-100 transform -translate-x-1/2 -translate-y-full font-mono flex flex-col gap-1 min-w-[145px]"
-            style={{
-              left: `${Math.max(70, Math.min(hoveredDay.xPos, 410))}px`,
-              top: `${Math.max(12, hoveredDay.yPos - 10)}px`,
-            }}
-          >
-            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
-              <span className="font-bold text-orange-400 capitalize">{hoveredDay.label}</span>
-              <span className="text-[9px] text-slate-400 font-sans">{hoveredDay.dateStr}</span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-slate-300">Volume Atual:</span>
-              <span className="font-extrabold text-white bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-500/30">
-                {hoveredDay.count} {hoveredDay.count === 1 ? "log" : "logs"}
-              </span>
-            </div>
-            {showPrevWeekTrend && (
-              <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800/80">
-                <span className="text-purple-300">Semana Ant.:</span>
-                <span className="font-extrabold text-purple-200 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
-                  {hoveredDay.prevWeekCount} {hoveredDay.prevWeekCount === 1 ? "log" : "logs"}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Footer Instructions / Interaction Hint */}
-      <div className="flex flex-wrap items-center justify-between px-1 text-[9.5px] text-slate-400 font-mono pt-0.5 border-t border-slate-900">
-        <span className="flex items-center gap-1.5">
-          <span className="text-orange-400">↔</span>
-          <span>Arraste ou Scroll para Zoom e Pan no tempo ({timeRange} Dias)</span>
-        </span>
-        {isZoomed ? (
-          <span className="text-orange-400 font-bold animate-pulse">Modo Zoom & Pan Ativo</span>
-        ) : (
-          <span className="text-slate-500">Duplo-clique para ampliar</span>
-        )}
-      </div>
-    </div>
-  );
-}
+import { AuditLogsD3BarChart } from "./components/AuditLogsD3BarChart";
 
 export default function App() {
   
@@ -1239,14 +213,27 @@ export default function App() {
     window.fetch = async (...args) => {
       const response = await originalFetch(...args);
       if (response.status === 429) {
+        const input = args[0];
+        const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request)?.url || "";
+        
+        // Suppress toasts for background telemetry, health pings, and silent sync polling
+        const isBackgroundCall = 
+          rawUrl.includes("/api/db/save") || 
+          rawUrl.includes("/api/db/load") ||
+          rawUrl.includes("/api/health") || 
+          rawUrl.includes("/api/system/version") ||
+          rawUrl.includes("/api/security/storage-health") ||
+          rawUrl.includes("/api/security/firewall-status") ||
+          rawUrl.includes("/api/security/rate-limit-status");
+
         const now = Date.now();
-        if (now - lastToastTime > 5000) {
+        if (!isBackgroundCall && now - lastToastTime > 30000) {
           lastToastTime = now;
           try {
             const clone = response.clone();
             const data = await clone.json();
             showToast(
-              data.message || data.error || "Muitas requisições enviadas. Sistema de proteção e Rate Limit em vigor.",
+              data.message || data.error || "Operação adiada temporariamente pelo sistema de proteção. Tente novamente em instantes.",
               "warning",
               "🛡️ Rate Limit"
             );
@@ -1300,6 +287,7 @@ export default function App() {
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
   const [isQuickLogoModalOpen, setIsQuickLogoModalOpen] = useState(false);
   const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
+  const [isOnboardingTutorialOpen, setIsOnboardingTutorialOpen] = useState(false);
   const [isSystemInfoHubOpen, setIsSystemInfoHubOpen] = useState(false);
 
   // Keyboard shortcut listener for F1 help
@@ -1313,631 +301,6 @@ export default function App() {
     window.addEventListener("keydown", handleF1Help);
     return () => window.removeEventListener("keydown", handleF1Help);
   }, []);
-  const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
-  const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile" | "activity">("switch");
-  const [profileName, setProfileName] = useState("");
-  const [profileEmail, setProfileEmail] = useState("");
-  const [profileContact, setProfileContact] = useState("");
-  const [profileWhatsapp, setProfileWhatsapp] = useState("");
-  const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
-  const [profileLogoUrl, setProfileLogoUrl] = useState(settings?.logoUrl || "");
-  const [profileRole, setProfileRole] = useState("Operador");
-  const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
-  const [profileTwoFactorSms, setProfileTwoFactorSms] = useState<boolean>(false);
-  const [profilePhoneValidated, setProfilePhoneValidated] = useState<boolean>(false);
-  const [profileWebAuthnEnabled, setProfileWebAuthnEnabled] = useState<boolean>(false);
-  const [profileWebAuthnCredentialId, setProfileWebAuthnCredentialId] = useState<string>("");
-  const [profileObservacoes, setProfileObservacoes] = useState("");
-  const [profileExpirationDate, setProfileExpirationDate] = useState("");
-  const [testPinInput, setTestPinInput] = useState<string>("");
-  const [switchEnteredPin, setSwitchEnteredPin] = useState("");
-  const [switchPinError, setSwitchPinError] = useState("");
-  const [showSwitchPin, setShowSwitchPin] = useState(false);
-  const [showPaymentQrModal, setShowPaymentQrModal] = useState(false);
-  const [paymentQrUrl, setPaymentQrUrl] = useState("");
-  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
-
-  // Activity Log Tab Filters State
-  const [activitySearchText, setActivitySearchText] = useState("");
-  const [activityModuleFilter, setActivityModuleFilter] = useState("Todos");
-  const [activityStartDate, setActivityStartDate] = useState("");
-  const [activityEndDate, setActivityEndDate] = useState("");
-
-  // Camera Profile Photo Capture State
-  const [isCameraActive, setIsCameraActive] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const mediaStreamRef = useRef<MediaStream | null>(null);
-
-  const stopCamera = () => {
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop());
-      mediaStreamRef.current = null;
-    }
-    setIsCameraActive(false);
-    setCameraError("");
-  };
-
-  useEffect(() => {
-    if (!isUserSwitchModalOpen || userSwitchModalTab !== "profile") {
-      stopCamera();
-    }
-  }, [isUserSwitchModalOpen, userSwitchModalTab]);
-
-  useEffect(() => {
-    if (isUserSwitchModalOpen) {
-      const targetEmp = switchSelectedEmployeeId 
-        ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
-        : activeUser;
-
-      if (targetEmp) {
-        setProfileName(targetEmp.name || "");
-        setProfileEmail(targetEmp.email || "");
-        setProfileContact(targetEmp.contact || "");
-        setProfileWhatsapp(targetEmp.whatsapp || targetEmp.contact || "");
-        setProfileFotoPerfil(targetEmp.fotoPerfil || "");
-        setProfileLogoUrl(settings.logoUrl || targetEmp.logoUrl || "");
-        setProfileRole(targetEmp.role || "Operador");
-        setTestPinInput(targetEmp.pin || "");
-        setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
-        setProfileTwoFactorSms(targetEmp.twoFactorSmsEnabled ?? false);
-        setProfilePhoneValidated(targetEmp.isPhoneValidated ?? Boolean(targetEmp.contact && targetEmp.contact.trim().length >= 8));
-        const isWebAuthnSaved = localStorage.getItem(`erp_webauthn_enabled_${targetEmp.id}`) === "true";
-        setProfileWebAuthnEnabled(targetEmp.webAuthnEnabled ?? isWebAuthnSaved ?? false);
-        setProfileWebAuthnCredentialId(targetEmp.webAuthnCredentialId || localStorage.getItem(`erp_webauthn_cred_${targetEmp.id}`) || "");
-        setProfileObservacoes(targetEmp.observacoes || "");
-        setProfileExpirationDate(targetEmp.expirationDate || "");
-      }
-    }
-    setSwitchEnteredPin("");
-    setSwitchPinError("");
-    setShowSwitchPin(false);
-  }, [isUserSwitchModalOpen, activeUser, settings.twoFactorEmailEnabled, switchSelectedEmployeeId, employees]);
-
-  const pinStrength = useMemo(() => {
-    const pin = testPinInput.trim();
-    if (!pin) {
-      return {
-        score: 0,
-        label: "Aguardando PIN",
-        colorBg: "bg-slate-700",
-        colorText: "text-slate-400",
-        bars: [false, false, false],
-        feedback: "Digite um PIN ou clique em 'Resetar PIN' para gerar um novo PIN temporário."
-      };
-    }
-
-    if (/^(\d)\1+$/.test(pin)) {
-      return {
-        score: 1,
-        label: "Muito Fraca (Números Repetidos)",
-        colorBg: "bg-rose-500",
-        colorText: "text-rose-400",
-        bars: [true, false, false],
-        feedback: "❌ Inseguro: Contém apenas dígitos repetidos (ex: 111111)."
-      };
-    }
-
-    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789"];
-    if (seqs.some(s => s.includes(pin))) {
-      return {
-        score: 1,
-        label: "Muito Fraca (Sequência Simples)",
-        colorBg: "bg-rose-500",
-        colorText: "text-rose-400",
-        bars: [true, false, false],
-        feedback: "❌ Inseguro: Contém uma sequência numérica simples (ex: 123456)."
-      };
-    }
-
-    if (pin.length < 4) {
-      return {
-        score: 1,
-        label: "Fraca (Curto)",
-        colorBg: "bg-orange-500",
-        colorText: "text-orange-400",
-        bars: [true, false, false],
-        feedback: "⚠️ O PIN deve possuir no mínimo 4 a 6 dígitos numéricos."
-      };
-    }
-
-    if (pin.length < 6 || /^(\d{2})\1+$/.test(pin)) {
-      return {
-        score: 2,
-        label: "Média",
-        colorBg: "bg-amber-500",
-        colorText: "text-amber-400",
-        bars: [true, true, false],
-        feedback: "⚡ Nível moderado: Recomendado utilizar 6 dígitos numéricos aleatórios."
-      };
-    }
-
-    return {
-      score: 3,
-      label: "Forte (Segurança Máxima)",
-      colorBg: "bg-emerald-500",
-      colorText: "text-emerald-400",
-      bars: [true, true, true],
-      feedback: "✅ PIN Seguro: Atende a todos os critérios sem sequências nem repetições simples."
-    };
-  }, [testPinInput]);
-
-  const currentPinWarning = useMemo(() => {
-    const pinToCheck = (testPinInput || activeUser?.pin || "").trim();
-    if (!pinToCheck) return null;
-
-    const isRepeated = /^(\d)\1+$/.test(pinToCheck);
-    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789", "1234", "4321"];
-    const isSequential = seqs.some(s => s.includes(pinToCheck));
-
-    if (isRepeated) {
-      return {
-        type: "repeated",
-        title: "Alerta de Segurança: PIN Inseguro (Repetição de Dígitos)",
-        message: `O PIN atual ('${pinToCheck}') consiste apenas em dígitos repetidos (ex: 111111). Esta escolha representa um alto risco de acesso não autorizado.`
-      };
-    }
-
-    if (isSequential) {
-      return {
-        type: "sequential",
-        title: "Alerta de Segurança: PIN Inseguro (Sequência Simples)",
-        message: `O PIN atual ('${pinToCheck}') é uma sequência numérica muito simples (ex: '123456'). Recomenda-se redefinir o PIN.`
-      };
-    }
-
-    return null;
-  }, [testPinInput, activeUser?.pin]);
-
-  const handleGeneratePaymentQr = async () => {
-    try {
-      setIsGeneratingQr(true);
-      const paymentData = JSON.stringify({
-        type: "RECEIVE_PAYMENT",
-        user: activeUser?.name || "Colaborador",
-        contact: activeUser?.contact || "840000000",
-        role: activeUser?.role || "Operador",
-        company: settings.companyName || "Sistema OST Vendas",
-        nuit: settings.companyNuit || "400000000",
-        timestamp: new Date().toISOString()
-      });
-      const url = await QRCode.toDataURL(paymentData, {
-        width: 300,
-        margin: 2,
-        color: {
-          dark: "#0f172a",
-          light: "#ffffff"
-        }
-      });
-      setPaymentQrUrl(url);
-      setShowPaymentQrModal(true);
-    } catch (err) {
-      console.error("Erro ao gerar QR Code:", err);
-      showToast("Erro ao gerar QR Code de pagamento", "error");
-    } finally {
-      setIsGeneratingQr(false);
-    }
-  };
-
-  const handleResetPin = async () => {
-    if (!activeUser) return;
-
-    const newTempPin = generateSecurePin(6);
-    const nowIso = new Date().toISOString();
-
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === activeUser.id) {
-        return {
-          ...emp,
-          pin: newTempPin,
-          pinCreatedAt: nowIso,
-          pinChanged: false
-        };
-      }
-      return emp;
-    });
-
-    setEmployees(updatedEmployees);
-    await syncTable("employees", updatedEmployees);
-
-    setActiveUser({
-      ...activeUser,
-      pin: newTempPin,
-      pinCreatedAt: nowIso,
-      pinChanged: false
-    });
-
-    setTestPinInput(newTempPin);
-
-    handleAddAuditLog(
-      "Reset de PIN",
-      "SISTEMA",
-      `PIN temporário gerado para o colaborador ${activeUser.name} (ID: ${activeUser.id}).`
-    );
-
-    showToast(`Novo PIN temporário gerado: ${newTempPin}`, "success");
-
-    alert(
-      `✅ PIN RESETADO COM SUCESSO!\n\nColaborador: ${activeUser.name}\nNovo PIN Temporário: ${newTempPin}\nData de Criação: ${new Date(nowIso).toLocaleDateString("pt-PT")} às ${new Date(nowIso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}\n\nO colaborador deverá alterar esta senha no próximo acesso.`
-    );
-  };
-
-  const handleRegisterWebAuthn = async () => {
-    const empId = switchSelectedEmployeeId || activeUser?.id || "e1";
-    const empName = profileName || activeUser?.name || "Operador";
-
-    try {
-      if (!window.PublicKeyCredential) {
-        showToast("O seu navegador ou ambiente não suporta a API WebAuthn.", "warning", "WebAuthn Não Suportado");
-        return;
-      }
-
-      const challenge = new Uint8Array(32);
-      window.crypto.getRandomValues(challenge);
-      const userIdBytes = new TextEncoder().encode(empId);
-
-      const credential = await navigator.credentials.create({
-        publicKey: {
-          challenge: challenge,
-          rp: {
-            name: settings.companyName || "OST Vendas ERP",
-            id: window.location.hostname || "localhost"
-          },
-          user: {
-            id: userIdBytes,
-            name: empName,
-            displayName: empName
-          },
-          pubKeyCredParams: [
-            { alg: -7, type: "public-key" },
-            { alg: -257, type: "public-key" }
-          ],
-          authenticatorSelection: {
-            authenticatorAttachment: "platform",
-            userVerification: "preferred"
-          },
-          timeout: 60000
-        }
-      }).catch(() => null);
-
-      const credId = credential ? (credential as any).id || generateEntityId("cred") : generateEntityId("cred_sim");
-      
-      setProfileWebAuthnEnabled(true);
-      setProfileWebAuthnCredentialId(credId);
-      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
-      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
-
-      setEmployees(prev => prev.map(emp => {
-        if (emp.id === empId) {
-          return { ...emp, webAuthnEnabled: true, webAuthnCredentialId: credId };
-        }
-        return emp;
-      }));
-
-      showToast(
-        "Login Biométrico (WebAuthn / Touch ID / Face ID) ativado com sucesso!",
-        "success",
-        "Biometria Ativada"
-      );
-      handleAddAuditLog(
-        "Ativar Login Biométrico",
-        "SEGURANÇA",
-        `Registo de chave WebAuthn para o colaborador ${empName}.`
-      );
-    } catch (err: any) {
-      console.error("WebAuthn Registration Error:", err);
-      const credId = generateEntityId("cred_passkey");
-      setProfileWebAuthnEnabled(true);
-      setProfileWebAuthnCredentialId(credId);
-      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
-      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
-      showToast("Passkey / Login Biométrico configurado para este dispositivo!", "success", "Biometria Ativa");
-    }
-  };
-
-  const handleTestWebAuthn = async () => {
-    const empName = profileName || activeUser?.name || "Operador";
-    if (window.PublicKeyCredential) {
-      try {
-        const challenge = new Uint8Array(32);
-        window.crypto.getRandomValues(challenge);
-        await navigator.credentials.get({
-          publicKey: {
-            challenge: challenge,
-            timeout: 60000,
-            userVerification: "preferred"
-          }
-        }).catch(() => null);
-      } catch (e) {
-        // Ignore iframe permissions error
-      }
-    }
-    showToast(`Leitor biométrico (WebAuthn / Passkey) de ${empName} validado com sucesso!`, "success", "Biometria Confirmada");
-  };
-
-  const isMozambicanPhoneValid = (phone: string): boolean => {
-    if (!phone || !phone.trim()) return true;
-    const cleanPhone = phone.trim().replace(/[\s-]/g, "");
-    return /^\+258[289]\d{8}$/.test(cleanPhone);
-  };
-
-  const formatMozambicanPhoneInput = (val: string): string => {
-    let digits = val.replace(/\D/g, "");
-    if (digits.startsWith("258")) {
-      digits = digits.slice(3);
-    }
-    digits = digits.slice(0, 9);
-    return digits ? `+258${digits}` : "";
-  };
-
-  const isEmailFormatValid = (email: string): boolean => {
-    if (!email || !email.trim()) return true;
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  };
-
-  const handleSaveProfileChanges = async () => {
-    const targetEmp = switchSelectedEmployeeId 
-      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
-      : activeUser;
-    const targetEmpId = targetEmp?.id;
-    if (!targetEmpId) return;
-
-    if (!profileName.trim()) {
-      showToast("O nome do colaborador não pode estar vazio.", "warning");
-      return;
-    }
-
-    if (profileEmail.trim() && !isEmailFormatValid(profileEmail)) {
-      showToast("E-mail profissional inválido. Insira um endereço de e-mail válido (ex: colaborador@empresa.com).", "warning");
-      return;
-    }
-
-    if (profileContact.trim() && !isMozambicanPhoneValid(profileContact)) {
-      showToast("Contacto telefónico inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
-      return;
-    }
-
-    if (profileWhatsapp.trim() && !isMozambicanPhoneValid(profileWhatsapp)) {
-      showToast("Número de WhatsApp inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
-      return;
-    }
-
-    const updatedSettings = {
-      ...settings,
-      logoUrl: profileLogoUrl.trim()
-    };
-    setSettings(updatedSettings);
-    syncTable("settings", [updatedSettings]);
-    if (handleUpdateSettings) {
-      handleUpdateSettings(updatedSettings);
-    }
-
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === targetEmpId) {
-        return {
-          ...emp,
-          name: profileName.trim(),
-          email: profileEmail.trim(),
-          contact: profileContact.trim(),
-          whatsapp: profileWhatsapp.trim(),
-          fotoPerfil: profileFotoPerfil.trim(),
-          logoUrl: profileLogoUrl.trim(),
-          role: profileRole.trim() || "Operador",
-          twoFactorEmailEnabled: profileTwoFactorEmail,
-          twoFactorSmsEnabled: profileTwoFactorSms,
-          isPhoneValidated: profilePhoneValidated,
-          observacoes: profileObservacoes.trim(),
-          expirationDate: profileExpirationDate
-        };
-      }
-      return emp;
-    });
-
-    setEmployees(updatedEmployees);
-    await syncTable("employees", updatedEmployees);
-
-    if (activeUser && activeUser.id === targetEmpId) {
-      setActiveUser({
-        ...activeUser,
-        name: profileName.trim(),
-        email: profileEmail.trim(),
-        contact: profileContact.trim(),
-        whatsapp: profileWhatsapp.trim(),
-        fotoPerfil: profileFotoPerfil.trim(),
-        logoUrl: profileLogoUrl.trim(),
-        role: profileRole.trim() || "Operador",
-        twoFactorEmailEnabled: profileTwoFactorEmail,
-        twoFactorSmsEnabled: profileTwoFactorSms,
-        isPhoneValidated: profilePhoneValidated,
-        observacoes: profileObservacoes.trim(),
-        expirationDate: profileExpirationDate
-      });
-    }
-
-    showToast("Perfil e Categoria salvos com sucesso!", "success");
-
-    handleAddAuditLog(
-      "Atualização de Perfil",
-      "COLABORADORES",
-      `Perfil do colaborador ${profileName.trim()} (ID: ${targetEmpId}) atualizado (Categoria: ${profileRole.trim()}, E-mail: ${profileEmail.trim() || "N/A"}, Contacto: ${profileContact.trim() || "N/A"}).`
-    );
-  };
-
-  const handleExportAuditLogsCSV = (logsToExport: AuditLog[]) => {
-    if (!logsToExport || logsToExport.length === 0) {
-      showToast("Nenhum log de auditoria encontrado para exportar.", "warning");
-      return;
-    }
-
-    const headers = ["ID", "Data/Hora", "Usuário/Operador", "Módulo", "Ação", "Detalhes"];
-    const rows = logsToExport.map(log => [
-      `"${(log.id || "").replace(/"/g, '""')}"`,
-      `"${(log.timestamp ? new Date(log.timestamp).toLocaleString("pt-MZ") : "").replace(/"/g, '""')}"`,
-      `"${(log.user || "").replace(/"/g, '""')}"`,
-      `"${(log.module || "").replace(/"/g, '""')}"`,
-      `"${(log.action || "").replace(/"/g, '""')}"`,
-      `"${(log.details || "").replace(/"/g, '""')}"`
-    ]);
-
-    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `logs_auditoria_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    showToast(`Exportados ${logsToExport.length} logs com sucesso!`, "success");
-  };
-
-  const handleExportCollaboratorPdf = () => {
-    const targetEmployee = switchSelectedEmployeeId 
-      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
-      : activeUser;
-
-    if (!targetEmployee) {
-      showToast("Nenhum colaborador selecionado para exportar.", "warning");
-      return;
-    }
-
-    const doc = new jsPDF();
-
-    // Header Banner
-    doc.setFillColor(249, 115, 22);
-    doc.rect(0, 0, 210, 28, "F");
-
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("FICHA DE COLABORADOR", 14, 18);
-
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text(`${settings.companyName || "OST Vendas"} | NUIT: ${settings.companyNuit || "400000000"}`, 14, 24);
-
-    // Profile Data Section
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text("1. Dados do Perfil e Credenciais", 14, 38);
-
-    const pinCreatedFormatted = targetEmployee.pinCreatedAt
-      ? new Date(targetEmployee.pinCreatedAt).toLocaleDateString("pt-PT", {
-          day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-        })
-      : targetEmployee.admissionDate
-      ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT")
-      : "Não registrada";
-
-    autoTable(doc, {
-      startY: 42,
-      head: [["Campo", "Informação"]],
-      body: [
-        ["ID do Colaborador", targetEmployee.id],
-        ["Nome Completo", targetEmployee.name],
-        ["Cargo / Função", targetEmployee.role],
-        ["Contacto Telefónico", targetEmployee.contact || "Não informado"],
-        ["E-mail Registrado", targetEmployee.email || "Sem e-mail vinculado"],
-        ["Estado da Conta", targetEmployee.status],
-        ["Data de Admissão", targetEmployee.admissionDate ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT") : "N/A"],
-        ["Data de Criação do PIN Atual", pinCreatedFormatted],
-        ["Status do PIN", targetEmployee.pinChanged === false ? "PIN Temporário" : "Senha Pessoal Ativa"],
-        ["Observações / Notas", targetEmployee.observacoes || "Nenhuma observação registrada"],
-        ["Data de Expiração (Validade)", targetEmployee.expirationDate ? new Date(targetEmployee.expirationDate).toLocaleDateString("pt-PT") : "Não definida"]
-      ],
-      theme: "striped",
-      headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
-      styles: { fontSize: 9.5 }
-    });
-
-    // Activity Summary Section
-    const lastY = (doc as any).lastAutoTable.finalY + 10;
-    doc.setFontSize(12);
-    doc.setFont("helvetica", "bold");
-    doc.text("2. Resumo de Atividade do Colaborador", 14, lastY);
-
-    const empName = targetEmployee.name.toLowerCase();
-    const empId = targetEmployee.id.toLowerCase();
-
-    const targetLogs = auditLogs
-      .filter(log => {
-        const logUser = (log.user || "").toLowerCase();
-        const logDetails = (log.details || "").toLowerCase();
-        return logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
-      })
-      .slice(-10)
-      .reverse();
-
-    if (targetLogs.length === 0) {
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "italic");
-      doc.text("Nenhum registro de auditoria encontrado para este colaborador.", 14, lastY + 8);
-    } else {
-      autoTable(doc, {
-        startY: lastY + 5,
-        head: [["Data / Hora", "Módulo", "Ação", "Detalhes"]],
-        body: targetLogs.map(log => [
-          new Date(log.timestamp).toLocaleString("pt-PT", {
-            day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
-          }),
-          log.module || "SISTEMA",
-          log.action || "AÇÃO",
-          log.details || "-"
-        ]),
-        theme: "grid",
-        headStyles: { fillColor: [249, 115, 22], textColor: [255, 255, 255], fontStyle: "bold" },
-        styles: { fontSize: 8.5 }
-      });
-    }
-
-    // Footer
-    const pageHeight = doc.internal.pageSize.getHeight();
-    doc.setFontSize(8);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Ficha emitida em ${new Date().toLocaleString("pt-PT")} pelo Operador: ${activeUser?.name || "Sistema"}`, 14, pageHeight - 10);
-
-    doc.save(`Ficha_Colaborador_${targetEmployee.name.replace(/\s+/g, "_")}.pdf`);
-    showToast("Ficha do colaborador exportada em PDF com sucesso!", "success");
-  };
-
-  const handleSuspendCollaborator = async () => {
-    if (!activeUser) return;
-    const confirmSuspend = window.confirm(
-      `Tem a certeza que deseja suspender o colaborador "${activeUser.name}"?\n\nO status passará a 'SUSPENDED' e novos logins serão bloqueados imediatamente.`
-    );
-    if (!confirmSuspend) return;
-
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === activeUser.id) {
-        return {
-          ...emp,
-          status: "SUSPENDED" as const
-        };
-      }
-      return emp;
-    });
-
-    setEmployees(updatedEmployees);
-    await syncTable("employees", updatedEmployees);
-
-    setActiveUser({
-      ...activeUser,
-      status: "SUSPENDED"
-    });
-
-    handleAddAuditLog(
-      "Suspensão de Colaborador",
-      "SISTEMA",
-      `Colaborador ${activeUser.name} (ID: ${activeUser.id}) teve o status alterado para SUSPENDED.`
-    );
-
-    showToast(`Colaborador ${activeUser.name} foi suspenso com sucesso.`, "error");
-
-    setIsUserSwitchModalOpen(false);
-  };
 
   const handleUpdateUserPlan = async (employeeId: string, newPlan: SubscriptionPlan) => {
     const updatedEmployees = employees.map(emp => 
@@ -1955,7 +318,7 @@ export default function App() {
 
   // Premium AI predictions state
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
-  const [forecastResult, setForecastResult] = useState<any | null>(null);
+  const [forecastResult, setForecastResult] = useState<AiForecastResult | null>(null);
 
   // Dynamic system versioning that automatically increments with each database record or action logged
   const totalSystemModifications = useMemo(() => {
@@ -2048,19 +411,7 @@ export default function App() {
   
   // Geolocation and IP tracking for Audit Logs
   const [userIpInfo, setUserIpInfo] = useState<{ ip: string; city: string; country: string } | null>(null);
-  const [deviceInfo, setDeviceInfo] = useState<string>(() => {
-    if (typeof navigator === "undefined") return "Desktop";
-    const ua = navigator.userAgent;
-    let dev = "Desktop";
-    if (/mobile/i.test(ua)) dev = "Telemóvel / Mobile";
-    else if (/tablet/i.test(ua)) dev = "Tablet";
-    
-    if (ua.includes("Chrome")) dev += " (Chrome)";
-    else if (ua.includes("Firefox")) dev += " (Firefox)";
-    else if (ua.includes("Safari") && !ua.includes("Chrome")) dev += " (Safari)";
-    else if (ua.includes("Edge")) dev += " (Edge)";
-    return dev;
-  });
+  const [deviceInfo] = useState<string>(() => detectDeviceType());
 
   // Track operator-specific custom color theme
   const [activeColorTheme, setActiveColorTheme] = useState<string>("laranja");
@@ -2121,37 +472,17 @@ export default function App() {
     };
   }, [settings, products, customers, transactions, cashFlow, employees, auditLogs]);
 
-  // Offline sync queue state & status tracking
-  const [pendingSyncQueue, setPendingSyncQueue] = useState<Record<string, any>>(() => {
-    try {
-      const raw = localStorage.getItem("pos_sync_queue");
-      if (raw) {
-        lastSyncQueueRawRef.current = raw;
-        return JSON.parse(raw);
-      }
-      return {};
-    } catch {
-      return {};
-    }
-  });
+  // Offline sync queue state & status tracking (IndexedDB backed via operationalCache)
+  const [pendingSyncQueue, setPendingSyncQueue] = useState<Record<string, unknown>>({});
   const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
 
-  // Periodically monitor the local storage for changes to sync queue without double JSON.stringify
+  // Load sync queue from high-capacity IndexedDB on mount
   useEffect(() => {
-    const checkQueue = () => {
-      try {
-        const raw = localStorage.getItem("pos_sync_queue") || "";
-        if (raw !== lastSyncQueueRawRef.current) {
-          lastSyncQueueRawRef.current = raw;
-          const parsed = raw ? JSON.parse(raw) : {};
-          setPendingSyncQueue(parsed);
-        }
-      } catch (e) {
-        console.warn("Erro ao monitorizar fila offline:", e);
+    loadSyncQueue().then(q => {
+      if (q && typeof q === "object") {
+        setPendingSyncQueue(q);
       }
-    };
-    const interval = setInterval(checkQueue, 5000);
-    return () => clearInterval(interval);
+    });
   }, []);
 
   // Initialize system error capturing
@@ -2165,29 +496,13 @@ export default function App() {
 
   // Fetch client IP and geolocation for Audit logs
   useEffect(() => {
-    // Fetch IP and Geo IP details
-    fetch("https://ipapi.co/json/")
-      .then(res => {
-        if (!res.ok) throw new Error("Failed to fetch IP details");
-        return res.json();
-      })
-      .then(data => {
-        if (data && data.ip) {
-          setUserIpInfo({
-            ip: data.ip,
-            city: data.city || "Maputo",
-            country: data.country_name || "Moçambique"
-          });
-        }
-      })
-      .catch(() => {
-        // Safe mock realistic Mozambican IP/Geo details on failure/ad-blocker
-        setUserIpInfo({
-          ip: "102.81.12.94",
-          city: "Maputo",
-          country: "Moçambique"
-        });
+    fetchGeoLocationInfo().then(info => {
+      setUserIpInfo({
+        ip: info.ip,
+        city: info.city,
+        country: info.country
       });
+    });
   }, []);
 
   // Advanced top bar metrics states
@@ -2240,7 +555,7 @@ export default function App() {
   }, [activeUser, userIpInfo, deviceInfo]);
 
   // DB Sync helper with robust offline queueing
-  const syncTable = async (tableName: string, updatedData: any) => {
+  const syncTable = async (tableName: string, updatedData: unknown) => {
     if (isLoggingOutRef.current) return;
     if (!isDbLoaded && Array.isArray(updatedData) && updatedData.length === 0) return;
     setLastSyncTime(new Date().toLocaleTimeString());
@@ -2251,17 +566,17 @@ export default function App() {
       }
       
       if (tableName === "products") {
-        await CommercialDataService.saveProductsBatch(updatedData);
+        await CommercialDataService.saveProductsBatch(updatedData as Product[]);
       } else if (tableName === "transactions") {
-        await CommercialDataService.saveTransactionsBatch(updatedData);
+        await CommercialDataService.saveTransactionsBatch(updatedData as Transaction[]);
       } else if (tableName === "customers") {
-        await CommercialDataService.saveCustomersBatch(updatedData);
+        await CommercialDataService.saveCustomersBatch(updatedData as Customer[]);
       } else if (tableName === "cashflow") {
-        await CommercialDataService.saveCashFlowBatch(updatedData);
+        await CommercialDataService.saveCashFlowBatch(updatedData as CashFlowEntry[]);
       } else if (tableName === "settings") {
-        await CommercialDataService.saveSettings(updatedData);
+        await CommercialDataService.saveSettings(updatedData as SystemSettings);
       } else if (tableName === "employees") {
-        await CommercialDataService.saveEmployeesBatch(updatedData);
+        await CommercialDataService.saveEmployeesBatch(updatedData as Employee[]);
       }
 
       // Also send mutation to server endpoint if available
@@ -2275,37 +590,34 @@ export default function App() {
         console.warn(`Could not save table '${tableName}' to server DB store:`, serverErr);
       }
       
-      // Successfully synced! Try to clean from pending queue
-      const rawQueue = localStorage.getItem("pos_sync_queue");
-      if (rawQueue) {
-        const queue = JSON.parse(rawQueue);
-        if (queue[tableName]) {
-          delete queue[tableName];
-          const newRaw = JSON.stringify(queue);
-          safeLocalStorageSetItem("pos_sync_queue", newRaw);
-          lastSyncQueueRawRef.current = newRaw;
-          setPendingSyncQueue(queue);
+      // Successfully synced! Try to clean from pending queue in IndexedDB
+      const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
+      if (queue[tableName]) {
+        delete queue[tableName];
+        if (Object.keys(queue).length === 0) {
+          await operationalCache.removeItem("pos_sync_queue");
+        } else {
+          await operationalCache.setItem("pos_sync_queue", queue);
         }
+        setPendingSyncQueue({ ...queue });
       }
-    } catch (err: any) {
-      console.warn(`[OFFLINE CACHE] Não foi possível sincronizar a tabela '${tableName}' (${err.message}). Guardando para reenvio automático.`);
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error ? err.message : String(err);
+      console.warn(`[OFFLINE CACHE] Não foi possível sincronizar a tabela '${tableName}' (${errMessage}). Guardando no IndexedDB para reenvio automático.`);
       if (tableName !== "auditlogs") {
         handleAddAuditLog(
           "Falha de Sincronização",
           "Erros do Sistema",
-          `Erro de conexão ao sincronizar tabela '${tableName}': ${err.message}. Guardado na fila de reenvio offline.`
+          `Erro de conexão ao sincronizar tabela '${tableName}': ${errMessage}. Guardado na fila de reenvio offline.`
         );
       }
       try {
-        const rawQueue = localStorage.getItem("pos_sync_queue");
-        const queue = rawQueue ? JSON.parse(rawQueue) : {};
+        const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
         queue[tableName] = updatedData;
-        const newRaw = JSON.stringify(queue);
-        safeLocalStorageSetItem("pos_sync_queue", newRaw);
-        lastSyncQueueRawRef.current = newRaw;
-        setPendingSyncQueue(queue);
+        await operationalCache.setItem("pos_sync_queue", queue);
+        setPendingSyncQueue({ ...queue });
       } catch (queueErr) {
-        console.warn("Erro ao guardar alteração na fila offline local (quota de armazenamento excedida):", queueErr);
+        console.warn("Erro ao guardar alteração na fila offline no IndexedDB:", queueErr);
       }
     }
   };
@@ -2322,108 +634,13 @@ export default function App() {
     
     isSyncProcessingRef.current = true;
     try {
-      const rawQueue = localStorage.getItem("pos_sync_queue");
-      if (!rawQueue) return;
-      
-      const queue = JSON.parse(rawQueue);
+      const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
       const tableNames = Object.keys(queue);
       if (tableNames.length === 0) return;
       
       console.log(`[SYNC QUEUE] Detectadas ${tableNames.length} tabelas com alterações offline pendentes. Sincronizando...`);
-      
-      for (const tableName of tableNames) {
-        const data = queue[tableName];
-        let success = false;
-        
-        if (tableName === "products") {
-          try {
-            await CommercialDataService.saveProductsBatch(data);
-            success = true;
-            try {
-              await authenticatedFetch("/api/db/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ table: "products", data })
-              });
-            } catch (err) {
-              console.warn("[SYNC QUEUE] Erro ao atualizar produtos no servidor:", err);
-            }
-          } catch (fsErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar produtos:", fsErr);
-          }
-        } else if (tableName === "transactions") {
-          try {
-            await CommercialDataService.saveTransactionsBatch(data);
-            success = true;
-            try {
-              await authenticatedFetch("/api/db/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ table: "transactions", data })
-              });
-            } catch (err) {
-              console.warn("[SYNC QUEUE] Erro ao atualizar transações no servidor:", err);
-            }
-          } catch (fsErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar transações:", fsErr);
-          }
-        } else if (tableName === "customers") {
-          try {
-            await CommercialDataService.saveCustomersBatch(data);
-            success = true;
-            try {
-              await authenticatedFetch("/api/db/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ table: "customers", data })
-              });
-            } catch (err) {
-              console.warn("[SYNC QUEUE] Erro ao atualizar clientes no servidor:", err);
-            }
-          } catch (cErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar clientes:", cErr);
-          }
-        } else if (tableName === "cashflow") {
-          try {
-            await CommercialDataService.saveCashFlowBatch(data);
-            success = true;
-            try {
-              await authenticatedFetch("/api/db/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ table: "cashflow", data })
-              });
-            } catch (err) {
-              console.warn("[SYNC QUEUE] Erro ao atualizar caixa no servidor:", err);
-            }
-          } catch (cfErr) {
-            console.warn("[SYNC QUEUE] Erro ao ressincronizar caixa:", cfErr);
-          }
-        } else {
-          try {
-            const response = await authenticatedFetch("/api/db/save", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ table: tableName, data })
-            });
-            success = response.ok;
-          } catch (fetchErr) {
-            console.warn(`[SYNC QUEUE] Erro de rede ao ressincronizar tabela ${tableName}:`, fetchErr);
-          }
-        }
-        
-        if (success) {
-          console.log(`[SYNC QUEUE] Tabela ${tableName} ressincronizada offline com sucesso!`);
-          delete queue[tableName];
-        } else {
-          console.warn(`[SYNC QUEUE] Falha na ressincronização de ${tableName}`);
-        }
-      }
-      
-      const newRaw = JSON.stringify(queue);
-      safeLocalStorageSetItem("pos_sync_queue", newRaw);
-      lastSyncQueueRawRef.current = newRaw;
-      setPendingSyncQueue(queue);
+      const { remainingQueue } = await syncOfflineQueueService(queue);
+      setPendingSyncQueue(remainingQueue);
     } catch (err) {
       console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
     } finally {
@@ -2443,9 +660,8 @@ export default function App() {
     try {
       await processSyncQueue();
       
-      const raw = localStorage.getItem("pos_sync_queue");
-      const parsed = raw ? JSON.parse(raw) : {};
-      const keys = Object.keys(parsed);
+      const currentQueue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
+      const keys = Object.keys(currentQueue);
       
       if (keys.length === 0) {
         showToast("Todas as alterações offline foram sincronizadas com sucesso!", "success", "Sincronização Concluída");
@@ -2467,8 +683,9 @@ export default function App() {
         });
         showToast(`Sincronização parcial concluída. Algumas alterações (${friendlyTables.join(", ")}) ainda estão pendentes.`, "warning", "Sincronização Parcial");
       }
-    } catch (err: any) {
-      showToast(`Erro durante a sincronização: ${err.message}`, "error", "Falha na Sincronização");
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      showToast(`Erro durante a sincronização: ${errMsg}`, "error", "Falha na Sincronização");
     } finally {
       setIsManualSyncing(false);
     }
@@ -2520,10 +737,9 @@ export default function App() {
 
       isSyncProcessingRef.current = true;
       try {
-        const rawQueue = localStorage.getItem("pos_sync_queue");
-        if (!rawQueue) return;
+        const queue = await operationalCache.getItem<Record<string, any>>("pos_sync_queue");
+        if (!queue) return;
 
-        const queue = JSON.parse(rawQueue);
         const pendingTxs = queue["transactions"];
 
         if (pendingTxs && Array.isArray(pendingTxs) && pendingTxs.length > 0) {
@@ -2533,12 +749,14 @@ export default function App() {
             // Envia transações pendentes para a base de dados em lote
             await CommercialDataService.saveTransactionsBatch(pendingTxs);
 
-            // Sucesso! Remove a chave transactions da fila offline
+            // Sucesso! Remove a chave transactions da fila offline no IndexedDB
             delete queue["transactions"];
-            const newRaw = JSON.stringify(queue);
-            safeLocalStorageSetItem("pos_sync_queue", newRaw);
-            lastSyncQueueRawRef.current = newRaw;
-            setPendingSyncQueue(queue);
+            if (Object.keys(queue).length === 0) {
+              await operationalCache.removeItem("pos_sync_queue");
+            } else {
+              await operationalCache.setItem("pos_sync_queue", queue);
+            }
+            setPendingSyncQueue({ ...queue });
             
             setLastSyncTime(new Date().toLocaleTimeString());
             console.log("[SYNC 5MIN] Sincronização automática das transações offline concluída com sucesso!");
@@ -2548,16 +766,17 @@ export default function App() {
               "Vendas",
               `Sincronização automática de 5 minutos reenviou ${pendingTxs.length} transações pendentes com sucesso.`
             );
-          } catch (fsErr: any) {
+          } catch (fsErr: unknown) {
+            const fsErrMessage = fsErr instanceof Error ? fsErr.message : String(fsErr);
             console.error("[SYNC 5MIN] Erro ao reenviar transações pendentes:", fsErr);
             handleAddAuditLog(
               "Falha de Sincronização",
               "Vendas",
-              `Falha na sincronização periódica de transações offline: ${fsErr.message}`
+              `Falha na sincronização periódica de transações offline: ${fsErrMessage}`
             );
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("[SYNC 5MIN] Erro ao analisar fila de sincronização:", err);
       } finally {
         isSyncProcessingRef.current = false;
@@ -2621,26 +840,36 @@ export default function App() {
   // Hydrate states with Cache-Aside pattern: instant local snapshot + background full integrity verification
   const hydrateDatabaseForUser = async (user?: Employee | null, customCompanyName?: string) => {
     try {
-      const cacheKey = user?.id ? `erp_cache_snapshot_${user.id}` : "erp_cache_snapshot_global";
+      const effectiveTenantId = user?.tenantId ||
+        (user?.companyId && user.companyId.startsWith("comp_") ? user.companyId : "") ||
+        (user?.id ? `comp_${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12)}` : (typeof window !== "undefined" ? localStorage.getItem("erp_current_tenant_id") || "default_tenant" : "default_tenant"));
 
-      // 1. [CACHE-ASIDE] Leitura Imediata do Snapshot Local
+      if (effectiveTenantId && typeof window !== "undefined") {
+        localStorage.setItem("erp_current_tenant_id", effectiveTenantId);
+        saveSupabaseConfig({ tenantId: effectiveTenantId });
+      }
+
+      const cacheKey = user?.id ? `erp_cache_snapshot_${effectiveTenantId}_${user.id}` : `erp_cache_snapshot_${effectiveTenantId}`;
+
+      // 1. [CACHE-ASIDE] Leitura Imediata do Snapshot Local (IndexedDB isolado por tenant)
+      let cached: ErpSnapshotData | null = null;
       try {
-        const cachedRaw = localStorage.getItem(cacheKey) || localStorage.getItem("erp_cache_snapshot_global");
-        if (cachedRaw) {
-          const cached = JSON.parse(cachedRaw);
-          if (cached && typeof cached === "object") {
-            if (Array.isArray(cached.products) && cached.products.length > 0) setProducts(cached.products);
-            if (Array.isArray(cached.customers) && cached.customers.length > 0) setCustomers(cached.customers);
-            if (Array.isArray(cached.transactions) && cached.transactions.length > 0) setTransactions(cached.transactions);
-            if (Array.isArray(cached.cashflow) && cached.cashflow.length > 0) setCashFlow(cached.cashflow);
-            if (Array.isArray(cached.employees) && cached.employees.length > 0) setEmployees(cached.employees);
-            if (Array.isArray(cached.auditlogs) && cached.auditlogs.length > 0) setAuditLogs(cached.auditlogs);
-            if (cached.settings) setSettings(prev => ({ ...prev, ...cached.settings }));
-            
-            // Marca a BD como carregada imediatamente para o operador interagir sem atraso
-            setIsDbLoaded(true);
-            console.log("[CACHE-ASIDE] Snapshot local carregado instantaneamente.");
-          }
+        cached = await operationalCache.loadSnapshot(cacheKey);
+        // IMPORTANTE: NÃO carregar "erp_cache_snapshot_global" se for um usuário autenticado específico para não herdar dados de outra conta de testes
+        if (!cached && !user?.id) {
+          cached = await operationalCache.loadSnapshot("erp_cache_snapshot_global");
+        }
+        if (cached && typeof cached === "object") {
+          if (Array.isArray(cached.products)) setProducts(cached.products);
+          if (Array.isArray(cached.customers)) setCustomers(cached.customers);
+          if (Array.isArray(cached.transactions)) setTransactions(cached.transactions);
+          if (Array.isArray(cached.cashflow)) setCashFlow(cached.cashflow);
+          if (Array.isArray(cached.employees) && cached.employees.length > 0) setEmployees(cached.employees);
+          if (Array.isArray(cached.auditlogs)) setAuditLogs(cached.auditlogs);
+          if (cached.settings) setSettings(prev => ({ ...prev, ...cached!.settings }));
+          
+          setIsDbLoaded(true);
+          console.log(`[CACHE-ASIDE] Snapshot da conta ${effectiveTenantId} carregado via IndexedDB.`);
         }
       } catch (cacheErr) {
         console.warn("[CACHE-ASIDE] Erro ao ler snapshot em cache:", cacheErr);
@@ -2661,7 +890,7 @@ export default function App() {
         });
       } catch {}
 
-      console.log("[HYDRATE] Executando sincronização de integridade em segundo plano...");
+      console.log(`[HYDRATE] Sincronizando dados autoritativos da nuvem para o tenant ${effectiveTenantId}...`);
 
       // 3. Fetch remote data from Supabase for this tenant
       const [sbProducts, sbCustomers, sbTransactions, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
@@ -2675,7 +904,7 @@ export default function App() {
       ]);
 
       // 3. Fetch server database state if available
-      let serverData: any = null;
+      let serverData: DatabaseSnapshotPayload | null = null;
       try {
         const response = await authenticatedFetch("/api/db/load");
         const contentType = response.headers.get("content-type");
@@ -2687,88 +916,108 @@ export default function App() {
         }
       } catch {}
 
-      // 4. Merge products by ID (preserving existing local modifications and remote catalog)
+      // 4. Merge products (garante que dados cadastrados na conta venham do servidor/nuvem)
       let finalProducts: Product[] = [];
-      setProducts(prev => {
-        const base = serverData?.products || prev || [];
-        finalProducts = SupabaseSyncService.mergeRecordsById(base, sbProducts || []);
-        return finalProducts;
-      });
+      const remoteProds = Array.isArray(sbProducts) ? sbProducts : [];
+      const serverProds = Array.isArray(serverData?.products) ? serverData.products : [];
+      const combinedProds = SupabaseSyncService.mergeRecordsById(serverProds, remoteProds);
+
+      if (combinedProds.length > 0) {
+        finalProducts = combinedProds;
+      } else if (cached?.products && Array.isArray(cached.products)) {
+        finalProducts = cached.products;
+      } else {
+        finalProducts = [];
+      }
+      setProducts(finalProducts);
 
       // 5. Merge customers by ID
       let finalCustomers: Customer[] = [];
-      setCustomers(prev => {
-        const base = serverData?.customers || prev || [];
-        finalCustomers = SupabaseSyncService.mergeRecordsById(base, sbCustomers || []);
-        return finalCustomers;
-      });
+      const remoteCusts = Array.isArray(sbCustomers) ? sbCustomers : [];
+      const serverCusts = Array.isArray(serverData?.customers) ? serverData.customers : [];
+      const combinedCusts = SupabaseSyncService.mergeRecordsById(serverCusts, remoteCusts);
+
+      if (combinedCusts.length > 0) {
+        finalCustomers = combinedCusts;
+      } else if (cached?.customers && Array.isArray(cached.customers)) {
+        finalCustomers = cached.customers;
+      } else {
+        finalCustomers = [];
+      }
+      setCustomers(finalCustomers);
 
       // 6. Merge transactions by ID and sort chronologically
       let finalTransactions: Transaction[] = [];
-      setTransactions(prev => {
-        const base = serverData?.transactions || prev || [];
-        const merged = SupabaseSyncService.mergeRecordsById(base, sbTransactions || []);
-        finalTransactions = merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        return finalTransactions;
-      });
+      const remoteTxs = Array.isArray(sbTransactions) ? sbTransactions : [];
+      const serverTxs = Array.isArray(serverData?.transactions) ? serverData.transactions : [];
+      const combinedTxs = SupabaseSyncService.mergeRecordsById(serverTxs, remoteTxs);
+
+      if (combinedTxs.length > 0) {
+        finalTransactions = combinedTxs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      } else if (cached?.transactions && Array.isArray(cached.transactions)) {
+        finalTransactions = cached.transactions;
+      } else {
+        finalTransactions = [];
+      }
+      setTransactions(finalTransactions);
 
       // 7. Merge cashflow by ID
       let finalCashflow: CashFlowEntry[] = [];
-      setCashFlow(prev => {
-        const base = serverData?.cashflow || prev || [];
-        finalCashflow = SupabaseSyncService.mergeRecordsById(base, sbCashflow || []);
-        return finalCashflow;
-      });
+      const remoteCash = Array.isArray(sbCashflow) ? sbCashflow : [];
+      const serverCash = Array.isArray(serverData?.cashflow) ? serverData.cashflow : [];
+      const combinedCash = SupabaseSyncService.mergeRecordsById(serverCash, remoteCash);
+
+      if (combinedCash.length > 0) {
+        finalCashflow = combinedCash;
+      } else if (cached?.cashflow && Array.isArray(cached.cashflow)) {
+        finalCashflow = cached.cashflow;
+      } else {
+        finalCashflow = [];
+      }
+      setCashFlow(finalCashflow);
 
       // 8. Merge employees by ID, ensuring user profile integrity and preservation of local PIN/credentials
       let finalEmployees: Employee[] = [];
-      setEmployees(prev => {
-        const base = (serverData?.employees && serverData.employees.length > 0) ? serverData.employees : (prev.length > 0 ? prev : initialEmployees);
-        const merged = SupabaseSyncService.mergeRecordsById(base, sbEmployees || []);
-        if (user) {
-          const idx = merged.findIndex(e => e.id === user.id || (e.email && e.email.toLowerCase() === user.email?.toLowerCase()));
-          if (idx > -1) {
-            merged[idx] = { ...merged[idx], ...user, pin: merged[idx].pin || user.pin };
-          } else {
-            merged.push(user);
-          }
+      const remoteEmps = Array.isArray(sbEmployees) ? sbEmployees : [];
+      const serverEmps = Array.isArray(serverData?.employees) ? serverData.employees : [];
+      const combinedEmps = SupabaseSyncService.mergeRecordsById(serverEmps, remoteEmps);
+      const baseEmps = combinedEmps.length > 0 ? combinedEmps : (cached?.employees && Array.isArray(cached.employees) && cached.employees.length > 0 ? cached.employees : initialEmployees);
+
+      if (user) {
+        const idx = baseEmps.findIndex(e => e.id === user.id || (e.email && e.email.toLowerCase() === user.email?.toLowerCase()));
+        if (idx > -1) {
+          baseEmps[idx] = { ...baseEmps[idx], ...user, pin: baseEmps[idx].pin || user.pin };
+        } else {
+          baseEmps.push(user);
         }
-        finalEmployees = merged;
-        return finalEmployees;
-      });
+      }
+      finalEmployees = baseEmps;
+      setEmployees(finalEmployees);
 
       // 9. Merge settings
       let finalSettings: SystemSettings | null = null;
       const validCustomName = customCompanyName && customCompanyName.trim() && !customCompanyName.startsWith("comp_") ? customCompanyName.trim() : "";
       if (sbSettings) {
-        setSettings(prev => {
-          const chosenName = (sbSettings.companyName && !sbSettings.companyName.startsWith("comp_")) ? sbSettings.companyName : (validCustomName || prev.companyName);
-          finalSettings = { ...prev, ...sbSettings, ...(chosenName ? { companyName: chosenName } : {}) };
-          return finalSettings;
-        });
+        const chosenName = (sbSettings.companyName && !sbSettings.companyName.startsWith("comp_")) ? sbSettings.companyName : (validCustomName || defaultSettings.companyName);
+        finalSettings = { ...defaultSettings, ...sbSettings, ...(chosenName ? { companyName: chosenName } : {}) };
       } else if (serverData?.settings) {
-        setSettings(prev => {
-          const chosenName = (serverData.settings.companyName && !serverData.settings.companyName.startsWith("comp_")) ? serverData.settings.companyName : (validCustomName || prev.companyName);
-          finalSettings = { ...prev, ...serverData.settings, ...(chosenName ? { companyName: chosenName } : {}) };
-          return finalSettings;
-        });
-      } else if (validCustomName) {
-        setSettings(prev => {
-          if (prev.companyName === validCustomName) return prev;
-          finalSettings = { ...prev, companyName: validCustomName };
-          return finalSettings;
-        });
+        const chosenName = (serverData.settings.companyName && !serverData.settings.companyName.startsWith("comp_")) ? serverData.settings.companyName : (validCustomName || defaultSettings.companyName);
+        finalSettings = { ...defaultSettings, ...serverData.settings, ...(chosenName ? { companyName: chosenName } : {}) };
+      } else if (cached?.settings) {
+        finalSettings = { ...defaultSettings, ...cached.settings, ...(validCustomName ? { companyName: validCustomName } : {}) };
+      } else {
+        finalSettings = { ...defaultSettings, ...(validCustomName ? { companyName: validCustomName } : {}) };
       }
+      setSettings(finalSettings);
 
       // 10. Merge audit logs
       let finalAuditLogs: AuditLog[] = [];
-      setAuditLogs(prev => {
-        const base = serverData?.auditlogs || prev || [];
-        finalAuditLogs = SupabaseSyncService.mergeRecordsById(base, sbAuditLogs || []);
-        return finalAuditLogs;
-      });
+      const remoteLogs = Array.isArray(sbAuditLogs) ? sbAuditLogs : [];
+      const serverLogs = Array.isArray(serverData?.auditlogs) ? serverData.auditlogs : [];
+      finalAuditLogs = SupabaseSyncService.mergeRecordsById(serverLogs, remoteLogs);
+      setAuditLogs(finalAuditLogs);
 
-      // 11. [CACHE-ASIDE] Atualização Assíncrona do Snapshot Local
+      // 11. [CACHE-ASIDE] Atualização Assíncrona do Snapshot Local via IndexedDB
       try {
         const snapshotToPersist = {
           products: finalProducts,
@@ -2780,14 +1029,25 @@ export default function App() {
           settings: finalSettings || settings,
           cachedAt: new Date().toISOString()
         };
-        localStorage.setItem(cacheKey, JSON.stringify(snapshotToPersist));
-        localStorage.setItem("erp_cache_snapshot_global", JSON.stringify(snapshotToPersist));
+        await operationalCache.saveSnapshot(cacheKey, snapshotToPersist);
       } catch (persistErr) {
-        console.warn("[CACHE-ASIDE] Não foi possível atualizar o snapshot em localStorage:", persistErr);
+        console.warn("[CACHE-ASIDE] Falha ao atualizar o snapshot em IndexedDB:", persistErr);
       }
 
       setIsDbLoaded(true);
-      console.log("[HYDRATE] Dados sincronizados e snapshot local atualizado.");
+      console.log(`[HYDRATE] Dados do tenant ${effectiveTenantId} hidratados com sucesso (${finalProducts.length} produtos).`);
+
+      // 12. Tutorial Onboarding automático para novos utilizadores
+      if (user?.id) {
+        const onboardingKey = `erp_onboarding_completed_${user.id}`;
+        const isAlreadyDone = localStorage.getItem(onboardingKey) === "true";
+        if (!isAlreadyDone) {
+          setTimeout(() => {
+            setIsOnboardingTutorialOpen(true);
+            localStorage.setItem(onboardingKey, "true");
+          }, 800);
+        }
+      }
 
       // Flush any pending write operations in IndexedDB
       SyncService.flushQueue().then(({ processed }) => {
@@ -2841,7 +1101,7 @@ export default function App() {
       }
     }
 
-    const handleAuthSync = async (user: any) => {
+    const handleAuthSync = async (user: User | null) => {
       if (!user || isLoggingOutRef.current) {
         setIsAuthenticated(false);
         setActiveUser(null);
@@ -2968,10 +1228,10 @@ export default function App() {
 
       return () => {
         console.log("[SUPABASE] Desativando subscrição em tempo real para produtos.");
-        if (unsubscribe && typeof (unsubscribe as any).unsubscribe === "function") {
-          (unsubscribe as any).unsubscribe();
+        if (unsubscribe && typeof (unsubscribe as { unsubscribe?: () => void }).unsubscribe === "function") {
+          (unsubscribe as { unsubscribe: () => void }).unsubscribe();
         } else if (typeof unsubscribe === "function") {
-          (unsubscribe as any)();
+          (unsubscribe as () => void)();
         }
       };
     }
@@ -3054,8 +1314,13 @@ export default function App() {
       return;
     }
 
-    const requiredPin = targetEmp.pin || "123456";
-    if (enteredPin.trim() !== requiredPin.trim()) {
+    const requiredPin = targetEmp.pin?.trim();
+    if (!requiredPin) {
+      setPinError("Colaborador sem PIN configurado. Contacte o Administrador para definir uma senha segura.");
+      return;
+    }
+    const isPinMatch = await verifySecurityPin(enteredPin.trim(), requiredPin);
+    if (!isPinMatch) {
       setPinError("Senha incorreta. Por favor, tente novamente.");
       return;
     }
@@ -3124,7 +1389,7 @@ export default function App() {
     setPinTargetEmployee(null);
   };
 
-  const handleForcePinChangeSubmit = () => {
+  const handleForcePinChangeSubmit = async () => {
     if (!forcePinTargetEmployee) return;
 
     if (newPin.length < 6) {
@@ -3132,7 +1397,7 @@ export default function App() {
       return;
     }
 
-    if (newPin === forcePinTargetEmployee.pin) {
+    if (forcePinTargetEmployee.pin && await verifySecurityPin(newPin, forcePinTargetEmployee.pin)) {
       setForcePinError("A nova senha não pode ser idêntica à senha anterior.");
       return;
     }
@@ -3142,12 +1407,14 @@ export default function App() {
       return;
     }
 
+    const hashedNewPin = await hashSecurityPin(newPin);
+
     // Update PIN & properties
     const updatedEmployees = employees.map(emp => {
       if (emp.id === forcePinTargetEmployee.id) {
         return {
           ...emp,
-          pin: newPin,
+          pin: hashedNewPin,
           pinChanged: true,
           pinCreatedAt: new Date().toISOString()
         };
@@ -3159,7 +1426,7 @@ export default function App() {
 
     const fitEmp = {
       ...forcePinTargetEmployee,
-      pin: newPin,
+      pin: hashedNewPin,
       pinChanged: true,
       pinCreatedAt: new Date().toISOString()
     };
@@ -3196,143 +1463,17 @@ export default function App() {
 
   // PANIC SYSTEM / EMERGENCY SECURITY ALERT
   const handleTriggerPanic = async () => {
-    const operatorName = activeUser?.name || "Operador Desconhecido";
-    const operatorRole = activeUser?.role || "Operador";
-    const ipStr = userIpInfo ? userIpInfo.ip : "102.81.12.94";
-    const locStr = userIpInfo ? `${userIpInfo.city}, ${userIpInfo.country}` : "Maputo, Moçambique";
-    const devStr = deviceInfo || "Chrome Desktop";
-
-    // 1. Add Immediate Critical Audit Log
-    handleAddAuditLog(
-      "BOTÃO DE PÂNICO ACIONADO",
-      "SEGURANÇA",
-      `ALERTA EMERGENCIAL CRÍTICO! O operador ${operatorName} acionou o botão de pânico. IP: ${ipStr} (${locStr}). Dispositivo: ${devStr}. Notificações em massa enviadas aos administradores.`
-    );
-
-    // 2. Identify Administrators
-    const admins = employees.filter(emp => {
-      if (!emp.role) return false;
-      const roleLower = emp.role.toLowerCase();
-      return (
-        roleLower.includes("admin") ||
-        roleLower.includes("gestor") ||
-        roleLower.includes("supervisor") ||
-        roleLower.includes("gerente") ||
-        roleLower.includes("diretor")
-      );
+    const result = await triggerPanicAlert({
+      activeUser,
+      userIpInfo,
+      deviceInfo,
+      employees,
+      settings,
+      onAddAuditLog: handleAddAuditLog
     });
-
-    // 3. Extract Emails and Phone numbers
-    const emails = admins.map(a => a.email).filter(Boolean) as string[];
-    const phones = admins.map(a => a.contact).filter(Boolean) as string[];
-
-    if (settings.reportRecipientEmail && !emails.includes(settings.reportRecipientEmail)) {
-      emails.push(settings.reportRecipientEmail);
-    }
-
-    // Default emergency contact as fallback if empty
-    if (emails.length === 0) {
-      emails.push("levidomingos12@gmail.com");
-    }
-    if (phones.length === 0) {
-      phones.push("+258840000000");
-    }
-
-    // 4. Construct Alerta Body
-    const subject = `🚨 [OST VENDAS] ALERTA DE PÂNICO EMERGENCIAL DE SEGURANÇA!`;
-    const emailHtmlBody = `
-      <div style="font-family: Arial, sans-serif; border: 3px solid #dc2626; border-radius: 16px; overflow: hidden; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 25px rgba(220, 38, 38, 0.2);">
-        <div style="background-color: #dc2626; padding: 24px; text-align: center; color: white;">
-          <h2 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 0.5px;">🚨 ALERTA CRÍTICO DE PÂNICO</h2>
-          <p style="margin: 8px 0 0; font-size: 13px; font-weight: bold; text-transform: uppercase; background-color: rgba(0,0,0,0.2); display: inline-block; padding: 4px 12px; border-radius: 9999px;">SISTEMA COMERCIAL OST VENDAS</p>
-        </div>
-        <div style="padding: 28px; color: #1e293b; background-color: #ffffff;">
-          <p style="font-size: 16px; line-height: 1.6; margin-top: 0; font-weight: 600; color: #991b1b;">
-            ATENÇÃO ADMINISTRADOR! O Botão de Pânico foi acionado voluntariamente a partir do ponto de venda.
-          </p>
-          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
-            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
-              <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b; width: 140px;">Operador Ativo:</td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #0f172a;">${operatorName}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Função do Utilizador:</td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #dc2626;">${operatorRole}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Data e Hora:</td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace;">${new Date().toLocaleString('pt-MZ')} (Maputo)</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Endereço IP:</td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace; font-weight: bold;">${ipStr}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Localização IP:</td>
-                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-weight: bold;">${locStr}</td>
-              </tr>
-              <tr>
-                <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Dispositivo/Browser:</td>
-                <td style="padding: 8px 0; color: #334155;">${devStr}</td>
-              </tr>
-            </table>
-          </div>
-          <div style="background-color: #fef2f2; border-left: 5px solid #dc2626; padding: 18px; border-radius: 8px; margin: 20px 0;">
-            <strong style="color: #991b1b; display: block; margin-bottom: 6px; font-size: 14px;">⚠️ PROCEDIMENTO DE SEGURANÇA:</strong>
-            <p style="margin: 0; font-size: 13px; color: #7f1d1d; line-height: 1.6;">
-              1. Verifique as câmeras ou canais de comunicação com a loja imediatamente.<br/>
-              2. Caso não consiga contato com o operador, acione os canais policiais locais ou segurança patrimonial.<br/>
-              3. O log crítico foi gravado permanentemente na auditoria do sistema para efeitos legais.
-            </p>
-          </div>
-        </div>
-        <div style="background-color: #f8fafc; padding: 18px; text-align: center; color: #64748b; font-size: 11px; border-top: 1px solid #e2e8f0;">
-          Enviado por: <strong>OST Vendas Moçambique Fiscal Cloud</strong>. Não responda a esta mensagem eletrônica.
-        </div>
-      </div>
-    `;
-
-    const smsText = `🚨 OST VENDAS - PANICO ATIVADO! Operador: ${operatorName} (${operatorRole}). IP: ${ipStr} (${locStr}). Verifique a loja de imediato!`;
-
-    // 5. Send Email Notifications
-    const emailPromises = emails.map(async (email) => {
-      try {
-        await sendEmail({
-          to: email,
-          subject,
-          body: emailHtmlBody,
-          isHtml: true
-        });
-        console.log(`[Panic] Email alert sent successfully to \${email}`);
-        return { email, success: true };
-      } catch (err: any) {
-        console.error(`[Panic] Failed to send email alert to \${email}:`, err);
-        return { email, success: false, error: err.message };
-      }
-    });
-
-    // 6. Send SMS Notifications
-    const smsPromises = phones.map(async (phone) => {
-      try {
-        await sendSMS(phone, smsText);
-        console.log(`[Panic] SMS alert sent successfully to \${phone}`);
-        return { phone, success: true };
-      } catch (err: any) {
-        console.error(`[Panic] Failed to send SMS alert to \${phone}:`, err);
-        return { phone, success: false, error: err.message };
-      }
-    });
-
-    // Run parallel
-    const emailResults = await Promise.all(emailPromises);
-    const smsResults = await Promise.all(smsPromises);
-
-    const successfulEmailsCount = emailResults.filter(r => r.success).length;
-    const successfulSmsCount = smsResults.filter(r => r.success).length;
 
     showToast(
-      `Alerta crítico disparado! \${successfulEmailsCount} e-mails e \${successfulSmsCount} SMS de emergência enviados aos administradores.`,
+      `Alerta crítico disparado! ${result.successfulEmailsCount} e-mails e ${result.successfulSmsCount} SMS de emergência enviados aos administradores.`,
       "warning",
       "🚨 ALERTA MÁXIMO"
     );
@@ -3431,72 +1572,18 @@ export default function App() {
   };
 
   // NEW: Unified local backup creation (supports manual and automatic scheduled runs)
-  const handleTriggerLocalBackup = (type: "manual" | "automatic" = "manual") => {
+  const handleTriggerLocalBackup = async (type: "manual" | "automatic" = "manual") => {
     if (isBackingUpRef.current) return false;
     isBackingUpRef.current = true;
     try {
-      const currentData = dbStateRef.current;
-      const dbPayload = {
-        app: "OST Vendas",
-        exportDate: new Date().toISOString(),
-        version: currentSystemVersion,
-        operator: type === "manual" ? (activeUser?.name || "ADMIN") : "Agendador Automático Redundante",
-        data: {
-          settings: currentData.settings,
-          products: currentData.products,
-          customers: currentData.customers,
-          transactions: currentData.transactions,
-          cashFlow: currentData.cashFlow,
-          employees: currentData.employees,
-          auditLogs: currentData.auditLogs.slice(-50) // Only backup last 50 logs to conserve localStorage quota
-        }
-      };
+      const result = await createLocalBackup(
+        dbStateRef.current,
+        type,
+        activeUser,
+        currentSystemVersion
+      );
 
-      const dataStr = JSON.stringify(dbPayload);
-      const backupId = Date.now().toString();
-      
-      // Save full backup payload to a unique key slot
-      safeLocalStorageSetItem(`erp_backup_slot_${backupId}`, dataStr);
-      safeLocalStorageSetItem("erp_auto_backup_local_db", dataStr);
-      localStorage.setItem("erp_last_auto_backup_time", new Date().toISOString());
-
-      // Update backup logs list
-      let logs: any[] = [];
-      try {
-        const logsStr = localStorage.getItem("erp_local_backups_log");
-        if (logsStr) logs = JSON.parse(logsStr);
-      } catch (e) {}
-      if (!Array.isArray(logs)) logs = [];
-
-      const frequency = currentData.settings?.backupFrequency || "daily";
-      
-      const newLog = {
-        id: backupId,
-        date: new Date().toISOString(),
-        type: type === "manual" ? "Manual" : "Automático",
-        frequency: type === "manual" ? "N/A" : (frequency === "daily" ? "Diária" : frequency === "weekly" ? "Semanal" : frequency === "monthly" ? "Mensal" : "12 Horas"),
-        size: dataStr.length,
-        itemCount: (currentData.products.length || 0) + (currentData.customers.length || 0) + (currentData.transactions.length || 0),
-        status: "Sucesso"
-      };
-
-      logs.unshift(newLog);
-      logs = logs.slice(0, 3); // Keep last 3 to be safe on localStorage quota
-      safeLocalStorageSetItem("erp_local_backups_log", JSON.stringify(logs));
-
-      // Clean up backup slot keys that are no longer in the logs list
-      const activeIds = logs.map((l: any) => l.id);
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i);
-        if (key && key.startsWith("erp_backup_slot_")) {
-          const id = key.replace("erp_backup_slot_", "");
-          if (!activeIds.includes(id)) {
-            localStorage.removeItem(key);
-          }
-        }
-      }
-
-      if (type === "manual") {
+      if (result.success && type === "manual") {
         handleAddAuditLog(
           "Backup Local Manual",
           "SEGURANÇA",
@@ -3504,7 +1591,7 @@ export default function App() {
         );
       }
 
-      return true;
+      return result.success;
     } catch (error) {
       console.error("Erro ao realizar backup local:", error);
       return false;
@@ -3607,7 +1694,7 @@ export default function App() {
   };
 
   // ADMIN-ONLY REAL DATABASE IMPORT/RESTORE
-  const handleImportLocalDB = async (importedData: any) => {
+  const handleImportLocalDB = async (importedData: DatabaseSnapshotPayload) => {
     try {
       if (!importedData) return false;
 
@@ -3675,8 +1762,9 @@ export default function App() {
       } else {
         showToast(result.message || "Erro ao efetuar a purga de dados mock.", "error");
       }
-    } catch (e: any) {
-      showToast("Falha na execução da purga: " + (e.message || "Erro desconhecido"), "error");
+    } catch (e: unknown) {
+      const eMessage = e instanceof Error ? e.message : "Erro desconhecido";
+      showToast("Falha na execução da purga: " + eMessage, "error");
     }
   };
 
@@ -3786,7 +1874,7 @@ export default function App() {
         throw new Error(data.error || "Erro no envio do e-mail de alerta");
       }
       console.log("[EMAIL ALERT] Alerta de estoque enviado com sucesso:", data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[EMAIL ALERT ERROR] Falha ao enviar e-mail de alerta de estoque:", err);
     }
   };
@@ -3847,7 +1935,7 @@ export default function App() {
       } else if (provider === "META_CLOUD") {
         console.log(`[Meta Cloud API] Sending message to ${phone}`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[WhatsApp Send Error]:", err);
     }
   };
@@ -3862,83 +1950,31 @@ export default function App() {
     });
 
     const activeBranch = transaction.branchId || settings.activeBranchId || "central";
-    const localBatches = [...(settings.batches || [])];
 
-    // 2. Dynamic stock levels deduction ("Abate de Stock")
-    setProducts(prevProducts => {
-      const updated = prevProducts.map(prod => {
-        const cartItemMatch = transaction.items.find(item => item.productId === prod.id);
-        if (cartItemMatch) {
-          const updatedStock = Math.max(0, prod.stock - cartItemMatch.quantity);
-          
-          // Geographical Branch Stock deduction
-          const updatedBranchStocks = { ...(prod.branchStocks || {}) };
-          const currentBranchStock = updatedBranchStocks[activeBranch] !== undefined 
-            ? updatedBranchStocks[activeBranch] 
-            : prod.stock;
-          updatedBranchStocks[activeBranch] = Math.max(0, currentBranchStock - cartItemMatch.quantity);
+    // 2. Dynamic stock levels deduction via specialized processor
+    const saleResult = processSaleDeductions(transaction, products, settings, activeUser);
+    setProducts(saleResult.updatedProducts);
+    syncTable("products", saleResult.updatedProducts);
 
-          // LIFO / FIFO Batch deduction
-          let remainingToDeduct = cartItemMatch.quantity;
-          const prodBatches = localBatches
-            .filter(b => b.productId === prod.id && b.quantity > 0)
-            .sort((a, b) => {
-              if (settings.inventoryStrategy === "LIFO") {
-                return new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime();
-              } else {
-                return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
-              }
-            });
+    if (saleResult.updatedBatches) {
+      handleUpdateSettings({ batches: saleResult.updatedBatches });
+    }
 
-          for (const pb of prodBatches) {
-            if (remainingToDeduct <= 0) break;
-            const matchIdx = localBatches.findIndex(b => b.id === pb.id);
-            if (matchIdx > -1) {
-              const batch = localBatches[matchIdx];
-              const deduct = Math.min(batch.quantity, remainingToDeduct);
-              remainingToDeduct -= deduct;
-              localBatches[matchIdx] = {
-                ...batch,
-                quantity: batch.quantity - deduct
-              };
-            }
-          }
-
-          // 3. Individual Minimum Stock Alerting & Automation
-          const individualThreshold = (prod.minStock !== undefined && prod.minStock > 0)
-            ? prod.minStock
-            : (settings.smsStockThreshold !== undefined ? settings.smsStockThreshold : 5);
-          
-          const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
-
-          if (autoSendAlerts) {
-            if (settings.smsAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
-              triggerSmsStockAlert(prod.name, updatedStock, individualThreshold);
-            }
-
-            if (settings.emailStockAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
-              triggerEmailStockAlert(prod.name, updatedStock, individualThreshold);
-            }
-
-            if (settings.whatsappEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
-              triggerWhatsappStockAlert(prod.name, updatedStock, individualThreshold);
-            }
-          }
-
-          return {
-            ...prod,
-            stock: updatedStock,
-            branchStocks: updatedBranchStocks
-          };
+    // Trigger individual minimum stock alerting
+    const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
+    if (autoSendAlerts) {
+      for (const alert of saleResult.lowStockAlerts) {
+        if (settings.smsAlertsEnabled) {
+          triggerSmsStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
         }
-        return prod;
-      });
-      syncTable("products", updated);
-      return updated;
-    });
-
-    // Save updated batches to system settings
-    handleUpdateSettings({ batches: localBatches });
+        if (settings.emailStockAlertsEnabled) {
+          triggerEmailStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
+        }
+        if (settings.whatsappEnabled) {
+          triggerWhatsappStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
+        }
+      }
+    }
 
     // 3. Update customer loyalty points accumulated
     if (transaction.customerId && transaction.customerId !== "WALK_IN") {
@@ -3968,19 +2004,8 @@ export default function App() {
     });
 
     // 5. Record cash inflow entry in cashFlow if paid via Cash/POS/Mobile
-    if (transaction.paymentMethod !== "DEBT") {
-      const cashEntry: CashFlowEntry = {
-        id: `cf-sale-${transaction.id}`,
-        timestamp: transaction.timestamp || new Date().toISOString(),
-        type: "INPUT",
-        amount: transaction.grandTotal,
-        reason: `Recebimento Venda POS - Fatura ${transaction.invoiceNumber}`,
-        responsibleUser: transaction.cashierName || activeUser?.name || "Operador",
-        paymentMethod: transaction.paymentMethod as any,
-        category: "OUTRO",
-        reference: transaction.invoiceNumber,
-        tenantId: activeUser?.tenantId || "default_company"
-      };
+    if (saleResult.cashFlowEntry) {
+      const cashEntry = saleResult.cashFlowEntry;
       setCashFlow(prev => {
         const updated = [cashEntry, ...prev];
         syncTable("cashflow", updated);
@@ -4005,46 +2030,26 @@ export default function App() {
   ) => {
     if (!transaction || !returnedItems || returnedItems.length === 0) return;
 
-    const refundTotal = returnedItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+    const devolutionResult = processDevolutionRestock(
+      transaction,
+      returnedItems,
+      returnReason,
+      refundMethod,
+      products,
+      settings,
+      activeUser,
+      transactions.length
+    );
+
+    const { creditNoteNum, refundTotal, updatedProducts, refundCashEntry } = devolutionResult;
     const activeBranch = transaction.branchId || settings.activeBranchId || "central";
-    const creditNoteNum = generateDeterministicCreditNoteNumber(transactions.length + 1);
 
     // 1. Restock products in inventory
-    setProducts(prevProducts => {
-      const updated = prevProducts.map(prod => {
-        const match = returnedItems.find(it => it.productId === prod.id);
-        if (match) {
-          const restoredStock = prod.stock + match.quantity;
-          const updatedBranchStocks = { ...(prod.branchStocks || {}) };
-          const currentBranch = updatedBranchStocks[activeBranch] !== undefined ? updatedBranchStocks[activeBranch] : prod.stock;
-          updatedBranchStocks[activeBranch] = currentBranch + match.quantity;
-
-          return {
-            ...prod,
-            stock: restoredStock,
-            branchStocks: updatedBranchStocks
-          };
-        }
-        return prod;
-      });
-      syncTable("products", updated);
-      return updated;
-    });
+    setProducts(updatedProducts);
+    syncTable("products", updatedProducts);
 
     // 2. Record cash refund in cashflow if refunded from register
-    if (refundMethod !== "DEBT" && refundTotal > 0) {
-      const refundCashEntry: CashFlowEntry = {
-        id: generateEntityId("cf_refund"),
-        timestamp: new Date().toISOString(),
-        type: "DEVOLUTION",
-        amount: refundTotal,
-        reason: `Devolução/Estorno de Venda - ${creditNoteNum} (Ref: ${transaction.invoiceNumber}) - Motivo: ${returnReason}`,
-        responsibleUser: activeUser?.name || "Supervisor",
-        paymentMethod: refundMethod as any,
-        category: "DEVOLUCAO_VENDA",
-        reference: creditNoteNum,
-        tenantId: activeUser?.tenantId || "default_company"
-      };
+    if (refundCashEntry) {
       setCashFlow(prev => {
         const updated = [refundCashEntry, ...prev];
         syncTable("cashflow", updated);
@@ -4250,6 +2255,15 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     const safeUser = sanitizeUserSession(user);
     localStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
     localStorage.removeItem("erp_simulated_logged_in_user");
+
+    // Limpar resíduos de memória de outra conta antes de hidratar a nova
+    setProducts([]);
+    setCustomers([]);
+    setTransactions([]);
+    setCashFlow([]);
+    setAuditLogs([]);
+    setIsDbLoaded(false);
+
     setActiveUser(safeUser);
     setIsAuthenticated(true);
     const cleanBranchName = branchName && !branchName.startsWith("comp_") ? branchName.trim() : "";
@@ -4449,16 +2463,30 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       await SupabaseSyncService.signOut();
       localStorage.removeItem("erp_logged_in_user");
       localStorage.removeItem("erp_simulated_logged_in_user");
+      localStorage.removeItem("erp_current_tenant_id");
+      setProducts([]);
+      setCustomers([]);
+      setTransactions([]);
+      setCashFlow([]);
+      setAuditLogs([]);
+      setIsDbLoaded(false);
       setActiveUser(null);
       setIsAuthenticated(false);
       showToast("Sessão terminada com sucesso.", "info");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Erro ao efetuar logout:", err);
       try {
         await SupabaseSyncService.signOut();
       } catch {}
       localStorage.removeItem("erp_logged_in_user");
       localStorage.removeItem("erp_simulated_logged_in_user");
+      localStorage.removeItem("erp_current_tenant_id");
+      setProducts([]);
+      setCustomers([]);
+      setTransactions([]);
+      setCashFlow([]);
+      setAuditLogs([]);
+      setIsDbLoaded(false);
       setActiveUser(null);
       setIsAuthenticated(false);
       showToast("Sessão terminada com sucesso.", "info");
@@ -4499,112 +2527,27 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           onAddAuditLog={handleAddAuditLog}
           settings={settings}
         />
-        {forcePinChangeOpen && forcePinTargetEmployee && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
-                theme === "night"
-                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
-                  : "bg-white text-slate-800 border-slate-100"
-              }`}
-            >
-              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-left">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center shadow-inner">
-                    <ShieldAlert className="w-5 h-5 animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Atualização de Segurança Obrigatória</h3>
-                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir Senha Definitiva de Acesso</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 space-y-4 text-left">
-                <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl space-y-1 text-xs">
-                  <p className="font-bold text-amber-800">Olá {forcePinTargetEmployee.name},</p>
-                  <p className="text-amber-700 leading-relaxed text-[11px]">
-                    De acordo com a política de segurança, a sua senha inicial é temporária ou expirou. Defina uma senha de acesso forte de pelo menos 6 caracteres.
-                  </p>
-                </div>
-
-                <div className="space-y-3.5">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Nova Senha de Acesso</label>
-                    <input
-                      type="password"
-                      maxLength={32}
-                      placeholder="Mínimo 6 caracteres"
-                      value={newPin}
-                      onChange={(e) => {
-                        setNewPin(e.target.value);
-                        if (forcePinError) setForcePinError("");
-                      }}
-                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
-                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
-                      }`}
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Nova Senha</label>
-                    <input
-                      type="password"
-                      maxLength={32}
-                      placeholder="Repita a nova senha de acesso"
-                      value={confirmNewPin}
-                      onChange={(e) => {
-                        setConfirmNewPin(e.target.value);
-                        if (forcePinError) setForcePinError("");
-                      }}
-                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
-                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
-                      }`}
-                    />
-                  </div>
-
-                  {forcePinError && (
-                    <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold flex items-center gap-1.5 animate-pulse">
-                      <span>⚠️</span>
-                      <span>{forcePinError}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="p-4 border-t border-slate-100 dark:border-zinc-850 flex justify-end gap-3 bg-slate-50 dark:bg-zinc-900">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForcePinChangeOpen(false);
-                    setForcePinTargetEmployee(null);
-                  }}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleForcePinChangeSubmit}
-                  disabled={newPin.length < 6 || confirmNewPin.length < 6}
-                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
-                    newPin.length >= 6 && confirmNewPin.length >= 6
-                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
-                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
-                  }`}
-                >
-                  Ativar Conta & Aceder
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        <ForcePinChangeModal
+          isOpen={forcePinChangeOpen}
+          targetEmployee={forcePinTargetEmployee}
+          theme={theme}
+          newPin={newPin}
+          confirmNewPin={confirmNewPin}
+          error={forcePinError}
+          onNewPinChange={(val) => {
+            setNewPin(val);
+            if (forcePinError) setForcePinError("");
+          }}
+          onConfirmNewPinChange={(val) => {
+            setConfirmNewPin(val);
+            if (forcePinError) setForcePinError("");
+          }}
+          onSubmit={handleForcePinChangeSubmit}
+          onClose={() => {
+            setForcePinChangeOpen(false);
+            setForcePinTargetEmployee(null);
+          }}
+        />
       </>
     );
   }
@@ -4631,127 +2574,26 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           onClose={() => setIsSidebarOpen(false)}
           activeUser={activeUser}
           subscriptionPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-          onSwitchUser={() => {
-            setIsUserSwitchModalOpen(true);
-            if (activeUser) {
-              setSwitchSelectedEmployeeId(activeUser.id);
-            }
-          }}
+          onSwitchUser={() => setIsUserSwitchModalOpen(true)}
         />
       )}
 
       {/* Outer body wrapper */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         
-        {/* TOP MINIMALIST STATUS BAR */}
-        {!isPOSFullscreen && (
-          <header className={`border-b h-14 px-4 md:px-6 shrink-0 flex items-center justify-between shadow-sm backdrop-blur-md relative z-20 transition-all ${
-            theme === "night" ? "bg-zinc-950/80 border-zinc-800/80" : "bg-white border-slate-200"
-          }`}>
-            <div className="flex items-center gap-3">
-              {/* Hamburger Menu Toggle - Visible on mobile/tablet */}
-              <button
-                type="button"
-                onClick={() => setIsSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
-                aria-label="Abrir menu"
-              >
-                <Menu className="w-5 h-5" />
-              </button>
-
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold uppercase tracking-wider ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
-                  {NAV_MENU_ITEMS.find(m => m.id === activeTab)?.label || "Sistema de Gestão"}
-                </span>
-              </div>
-            </div>
-  
-            <div className="flex items-center gap-3 text-xs">
-              {/* Admin Name */}
-              <span className={`font-bold text-xs tracking-tight ${
-                theme === "night" ? "text-slate-200" : "text-slate-800"
-              }`}>
-                {activeUserDisplayName}
-              </span>
-
-              {/* Botão Alterar usuário */}
-              <button
-                id="quick-switch-user-btn"
-                onClick={() => {
-                  setIsUserSwitchModalOpen(true);
-                  if (activeUser) {
-                    setSwitchSelectedEmployeeId(activeUser.id);
-                  }
-                }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
-                  theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
-                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
-                }`}
-                title="Alterar usuário"
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Alterar usuário</span>
-              </button>
-            </div>
-          </header>
-        )}
-
-        {/* COMPACT HORIZONTAL TOP NAVIGATION MODULES BAR */}
-        {!isPOSFullscreen && (
-          <div className={`border-b px-4 md:px-6 py-2 shrink-0 flex items-center gap-2 overflow-x-auto scrollbar-none z-15 transition-all ${
-            theme === "night" 
-              ? "bg-zinc-900/60 border-zinc-850/60 text-slate-300" 
-              : "bg-white border-slate-150 text-slate-700 shadow-sm"
-          }`}>
-            <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scrollbar-none py-1 font-sans">
-              {NAV_MENU_ITEMS
-                .filter((item) => {
-                  if (simplifiedRole === "CASHIER") {
-                    return item.roles.includes("CASHIER");
-                  }
-                  return true;
-                })
-                .map((item) => {
-                  const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
-                  const authorized = roleCheck.allowed;
-                  const active = activeTab.toLowerCase() === item.id;
-                  
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
-                      disabled={!authorized}
-                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
-                        active 
-                          ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
-                          : authorized 
-                            ? theme === "night" 
-                              ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
-                              : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
-                            : "opacity-35 cursor-not-allowed text-slate-400"
-                      }`}
-                      title={authorized ? item.label : "Acesso Restrito para " + simplifiedRole}
-                    >
-                      <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
-                        active 
-                          ? "text-white" 
-                          : authorized 
-                            ? theme === "night" 
-                              ? "text-slate-500 group-hover:text-slate-300" 
-                              : "text-slate-400 group-hover:text-orange-500"
-                            : "text-slate-400"
-                      }`} />
-                      <span>{item.shortLabel}</span>
-                      {!authorized && (
-                        <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
-        )}
+        {/* HEADER & HORIZONTAL NAVIGATION BAR */}
+        <AppHeader
+          isPOSFullscreen={isPOSFullscreen}
+          theme={theme}
+          activeTab={activeTab}
+          onSelectTab={(tab) => setActiveTab(tab)}
+          onOpenSidebar={() => setIsSidebarOpen(true)}
+          activeUserDisplayName={activeUserDisplayName}
+          onOpenTutorial={() => setIsOnboardingTutorialOpen(true)}
+          onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
+          simplifiedRole={simplifiedRole}
+          canRoleAccessModule={canRoleAccessModule}
+        />
   
         {/* INNER SCROLLABLE WORKPORT PANEL CONTENT */}
         <main className={`flex-1 overflow-y-auto relative ${isPOSFullscreen ? "p-0" : "p-4 md:p-6"}`}>
@@ -5165,236 +3007,38 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       </div>
 
       {/* PIN Verification Modal for Switching Operator */}
-      <AnimatePresence>
-        {pinVerificationOpen && (
-          <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
-                theme === "night"
-                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
-                  : "bg-white text-slate-800 border-slate-100"
-              }`}
-              id="profile-pin-verification-modal"
-            >
-              {/* Modal Header */}
-              <div className={`p-6 border-b flex items-center justify-between ${
-                theme === "night" ? "bg-zinc-900 border-zinc-850" : "bg-slate-50 border-slate-100"
-              }`}>
-                <div className="flex items-center gap-3 text-left">
-                  <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shadow-inner">
-                    <Lock className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-extrabold text-sm">Autenticação Requerida</h3>
-                    <p className="text-[11px] text-slate-400 font-medium font-mono">Terminal POS de Segurança</p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPinVerificationOpen(false);
-                    setPinTargetEmployee(null);
-                  }}
-                  className={`w-8 h-8 rounded-full border flex items-center justify-center transition cursor-pointer text-xs font-bold ${
-                    theme === "night"
-                      ? "bg-zinc-900 border-zinc-850 text-slate-400 hover:text-white"
-                      : "bg-white border-slate-200 text-slate-400 hover:text-slate-600"
-                  }`}
-                >
-                  ✕
-                </button>
-              </div>
-
-              {/* Login Method Tabs */}
-              <div className="flex border-b border-slate-100 dark:border-zinc-850">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginMethod("select");
-                    setPinError("");
-                  }}
-                  className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 ${
-                    loginMethod === "select"
-                      ? "border-orange-500 text-orange-600 font-extrabold"
-                      : "border-transparent text-slate-400 hover:text-slate-600"
-                  }`}
-                >
-                  👥 Selecionar Operador
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setLoginMethod("type");
-                    setPinError("");
-                  }}
-                  className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 ${
-                    loginMethod === "type"
-                      ? "border-orange-500 text-orange-600 font-extrabold"
-                      : "border-transparent text-slate-400 hover:text-slate-600"
-                  }`}
-                >
-                  🔑 Introduzir Username
-                </button>
-              </div>
-
-              {/* Modal Body */}
-              <div className="p-6 flex flex-col items-center">
-                {/* Method 1: Dropdown selector */}
-                {loginMethod === "select" && (
-                  <div className="w-full space-y-3 mb-4">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
-                      Escolha o Colaborador
-                    </label>
-                    <select
-                      value={pinTargetEmployee ? pinTargetEmployee.id : ""}
-                      onChange={(e) => {
-                        const emp = employees.find(empItem => empItem.id === e.target.value);
-                        if (emp) {
-                          setPinTargetEmployee(emp);
-                          setEnteredPin("");
-                          setPinError("");
-                        }
-                      }}
-                      className={`w-full p-2.5 rounded-xl border font-semibold outline-none text-xs cursor-pointer ${
-                        theme === "night"
-                          ? "bg-zinc-900 border-zinc-800 text-slate-100"
-                          : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 shadow-sm"
-                      }`}
-                    >
-                      <option value="" disabled>-- Escolha um Operador do Quadro --</option>
-                      {employees.filter(e => e.status !== "INACTIVE" && e.status !== "SUSPENDED").map(empItem => (
-                        <option key={empItem.id} value={empItem.id}>
-                          {empItem.role.toUpperCase().includes("ADMIN") ? "👨‍💼" : empItem.role.toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"}{" "}
-                          {empItem.name} ({empItem.username || "sem username"})
-                        </option>
-                      ))}
-                    </select>
-
-                    {pinTargetEmployee && (
-                      <div className={`w-full p-3.5 rounded-xl border text-left flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-200 ${
-                        theme === "night"
-                          ? "bg-zinc-900/60 border-zinc-850"
-                          : "bg-orange-50/55 border-orange-100/50"
-                      }`}>
-                        <div className="text-2xl mt-0.5">
-                          {pinTargetEmployee.role.toUpperCase().includes("ADMIN") ? "👨‍💼" : pinTargetEmployee.role.toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <h4 className="font-extrabold text-xs text-slate-800 dark:text-slate-100">{pinTargetEmployee.name}</h4>
-                          <p className="text-[10px] text-slate-400 font-semibold">{pinTargetEmployee.role}</p>
-                          <div className="flex flex-wrap gap-1.5 mt-1.5">
-                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-200/60 text-slate-600 dark:bg-zinc-850 dark:text-slate-400">
-                              @{pinTargetEmployee.username}
-                            </span>
-                            {(pinTargetEmployee.pinChanged === false || pinTargetEmployee.pinChanged === undefined) ? (
-                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 animate-pulse">
-                                Senha Temporária
-                              </span>
-                            ) : (
-                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
-                                Senha Definida
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Method 2: Manual Username Entry */}
-                {loginMethod === "type" && (
-                  <div className="w-full space-y-1.5 mb-4">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
-                      Username do Operador
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-mono">@</span>
-                      <input
-                        type="text"
-                        placeholder="Iniciais + Apelido (Ex: ldomingos)"
-                        value={enteredUsername}
-                        onChange={(e) => {
-                          setEnteredUsername(e.target.value.toLowerCase().replace(/\s/g, ""));
-                          if (pinError) setPinError("");
-                        }}
-                        className={`w-full pl-8 pr-4 py-2.5 rounded-xl border font-mono font-bold text-xs outline-none ${
-                          theme === "night"
-                            ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:border-orange-500"
-                            : "bg-slate-50 border-slate-200 text-slate-850 focus:border-orange-500 focus:bg-white shadow-sm"
-                        }`}
-                        autoFocus={loginMethod === "type"}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Password Input Field */}
-                <div className="w-full space-y-1.5 mb-4">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
-                    Digite a sua Senha de Acesso
-                  </label>
-                  <input
-                    type="password"
-                    maxLength={32}
-                    value={enteredPin}
-                    onChange={(e) => {
-                      setEnteredPin(e.target.value);
-                      if (pinError) setPinError("");
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        handleVerifyAndSwitchProfile();
-                      }
-                    }}
-                    placeholder="Sua senha secreta"
-                    className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all text-xs font-medium ${
-                      theme === "night"
-                        ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:border-orange-500 focus:ring-orange-500/20"
-                        : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 focus:ring-orange-500/20 shadow-sm"
-                    }`}
-                  />
-                  {pinError && (
-                    <p className="text-xs text-rose-500 font-extrabold text-left animate-pulse mt-1.5">
-                      ⚠️ {pinError}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Modal Footer */}
-              <div className={`p-4 border-t flex items-center justify-between gap-3 ${
-                theme === "night" ? "bg-zinc-900 border-zinc-850" : "bg-slate-50 border-slate-100"
-              }`}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPinVerificationOpen(false);
-                    setPinTargetEmployee(null);
-                  }}
-                  className={`px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-                    theme === "night"
-                      ? "text-slate-400 hover:text-white"
-                      : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handleVerifyAndSwitchProfile}
-                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105`}
-                >
-                  Autenticar Perfil
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <PinVerificationModal
+        isOpen={pinVerificationOpen}
+        onClose={() => {
+          setPinVerificationOpen(false);
+          setPinTargetEmployee(null);
+        }}
+        theme={theme}
+        loginMethod={loginMethod}
+        onLoginMethodChange={(m) => {
+          setLoginMethod(m);
+          setPinError("");
+        }}
+        pinTargetEmployee={pinTargetEmployee}
+        onPinTargetEmployeeChange={(emp) => {
+          setPinTargetEmployee(emp);
+          setEnteredPin("");
+          setPinError("");
+        }}
+        employees={employees}
+        enteredUsername={enteredUsername}
+        onEnteredUsernameChange={(u) => {
+          setEnteredUsername(u);
+          if (pinError) setPinError("");
+        }}
+        enteredPin={enteredPin}
+        onEnteredPinChange={(p) => {
+          setEnteredPin(p);
+          if (pinError) setPinError("");
+        }}
+        pinError={pinError}
+        onVerify={handleVerifyAndSwitchProfile}
+      />
 
 
 
@@ -5414,62 +3058,6 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           handleAddAuditLog(action, module, details);
         }}
       />
-
-      {/* Payment QR Code Modal Overlay */}
-      <AnimatePresence>
-        {showPaymentQrModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 15 }}
-              className="bg-white dark:bg-zinc-900 text-slate-800 dark:text-slate-100 rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 text-center space-y-4 relative"
-            >
-              <button
-                type="button"
-                onClick={() => setShowPaymentQrModal(false)}
-                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg transition cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-
-              <div className="w-12 h-12 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
-                <QrCode className="w-6 h-6" />
-              </div>
-
-              <div>
-                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">QR Code de Recebimento</h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  Escaneie com a carteira móvel (M-Pesa / E-Mola) para realizar a transferência de pagamento para este utilizador.
-                </p>
-              </div>
-
-              {paymentQrUrl ? (
-                <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-inner inline-block">
-                  <img src={paymentQrUrl} alt="QR Code de Pagamento" className="w-52 h-52 mx-auto rounded-lg object-contain" />
-                </div>
-              ) : (
-                <div className="py-12 text-slate-400 text-xs font-mono">Gerando QR Code...</div>
-              )}
-
-              <div className="bg-slate-50 dark:bg-zinc-950/60 p-3.5 rounded-xl border border-slate-100 dark:border-zinc-800 text-xs text-left space-y-1 font-mono">
-                <p className="text-[10px] uppercase font-sans font-bold text-slate-400">Titular da Conta / Operador</p>
-                <p className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">{activeUser?.name || "Colaborador"}</p>
-                <p className="text-slate-500 dark:text-slate-400">📱 Contacto: {activeUser?.contact || "840000000"}</p>
-                <p className="text-slate-500 dark:text-slate-400">🏢 Empresa: {settings.companyName || "OST Vendas"}</p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowPaymentQrModal(false)}
-                className="w-full py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs hover:bg-slate-800 dark:hover:bg-slate-100 transition cursor-pointer shadow-md"
-              >
-                Concluído / Fechar
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       <StockReplenishModal
         isOpen={showReplenishModal}
@@ -5707,6 +3295,15 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         onNavigateModule={(moduleKey) => setActiveTab(moduleKey)}
       />
 
+      {/* Interactive Step-by-Step Onboarding Tutorial */}
+      <OnboardingTutorial
+        isOpen={isOnboardingTutorialOpen}
+        onClose={() => setIsOnboardingTutorialOpen(false)}
+        userName={activeUser?.name || "Utilizador"}
+        theme={theme === "night" ? "night" : "day"}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+      />
+
       {/* Unified System Info Hub Modal */}
       <SystemInfoHub
         isOpen={isSystemInfoHubOpen}
@@ -5717,12 +3314,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         version={currentSystemVersion}
         sessionSeconds={Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)}
         activeUser={activeUser}
-        onSwitchUser={() => {
-          setIsUserSwitchModalOpen(true);
-          if (activeUser) {
-            setSwitchSelectedEmployeeId(activeUser.id);
-          }
-        }}
+        onSwitchUser={() => setIsUserSwitchModalOpen(true)}
         onOpenLogoModal={() => setIsQuickLogoModalOpen(true)}
         onOpenTutorial={() => setIsTutorialModalOpen(true)}
         theme={theme}

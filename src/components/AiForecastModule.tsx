@@ -29,7 +29,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Product, Transaction, SystemSettings } from "../types";
+import { Product, Transaction, SystemSettings, AiForecastResult, Supplier } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 import { generateEntityId } from "../lib/deterministic";
 
@@ -50,6 +50,17 @@ interface ChatMessage {
   timestamp: string;
 }
 
+interface QuotationItem {
+  id: string;
+  productName: string;
+  quantity: number;
+  supplier: string;
+  channel: "EMAIL" | "WHATSAPP";
+  status: string;
+  costPrice: number;
+  timestamp: string;
+}
+
 export default function AiForecastModule({
   products,
   transactions,
@@ -63,7 +74,7 @@ export default function AiForecastModule({
 
   // State Management
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
-  const [forecastResult, setForecastResult] = useState<any>(null);
+  const [forecastResult, setForecastResult] = useState<AiForecastResult | null>(null);
   
   // Interactive Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -88,7 +99,7 @@ Como posso ajudar você hoje? Pode escolher uma das perguntas rápidas abaixo ou
   const [selectedProductForQuote, setSelectedProductForQuote] = useState<Product | null>(null);
   const [quoteQuantity, setQuoteQuantity] = useState<number>(100);
   const [quoteChannel, setQuoteChannel] = useState<"EMAIL" | "WHATSAPP">("EMAIL");
-  const [quotations, setQuotations] = useState<any[]>([
+  const [quotations, setQuotations] = useState<QuotationItem[]>([
     {
       id: "quote-1",
       productName: "Macaroca de Milho (Saco 50kg)",
@@ -453,7 +464,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
       });
 
       // Executive Summary Content
-      const finalY = (doc as any).lastAutoTable.finalY + 12;
+      const finalY = ((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 100) + 12;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       doc.text("Resumo Executivo do Assistente:", 15, finalY);
@@ -600,7 +611,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
       styles: { fontSize: 8.5, cellPadding: 4 }
     });
 
-    const finalY = (doc as any).lastAutoTable?.finalY || 110;
+    const finalY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 110;
 
     doc.setFont("Helvetica", "normal");
     doc.setFontSize(8.5);
@@ -619,7 +630,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
     const msgText = `Prezado(a) ${supplierName},\n\nGostaríamos de solicitar uma cotação de preços para o fornecimento de ${quoteQuantity} unidades do produto:\n- ${selectedProductForQuote.name}\n\nEncontra-se em anexo/descarregado o documento de Solicitação de Cotação em PDF com o logotipo da nossa empresa.\nPor favor, envie-nos o preço unitário comercializado e o prazo estimado para entrega física.\n\nAtenciosamente,\n${companyName}`;
 
     if (quoteChannel === "WHATSAPP") {
-      const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === supplierName.toLowerCase());
+      const matchSupp = (settings?.suppliers || []).find((s: Supplier) => s.name.toLowerCase() === supplierName.toLowerCase());
       const suppPhone = matchSupp?.phone || "";
       let cleanPhone = suppPhone.replace(/[^\d+]/g, "");
       if (cleanPhone.startsWith("+")) cleanPhone = cleanPhone.substring(1);
@@ -629,7 +640,7 @@ Não consegui conectar com o servidor central de IA temporariamente, mas posso f
         : `https://wa.me/?text=${encodeURIComponent(msgText)}`;
       window.open(waUrl, "_blank");
     } else if (quoteChannel === "EMAIL") {
-      const matchSupp = (settings?.suppliers || []).find((s: any) => s.name.toLowerCase() === supplierName.toLowerCase());
+      const matchSupp = (settings?.suppliers || []).find((s: Supplier) => s.name.toLowerCase() === supplierName.toLowerCase());
       const suppEmail = matchSupp?.email || "";
       const subject = `Solicitação de Cotação - ${selectedProductForQuote.name} (${companyName})`;
       

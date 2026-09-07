@@ -22,34 +22,35 @@ export interface CleanMockReport {
 export const MOCK_ID_PATTERN = /^(mock|demo|prod-mock|cust-mock|tx-mock|sample|teste|test-|dummy)/i;
 export const MOCK_NAME_PATTERN = /\[(mock|demo|exemplo|teste|sample)\]|\((mock|demo|demonstração|exemplo|teste|sample)\)/i;
 
-export function isMockRecord(item: any): boolean {
+export function isMockRecord(item: unknown): boolean {
   if (!item || typeof item !== "object") return false;
+  const rec = item as Record<string, unknown>;
 
   // 1. Flags booleanas explícitas
   if (
-    item.isMock === true ||
-    item.is_mock === true ||
-    item.mock === true ||
-    item.isDemo === true ||
-    item.is_demo === true ||
-    item.isSample === true ||
-    item.is_sample === true
+    rec.isMock === true ||
+    rec.is_mock === true ||
+    rec.mock === true ||
+    rec.isDemo === true ||
+    rec.is_demo === true ||
+    rec.isSample === true ||
+    rec.is_sample === true
   ) {
     return true;
   }
 
   // 2. Identificador
-  if (typeof item.id === "string" && MOCK_ID_PATTERN.test(item.id)) {
+  if (typeof rec.id === "string" && MOCK_ID_PATTERN.test(rec.id)) {
     return true;
   }
 
   // 3. Nomes, códigos ou referências
-  const name = item.name || item.nome || item.customerName || item.customer_name || item.invoice_number || item.invoiceNumber || "";
+  const name = rec.name || rec.nome || rec.customerName || rec.customer_name || rec.invoice_number || rec.invoiceNumber || "";
   if (typeof name === "string" && MOCK_NAME_PATTERN.test(name)) {
     return true;
   }
 
-  const code = item.code || item.barcode || item.nuit || item.nif || "";
+  const code = rec.code || rec.barcode || rec.nuit || rec.nif || "";
   if (typeof code === "string" && MOCK_ID_PATTERN.test(code)) {
     return true;
   }
@@ -95,7 +96,7 @@ export const AdminService = {
             }
           }
         }
-      } catch (err: any) {
+      } catch (err) {
         console.warn(`[AdminService] Aviso ao verificar ${table}:`, err.message);
       }
     }
@@ -117,7 +118,7 @@ export const AdminService = {
             }
           }
         }
-      } catch (err: any) {
+      } catch (err) {
         console.warn(`[AdminService] Aviso ao verificar ${table}:`, err.message);
       }
     }
@@ -138,7 +139,7 @@ export const AdminService = {
             }
           }
         }
-      } catch (err: any) {
+      } catch (err) {
         console.warn(`[AdminService] Aviso ao verificar ${table}:`, err.message);
       }
     }
@@ -157,7 +158,7 @@ export const AdminService = {
           }
         }
       }
-    } catch (err: any) {
+    } catch (err) {
       console.warn("[AdminService] Aviso ao verificar caixa:", err.message);
     }
 
@@ -209,7 +210,7 @@ export const AdminService = {
       report.purgedCashflow += directSbReport.purgedCashflow;
       report.supabaseCleaned = true;
       report.details.push(...directSbReport.details);
-    } catch (sbErr: any) {
+    } catch (sbErr) {
       console.warn("[AdminService] Erro na limpeza direta Supabase:", sbErr.message);
     }
 
@@ -258,7 +259,7 @@ export const AdminService = {
         success: true,
         message: "O sistema foi completamente reiniciado e limpo para comercialização. A recarregar..."
       };
-    } catch (err: any) {
+    } catch (err) {
       return {
         success: false,
         message: "Erro ao reiniciar o sistema: " + (err.message || "Erro desconhecido")

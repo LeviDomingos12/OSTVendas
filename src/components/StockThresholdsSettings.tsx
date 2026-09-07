@@ -335,7 +335,7 @@ export default function StockThresholdsSettings({
     const payload: Partial<SystemSettings> = {
       whatsappEnabled,
       managerWhatsappPhone,
-      whatsappProvider: whatsappProvider as any,
+      whatsappProvider: whatsappProvider as "DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD",
       whatsappMessageTemplate,
       emailStockAlertsEnabled,
       alertsRecipientEmail,
@@ -1335,7 +1335,7 @@ export default function StockThresholdsSettings({
                     <label className="block font-bold text-slate-700 mb-1">Modo de Envio WhatsApp</label>
                     <select
                       value={whatsappProvider}
-                      onChange={(e) => setWhatsappProvider(e.target.value as any)}
+                      onChange={(e) => setWhatsappProvider(e.target.value as "DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD")}
                       disabled={!canEdit || !whatsappEnabled}
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
                     >
@@ -1425,7 +1425,7 @@ export default function StockThresholdsSettings({
                       <label className="block font-bold text-slate-700 mb-1">Frequência</label>
                       <select
                         value={reportFrequency}
-                        onChange={(e) => setReportFrequency(e.target.value as any)}
+                        onChange={(e) => setReportFrequency(e.target.value as "daily" | "weekly")}
                         disabled={!canEdit}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
                       >

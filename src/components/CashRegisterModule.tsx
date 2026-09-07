@@ -23,6 +23,7 @@ import {
   CashClosure 
 } from "../types";
 import { generateEntityId, generateUUID } from "../lib/deterministic";
+import { operationalCache } from "../lib/indexedDbStorage";
 import { CommercialDataService } from "../services/dataService";
 import { CashKpiCards } from "./cash/CashKpiCards";
 import { CashQuickActions } from "./cash/CashQuickActions";
@@ -67,38 +68,32 @@ function CashRegisterModule({
   const [activeTab, setActiveTab] = useState<"dashboard" | "cashbook" | "closures" | "analytics">("dashboard");
 
   // Shift Status & Float
-  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">(() => {
-    const saved = localStorage.getItem("ost_pos_shift_status");
-    return saved === "OPEN" ? "OPEN" : "CLOSED";
-  });
-
-  const [openingBalance, setOpeningBalance] = useState<number>(() => {
-    const saved = localStorage.getItem("ost_pos_opening_balance");
-    return saved ? Number(saved) : 0;
-  });
-
-  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>(() => {
-    return localStorage.getItem("ost_pos_shift_opened_at") || new Date().toISOString();
-  });
-
-  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>(() => {
-    return localStorage.getItem("ost_pos_shift_opened_by") || activeUsername;
-  });
+  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("CLOSED");
+  const [openingBalance, setOpeningBalance] = useState<number>(0);
+  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>(() => new Date().toISOString());
+  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>(() => activeUsername);
 
   // Closures History State (Database-backed via Supabase)
-  const [closuresHistory, setClosuresHistory] = useState<CashClosure[]>(() => {
-    const saved = localStorage.getItem("ost_pos_cash_closures");
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {}
-    }
-    return [];
-  });
+  const [closuresHistory, setClosuresHistory] = useState<CashClosure[]>([]);
 
-  // Fetch real closures and active shift from Supabase on mount
+  // Fetch initial cache from IndexedDB and real data from Supabase
   useEffect(() => {
     let isMounted = true;
+
+    // Load local operational cache first
+    operationalCache.getItem<CashClosure[]>("ost_pos_cash_closures").then(cachedClosures => {
+      if (isMounted && cachedClosures && Array.isArray(cachedClosures)) {
+        setClosuresHistory(cachedClosures);
+      }
+    });
+
+    operationalCache.getItem<"OPEN" | "CLOSED">("ost_pos_shift_status").then(s => {
+      if (isMounted && (s === "OPEN" || s === "CLOSED")) setShiftStatus(s);
+    });
+
+    operationalCache.getItem<number>("ost_pos_opening_balance").then(b => {
+      if (isMounted && typeof b === "number") setOpeningBalance(b);
+    });
 
     // Load active shift status from Supabase
     CommercialDataService.fetchActiveCashShift().then((shift) => {
@@ -107,6 +102,8 @@ function CashRegisterModule({
         setOpeningBalance(shift.openingBalance || 0);
         setShiftOpenedAt(shift.openedAt);
         setShiftOpenedBy(shift.openedBy || activeUsername);
+        operationalCache.setItem("ost_pos_shift_status", shift.status);
+        operationalCache.setItem("ost_pos_opening_balance", shift.openingBalance || 0);
       }
     });
 
@@ -114,7 +111,7 @@ function CashRegisterModule({
     CommercialDataService.fetchCashClosures().then((closures) => {
       if (isMounted && closures && closures.length > 0) {
         setClosuresHistory(closures);
-        localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closures));
+        operationalCache.setItem("ost_pos_cash_closures", closures);
       }
     });
 
@@ -123,7 +120,7 @@ function CashRegisterModule({
       CommercialDataService.fetchCashClosures().then((closures) => {
         if (isMounted && closures) {
           setClosuresHistory(closures);
-          localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closures));
+          operationalCache.setItem("ost_pos_cash_closures", closures);
         }
       });
     });
@@ -134,17 +131,19 @@ function CashRegisterModule({
     };
   }, [activeUsername]);
 
-  // Save Closures to LocalStorage Cache
+  // Save Closures to IndexedDB Cache
   useEffect(() => {
-    localStorage.setItem("ost_pos_cash_closures", JSON.stringify(closuresHistory));
+    if (closuresHistory.length > 0) {
+      operationalCache.setItem("ost_pos_cash_closures", closuresHistory);
+    }
   }, [closuresHistory]);
 
-  // Save Shift Status to LocalStorage Cache
+  // Save Shift Status to IndexedDB Cache
   useEffect(() => {
-    localStorage.setItem("ost_pos_shift_status", shiftStatus);
-    localStorage.setItem("ost_pos_opening_balance", openingBalance.toString());
-    localStorage.setItem("ost_pos_shift_opened_at", shiftOpenedAt);
-    localStorage.setItem("ost_pos_shift_opened_by", shiftOpenedBy);
+    operationalCache.setItem("ost_pos_shift_status", shiftStatus);
+    operationalCache.setItem("ost_pos_opening_balance", openingBalance);
+    operationalCache.setItem("ost_pos_shift_opened_at", shiftOpenedAt);
+    operationalCache.setItem("ost_pos_shift_opened_by", shiftOpenedBy);
   }, [shiftStatus, openingBalance, shiftOpenedAt, shiftOpenedBy]);
 
   // Denominations Counter State - Clean default initialized to 0 for production commercialization
@@ -295,9 +294,21 @@ function CashRegisterModule({
     };
   }, [filteredTransactions, filteredCashFlow, shiftStatus, openingBalance]);
 
+interface CashTimelineItem {
+  id: string;
+  timestamp: string;
+  type: string;
+  paymentMethod?: string;
+  amount: number;
+  reason: string;
+  responsibleUser: string;
+  supplier?: string;
+  isInput: boolean;
+}
+
   // Unified Chronological Timeline
   const unifiedTimeline = useMemo(() => {
-    const items: any[] = [];
+    const items: CashTimelineItem[] = [];
 
     // Transactions
     filteredTransactions.forEach(t => {
@@ -513,7 +524,7 @@ function CashRegisterModule({
 
   const handleAdjustOpeningBalance = useCallback((newFloat: number, reason: string, supervisor: string) => {
     setOpeningBalance(newFloat);
-    localStorage.setItem("ost_pos_opening_balance", newFloat.toString());
+    operationalCache.setItem("ost_pos_opening_balance", newFloat);
     
     if (shiftStatus === "OPEN") {
       CommercialDataService.saveActiveCashShift({

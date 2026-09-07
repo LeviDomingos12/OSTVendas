@@ -22,9 +22,9 @@ export async function sendSMS(to: string, message: string): Promise<{ success: b
     }
 
     return { success: true, message: result?.message || "SMS despachado com sucesso." };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("[SMS Gateway Error]", err);
-    return { success: false, error: err?.message || "Erro de comunicação com o Gateway de SMS." };
+    return { success: false, error: err instanceof Error ? err.message : "Erro de comunicação com o Gateway de SMS." };
   }
 }
 

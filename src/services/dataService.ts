@@ -3,7 +3,7 @@
  * Camada de Serviço Unificada e Fachada de Dados Centralizada (@supabase/supabase-js).
  * 
  * Centraliza a inicialização do cliente Supabase a partir das variáveis de ambiente
- * 'VITE_SUPABASE_URL' e 'VITE_SUPABASE_ANON_KEY', eliminando quaisquer dependências diretas do Firebase.
+ * 'VITE_SUPABASE_URL' e 'VITE_SUPABASE_ANON_KEY', operando em PostgreSQL e Row Level Security.
  * 
  * Providencia serviços estruturados para:
  * - Autenticação e Sessões (AuthService)
@@ -154,7 +154,7 @@ export const AuthService = {
     return await SupabaseSyncService.signOut();
   },
 
-  onAuthStateChange(callback: (event: string, session: any) => void) {
+  onAuthStateChange(callback: (event: string, session: Session | null) => void) {
     return SupabaseSyncService.onAuthStateChange(callback);
   },
 
@@ -309,7 +309,8 @@ export const CommercialDataService = {
         grandTotal: transaction.grandTotal,
         amountPaid: transaction.grandTotal,
         changeAmount: 0,
-        items: transaction.items || []
+        items: transaction.items || [],
+        idempotencyKey: transaction.id
       };
 
       const res = await SupabaseSyncService.processSaleAtomic(params);

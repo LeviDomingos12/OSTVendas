@@ -25,7 +25,7 @@ import {
   Award,
   Phone
 } from "lucide-react";
-import { Employee, SystemSettings, SubscriptionPlan } from "../types";
+import { Employee, SystemSettings, SubscriptionPlan, Branch } from "../types";
 import { verifySecurityPin } from "../lib/security";
 import { getSupabaseClient } from "../lib/supabase";
 import { SupabaseSyncService } from "../services/supabaseService";
@@ -41,7 +41,7 @@ interface LoginModuleProps {
   employees: Employee[];
   companyName: string;
   logoUrl?: string;
-  branches?: any[];
+  branches?: Branch[];
   onLoginSuccess: (user: Employee, company: string) => void;
   onShowToast: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   onAddAuditLog?: (action: string, module: string, details: string) => void;
@@ -220,7 +220,7 @@ function LoginModule({
         setLoadingState("CONNECTING");
         setLoadingProgress(45);
 
-        const result: any = await signInWithEmail(inputEmail, password);
+        const result = await signInWithEmail(inputEmail, password);
         if (result && result.user) {
           const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(result.user, employees);
 
@@ -259,7 +259,7 @@ function LoginModule({
       setLoadingState("IDLE");
       setLoadingProgress(0);
       setErrorMessage("Por favor, introduza a palavra-passe para aceder.");
-    } catch (err: any) {
+    } catch (err) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
       const msg = err.message?.includes("Invalid login credentials")
@@ -347,7 +347,7 @@ function LoginModule({
       setSignupContact("");
       setSignupPassword("");
       setSignupConfirmPassword("");
-    } catch (err: any) {
+    } catch (err) {
       setLoadingState("IDLE");
       const translatedError = err.message?.includes("email-already-in-use") || err.message?.includes("already registered")
         ? "Este endereço de e-mail já está associado a uma conta."
@@ -465,7 +465,7 @@ function LoginModule({
       setSuccessMessage("Link de recuperação enviado! O administrador também foi notificado sobre o seu pedido.");
       onShowToast("Pedido de recuperação e e-mail enviados com sucesso.", "success");
       setRecoveryEmail("");
-    } catch (err: any) {
+    } catch (err) {
       setErrorMessage(`❌ Erro na recuperação: ${err.message}`);
       onShowToast("Erro ao solicitar recuperação.", "error");
     }
@@ -491,7 +491,7 @@ function LoginModule({
       setLoadingState("CONNECTING");
       setLoadingProgress(60);
       onShowToast("A conectar aos servidores seguros da Google...", "info");
-    } catch (err: any) {
+    } catch (err) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
       setErrorMessage(`Erro ao iniciar autenticação Google: ${err.message || err}`);
@@ -530,7 +530,7 @@ function LoginModule({
     // Se o colaborador possui email registrado, validar via Supabase Auth se aplicável
     if (match.email) {
       try {
-        const res: any = await signInWithEmail(match.email, pinVal.trim());
+        const res = await signInWithEmail(match.email, pinVal.trim());
         if (res && res.user) {
           triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
           return;
@@ -581,7 +581,7 @@ function LoginModule({
         onAddAuditLog("Login Biométrico WebAuthn", "AUTENTICAÇÃO", `Login biométrico efetuado com sucesso pelo operador ${match.name}.`);
       }
       triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
-    } catch (err: any) {
+    } catch (err) {
       setErrorMessage("Erro na validação biométrica: " + (err.message || "Tente novamente."));
     }
   };
@@ -1337,7 +1337,7 @@ function LoginModule({
 
                             onShowToast(`Solicitação enviada ao administrador para ${currentEmp.name}!`, "success");
                             setSuccessMessage(`Pedido de recuperação para ${currentEmp.name} enviado ao Administrador.`);
-                          } catch (err: any) {
+                          } catch (err) {
                             onShowToast("Erro ao solicitar recuperação.", "error");
                           }
                         }}

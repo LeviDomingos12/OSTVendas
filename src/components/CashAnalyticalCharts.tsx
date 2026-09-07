@@ -95,7 +95,7 @@ export default function CashAnalyticalCharts({ data, currency }: CashAnalyticalC
               tickFormatter={(v) => `${v.toLocaleString()}`}
             />
             <Tooltip 
-              formatter={(value: any) => [`${value.toLocaleString()} ${currency}`, ""]}
+              formatter={(value: unknown) => [`${Number(value || 0).toLocaleString()} ${currency}`, ""]}
               contentStyle={{
                 backgroundColor: "#1e293b",
                 border: "none",

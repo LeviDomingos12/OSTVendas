@@ -25,6 +25,7 @@ import {
 import { motion, AnimatePresence } from "motion/react";
 import jsPDF from "jspdf";
 import { MasterclassVideo } from "../types";
+import { generateCertificateCode } from "../lib/deterministic";
 
 interface TrainingModuleProps {
   videos: MasterclassVideo[];
@@ -108,7 +109,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
   const trainingVideos = videos;
 
   // Local state management
-  const [selectedVideo, setSelectedVideo] = useState<any>(null);
+  const [selectedVideo, setSelectedVideo] = useState<MasterclassVideo | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playerMode, setPlayerMode] = useState<"real" | "simulation">("real");
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -157,7 +158,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
     localStorage.setItem("ost_watched_videos", JSON.stringify(updated));
   };
 
-  const handleOpenVideo = (video: any) => {
+  const handleOpenVideo = (video: MasterclassVideo) => {
     setSelectedVideo(video);
     setIsPlaying(true);
     setPlayerMode("real");
@@ -305,7 +306,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
       doc.setFontSize(8);
       doc.setTextColor(148, 163, 184);
       doc.text("Fundador & Diretor Geral", 85, 179, { align: "center" });
-      doc.text("Chave de Validação: OST-CERT-" + Math.random().toString(36).substring(2, 8).toUpperCase(), 210, 179, { align: "center" });
+      doc.text(`Chave de Validação: ${generateCertificateCode()}`, 210, 179, { align: "center" });
 
       doc.save(`Certificado_Especialista_OST_Vendas.pdf`);
     } catch (err) {

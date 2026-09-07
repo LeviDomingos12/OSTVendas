@@ -13,29 +13,28 @@ export async function hashSecurityPin(pin: string): Promise<string> {
   const clean = (pin || "").trim();
   if (!clean) return "";
 
-  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
+  const cryptoObj = typeof globalThis !== "undefined" ? (globalThis.crypto || ((globalThis as Record<string, unknown>).msCrypto as Crypto | undefined)) : null;
+
+  if (cryptoObj && cryptoObj.subtle) {
     const encoder = new TextEncoder();
     const data = encoder.encode(`ost_vendas_salt_${clean}`);
-    const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
+    const hashBuffer = await cryptoObj.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  // Fallback síncrono/Node seguro caso crypto.subtle não esteja disponível
-  try {
-    const crypto = await import("crypto");
-    return crypto.createHash("sha256").update(`ost_vendas_salt_${clean}`).digest("hex");
-  } catch {
-    // Algoritmo simples de digest seguro como fallback extremo
-    let hash = 0;
-    const str = `ost_vendas_salt_${clean}`;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash |= 0;
-    }
-    return `hash_${Math.abs(hash).toString(16)}`;
+  // Fallback digest puro em JavaScript caso Web Crypto não esteja acessível
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+  const str = `ost_vendas_salt_${clean}`;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h0 = ((h0 << 5) - h0) + ch; h0 |= 0;
+    h1 = ((h1 << 7) - h1) + ch; h1 |= 0;
+    h2 = ((h2 << 11) - h2) + ch; h2 |= 0;
+    h3 = ((h3 << 13) - h3) + ch; h3 |= 0;
   }
+  const hex = [h0, h1, h2, h3].map(v => (v >>> 0).toString(16).padStart(8, "0")).join("");
+  return hex.padEnd(64, "0").slice(0, 64);
 }
 
 /**
@@ -66,10 +65,11 @@ export async function verifySecurityPin(enteredPin: string, storedPinOrHash?: st
  */
 export function sanitizeUserSession(user: Employee | null | undefined): Employee | null {
   if (!user) return null;
-  const safe = { ...user };
-  delete (safe as any).pin;
-  delete (safe as any).password;
-  delete (safe as any).tempPassword;
-  delete (safe as any).tokenSecret;
-  return safe;
+  // Desestrura para remover campos sensíveis conhecidos
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { pin, password, ...rest } = user;
+  const safeRecord: Record<string, unknown> = { ...rest };
+  delete safeRecord.tempPassword;
+  delete safeRecord.tokenSecret;
+  return safeRecord as unknown as Employee;
 }

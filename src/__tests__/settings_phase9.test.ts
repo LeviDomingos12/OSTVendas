@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SubscriptionPlan, SystemSettings } from "../types";
+import { generateUUID } from "../lib/deterministic";
 
 // ==========================================
 // Phase 9: Settings, Multi-Currency, Gateways & SaaS Plans
@@ -104,7 +105,7 @@ export function processDigitalPaymentMock(
     provider,
     amount,
     status: isValidPhone && amount > 0 ? "SUCCESS" : "FAILED",
-    reference: `REF_${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+    reference: `REF_${generateUUID().slice(0, 6).toUpperCase()}`,
     timestamp: new Date().toISOString()
   };
 }

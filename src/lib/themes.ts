@@ -111,7 +111,7 @@ export function applyTheme(themeId: string) {
     document.head.appendChild(styleEl);
   }
 
-  styleEl.innerHTML = `
+  styleEl.textContent = `
     :root {
       --theme-primary: ${theme.primary};
       --theme-hover: ${theme.hover};

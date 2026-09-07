@@ -37,7 +37,7 @@ import {
   Pie, 
   Cell
 } from "recharts";
-import { Product, Customer, Transaction, CashFlowEntry, SystemSettings } from "../types";
+import { Product, Customer, Transaction, CashFlowEntry, SystemSettings, Employee, ProductBatch } from "../types";
 import { printInvoiceHTML } from "../lib/printHelper";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import { ProfitMarginWidget } from "./dashboard/ProfitMarginWidget";
@@ -48,7 +48,7 @@ interface DashboardModuleProps {
   transactions: Transaction[];
   cashFlow: CashFlowEntry[];
   currency: string;
-  activeUser?: any;
+  activeUser?: Employee;
   onChangeModule?: (mod: string) => void;
   settings?: SystemSettings;
   onUpdateSettings?: (newSettings: Partial<SystemSettings>) => void;
@@ -56,7 +56,7 @@ interface DashboardModuleProps {
   onAddAuditLog?: (action: string, module: string, description: string) => void;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
   onCompleteSale?: (transaction: Transaction) => void;
-  pendingSyncQueue?: Record<string, any>;
+  pendingSyncQueue?: Record<string, unknown>;
   isManualSyncing?: boolean;
   isOnline?: boolean;
   onManualSync?: () => Promise<void> | void;
@@ -85,12 +85,12 @@ function DashboardModule({
 
   // Expiry Batch Promo / Discard States
   const [promoProduct, setPromoProduct] = useState<Product | null>(null);
-  const [promoBatch, setPromoBatch] = useState<any | null>(null);
+  const [promoBatch, setPromoBatch] = useState<ProductBatch | null>(null);
   const [discountPercent, setDiscountPercent] = useState<number>(20);
   const [customPromoPrice, setCustomPromoPrice] = useState<string>("");
   const [isFlyerGeneratorOpen, setIsFlyerGeneratorOpen] = useState(false);
   const [flyerProduct, setFlyerProduct] = useState<Product | null>(null);
-  const [confirmDiscardBatch, setConfirmDiscardBatch] = useState<any | null>(null);
+  const [confirmDiscardBatch, setConfirmDiscardBatch] = useState<ProductBatch | null>(null);
 
   // Date helper
   const dateSplit = (isoStr: string) => (isoStr ? isoStr.split("T")[0] : "");
@@ -146,7 +146,7 @@ function DashboardModule({
     scopedTransactions.forEach(tx => {
       totalRevenue += tx.grandTotal || 0;
       if (Array.isArray(tx.items)) {
-        tx.items.forEach((item: any) => {
+        tx.items.forEach((item) => {
           const unitCost = item.costPrice !== undefined ? item.costPrice : (productCostMap.get(item.productId) || 0);
           totalCost += unitCost * (item.quantity || 1);
         });
@@ -164,8 +164,9 @@ function DashboardModule({
     yesterdayTxs.forEach(tx => {
       yRevenue += tx.grandTotal || 0;
       if (Array.isArray(tx.items)) {
-        tx.items.forEach((item: any) => {
-          const unitCost = item.costPrice !== undefined ? item.costPrice : (productCostMap.get(item.productId) || 0);
+        tx.items.forEach((item) => {
+          const itemWithCost = item as { costPrice?: number };
+          const unitCost = itemWithCost.costPrice !== undefined ? itemWithCost.costPrice : (productCostMap.get(item.productId) || 0);
           yCost += unitCost * (item.quantity || 1);
         });
       }
@@ -342,7 +343,7 @@ function DashboardModule({
 
   // Expiring Batches (within 30 days) from real products
   const expiringBatches = useMemo(() => {
-    const list: any[] = [];
+    const list: (ProductBatch & { product: Product; daysLeft: number; isExpired: boolean })[] = [];
     const now = new Date();
     const thirtyDaysAhead = new Date();
     thirtyDaysAhead.setDate(now.getDate() + 30);
@@ -403,7 +404,7 @@ function DashboardModule({
     const prod = confirmDiscardBatch.product;
     if (!prod) return;
 
-    const updatedBatches = (prod.batches || []).filter((b: any) => b.id !== batchId);
+    const updatedBatches = (prod.batches || []).filter((b) => b.id !== batchId);
     const discardedQty = confirmDiscardBatch.quantity;
     const newStock = Math.max(0, (prod.stock || 0) - discardedQty);
 
@@ -642,7 +643,7 @@ function DashboardModule({
                   <XAxis dataKey="label" stroke="#94a3b8" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} />
                   <Tooltip 
-                    formatter={(value: any) => [`${Number(value).toLocaleString()} ${currency}`, "Faturamento"]}
+                    formatter={(value: unknown) => [`${Number(value || 0).toLocaleString()} ${currency}`, "Faturamento"]}
                     contentStyle={{ backgroundColor: "#0f172a", borderRadius: "10px", border: "none", color: "#fff", fontSize: "11px" }}
                   />
                   <Area type="monotone" dataKey="valor" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSalesClean)" />
@@ -683,7 +684,7 @@ function DashboardModule({
                           <Cell key={`cell-${index}`} fill={PAYMENT_COLORS[index % PAYMENT_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(val: any) => [`${Number(val).toLocaleString()} ${currency}`, "Valor"]} />
+                      <Tooltip formatter={(val: unknown) => [`${Number(val || 0).toLocaleString()} ${currency}`, "Valor"]} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>

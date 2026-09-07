@@ -49,7 +49,7 @@ function Sidebar({
 }: SidebarProps) {
   const { formattedVersion } = useSystemVersion();
   const effectivePlan: SubscriptionPlan = activeUser?.subscriptionPlan || subscriptionPlan || "OURO";
-  const userRole: UserRole = normalizeUserRole(activeUser || ({ role: currentRole } as any));
+  const userRole: UserRole = activeUser ? normalizeUserRole(activeUser) : currentRole;
 
   // Itens do menu com restrições por perfil estritas
   const allMenuItems = [

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo } from "react";
+import React, { useState, useEffect, memo, useRef } from "react";
 import { 
   Settings, 
   Building, 
@@ -21,7 +21,8 @@ import {
   Cloud,
   MapPin,
   Phone,
-  Sliders
+  Sliders,
+  X
 } from "lucide-react";
 import { 
   SystemSettings, 
@@ -32,7 +33,8 @@ import {
   Product, 
   Transaction, 
   Customer, 
-  SubscriptionPlan 
+  SubscriptionPlan,
+  MasterclassVideo
 } from "../types";
 import { generateEntityId } from "../lib/deterministic";
 import { SYSTEM_THEMES } from "../lib/themes";
@@ -43,6 +45,8 @@ import AiForecastModule from "./AiForecastModule";
 import TrainingModule from "./TrainingModule";
 import SubscriptionPlansModule from "./SubscriptionPlansModule";
 import StockThresholdsSettings from "./StockThresholdsSettings";
+
+export type SettingsSubTab = "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -55,9 +59,9 @@ interface SettingsModuleProps {
   activeColorTheme: string;
   onChangeColorTheme: (themeId: string) => void;
   onExportLocalDB?: () => void;
-  onImportLocalDB?: (jsonData: any) => Promise<boolean> | boolean;
+  onImportLocalDB?: (jsonData: unknown) => Promise<boolean> | boolean;
   onTriggerLocalBackup?: (type: "manual" | "automatic") => Promise<boolean> | boolean;
-  onGetBackupPayload?: () => any;
+  onGetBackupPayload?: () => unknown;
   systemVersion?: string;
   employees?: Employee[];
   auditLogs?: AuditLog[];
@@ -70,11 +74,11 @@ interface SettingsModuleProps {
   customers?: Customer[];
   onAddEmployee?: (emp: Employee) => void;
   onUpdateEmployees?: (employees: Employee[]) => void;
-  masterclassVideos?: any[];
+  masterclassVideos?: MasterclassVideo[];
   theme?: "daily" | "night";
   onUpdateUserPlan?: (employeeId: string, newPlan: SubscriptionPlan) => void;
   onUpdateSystemPlan?: (newPlan: SubscriptionPlan) => void;
-  initialSubTab?: string;
+  initialSubTab?: SettingsSubTab;
   onChangeModule?: (mod: string) => void;
   onPurgeMockData?: () => Promise<void> | void;
 }
@@ -111,17 +115,15 @@ function SettingsModule({
   onChangeModule,
   onPurgeMockData
 }: SettingsModuleProps) {
-  const canEdit = currentRole === "ADMIN" || currentRole === "SUPERVISOR";
+  const canEdit = currentRole === "ADMIN" || currentRole === "SUPERVISOR" || !currentRole;
   
   // Navigation Sub-tab state
-  const [activeSubTab, setActiveSubTab] = useState<
-    "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans"
-  >((initialSubTab as any) || "geral");
+  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>(initialSubTab || "geral");
 
   // Sync sub-tab if initialSubTab prop changes
   useEffect(() => {
     if (initialSubTab) {
-      setActiveSubTab(initialSubTab as any);
+      setActiveSubTab(initialSubTab);
     }
   }, [initialSubTab]);
 
@@ -163,25 +165,59 @@ function SettingsModule({
   const [isPurgingData, setIsPurgingData] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  // Update local states when settings change from parent
+  // Track if user is actively typing in inputs to never overwrite active typing
+  const isUserInteractingRef = useRef<boolean>(false);
+  const lastSavedSettingsRef = useRef<SystemSettings>(settings);
+
+  // Update local states only when external settings change AND user is not actively editing
   useEffect(() => {
-    setCompanyName(settings.companyName || "");
-    setSlogan(settings.slogan || "");
-    setCompanyNuit(settings.companyNuit || settings.nuit || "");
-    setStoreAddress(settings.storeAddress || settings.companyAddress || "");
-    setStoreContact(settings.storeContact || "");
-    setStoreEmail(settings.storeEmail || settings.email || "");
-    setLogoUrl(settings.logoUrl || "");
-    setDefaultVat(settings.defaultVat ?? settings.vatDefaultRate ?? 16);
-    setCurrencyCode(settings.currency || "MT");
-    setPaperSize(settings.paperSize || "80MM");
-    setPrinterAutoCut(settings.printerAutoCut ?? true);
-    setAlertsRecipientEmail(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
-    setManagerWhatsappPhone(settings.managerWhatsappPhone || "");
-    setSmsStockThreshold(settings.smsStockThreshold || 5);
-    setEmailStockAlertsEnabled(settings.emailStockAlertsEnabled ?? true);
-    setWhatsappEnabled(settings.whatsappEnabled ?? true);
-    setBranches(settings.branches || []);
+    const prev = lastSavedSettingsRef.current;
+    
+    // If the change came from our own local save, update the reference and do nothing
+    if (
+      settings.companyName === prev.companyName &&
+      settings.slogan === prev.slogan &&
+      (settings.companyNuit || settings.nuit) === (prev.companyNuit || prev.nuit) &&
+      (settings.storeAddress || settings.companyAddress) === (prev.storeAddress || prev.companyAddress) &&
+      settings.storeContact === prev.storeContact &&
+      (settings.storeEmail || settings.email) === (prev.storeEmail || prev.email) &&
+      settings.logoUrl === prev.logoUrl &&
+      (settings.defaultVat ?? settings.vatDefaultRate) === (prev.defaultVat ?? prev.vatDefaultRate) &&
+      settings.currency === prev.currency &&
+      settings.paperSize === prev.paperSize &&
+      settings.printerAutoCut === prev.printerAutoCut &&
+      (settings.alertsRecipientEmail || settings.reportRecipientEmail) === (prev.alertsRecipientEmail || prev.reportRecipientEmail) &&
+      settings.managerWhatsappPhone === prev.managerWhatsappPhone &&
+      settings.smsStockThreshold === prev.smsStockThreshold &&
+      settings.emailStockAlertsEnabled === prev.emailStockAlertsEnabled &&
+      settings.whatsappEnabled === prev.whatsappEnabled &&
+      settings.branches === prev.branches
+    ) {
+      return;
+    }
+
+    lastSavedSettingsRef.current = settings;
+    
+    // Only hydrate form if user is not actively typing
+    if (!isUserInteractingRef.current) {
+      setCompanyName(settings.companyName || "");
+      setSlogan(settings.slogan || "");
+      setCompanyNuit(settings.companyNuit || settings.nuit || "");
+      setStoreAddress(settings.storeAddress || settings.companyAddress || "");
+      setStoreContact(settings.storeContact || "");
+      setStoreEmail(settings.storeEmail || settings.email || "");
+      setLogoUrl(settings.logoUrl || "");
+      setDefaultVat(settings.defaultVat ?? settings.vatDefaultRate ?? 16);
+      setCurrencyCode(settings.currency || "MT");
+      setPaperSize(settings.paperSize || "80MM");
+      setPrinterAutoCut(settings.printerAutoCut ?? true);
+      setAlertsRecipientEmail(settings.alertsRecipientEmail || settings.reportRecipientEmail || "");
+      setManagerWhatsappPhone(settings.managerWhatsappPhone || "");
+      setSmsStockThreshold(settings.smsStockThreshold || 5);
+      setEmailStockAlertsEnabled(settings.emailStockAlertsEnabled ?? true);
+      setWhatsappEnabled(settings.whatsappEnabled ?? true);
+      setBranches(settings.branches || []);
+    }
   }, [settings]);
 
   // Handler: Save General & Store Settings
@@ -192,16 +228,22 @@ function SettingsModule({
       return;
     }
 
+    const trimmedCompanyName = companyName.trim();
+    if (!trimmedCompanyName) {
+      if (onShowToast) onShowToast("Por favor, insira o nome da sua empresa / loja.", "warning");
+      return;
+    }
+
     const updatedData: Partial<SystemSettings> = {
-      companyName,
-      slogan,
-      companyNuit,
-      nuit: companyNuit,
-      storeAddress,
-      companyAddress: storeAddress,
-      storeContact,
-      storeEmail,
-      email: storeEmail,
+      companyName: trimmedCompanyName,
+      slogan: slogan.trim(),
+      companyNuit: companyNuit.trim(),
+      nuit: companyNuit.trim(),
+      storeAddress: storeAddress.trim(),
+      companyAddress: storeAddress.trim(),
+      storeContact: storeContact.trim(),
+      storeEmail: storeEmail.trim(),
+      email: storeEmail.trim(),
       logoUrl,
       defaultVat: Number(defaultVat),
       vatDefaultRate: Number(defaultVat),
@@ -210,8 +252,9 @@ function SettingsModule({
       printerAutoCut
     };
 
+    lastSavedSettingsRef.current = { ...lastSavedSettingsRef.current, ...updatedData } as SystemSettings;
     onUpdateSettings(updatedData);
-    onAddAuditLog("Configurações Gerais", "CONFIGURAÇÕES", `Dados da empresa '${companyName}' e parâmetros de venda atualizados.`);
+    onAddAuditLog("Configurações Gerais", "CONFIGURAÇÕES", `Dados da empresa '${trimmedCompanyName}' e parâmetros de venda atualizados.`);
     if (onShowToast) {
       onShowToast("Configurações da empresa guardadas com sucesso!", "success", "Guardado");
     }
@@ -312,8 +355,9 @@ function SettingsModule({
       }
       onAddAuditLog("Sincronização Cloud", "SISTEMA", "Sincronização manual da base de dados executada com sucesso.");
       if (onShowToast) onShowToast("Dados sincronizados com o servidor em nuvem!", "success");
-    } catch (err: any) {
-      if (onShowToast) onShowToast("Erro ao sincronizar com a nuvem: " + err.message, "error");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (onShowToast) onShowToast("Erro ao sincronizar com a nuvem: " + msg, "error");
     } finally {
       setIsSyncingCloud(false);
     }
@@ -332,8 +376,9 @@ function SettingsModule({
         await AdminService.purgeMockData(activeUser?.name || "Administrador");
       }
       if (onShowToast) onShowToast("Dados de teste removidos com sucesso!", "success", "Sistema Pronto");
-    } catch (err: any) {
-      if (onShowToast) onShowToast("Erro ao limpar dados: " + err.message, "error");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (onShowToast) onShowToast("Erro ao limpar dados: " + msg, "error");
     } finally {
       setIsPurgingData(false);
     }
@@ -353,7 +398,7 @@ function SettingsModule({
           onShowToast("Cópia de segurança restaurada com sucesso!", "success");
         }
       }
-    } catch (err: any) {
+    } catch {
       if (onShowToast) onShowToast("Ficheiro JSON de backup inválido ou corrompido.", "error");
     } finally {
       setIsImporting(false);
@@ -519,20 +564,51 @@ function SettingsModule({
               </div>
             </div>
 
-            <form onSubmit={handleSaveGeneralSettings} className="space-y-5">
+            <form 
+              onSubmit={handleSaveGeneralSettings} 
+              onFocus={() => { isUserInteractingRef.current = true; }}
+              onBlur={(e) => {
+                // If focus moved outside the form, allow synchronization again after a delay
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  setTimeout(() => {
+                    isUserInteractingRef.current = false;
+                  }, 500);
+                }
+              }}
+              className="space-y-5"
+            >
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
                 {/* Nome da Empresa */}
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Nome da Empresa / Loja *</label>
-                  <input
-                    type="text"
-                    required
-                    value={companyName}
-                    onChange={(e) => setCompanyName(e.target.value)}
-                    disabled={!canEdit}
-                    placeholder="Ex: Mercearia Central, Lda."
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
-                  />
+                  <div className="relative">
+                    <input
+                      type="text"
+                      required
+                      value={companyName}
+                      onChange={(e) => {
+                        isUserInteractingRef.current = true;
+                        setCompanyName(e.target.value);
+                      }}
+                      disabled={!canEdit}
+                      placeholder="Ex: Mercearia Central, Lda."
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium pr-8"
+                    />
+                    {companyName && canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          isUserInteractingRef.current = true;
+                          setCompanyName("");
+                        }}
+                        title="Limpar nome para digitar novo"
+                        aria-label="Limpar campo de nome da empresa"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md hover:bg-slate-200/70 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Slogan */}
@@ -541,7 +617,10 @@ function SettingsModule({
                   <input
                     type="text"
                     value={slogan}
-                    onChange={(e) => setSlogan(e.target.value)}
+                    onChange={(e) => {
+                      isUserInteractingRef.current = true;
+                      setSlogan(e.target.value);
+                    }}
                     disabled={!canEdit}
                     placeholder="Ex: Qualidade e os melhores preços"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -555,7 +634,10 @@ function SettingsModule({
                     type="text"
                     required
                     value={companyNuit}
-                    onChange={(e) => setCompanyNuit(e.target.value)}
+                    onChange={(e) => {
+                      isUserInteractingRef.current = true;
+                      setCompanyNuit(e.target.value);
+                    }}
                     disabled={!canEdit}
                     placeholder="Ex: 400123456"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-mono font-medium"
@@ -568,7 +650,10 @@ function SettingsModule({
                   <input
                     type="text"
                     value={storeContact}
-                    onChange={(e) => setStoreContact(e.target.value)}
+                    onChange={(e) => {
+                      isUserInteractingRef.current = true;
+                      setStoreContact(e.target.value);
+                    }}
                     disabled={!canEdit}
                     placeholder="Ex: +258 84 123 4567"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -581,7 +666,10 @@ function SettingsModule({
                   <input
                     type="email"
                     value={storeEmail}
-                    onChange={(e) => setStoreEmail(e.target.value)}
+                    onChange={(e) => {
+                      isUserInteractingRef.current = true;
+                      setStoreEmail(e.target.value);
+                    }}
                     disabled={!canEdit}
                     placeholder="Ex: contacto@loja.co.mz"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -594,7 +682,10 @@ function SettingsModule({
                   <input
                     type="text"
                     value={storeAddress}
-                    onChange={(e) => setStoreAddress(e.target.value)}
+                    onChange={(e) => {
+                      isUserInteractingRef.current = true;
+                      setStoreAddress(e.target.value);
+                    }}
                     disabled={!canEdit}
                     placeholder="Ex: Av. 24 de Julho, nº 123, Maputo"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -688,7 +779,12 @@ function SettingsModule({
                     <label className="block font-bold text-slate-700 mb-1">Largura do Papel Térmico</label>
                     <select
                       value={paperSize}
-                      onChange={(e) => setPaperSize(e.target.value as any)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "80MM" || val === "58MM" || val === "A4") {
+                          setPaperSize(val);
+                        }
+                      }}
                       disabled={!canEdit}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
                     >

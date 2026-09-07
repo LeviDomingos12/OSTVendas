@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "./supabase";
 import { authenticatedFetch } from "./apiClient";
+import { generateUUID } from "./deterministic";
 
 export const getGoogleAccessToken = async (): Promise<string | null> => {
   const token = localStorage.getItem("google_access_token");
@@ -53,7 +54,7 @@ export const sendEmail = async ({ to, subject, body, isHtml = true, attachments 
       let emailContent = "";
 
       if (attachments && attachments.length > 0) {
-        const boundary = "----=_NextPart_" + Math.random().toString(36).substring(2);
+        const boundary = `----=_NextPart_${generateUUID().replace(/-/g, "")}`;
         emailContent += `To: ${to}\r\n`;
         emailContent += `Subject: ${subject}\r\n`;
         emailContent += `MIME-Version: 1.0\r\n`;

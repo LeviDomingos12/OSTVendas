@@ -1,227 +1,80 @@
 /**
  * @file src/lib/indexedDbStorage.ts
- * Gestor Centralizado de Armazenamento Assíncrono em IndexedDB para OST Vendas.
+ * Gestor de Cache e Armazenamento Local de Alta Capacidade via IndexedDB.
  * 
- * Substitui o uso arriscado de localStorage para:
- * 1. Fila de Sincronização POS Offline (pos_sync_queue)
- * 2. Snapshots volumosos do ERP (catálogo de produtos, vendas, clientes, auditoria)
- * 
- * Vantagens:
- * - Não bloqueia a thread principal da UI (assíncrono)
- * - Capacidade de centenas de megabytes (sem o limite de 5MB do localStorage)
- * - Transações atómicas ACID e integridade de dados garantida
+ * Substitui o uso de localStorage para coleções operacionais grandes (produtos, vendas, clientes, etc.),
+ * prevenindo erros de QuotaExceeded e assegurando integridade offline.
  */
 
-export interface SyncQueueItem {
-  id: string;
-  type: string;
-  payload: any;
-  timestamp: string;
-  userId?: string;
-  retryCount: number;
-  lastError?: string;
-  status: "PENDING" | "PROCESSING" | "FAILED";
+import { Product, Customer, Transaction, CashFlowEntry, Employee, AuditLog, SystemSettings } from "../types";
+
+export interface ErpSnapshotData {
+  products: Product[];
+  customers: Customer[];
+  transactions: Transaction[];
+  cashflow: CashFlowEntry[];
+  employees: Employee[];
+  auditlogs: AuditLog[];
+  settings: SystemSettings | null;
+  cachedAt: string;
 }
 
-const DB_NAME = "ost_vendas_enterprise_idb";
-const DB_VERSION = 2;
+const DB_NAME = "ost_vendas_operational_cache";
+const DB_VERSION = 1;
+const STORE_NAME = "operational_data";
 
-const STORES = {
-  SYNC_QUEUE: "pos_sync_queue",
-  SNAPSHOTS: "erp_large_snapshots",
-  KEY_VAL: "system_key_val"
-} as const;
-
-class EnterpriseIndexedDb {
+class OperationalIndexedDB {
   private dbPromise: Promise<IDBDatabase> | null = null;
 
-  private isSupported(): boolean {
-    return typeof window !== "undefined" && Boolean(window.indexedDB);
-  }
-
   private getDB(): Promise<IDBDatabase> {
-    if (!this.isSupported()) {
-      return Promise.reject(new Error("IndexedDB não está disponível neste ambiente."));
+    if (typeof window === "undefined" || !window.indexedDB) {
+      return Promise.reject(new Error("IndexedDB não disponível no ambiente atual"));
     }
 
     if (!this.dbPromise) {
-      this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-        const req = window.indexedDB.open(DB_NAME, DB_VERSION);
+      this.dbPromise = new Promise((resolve, reject) => {
+        const request = window.indexedDB.open(DB_NAME, DB_VERSION);
 
-        req.onupgradeneeded = (e: IDBVersionChangeEvent) => {
-          const db = (e.target as IDBOpenDBRequest).result;
-
-          // 1. Fila de sincronização POS
-          if (!db.objectStoreNames.contains(STORES.SYNC_QUEUE)) {
-            const store = db.createObjectStore(STORES.SYNC_QUEUE, { keyPath: "id" });
-            store.createIndex("timestamp", "timestamp", { unique: false });
-            store.createIndex("status", "status", { unique: false });
-            store.createIndex("type", "type", { unique: false });
-          }
-
-          // 2. Snapshots grandes de dados empresariais
-          if (!db.objectStoreNames.contains(STORES.SNAPSHOTS)) {
-            const snapStore = db.createObjectStore(STORES.SNAPSHOTS, { keyPath: "key" });
-            snapStore.createIndex("updatedAt", "updatedAt", { unique: false });
-          }
-
-          // 3. Store genérico chave-valor indexado
-          if (!db.objectStoreNames.contains(STORES.KEY_VAL)) {
-            db.createObjectStore(STORES.KEY_VAL, { keyPath: "key" });
+        request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+          const db = (event.target as IDBOpenDBRequest).result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME, { keyPath: "key" });
           }
         };
 
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
       });
     }
 
     return this.dbPromise;
   }
 
-  // ==========================================================================
-  // 1. POS SYNC QUEUE OPERATIONS (IndexedDB)
-  // ==========================================================================
-
-  async getSyncQueue(): Promise<SyncQueueItem[]> {
-    if (!this.isSupported()) return [];
+  async setItem<T>(key: string, value: T): Promise<void> {
     try {
       const db = await this.getDB();
-      return new Promise<SyncQueueItem[]>((resolve, reject) => {
-        const tx = db.transaction(STORES.SYNC_QUEUE, "readonly");
-        const store = tx.objectStore(STORES.SYNC_QUEUE);
-        const req = store.getAll();
-
-        req.onsuccess = () => {
-          const list: SyncQueueItem[] = req.result || [];
-          list.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-          resolve(list);
-        };
-        req.onerror = () => reject(req.error);
-      });
-    } catch (err) {
-      console.warn("[IndexedDB] Falha ao ler pos_sync_queue:", err);
-      return [];
-    }
-  }
-
-  async addSyncQueueItem(item: SyncQueueItem): Promise<void> {
-    if (!this.isSupported()) return;
-    try {
-      const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SYNC_QUEUE, "readwrite");
-        const store = tx.objectStore(STORES.SYNC_QUEUE);
-        const req = store.put(item);
-
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.put({ key, value, updatedAt: Date.now() });
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
     } catch (err) {
-      console.error("[IndexedDB] Erro ao adicionar item à fila POS:", err);
-      throw err;
+      console.warn(`[IndexedDB] Falha ao guardar chave ${key}:`, err);
     }
   }
 
-  async removeSyncQueueItem(id: string): Promise<void> {
-    if (!this.isSupported()) return;
+  async getItem<T>(key: string): Promise<T | null> {
     try {
       const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SYNC_QUEUE, "readwrite");
-        const store = tx.objectStore(STORES.SYNC_QUEUE);
-        const req = store.delete(id);
-
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-    } catch (err) {
-      console.error("[IndexedDB] Erro ao remover item da fila POS:", err);
-    }
-  }
-
-  async updateSyncQueueItem(id: string, updates: Partial<SyncQueueItem>): Promise<void> {
-    if (!this.isSupported()) return;
-    try {
-      const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SYNC_QUEUE, "readwrite");
-        const store = tx.objectStore(STORES.SYNC_QUEUE);
-        const getReq = store.get(id);
-
-        getReq.onsuccess = () => {
-          if (getReq.result) {
-            const updated = { ...getReq.result, ...updates };
-            const putReq = store.put(updated);
-            putReq.onsuccess = () => resolve();
-            putReq.onerror = () => reject(putReq.error);
-          } else {
-            resolve();
-          }
-        };
-        getReq.onerror = () => reject(getReq.error);
-      });
-    } catch (err) {
-      console.error("[IndexedDB] Erro ao atualizar item da fila POS:", err);
-    }
-  }
-
-  async clearSyncQueue(): Promise<void> {
-    if (!this.isSupported()) return;
-    try {
-      const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SYNC_QUEUE, "readwrite");
-        const store = tx.objectStore(STORES.SYNC_QUEUE);
-        const req = store.clear();
-
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-    } catch (err) {
-      console.error("[IndexedDB] Erro ao limpar fila de sincronização:", err);
-    }
-  }
-
-  // ==========================================================================
-  // 2. LARGE DATA SNAPSHOTS OPERATIONS (IndexedDB)
-  // ==========================================================================
-
-  async saveSnapshot<T = any>(key: string, data: T): Promise<void> {
-    if (!this.isSupported()) return;
-    try {
-      const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SNAPSHOTS, "readwrite");
-        const store = tx.objectStore(STORES.SNAPSHOTS);
-        const record = {
-          key,
-          data,
-          updatedAt: new Date().toISOString(),
-          byteSizeApprox: JSON.stringify(data).length
-        };
-        const req = store.put(record);
-
-        req.onsuccess = () => resolve();
-        req.onerror = () => reject(req.error);
-      });
-    } catch (err) {
-      console.warn(`[IndexedDB] Falha ao persistir snapshot (${key}):`, err);
-    }
-  }
-
-  async getSnapshot<T = any>(key: string): Promise<T | null> {
-    if (!this.isSupported()) return null;
-    try {
-      const db = await this.getDB();
-      return new Promise<T | null>((resolve, reject) => {
-        const tx = db.transaction(STORES.SNAPSHOTS, "readonly");
-        const store = tx.objectStore(STORES.SNAPSHOTS);
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
         const req = store.get(key);
-
         req.onsuccess = () => {
-          if (req.result && req.result.data !== undefined) {
-            resolve(req.result.data as T);
+          if (req.result && req.result.value !== undefined) {
+            resolve(req.result.value as T);
           } else {
             resolve(null);
           }
@@ -229,27 +82,54 @@ class EnterpriseIndexedDb {
         req.onerror = () => reject(req.error);
       });
     } catch (err) {
-      console.warn(`[IndexedDB] Falha ao recuperar snapshot (${key}):`, err);
+      console.warn(`[IndexedDB] Falha ao ler chave ${key}:`, err);
       return null;
     }
   }
 
-  async deleteSnapshot(key: string): Promise<void> {
-    if (!this.isSupported()) return;
+  async removeItem(key: string): Promise<void> {
     try {
       const db = await this.getDB();
-      return new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORES.SNAPSHOTS, "readwrite");
-        const store = tx.objectStore(STORES.SNAPSHOTS);
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
         const req = store.delete(key);
-
         req.onsuccess = () => resolve();
         req.onerror = () => reject(req.error);
       });
     } catch (err) {
-      console.warn(`[IndexedDB] Falha ao apagar snapshot (${key}):`, err);
+      console.warn(`[IndexedDB] Falha ao remover chave ${key}:`, err);
     }
+  }
+
+  async clear(): Promise<void> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.clear();
+        req.onsuccess = () => resolve();
+        req.onerror = () => reject(req.error);
+      });
+    } catch (err) {
+      console.warn("[IndexedDB] Falha ao limpar base de dados:", err);
+    }
+  }
+
+  /**
+   * Armazena snapshot completo com segurança e alta performance
+   */
+  async saveSnapshot(key: string, data: ErpSnapshotData): Promise<void> {
+    await this.setItem<ErpSnapshotData>(key, data);
+  }
+
+  /**
+   * Recupera snapshot completo do IndexedDB
+   */
+  async loadSnapshot(key: string): Promise<ErpSnapshotData | null> {
+    return this.getItem<ErpSnapshotData>(key);
   }
 }
 
-export const indexedDbStorage = new EnterpriseIndexedDb();
+export const operationalCache = new OperationalIndexedDB();
