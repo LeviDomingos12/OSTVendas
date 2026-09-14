@@ -368,7 +368,7 @@ export default function StaffModule({
         }"`
       ).join("\n");
       
-      const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+      const blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -457,7 +457,7 @@ export default function StaffModule({
         `"${new Date(log.timestamp).toLocaleString() || ''}","${log.user || ''}","${log.userRole || ''}","${log.action || ''}","${log.module || ''}","${(log.details || '').replace(/"/g, '""')}"`
       ).join("\n");
       
-      const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+      const blob = new Blob(["\uFEFF" + header + rows], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;

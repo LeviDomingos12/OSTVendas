@@ -23,17 +23,110 @@ dbRouter.get("/load", requireAuth, async (req: Request, res: Response) => {
       return res.status(500).json({ error: "Cliente Supabase indisponível no servidor." });
     }
 
-    const [prodsRes, custsRes, salesRes, logsRes, setsRes] = await Promise.allSettled([
+    const [prodsRes, custsRes, salesRes, logsRes, setsRes, cashRes] = await Promise.allSettled([
       client.from("produtos").select("*").eq("tenant_id", tenantUid),
       client.from("clientes").select("*").eq("tenant_id", tenantUid),
-      client.from("vendas").select("*").eq("tenant_id", tenantUid).order("created_at", { ascending: false }).limit(200),
+      client.from("vendas").select("*").eq("tenant_id", tenantUid).order("created_at", { ascending: false }).limit(500),
       client.from("audit_logs").select("*").eq("tenant_id", tenantUid).order("created_at", { ascending: false }).limit(100),
-      client.from("settings").select("*").eq("tenant_id", tenantUid).maybeSingle()
+      client.from("settings").select("*").eq("tenant_id", tenantUid).maybeSingle(),
+      client.from("caixa").select("*").eq("tenant_id", tenantUid).order("created_at", { ascending: false }).limit(200)
     ]);
 
-    const products = prodsRes.status === "fulfilled" && prodsRes.value.data ? prodsRes.value.data : [];
-    const customers = custsRes.status === "fulfilled" && custsRes.value.data ? custsRes.value.data : [];
-    const transactions = salesRes.status === "fulfilled" && salesRes.value.data ? salesRes.value.data : [];
+    const rawProducts = prodsRes.status === "fulfilled" && prodsRes.value.data ? prodsRes.value.data : [];
+    const products = (rawProducts as Record<string, unknown>[]).map((p) => ({
+      id: String(p.id),
+      name: String(p.name || p.nome || "Produto"),
+      code: String(p.code || p.codigo || p.id),
+      barcode: String(p.barcode || p.code || ""),
+      category: String(p.category || p.categoria || "Geral"),
+      supplier: String(p.supplier || p.fornecedor || "Geral"),
+      costPrice: Number(p.costPrice ?? p.cost_price ?? 0),
+      salePrice: Number(p.salePrice ?? p.sale_price ?? 0),
+      stock: Number(p.stock ?? p.estoque ?? 0),
+      minStock: Number(p.minStock ?? p.min_stock ?? 5),
+      vatRate: Number(p.vatRate ?? p.vat_rate ?? 16),
+      unit: String(p.unit || "un"),
+      image: String(p.image || p.imageUrl || p.image_url || ""),
+      imageUrl: String(p.image || p.imageUrl || p.image_url || ""),
+      emoji: String(p.emoji || "📦"),
+      isActive: p.isActive !== false && p.is_active !== false,
+      updatedAt: p.updated_at ? String(p.updated_at) : p.updatedAt ? String(p.updatedAt) : undefined
+    }));
+
+    const rawCustomers = custsRes.status === "fulfilled" && custsRes.value.data ? custsRes.value.data : [];
+    const customers = (rawCustomers as Record<string, unknown>[]).map((c) => ({
+      id: String(c.id),
+      name: String(c.name || c.nome || "Cliente"),
+      email: c.email ? String(c.email) : undefined,
+      phone: String(c.phone || c.telefone || ""),
+      address: c.address ? String(c.address) : undefined,
+      nuit: c.nuit ? String(c.nuit) : undefined,
+      totalSpent: Number(c.totalSpent ?? c.total_spent ?? 0),
+      purchaseCount: Number(c.purchaseCount ?? c.purchase_count ?? 0),
+      loyaltyPoints: Number(c.loyaltyPoints ?? c.loyalty_points ?? 0),
+      debt: Number(c.debt ?? c.divida ?? 0),
+      creditLimit: Number(c.creditLimit ?? c.credit_limit ?? 0),
+      creditBlocked: Boolean(c.creditBlocked ?? c.credit_blocked ?? false),
+      preferredPaymentMethod: c.preferredPaymentMethod || c.preferred_payment_method || undefined,
+      category: c.category || c.categoria || "REGULAR",
+      branchId: c.branchId || c.branch_id || undefined,
+      createdAt: c.createdAt || c.created_at || undefined,
+      updatedAt: c.updatedAt || c.updated_at || undefined
+    }));
+
+    const rawSales = salesRes.status === "fulfilled" && salesRes.value.data ? salesRes.value.data : [];
+    const transactions = (rawSales as Record<string, unknown>[]).map((t) => {
+      const grand = Number(t.grand_total ?? t.grandTotal ?? t.amount_paid ?? 0);
+      const vat = Number(t.vat_total ?? t.vatTotal ?? 0);
+      const disc = Number(t.discount_total ?? t.discountTotal ?? 0);
+      const sub = Number(t.subtotal ?? (grand - vat + disc)) || grand;
+
+      let itemsArr: unknown[] = [];
+      if (Array.isArray(t.items)) {
+        itemsArr = t.items;
+      } else if (typeof t.items === "string") {
+        try {
+          itemsArr = JSON.parse(t.items);
+        } catch {
+          itemsArr = [];
+        }
+      }
+
+      return {
+        id: String(t.id),
+        invoiceNumber: String(t.invoice_number || t.invoiceNumber || t.id),
+        customerName: String(t.customer_name || t.customerName || "Consumidor Final"),
+        customerId: t.customer_id ? String(t.customer_id) : (t.customerId ? String(t.customerId) : undefined),
+        customerPhone: t.customer_phone ? String(t.customer_phone) : (t.customerPhone ? String(t.customerPhone) : undefined),
+        customerEmail: t.customer_email ? String(t.customer_email) : (t.customerEmail ? String(t.customerEmail) : undefined),
+        nuit: t.customer_nuit ? String(t.customer_nuit) : (t.nuit ? String(t.nuit) : undefined),
+        grandTotal: grand,
+        subtotal: sub,
+        vatTotal: vat,
+        discountTotal: disc,
+        paymentMethod: String(t.payment_method || t.paymentMethod || "CASH"),
+        paymentStatus: String(t.payment_status || t.paymentStatus || "PAID"),
+        cashierName: String(t.operator_name || t.seller_name || t.sellerName || t.cashierName || "Operador Geral"),
+        items: itemsArr,
+        timestamp: String(t.timestamp || t.created_at || new Date().toISOString()),
+        paymentDetails: t.notes ? String(t.notes) : (t.paymentDetails ? String(t.paymentDetails) : undefined),
+        branchId: t.branch_id ? String(t.branch_id) : (t.branchId ? String(t.branchId) : "central"),
+        status: String(t.status || "COMPLETED")
+      };
+    });
+
+    const rawCash = cashRes.status === "fulfilled" && cashRes.value.data ? cashRes.value.data : [];
+    const cashflow = (rawCash as Record<string, unknown>[]).map((cf) => ({
+      id: String(cf.id),
+      cashRegisterId: cf.cash_register_id ? String(cf.cash_register_id) : undefined,
+      type: String(cf.type || "INPUT"),
+      amount: Number(cf.amount || 0),
+      reason: String(cf.reason || "Movimento de Caixa"),
+      responsibleUser: String(cf.responsible_user || "Sistema"),
+      referenceId: cf.reference_id ? String(cf.reference_id) : undefined,
+      timestamp: String(cf.timestamp || cf.created_at || new Date().toISOString())
+    }));
+
     const auditlogs = logsRes.status === "fulfilled" && logsRes.value.data ? logsRes.value.data : [];
     const settings = setsRes.status === "fulfilled" && setsRes.value.data ? setsRes.value.data : null;
 
@@ -44,7 +137,7 @@ dbRouter.get("/load", requireAuth, async (req: Request, res: Response) => {
         products,
         customers,
         transactions,
-        cashflow: [],
+        cashflow,
         employees: [],
         auditlogs,
         settings

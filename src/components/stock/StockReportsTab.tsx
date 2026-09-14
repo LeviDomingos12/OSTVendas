@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import * as XLSX from "xlsx";
 import { Product, SystemSettings, Transaction, UserRole } from "../../types";
 
 const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
@@ -322,6 +323,64 @@ export const StockReportsTab: React.FC<StockReportsTabProps> = ({
     );
   };
 
+  const handleExportReportExcel = () => {
+    let headers: string[] = [];
+    let rows: (string | number)[][] = [];
+
+    if (reportType === "VALUATION") {
+      headers = ["CÓDIGO", "NOME", "CATEGORIA", "ESTOQUE ATUAL", `PREÇO CUSTO (${currency})`, `PREÇO VENDA (${currency})`, `VALOR TOTAL CUSTO (${currency})`, `VALOR TOTAL VENDA (${currency})`, "MARGEM (%)"];
+      rows = reportsData.items.map(item => [
+        item.product.code,
+        item.product.name,
+        item.product.category,
+        item.product.stock,
+        item.product.costPrice,
+        item.product.salePrice,
+        item.currentStockValCost,
+        item.currentStockValSale,
+        Math.round(item.marginPct)
+      ]);
+    } else if (reportType === "MOVEMENTS") {
+      headers = ["CÓDIGO", "NOME", "CATEGORIA", "ESTOQUE ATUAL", "QUANTIDADE VENDIDA", `FATURADO (${currency})`, `LUCRO NO PERÍODO (${currency})`, "TAXA DE GIRO (%)"];
+      rows = reportsData.items.map(item => [
+        item.product.code,
+        item.product.name,
+        item.product.category,
+        item.product.stock,
+        item.salesQty,
+        item.salesValue,
+        item.salesProfit,
+        parseFloat(item.rotationRate.toFixed(1))
+      ]);
+    } else {
+      headers = ["CÓDIGO", "NOME", "CATEGORIA", "FORNECEDOR", "DATA VENCIMENTO", "ESTOQUE ATUAL", `VALOR CUSTO (${currency})`, "DIAS RESTANTES"];
+      rows = reportsData.items.map(item => {
+        const daysLeft = Math.ceil((new Date(item.product.expiryDate || "").getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        return [
+          item.product.code,
+          item.product.name,
+          item.product.category,
+          item.product.supplier || "-",
+          item.product.expiryDate || "-",
+          item.product.stock,
+          item.currentStockValCost,
+          isNaN(daysLeft) ? "-" : daysLeft
+        ];
+      });
+    }
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    XLSX.utils.book_append_sheet(wb, ws, `Relatorio ${reportType}`);
+    XLSX.writeFile(wb, `relatorio_estoque_${reportType.toLowerCase()}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+    onAddAuditLog(
+      "Exportar Relatório Excel",
+      "STOCK",
+      `Exportado relatório Excel (.xlsx) (${reportType}) para o período de ${reportStartDate} a ${reportEndDate} por ${currentRole}.`
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Controls & Filter Panel */}
@@ -345,11 +404,18 @@ export const StockReportsTab: React.FC<StockReportsTabProps> = ({
               Exportar PDF
             </button>
             <button
-              onClick={handleExportReportCSV}
-              className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer transition"
+              onClick={handleExportReportExcel}
+              className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer transition shadow-emerald-600/10"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              Planilha CSV
+              Exportar Excel (.xlsx)
+            </button>
+            <button
+              onClick={handleExportReportCSV}
+              className="px-3.5 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-900 dark:bg-zinc-800 dark:hover:bg-zinc-700 active:scale-95 text-white rounded-xl flex items-center gap-1.5 shadow-sm cursor-pointer transition"
+            >
+              <Download className="w-4 h-4" />
+              CSV
             </button>
           </div>
         </div>

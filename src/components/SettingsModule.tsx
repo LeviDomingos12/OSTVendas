@@ -41,12 +41,9 @@ import { SYSTEM_THEMES } from "../lib/themes";
 import { AdminService } from "../services/adminService";
 import StaffModule from "./StaffModule";
 import GatewayModule from "./GatewayModule";
-import AiForecastModule from "./AiForecastModule";
-import TrainingModule from "./TrainingModule";
-import SubscriptionPlansModule from "./SubscriptionPlansModule";
 import StockThresholdsSettings from "./StockThresholdsSettings";
 
-export type SettingsSubTab = "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans";
+export type SettingsSubTab = "geral" | "staff" | "gateway" | "notificacoes" | "backup";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -431,7 +428,7 @@ function SettingsModule({
         </div>
       </div>
 
-      {/* Sub-tabs Navigation Bar */}
+      {/* Sub-tabs Navigation Bar - 5 Abas Essenciais e Fáceis */}
       <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1 bg-white/60 p-1.5 rounded-xl">
         <button
           type="button"
@@ -443,7 +440,7 @@ function SettingsModule({
           }`}
         >
           <Building className="w-4 h-4 text-orange-500" />
-          Geral & Loja
+          Dados da Loja
         </button>
 
         <button
@@ -469,7 +466,7 @@ function SettingsModule({
           }`}
         >
           <Smartphone className="w-4 h-4 text-emerald-500" />
-          Mobile Money (M-Pesa / e-Mola)
+          Pagamentos Móveis (M-Pesa / e-Mola)
         </button>
 
         <button
@@ -482,7 +479,7 @@ function SettingsModule({
           }`}
         >
           <Sliders className="w-4 h-4 text-orange-500" />
-          Limiares & Alertas de Stock
+          Alertas de Stock
         </button>
 
         <button
@@ -495,59 +492,7 @@ function SettingsModule({
           }`}
         >
           <Database className="w-4 h-4 text-teal-500" />
-          Cópias de Segurança & Dados
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("filiais")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "filiais"
-              ? "border-amber-500 text-amber-600 font-extrabold bg-amber-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <MapPin className="w-4 h-4 text-amber-500" />
-          Lojas & Filiais
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("ai")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "ai"
-              ? "border-indigo-500 text-indigo-600 font-extrabold bg-indigo-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <TrendingUp className="w-4 h-4 text-indigo-500" />
-          Previsão Comercial
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("training")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "training"
-              ? "border-sky-500 text-sky-600 font-extrabold bg-sky-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <BookOpen className="w-4 h-4 text-sky-500" />
-          Formação
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveSubTab("plans")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "plans"
-              ? "border-yellow-500 text-yellow-600 font-extrabold bg-yellow-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
-          }`}
-        >
-          <Crown className="w-4 h-4 text-yellow-500" />
-          Planos
+          Cópia de Segurança & Dados
         </button>
       </div>
 
@@ -1043,180 +988,6 @@ function SettingsModule({
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* SUB-TAB 6: FILIAIS & LOJAS */}
-      {activeSubTab === "filiais" && (
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-3 border-slate-100">
-            <div className="flex items-center gap-2.5 text-amber-600">
-              <MapPin className="w-5 h-5" />
-              <div>
-                <h2 className="font-bold text-slate-850 text-sm">Lojas & Filiais da Empresa</h2>
-                <p className="text-[11px] text-slate-400">Faça a gestão dos seus pontos de venda físicos e localizações de stock.</p>
-              </div>
-            </div>
-
-            {canEdit && !isAddingBranch && (
-              <button
-                type="button"
-                onClick={() => setIsAddingBranch(true)}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Nova Filial
-              </button>
-            )}
-          </div>
-
-          {/* Form to Add Branch */}
-          {isAddingBranch && (
-            <form onSubmit={handleAddBranch} className="p-4 bg-amber-50/40 rounded-xl border border-amber-200 space-y-4">
-              <h3 className="font-bold text-xs text-amber-800">Cadastrar Nova Filial</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Nome da Filial *</label>
-                  <input
-                    type="text"
-                    required
-                    value={newBranchName}
-                    onChange={(e) => setNewBranchName(e.target.value)}
-                    placeholder="Ex: Filial Matola"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Endereço</label>
-                  <input
-                    type="text"
-                    value={newBranchAddress}
-                    onChange={(e) => setNewBranchAddress(e.target.value)}
-                    placeholder="Ex: Av. da Matola, nº 45"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Contacto</label>
-                  <input
-                    type="text"
-                    value={newBranchContact}
-                    onChange={(e) => setNewBranchContact(e.target.value)}
-                    placeholder="Ex: +258 84 999 8888"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsAddingBranch(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition"
-                >
-                  Salvar Filial
-                </button>
-              </div>
-            </form>
-          )}
-
-          {/* List of Branches */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Sede / Loja Principal */}
-            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2 relative">
-              <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
-                  Sede Principal
-                </span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              </div>
-              <h3 className="font-bold text-sm text-slate-800">{companyName || "Loja Principal"}</h3>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="truncate">{storeAddress || "Endereço Principal"}</span>
-              </p>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>{storeContact || "Sem contacto"}</span>
-              </p>
-            </div>
-
-            {/* Custom Branches */}
-            {branches.map((b) => (
-              <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 relative group hover:border-amber-300 transition">
-                <div className="flex items-center justify-between">
-                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
-                    Filial
-                  </span>
-                  {canEdit && (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveBranch(b.id, b.name)}
-                      className="text-slate-400 hover:text-rose-500 p-1 transition"
-                      title="Remover Filial"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-                <h3 className="font-bold text-sm text-slate-800">{b.name}</h3>
-                <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span className="truncate">{b.address || "Sem endereço"}</span>
-                </p>
-                <p className="text-xs text-slate-500 flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                  <span>{b.contact || "Sem contacto"}</span>
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* SUB-TAB 7: PREVISÃO COMERCIAL (IA) */}
-      {activeSubTab === "ai" && (
-        <div className="animate-in fade-in-50 duration-150">
-          <AiForecastModule
-            products={products}
-            transactions={transactions}
-            settings={settings}
-            theme={theme}
-            currency={currencyCode}
-            onShowToast={onShowToast || (() => {})}
-            onChangeModule={onChangeModule || (() => {})}
-          />
-        </div>
-      )}
-
-      {/* SUB-TAB 8: FORMAÇÃO */}
-      {activeSubTab === "training" && (
-        <div className="animate-in fade-in-50 duration-150">
-          <TrainingModule
-            videos={masterclassVideos}
-            currency={currencyCode}
-          />
-        </div>
-      )}
-
-      {/* SUB-TAB 9: PLANOS & SUBSGRIÇÃO */}
-      {activeSubTab === "plans" && (
-        <div className="animate-in fade-in-50 duration-150">
-          <SubscriptionPlansModule
-            currentPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-            activeUser={activeUser}
-            employees={employees}
-            settings={settings}
-            onUpdateUserPlan={onUpdateUserPlan || (() => {})}
-            onUpdateSystemPlan={onUpdateSystemPlan || (() => {})}
-            onShowToast={onShowToast}
-            onNavigateToModule={onChangeModule}
-          />
         </div>
       )}
     </div>

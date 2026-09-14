@@ -32,21 +32,34 @@ export function processSaleDeductions(
   const lowStockAlerts: { productName: string; currentStock: number; minThreshold: number }[] = [];
 
   const updatedProducts = products.map(prod => {
-    const cartItemMatch = transaction.items.find(item => item.productId === prod.id);
-    if (cartItemMatch) {
-      const updatedStock = Math.max(0, prod.stock - cartItemMatch.quantity);
+    const prodIdStr = String(prod.id || "").trim().toLowerCase();
+    const prodCodeStr = prod.code ? String(prod.code).trim().toLowerCase() : "";
+    const prodBarcodeStr = prod.barcode ? String(prod.barcode).trim().toLowerCase() : "";
+
+    const matchingItems = (transaction.items || []).filter(item => {
+      const itemIdStr = String(item.productId || "").trim().toLowerCase();
+      return (
+        (itemIdStr && itemIdStr === prodIdStr) ||
+        (prodCodeStr && itemIdStr === prodCodeStr) ||
+        (prodBarcodeStr && itemIdStr === prodBarcodeStr)
+      );
+    });
+
+    if (matchingItems.length > 0) {
+      const totalSoldQty = matchingItems.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+      const updatedStock = Math.max(0, prod.stock - totalSoldQty);
 
       // Geographical Branch Stock deduction
       const updatedBranchStocks = { ...(prod.branchStocks || {}) };
       const currentBranchStock = updatedBranchStocks[activeBranch] !== undefined 
         ? updatedBranchStocks[activeBranch] 
         : prod.stock;
-      updatedBranchStocks[activeBranch] = Math.max(0, currentBranchStock - cartItemMatch.quantity);
+      updatedBranchStocks[activeBranch] = Math.max(0, currentBranchStock - totalSoldQty);
 
       // LIFO / FIFO Batch deduction
-      let remainingToDeduct = cartItemMatch.quantity;
+      let remainingToDeduct = totalSoldQty;
       const prodBatches = localBatches
-        .filter(b => b.productId === prod.id && b.quantity > 0)
+        .filter(b => (String(b.productId || "").trim().toLowerCase() === prodIdStr || (prodCodeStr && String(b.productId || "").trim().toLowerCase() === prodCodeStr)) && b.quantity > 0)
         .sort((a, b) => {
           if (settings.inventoryStrategy === "LIFO") {
             return new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime();
@@ -85,7 +98,8 @@ export function processSaleDeductions(
       return {
         ...prod,
         stock: updatedStock,
-        branchStocks: updatedBranchStocks
+        branchStocks: updatedBranchStocks,
+        updatedAt: new Date().toISOString()
       };
     }
     return prod;
@@ -138,17 +152,31 @@ export function processDevolutionRestock(
   const creditNoteNum = generateDeterministicCreditNoteNumber(totalTransactionsCount + 1);
 
   const updatedProducts = products.map(prod => {
-    const match = returnedItems.find(it => it.productId === prod.id);
-    if (match) {
-      const restoredStock = prod.stock + match.quantity;
+    const prodIdStr = String(prod.id || "").trim().toLowerCase();
+    const prodCodeStr = prod.code ? String(prod.code).trim().toLowerCase() : "";
+    const prodBarcodeStr = prod.barcode ? String(prod.barcode).trim().toLowerCase() : "";
+
+    const matchingReturns = (returnedItems || []).filter(it => {
+      const itIdStr = String(it.productId || "").trim().toLowerCase();
+      return (
+        (itIdStr && itIdStr === prodIdStr) ||
+        (prodCodeStr && itIdStr === prodCodeStr) ||
+        (prodBarcodeStr && itIdStr === prodBarcodeStr)
+      );
+    });
+
+    if (matchingReturns.length > 0) {
+      const totalReturnedQty = matchingReturns.reduce((acc, it) => acc + (Number(it.quantity) || 0), 0);
+      const restoredStock = prod.stock + totalReturnedQty;
       const updatedBranchStocks = { ...(prod.branchStocks || {}) };
       const currentBranch = updatedBranchStocks[activeBranch] !== undefined ? updatedBranchStocks[activeBranch] : prod.stock;
-      updatedBranchStocks[activeBranch] = currentBranch + match.quantity;
+      updatedBranchStocks[activeBranch] = currentBranch + totalReturnedQty;
 
       return {
         ...prod,
         stock: restoredStock,
-        branchStocks: updatedBranchStocks
+        branchStocks: updatedBranchStocks,
+        updatedAt: new Date().toISOString()
       };
     }
     return prod;

@@ -57,8 +57,8 @@ describe("Fase 2 - Segurança & Arquitetura", () => {
       expect(safeUser).not.toBeNull();
       expect(safeUser?.id).toBe("emp-101");
       expect(safeUser?.name).toBe("Carlos Silva");
-      expect((safeUser as any).pin).toBeUndefined();
-      expect((safeUser as any).password).toBeUndefined();
+      expect((safeUser as unknown as Record<string, unknown>).pin).toBeUndefined();
+      expect((safeUser as unknown as Record<string, unknown>).password).toBeUndefined();
     });
 
     it("deve lidar de forma segura com utilizador nulo ou indefinido", () => {
@@ -69,12 +69,12 @@ describe("Fase 2 - Segurança & Arquitetura", () => {
 
   describe("Matriz de Permissões e RBAC", () => {
     it("deve normalizar corretamente funções de utilizador", () => {
-      expect(normalizeUserRole({ role: "Administrador Geral" } as any)).toBe("ADMIN");
-      expect(normalizeUserRole({ role: "Supervisor de Loja" } as any)).toBe("SUPERVISOR");
-      expect(normalizeUserRole({ role: "Operador de Caixa" } as any)).toBe("CASHIER");
-      expect(normalizeUserRole({ role: "Gestor de Recursos Humanos" } as any)).toBe("RH");
-      expect(normalizeUserRole({ role: "Contabilista Financeiro" } as any)).toBe("FINANCEIRO");
-      expect(normalizeUserRole({ role: "Auditor Fiscal" } as any)).toBe("AUDITOR");
+      expect(normalizeUserRole({ role: "Administrador Geral" as Employee["role"] })).toBe("ADMIN");
+      expect(normalizeUserRole({ role: "Supervisor de Loja" as Employee["role"] })).toBe("SUPERVISOR");
+      expect(normalizeUserRole({ role: "Operador de Caixa" as Employee["role"] })).toBe("CASHIER");
+      expect(normalizeUserRole({ role: "Gestor de Recursos Humanos" as Employee["role"] })).toBe("RH");
+      expect(normalizeUserRole({ role: "Contabilista Financeiro" as Employee["role"] })).toBe("FINANCEIRO");
+      expect(normalizeUserRole({ role: "Auditor Fiscal" as Employee["role"] })).toBe("AUDITOR");
     });
 
     it("deve restringir acesso a módulos confidenciais a operadores de caixa", () => {

@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   company_id TEXT REFERENCES public.companies(id) ON DELETE SET NULL,
   email TEXT,
   full_name TEXT,
-  role TEXT DEFAULT 'ADMIN',
+  role TEXT,
   avatar_url TEXT,
   phone TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -259,7 +259,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
   status TEXT NOT NULL DEFAULT 'CLOSED',
   opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   opened_at TIMESTAMPTZ DEFAULT NOW(),
-  opened_by TEXT NOT NULL DEFAULT 'Admin',
+  opened_by TEXT NOT NULL,
   opening_supervisor TEXT,
   opening_notes TEXT,
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -424,14 +424,20 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
-  -- 2. Criar perfil vinculado à empresa (Role obtida estritamente de app_metadata ou padrão ADMIN para nova conta criadora)
+  -- 2. Criar perfil vinculado à empresa (ADMIN atribuído somente durante o provisionamento controlado do proprietário inicial)
   INSERT INTO public.profiles (id, company_id, email, full_name, role, avatar_url, created_at, updated_at)
   VALUES (
     new.id,
     v_company_id,
     new.email,
     v_user_name,
-    COALESCE(new.raw_app_meta_data->>'role', 'ADMIN'),
+    CASE 
+      WHEN new.raw_app_meta_data->>'role' IS NOT NULL AND (new.raw_app_meta_data->>'role') <> '' 
+        THEN new.raw_app_meta_data->>'role'
+      WHEN EXISTS (SELECT 1 FROM public.companies c WHERE c.id = v_company_id AND c.owner_uid = new.id::text)
+        THEN 'ADMIN' -- Provisionamento controlado do proprietário inicial
+      ELSE NULL -- Rejeitar role padrão não provisionado
+    END,
     COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', ''),
     NOW(),
     NOW()

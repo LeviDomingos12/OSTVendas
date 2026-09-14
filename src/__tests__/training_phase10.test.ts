@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { MasterclassVideo, Employee } from "../types";
-import { generateCertificateCode } from "../lib/deterministic";
+import { generateCertificateCode, generateUUID } from "../lib/deterministic";
 
 // ==========================================
 // Phase 10: Training, Masterclasses & Certification
@@ -101,7 +101,7 @@ export function generateCertificationData(
   const verificationCode = generateCertificateCode();
 
   return {
-    certificateId: `CRT_${Date.now()}`,
+    certificateId: `CRT_${generateUUID().slice(0, 8).toUpperCase()}`,
     candidateName: candidate.name,
     candidateRole: candidate.role,
     courseTitle,

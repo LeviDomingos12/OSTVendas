@@ -10,7 +10,7 @@ interface AppHeaderProps {
   onSelectTab: (tab: string) => void;
   onOpenSidebar: () => void;
   activeUserDisplayName: string;
-  onOpenTutorial: () => void;
+  onOpenTutorial?: () => void;
   onOpenUserSwitch: () => void;
   simplifiedRole: UserRole;
   canRoleAccessModule: (role: UserRole, moduleId: string) => { allowed: boolean; reason?: string };
@@ -23,7 +23,6 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onSelectTab,
   onOpenSidebar,
   activeUserDisplayName,
-  onOpenTutorial,
   onOpenUserSwitch,
   simplifiedRole,
   canRoleAccessModule
@@ -41,7 +40,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
           <button
             type="button"
             onClick={onOpenSidebar}
-            className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
+            className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-850 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
             aria-label="Abrir menu"
           >
             <Menu className="w-5 h-5" />
@@ -55,29 +54,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-3 text-xs">
-          {/* Admin Name */}
+          {/* Nome do Operador Ativo */}
           <span className={`font-bold text-xs tracking-tight ${
             theme === "night" ? "text-slate-200" : "text-slate-800"
           }`}>
             {activeUserDisplayName}
           </span>
 
-          {/* Botão Tutorial & Configurações */}
-          <button
-            id="header-onboarding-tutorial-btn"
-            onClick={onOpenTutorial}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
-              theme === "night" 
-                ? "bg-zinc-900 border-zinc-800 text-amber-400 hover:text-amber-300 hover:border-amber-500/50" 
-                : "bg-white border-slate-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800 shadow-sm"
-            }`}
-            title="Tutorial do Sistema e Configurações Principais"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-            <span>Tutorial</span>
-          </button>
-
-          {/* Botão Alterar usuário */}
+          {/* Botão Alterar Utilizador */}
           <button
             id="quick-switch-user-btn"
             onClick={onOpenUserSwitch}
@@ -86,10 +70,10 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
                 ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
                 : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
             }`}
-            title="Alterar usuário"
+            title="Trocar operador ativo"
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Alterar usuário</span>
+            <span>Mudar Operador</span>
           </button>
         </div>
       </header>

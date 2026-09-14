@@ -132,7 +132,7 @@ export function createAuditTrailEntry(
   ipAddress: string = "127.0.0.1"
 ): AuditLog {
   return {
-    id: `audit_${Date.now()}_${generateUUID().slice(0, 6)}`,
+    id: `audit_${generateUUID()}`,
     timestamp: new Date().toISOString(),
     user: actor.name,
     userRole: actor.role as UserRole,

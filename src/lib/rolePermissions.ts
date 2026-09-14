@@ -121,7 +121,7 @@ export function normalizeRoleString(role?: string): UserRole {
 /**
  * Normaliza o perfil de acesso a partir do utilizador ativo
  */
-export function normalizeUserRole(user?: Employee | null): UserRole {
+export function normalizeUserRole(user?: Partial<Employee> | null): UserRole {
   if (!user || !user.role) return "CASHIER";
   return normalizeRoleString(user.role);
 }

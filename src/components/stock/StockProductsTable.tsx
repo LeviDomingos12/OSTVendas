@@ -28,13 +28,13 @@ export interface StockProductsTableProps {
   totalPages: number;
   itemsPerPage: number;
   settings?: SystemSettings;
+  highlightedProductId?: string | null;
   onSort: (field: "name" | "code" | "category" | "salePrice" | "costPrice" | "stock" | "stockValue") => void;
   onToggleSelectAll: () => void;
   onToggleSelectProduct: (id: string) => void;
   onOpenProductDetail: (product: Product) => void;
   onOpenQuickAdjust: (product: Product, type: "IN" | "OUT") => void;
   onSendWhatsAppAlert: (product: Product) => void;
-  onOpenPromoFlyer: (product: Product) => void;
   onOpenEditForm: (product: Product) => void;
   onDuplicateProduct: (product: Product) => void;
   onDeleteProduct: (productId: string) => void;
@@ -54,13 +54,13 @@ export const StockProductsTable: React.FC<StockProductsTableProps> = ({
   totalPages,
   itemsPerPage,
   settings,
+  highlightedProductId,
   onSort,
   onToggleSelectAll,
   onToggleSelectProduct,
   onOpenProductDetail,
   onOpenQuickAdjust,
   onSendWhatsAppAlert,
-  onOpenPromoFlyer,
   onOpenEditForm,
   onDuplicateProduct,
   onDeleteProduct,
@@ -184,10 +184,16 @@ export const StockProductsTable: React.FC<StockProductsTableProps> = ({
                   );
                 }
 
+                const isHighlighted = highlightedProductId === p.id;
+
                 return (
                   <tr 
                     key={p.id} 
-                    className="hover:bg-slate-50/40 transition group dark:hover:bg-zinc-800/40"
+                    className={
+                      isHighlighted
+                        ? "bg-amber-50/90 dark:bg-amber-950/40 border-y-2 border-orange-500 font-medium transition-colors"
+                        : "hover:bg-slate-50/40 transition group dark:hover:bg-zinc-800/40"
+                    }
                   >
                     <td className="p-3 text-center">
                       <input
@@ -225,6 +231,11 @@ export const StockProductsTable: React.FC<StockProductsTableProps> = ({
                     >
                       <div className="font-bold text-slate-800 dark:text-zinc-100 group-hover:text-orange-600 transition-colors flex items-center gap-1.5">
                         {p.name}
+                        {isHighlighted && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-black bg-emerald-500 text-white shadow-xs">
+                            NOVO
+                          </span>
+                        )}
                         <Info className="w-3 h-3 text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
                       </div>
                       <div className="text-[10px] text-slate-400 flex flex-wrap items-center gap-1.5 mt-0.5 font-mono">
@@ -325,15 +336,6 @@ export const StockProductsTable: React.FC<StockProductsTableProps> = ({
                               >
                                 <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
                                 Notificar Stock
-                              </button>
-
-                              <button
-                                onClick={() => { onOpenPromoFlyer(p); setOpenDropdownId(null); }}
-                                className="w-full px-3 py-1.5 hover:bg-slate-50 text-orange-700 font-semibold flex items-center gap-2 dark:text-orange-400 dark:hover:bg-zinc-800"
-                                title="Gerar cartaz publicitário para este produto"
-                              >
-                                <Sparkles className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
-                                Gerar Cartaz Promo
                               </button>
                               
                               {canMutate && (

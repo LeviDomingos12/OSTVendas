@@ -19,11 +19,11 @@ export interface NavMenuItem {
 }
 
 export const NAV_MENU_ITEMS: NavMenuItem[] = [
-  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
-  { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
+  { id: "dashboard", label: "Painel Principal", shortLabel: "Início", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "pos", label: "Registar Vendas", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "stock", label: "Produtos em Stock", shortLabel: "Produtos", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "cash", label: "Livro de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
+  { id: "customers", label: "Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "reports", label: "Relatórios de Vendas", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações da Loja", shortLabel: "Definições", icon: Settings, roles: ["ADMIN"] },
 ];

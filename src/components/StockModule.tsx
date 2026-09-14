@@ -13,16 +13,23 @@ import {
   Sliders, 
   Filter, 
   RefreshCw, 
-  Search 
+  Search,
+  PackagePlus
 } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { Product, UserRole, Transaction, SystemSettings, Supplier, SupplierOrder } from "../types";
 import { useConfirm } from "../hooks/useConfirm";
-import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import StockThresholdsSettings from "./StockThresholdsSettings";
 import { generateEntityId } from "../lib/deterministic";
 import { ModuleShortcutsHelp } from "./common/ModuleShortcutsHelp";
+import { parseStockImportFile } from "../lib/stockImportParser";
+import { 
+  downloadStockTemplateExcel, 
+  downloadStockTemplateCSV, 
+  exportCurrentStockToExcel 
+} from "../lib/stockExcelService";
+import StockReplenishModal from "./StockReplenishModal";
 
 // Submodules
 import { StockSuppliersTab } from "./stock/StockSuppliersTab";
@@ -66,6 +73,7 @@ export interface StockModuleProps {
   settings?: SystemSettings;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   onUpdateSettings?: (settings: Partial<SystemSettings>) => void;
+  onImportProductsBatch?: (products: Product[]) => Promise<void> | void;
 }
 
 function StockModule({
@@ -79,7 +87,8 @@ function StockModule({
   currency,
   settings,
   onShowToast,
-  onUpdateSettings
+  onUpdateSettings,
+  onImportProductsBatch
 }: StockModuleProps) {
   const confirm = useConfirm();
   
@@ -95,13 +104,14 @@ function StockModule({
 
   // Modals & Panels state
   const [isFormDrawerOpen, setIsFormDrawerOpen] = useState(false);
+  const [isManualReplenishOpen, setIsManualReplenishOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [detailedProduct, setDetailedProduct] = useState<Product | null>(null);
   const [adjustingProduct, setAdjustingProduct] = useState<Product | null>(null);
   const [adjustmentType, setAdjustmentType] = useState<"IN" | "OUT">("IN");
-  const [flyerProduct, setFlyerProduct] = useState<Product | null>(null);
-  const [isFlyerGeneratorOpen, setIsFlyerGeneratorOpen] = useState(false);
   const [showStockShortcutsHelp, setShowStockShortcutsHelp] = useState(false);
+  const [highlightedProductId, setHighlightedProductId] = useState<string | null>(null);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Supplier Form state
@@ -204,7 +214,7 @@ function StockModule({
 
   // Filtered & Sorted products
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    const sorted = products.filter(p => {
       // Search
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -256,7 +266,17 @@ function StockModule({
       }
       return sortDirection === "asc" ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
     });
-  }, [products, searchQuery, selectedCategory, selectedSupplier, minMarginFilter, stockFilter, sortField, sortDirection]);
+
+    if (highlightedProductId) {
+      const idx = sorted.findIndex(p => p.id === highlightedProductId);
+      if (idx > 0) {
+        const [highlighted] = sorted.splice(idx, 1);
+        sorted.unshift(highlighted);
+      }
+    }
+
+    return sorted;
+  }, [products, searchQuery, selectedCategory, selectedSupplier, minMarginFilter, stockFilter, sortField, sortDirection, highlightedProductId]);
 
   // Paginated slice
   const paginatedProducts = useMemo(() => {
@@ -563,65 +583,52 @@ function StockModule({
     }
   };
 
-  // CSV Import/Export handlers
+  // CSV & Excel Import/Export handlers
   const handleDownloadCSVTemplate = () => {
-    const headers = "Código,Nome,Categoria,Preço Custo,Preço Venda,Stock,Stock Mínimo,Fornecedor\n";
-    const sample = "SKU-001,Exemplo Produto,Bebidas,50,80,100,20,CDM\n";
-    const blob = new Blob([headers + sample], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", "modelo_produtos_inventario.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadStockTemplateCSV();
+    onAddAuditLog("Baixar Template CSV", "STOCK", "Descarregado template CSV padrão do inventário.");
   };
 
-  const handleParseAndImportFile = (file: File) => {
+  const handleDownloadExcelTemplate = () => {
+    downloadStockTemplateExcel();
+    onAddAuditLog("Baixar Template Excel", "STOCK", "Descarregado modelo oficial Excel (.xlsx) do inventário.");
+  };
+
+  const handleExportCurrentStock = () => {
+    exportCurrentStockToExcel(products, currency);
+    onAddAuditLog("Exportar Stock Excel", "STOCK", `Exportado catálogo atual de ${products.length} produtos em Excel (.xlsx).`);
+  };
+
+  const handleParseAndImportFile = async (file: File) => {
     setImportStatus("processing");
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      if (!text) {
+    try {
+      const defaultVat = settings?.vatDefaultRate || 16;
+      const result = await parseStockImportFile(file, defaultVat);
+
+      if (!result.success || result.products.length === 0) {
         setImportStatus("idle");
-        onShowToast?.("Ficheiro vazio.", "error");
+        onShowToast?.(result.message || "Não foi possível extrair produtos válidos do ficheiro.", "error");
         return;
       }
 
-      const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0);
-      if (lines.length <= 1) {
-        setImportStatus("idle");
-        onShowToast?.("Ficheiro não contém dados de produtos além do cabeçalho.", "warning");
-        return;
-      }
-
-      let count = 0;
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(",").map(p => p.trim());
-        if (parts.length >= 2 && parts[1]) {
-          const newP: Product = {
-            id: generateEntityId("prod"),
-            code: parts[0] || generateEntityId("sku"),
-            name: parts[1],
-            category: parts[2] || "Geral",
-            costPrice: Number(parts[3]) || 0,
-            salePrice: Number(parts[4]) || 0,
-            vatRate: settings?.vatDefaultRate || 16,
-            stock: Number(parts[5]) || 0,
-            minStock: Number(parts[6]) || 5,
-            supplier: parts[7] || undefined
-          };
-          onAddProduct(newP);
-          count++;
+      if (onImportProductsBatch) {
+        await onImportProductsBatch(result.products);
+      } else {
+        // Fallback resiliente caso onImportProductsBatch não esteja provido
+        for (const p of result.products) {
+          onAddProduct(p);
         }
       }
 
-      setImportedRowCount(count);
+      setImportedRowCount(result.products.length);
       setImportStatus("success");
-      onShowToast?.(`${count} produtos importados com sucesso!`, "success");
-      onAddAuditLog("Importar CSV", "STOCK", `Importados ${count} produtos via ficheiro.`);
-    };
-    reader.readAsText(file);
+      onShowToast?.(`${result.products.length} produtos importados e sincronizados com sucesso!`, "success");
+      onAddAuditLog("Importar Stock", "STOCK", `Importados ${result.products.length} produtos via ficheiro ${file.name}.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportStatus("idle");
+      onShowToast?.(`Erro ao processar ficheiro: ${msg}`, "error");
+    }
   };
 
   // Product CRUD Handlers
@@ -815,20 +822,31 @@ function StockModule({
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowImportPanel(!showImportPanel)}
-              className="bg-white border border-slate-200 hover:bg-slate-50 py-2 px-3.5 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer transition dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="bg-white border border-slate-200 hover:bg-slate-50 py-2 px-3.5 rounded-xl text-xs font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer transition dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800 shadow-xs"
             >
-              <Upload className="w-4 h-4" />
-              Importar Planilha
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              Excel / CSV
             </button>
 
             {canMutate && (
-              <button
-                onClick={handleOpenCreateForm}
-                className="bg-orange-500 hover:bg-orange-600 py-2 px-4 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md shadow-orange-500/10 cursor-pointer transition"
-              >
-                <Plus className="w-4 h-4" />
-                Novo Produto
-              </button>
+              <>
+                <button
+                  onClick={() => setIsManualReplenishOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-700 active:scale-95 py-2 px-3.5 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-sm shadow-emerald-600/15 cursor-pointer transition"
+                  title="Adicionar ou dar entrada manual de stock em produtos existentes"
+                >
+                  <PackagePlus className="w-4 h-4" />
+                  Entrada de Stock
+                </button>
+
+                <button
+                  onClick={handleOpenCreateForm}
+                  className="bg-orange-500 hover:bg-orange-600 active:scale-95 py-2 px-4 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 shadow-md shadow-orange-500/10 cursor-pointer transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  Novo Produto
+                </button>
+              </>
             )}
           </div>
         )}
@@ -851,14 +869,18 @@ function StockModule({
             onStockFilterChange={(f) => setStockFilter(f === "ALL" ? "ALL" : f === "LOW" ? "LOW_STOCK" : "OUT_OF_STOCK")}
           />
 
-          {/* Excel Import Panel */}
+          {/* Excel Import/Export Panel */}
           <StockCsvImportExportModal
             isOpen={showImportPanel}
             importStatus={importStatus}
             importedRowCount={importedRowCount}
+            products={products}
+            currency={currency}
             onClose={() => { setShowImportPanel(false); setImportStatus("idle"); }}
             onParseAndImportFile={handleParseAndImportFile}
             onDownloadCSVTemplate={handleDownloadCSVTemplate}
+            onDownloadExcelTemplate={handleDownloadExcelTemplate}
+            onExportCurrentStock={handleExportCurrentStock}
           />
 
           {/* Quick Filters Pill bar */}
@@ -1018,13 +1040,13 @@ function StockModule({
             totalPages={totalPages}
             itemsPerPage={itemsPerPage}
             settings={settings}
+            highlightedProductId={highlightedProductId}
             onSort={handleSort}
             onToggleSelectAll={handleToggleSelectAll}
             onToggleSelectProduct={handleToggleSelectProduct}
             onOpenProductDetail={(p) => setDetailedProduct(p)}
             onOpenQuickAdjust={(p, type) => { setAdjustingProduct(p); setAdjustmentType(type); }}
             onSendWhatsAppAlert={handleSendWhatsAppStockAlert}
-            onOpenPromoFlyer={(p) => { setFlyerProduct(p); setIsFlyerGeneratorOpen(true); }}
             onOpenEditForm={handleOpenEditForm}
             onDuplicateProduct={handleDuplicateProduct}
             onDeleteProduct={handleDeleteProductClick}
@@ -1176,22 +1198,43 @@ function StockModule({
             onAddAuditLog("Editar Produto", "STOCK", `Atualizado produto ${prodData.name}.`);
           } else {
             const newProd: Product = {
-              id: generateEntityId("prod"),
+              id: prodData.id || generateEntityId("prod"),
               code: prodData.code || generateEntityId("sku"),
               name: prodData.name,
-              category: prodData.category,
-              costPrice: prodData.costPrice,
-              salePrice: prodData.salePrice,
-              vatRate: prodData.vatRate || settings?.vatDefaultRate || 16,
-              stock: prodData.stock,
-              minStock: prodData.minStock,
-              supplier: prodData.supplier,
-              image: prodData.image,
+              category: prodData.category || "Geral",
+              costPrice: Number(prodData.costPrice || 0),
+              salePrice: Number(prodData.salePrice || 0),
+              vatRate: Number(prodData.vatRate || settings?.vatDefaultRate || 16),
+              stock: Number(prodData.stock || 0),
+              minStock: Number(prodData.minStock !== undefined ? prodData.minStock : 5),
+              supplier: prodData.supplier || "Geral",
+              image: prodData.image || prodData.imageUrl || "",
+              imageUrl: prodData.imageUrl || prodData.image || "",
+              barcode: prodData.barcode || "",
               expiryDate: prodData.expiryDate,
-              emoji: prodData.emoji
+              emoji: prodData.emoji || "📦",
+              promotion: prodData.promotion,
+              createdAt: new Date().toISOString()
             };
+
+            // Limpa filtros e vai para a página 1 da lista para que o produto recém-criado apareça visível no topo
+            setActiveModuleTab("list");
+            setSearchQuery("");
+            setSelectedCategory("Todos");
+            setSelectedSupplier("Todos");
+            setStockFilter("ALL");
+            setMinMarginFilter(0);
+            setCurrentPage(1);
+
+            // Realce visual para o produto recém-adicionado
+            setHighlightedProductId(newProd.id);
+            if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current);
+            highlightTimeoutRef.current = setTimeout(() => {
+              setHighlightedProductId(null);
+            }, 8000);
+
             onAddProduct(newProd);
-            onShowToast?.("Produto cadastrado com sucesso!", "success");
+            onShowToast?.(`Produto "${newProd.name}" cadastrado com sucesso!`, "success");
             onAddAuditLog("Cadastrar Produto", "STOCK", `Criado produto ${newProd.name}.`);
           }
           setIsFormDrawerOpen(false);
@@ -1227,6 +1270,22 @@ function StockModule({
           onAddAuditLog("Ajuste Rápido de Stock", "STOCK", `${delta > 0 ? "+" : ""}${delta} un em ${prod.name}. Motivo: ${reason}`);
           setAdjustingProduct(null);
         }}
+      />
+
+      <StockReplenishModal
+        isOpen={isManualReplenishOpen}
+        onClose={() => setIsManualReplenishOpen(false)}
+        products={products}
+        onUpdateProduct={(updated) => {
+          onUpdateProduct(updated);
+          onAddAuditLog(
+            "Entrada Manual de Stock",
+            "STOCK",
+            `Stock do produto "${updated.name}" atualizado para ${updated.stock} un.`
+          );
+        }}
+        activeBranchId="central"
+        onShowToast={onShowToast}
       />
 
       <SupplierOrderModal
@@ -1282,23 +1341,6 @@ function StockModule({
           onShowToast?.("Texto do pedido copiado!", "info");
         }}
       />
-
-      {flyerProduct && (
-        <PromoFlyerGenerator
-          product={flyerProduct}
-          allProducts={products}
-          isOpen={isFlyerGeneratorOpen}
-          onClose={() => {
-            setIsFlyerGeneratorOpen(false);
-            setFlyerProduct(null);
-          }}
-          currency={currency}
-          onShowToast={(msg, type) => {
-            if (onShowToast) onShowToast(msg, type === "success" ? "success" : type === "error" ? "error" : "info");
-          }}
-          settings={settings}
-        />
-      )}
 
       {/* Small Help / Info Button in Bottom Corner & Shortcuts Modal */}
       <ModuleShortcutsHelp

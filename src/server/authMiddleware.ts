@@ -101,7 +101,13 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     if (process.env.NODE_ENV === "test" && token.startsWith("test-token-")) {
       const parts = token.replace("test-token-", "").split("-");
       const roleParsed = normalizeRole(parts[0]);
-      const role = roleParsed || "SELLER";
+      if (!roleParsed) {
+        return res.status(403).json({
+          success: false,
+          error: "Acesso negado: Perfil de utilizador sem papel (role) válido atribuído."
+        });
+      }
+      const role = roleParsed;
       const tenantId = parts[1] ? (parts[1].startsWith("tenant_") || parts[1].startsWith("comp_") ? parts[1] : `tenant_${parts[1]}`) : "tenant_test_a";
       const userId = `user_${parts[0]}_${parts[1] || "default"}`;
 
@@ -230,7 +236,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
             company_id: tenantId,
             email: user.email || "",
             full_name: fullName,
-            role: isInitialOwnerProvisioning ? "ADMIN" : "SELLER",
+            role: "ADMIN",
             updated_at: new Date().toISOString()
           });
         } catch {}
@@ -239,13 +245,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     // Regra estrita de autorização: Somente o provisionamento controlado do proprietário inicial pode criar ADMIN.
     // Se o role for inválido ou ausente, NUNCA atribuir ADMIN como fallback.
+    // Utilizadores sem role válido devem ser rejeitados.
     let verifiedRole = normalizeRole(roleRaw);
     if (!verifiedRole) {
       if (isInitialOwnerProvisioning) {
         verifiedRole = "ADMIN";
       } else {
-        // Fallback de menor privilégio para utilizadores sem role definido
-        verifiedRole = "SELLER";
+        return res.status(403).json({
+          success: false,
+          error: "Acesso negado: Perfil de utilizador sem papel (role) válido atribuído."
+        });
       }
     }
 

@@ -484,7 +484,7 @@ commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: 
       tenantId: user.tenantId,
       companyName: user.companyName,
       exportedAt: new Date().toISOString(),
-      version: "3.0.0",
+      version: "34.0.0",
       tables: tablesData
     };
 

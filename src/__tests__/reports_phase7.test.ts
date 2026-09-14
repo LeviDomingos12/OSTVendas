@@ -34,7 +34,7 @@ export function calculateIncomeStatementDRE(
     if (t.items && t.items.length > 0) {
       t.items.forEach(item => {
         // Se custo unitário estiver disponível, usar; caso contrário aplicar taxa de custo
-        const itemCost = (item as any).costPrice ?? (item.price * estimatedCostRate);
+        const itemCost = (item as { costPrice?: number; price: number }).costPrice ?? (item.price * estimatedCostRate);
         costOfGoodsSold += itemCost * item.quantity;
       });
     } else {

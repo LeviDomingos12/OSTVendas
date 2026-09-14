@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import express from "express";
 import request from "supertest";
-import { requireAuth, requireAdmin, requireStockOrAdmin } from "../server/authMiddleware";
+import { requireAuth, requireAdmin, requireStockOrAdmin, AuthenticatedRequest } from "../server/authMiddleware";
 import { dbSaveSchema, saleProcessSchema } from "../server/validation";
 
 describe("Auth Middleware & Multi-Tenant Security", () => {
@@ -10,7 +10,7 @@ describe("Auth Middleware & Multi-Tenant Security", () => {
 
   // Test endpoints
   app.get("/test/protected", requireAuth, (req, res) => {
-    res.json({ success: true, user: (req as any).user });
+    res.json({ success: true, user: (req as AuthenticatedRequest).user });
   });
 
   app.get("/test/admin-only", requireAuth, requireAdmin, (req, res) => {

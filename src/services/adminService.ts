@@ -5,6 +5,7 @@
 
 import { supabase } from "../lib/supabase";
 import { authenticatedFetch } from "../lib/apiClient";
+import { operationalCache } from "../lib/indexedDbStorage";
 import { Product, Customer, Transaction } from "../types";
 
 export interface CleanMockReport {
@@ -249,8 +250,9 @@ export const AdminService = {
         await supabase.auth.signOut();
       } catch (e) {}
 
-      // 4. Wipe all browser storage
+      // 4. Wipe all browser storage and operational IndexedDB cache
       try {
+        await operationalCache.clear();
         localStorage.clear();
         sessionStorage.clear();
       } catch (e) {}

@@ -562,7 +562,7 @@ interface CashTimelineItem {
       return `"${item.id}","${item.timestamp}","${item.type}","${item.responsibleUser}","${cleanReason}",${val},"${currency}"`;
     }).join("\n");
 
-    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob(["\uFEFF" + headers + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
@@ -591,7 +591,7 @@ interface CashTimelineItem {
                 Gestão Profissional de Caixa & Turnos (ERP/POS)
               </h2>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-                v{settings?.systemVersion || "2.1.0"}
+                v{settings?.systemVersion || "34.0"}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">

@@ -3,8 +3,8 @@ import { useSyncExternalStore } from "react";
 const VERSION_STORAGE_KEY = "ost_system_version";
 const VERSION_CHANGE_EVENT = "ost_version_changed";
 
-// Versão padrão do sistema alinhada com os serviços de produção (OST Vendas v32.0)
-export const DEFAULT_SYSTEM_VERSION = "32.0";
+// Versão padrão do sistema alinhada com os serviços de produção (OST Vendas v34.0)
+export const DEFAULT_SYSTEM_VERSION = "34.0";
 
 let cachedVersion: string = DEFAULT_SYSTEM_VERSION;
 if (typeof window !== "undefined") {
@@ -12,7 +12,7 @@ if (typeof window !== "undefined") {
     const saved = localStorage.getItem(VERSION_STORAGE_KEY);
     if (saved && saved.trim()) {
       const parsedMajor = parseInt(saved.trim().replace(/^v/i, "").split(".")[0] || "0", 10);
-      if (parsedMajor < 32) {
+      if (parsedMajor < 34) {
         cachedVersion = DEFAULT_SYSTEM_VERSION;
         localStorage.setItem(VERSION_STORAGE_KEY, DEFAULT_SYSTEM_VERSION);
       } else {

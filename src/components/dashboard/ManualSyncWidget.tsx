@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { measureSupabaseLatency, LatencyResult } from "../../services/supabaseService";
+import { operationalCache } from "../../lib/indexedDbStorage";
 
 export interface ManualSyncWidgetProps {
   pendingSyncQueue?: Record<string, unknown>;
@@ -43,11 +44,26 @@ export const ManualSyncWidget: React.FC<ManualSyncWidgetProps> = ({
 }) => {
   const [wasOffline, setWasOffline] = useState<boolean>(!navigator.onLine);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
-  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => {
-    return localStorage.getItem("pos_last_sync_timestamp") || null;
-  });
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [latencyInfo, setLatencyInfo] = useState<LatencyResult | null>(null);
   const [isCheckingLatency, setIsCheckingLatency] = useState<boolean>(false);
+
+  // Load sync timestamp from IndexedDB
+  useEffect(() => {
+    let isMounted = true;
+    operationalCache.getItem<string>("pos_last_sync_timestamp").then(val => {
+      if (isMounted && val) {
+        setLastSyncTime(val);
+      }
+    });
+    // Limpeza de resíduos em localStorage
+    try {
+      localStorage.removeItem("pos_last_sync_timestamp");
+    } catch {}
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Monitor online / offline transitions
   useEffect(() => {
@@ -157,7 +173,7 @@ export const ManualSyncWidget: React.FC<ManualSyncWidgetProps> = ({
         await onManualSync();
         const nowStr = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         setLastSyncTime(nowStr);
-        localStorage.setItem("pos_last_sync_timestamp", nowStr);
+        await operationalCache.setItem("pos_last_sync_timestamp", nowStr);
         setWasOffline(false);
         checkNetworkLatency();
       } catch (err: unknown) {

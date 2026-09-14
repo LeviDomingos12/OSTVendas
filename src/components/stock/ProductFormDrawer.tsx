@@ -1,24 +1,29 @@
 import React, { useState, useEffect } from "react";
-import { Sparkles } from "lucide-react";
 import { Product } from "../../types";
-import { generateEntityId, generateDeterministicBarcodeEan13 } from "../../lib/deterministic";
+import { generateEntityId, generateDeterministicBarcodeEan13, generateUUID } from "../../lib/deterministic";
 
 export interface ProductFormDrawerProps {
   isOpen: boolean;
   editingProduct: Product | null;
-  productsCount: number;
+  productsCount?: number;
+  categoriesList?: string[];
+  suppliersList?: string[];
+  currency?: string;
   onClose: () => void;
-  onSave: (product: Product) => void;
-  onOpenFlyerGenerator: (product: Product) => void;
+  onSave?: (product: Product) => void;
+  onSaveProduct?: (product: Product) => void;
 }
 
 export const ProductFormDrawer: React.FC<ProductFormDrawerProps> = ({
   isOpen,
   editingProduct,
-  productsCount,
+  productsCount = 0,
+  categoriesList,
+  suppliersList,
+  currency = "MT",
   onClose,
   onSave,
-  onOpenFlyerGenerator
+  onSaveProduct
 }) => {
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -77,11 +82,7 @@ export const ProductFormDrawer: React.FC<ProductFormDrawerProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      setValidationError("O nome do produto é obrigatório.");
-      return;
-    }
-    if (!code.trim()) {
-      setValidationError("O código SKU do produto é obrigatório.");
+      setValidationError("Por favor, escreva o nome do produto.");
       return;
     }
     if (salePrice < 0 || costPrice < 0) {
@@ -89,50 +90,35 @@ export const ProductFormDrawer: React.FC<ProductFormDrawerProps> = ({
       return;
     }
 
+    // Auto-gera código SKU amigável caso o usuário não tenha preenchido
+    const finalCode = code.trim() || `SKU-${generateUUID().slice(0, 8).toUpperCase()}`;
+    const finalSupplier = supplier.trim() || "Geral";
+
     const savedProduct: Product = {
       id: editingProduct ? editingProduct.id : generateEntityId("prod"),
       name: name.trim(),
-      code: code.trim(),
+      code: finalCode,
       category,
-      supplier: supplier.trim() || "Geral",
-      costPrice,
-      salePrice,
-      stock,
-      minStock,
+      supplier: finalSupplier,
+      costPrice: Number(costPrice || 0),
+      salePrice: Number(salePrice || 0),
+      stock: Number(stock || 0),
+      minStock: Number(minStock !== undefined ? minStock : 5),
       expiryDate: expiryDate || undefined,
       barcode: barcode.trim() || undefined,
       image: imageUrl.trim() || undefined,
-      emoji,
+      emoji: emoji || "📦",
       promotion: promotion || undefined,
-      vatRate,
+      vatRate: Number(vatRate || 16),
       branchStocks: editingProduct?.branchStocks
     };
 
-    onSave(savedProduct);
-    onClose();
-  };
-
-  const handleGenerateFlyer = () => {
-    if (!name.trim()) {
-      setValidationError("Por favor, preencha pelo menos o nome do produto para gerar o cartaz publicitário.");
-      return;
+    if (onSaveProduct) {
+      onSaveProduct(savedProduct);
+    } else if (onSave) {
+      onSave(savedProduct);
     }
-    const tempProduct: Product = {
-      id: editingProduct ? editingProduct.id : generateEntityId("temp"),
-      name,
-      code: code || "PROMO-CODE",
-      category,
-      supplier: supplier || "OST Vendas",
-      costPrice: costPrice || 0,
-      salePrice: salePrice || 0,
-      vatRate: vatRate || 16,
-      stock: stock || 0,
-      minStock: minStock || 0,
-      emoji,
-      image: imageUrl || undefined,
-      promotion: promotion || "PROMO"
-    };
-    onOpenFlyerGenerator(tempProduct);
+    onClose();
   };
 
   return (
@@ -338,8 +324,8 @@ export const ProductFormDrawer: React.FC<ProductFormDrawerProps> = ({
             </div>
 
             {/* Promotion Type */}
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-slate-500 uppercase">Campanha Promocional</label>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] font-bold text-slate-500 uppercase">Campanha Promocional (Opcional)</label>
               <select
                 value={promotion}
                 onChange={(e) => setPromotion(e.target.value)}
@@ -351,18 +337,6 @@ export const ProductFormDrawer: React.FC<ProductFormDrawerProps> = ({
                 <option value="MAIS_VENDIDO">MAIS VENDIDO - Destaque de Vendas</option>
                 <option value="NOVO">NOVO - Lançamento</option>
               </select>
-            </div>
-
-            {/* Promotional Image Creator Button inside form */}
-            <div className="space-y-1 flex flex-col justify-end">
-              <button
-                type="button"
-                onClick={handleGenerateFlyer}
-                className="w-full py-2 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-black rounded-lg text-xs cursor-pointer transition flex items-center justify-center gap-1.5 shadow-sm border border-orange-200/50"
-              >
-                <Sparkles className="w-3.5 h-3.5 animate-pulse text-amber-200" />
-                Gerar Cartaz de Promoção
-              </button>
             </div>
           </div>
 

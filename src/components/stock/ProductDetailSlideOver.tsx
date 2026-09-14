@@ -1,23 +1,29 @@
 import React from "react";
-import { X, Edit3, Copy } from "lucide-react";
-import { Product, UserRole } from "../../types";
+import { X, Edit3, Copy, Plus, Minus } from "lucide-react";
+import { Product } from "../../types";
 
 export interface ProductDetailSlideOverProps {
   product: Product | null;
-  currency: string;
-  canMutate: boolean;
+  currency?: string;
+  canMutate?: boolean;
   onClose: () => void;
-  onOpenEditForm: (product: Product) => void;
-  onDuplicateProduct: (product: Product) => void;
+  onOpenEditForm?: (product: Product) => void;
+  onEditProduct?: (product: Product) => void;
+  onDuplicateProduct?: (product: Product) => void;
+  onQuickAdjust?: (product: Product, type: "IN" | "OUT") => void;
+  onRequestStock?: (product: Product) => void;
 }
 
 export const ProductDetailSlideOver: React.FC<ProductDetailSlideOverProps> = ({
   product,
-  currency,
-  canMutate,
+  currency = "MT",
+  canMutate = true,
   onClose,
   onOpenEditForm,
-  onDuplicateProduct
+  onEditProduct,
+  onDuplicateProduct,
+  onQuickAdjust,
+  onRequestStock
 }) => {
   if (!product) return null;
 
@@ -97,6 +103,28 @@ export const ProductDetailSlideOver: React.FC<ProductDetailSlideOverProps> = ({
               </div>
             </div>
 
+            {/* Quick stock adjustment buttons */}
+            {canMutate && onQuickAdjust && (
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onQuickAdjust(product, "IN")}
+                  className="flex-1 py-2 px-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Stock (+)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onQuickAdjust(product, "OUT")}
+                  className="flex-1 py-2 px-3 bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer dark:bg-red-950/40 dark:border-red-800 dark:text-red-300 shadow-xs"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                  <span>Dar Saída (-)</span>
+                </button>
+              </div>
+            )}
+
             <div className="border border-slate-200 p-3.5 rounded-xl space-y-2 dark:border-zinc-800">
               <div className="flex justify-between items-center text-xs">
                 <span>Validade:</span>
@@ -147,19 +175,25 @@ export const ProductDetailSlideOver: React.FC<ProductDetailSlideOverProps> = ({
         {canMutate && (
           <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-2 dark:bg-zinc-950 dark:border-zinc-800">
             <button
-              onClick={() => { onOpenEditForm(product); onClose(); }}
-              className="w-1/2 py-2 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-200"
+              onClick={() => {
+                if (onEditProduct) onEditProduct(product);
+                else if (onOpenEditForm) onOpenEditForm(product);
+                onClose();
+              }}
+              className="flex-1 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-200"
             >
               <Edit3 className="w-4 h-4" />
               Editar Produto
             </button>
-            <button
-              onClick={() => { onDuplicateProduct(product); onClose(); }}
-              className="w-1/2 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition"
-            >
-              <Copy className="w-4 h-4" />
-              Duplicar
-            </button>
+            {onDuplicateProduct && (
+              <button
+                onClick={() => { onDuplicateProduct(product); onClose(); }}
+                className="flex-1 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition"
+              >
+                <Copy className="w-4 h-4" />
+                Duplicar
+              </button>
+            )}
           </div>
         )}
       </div>

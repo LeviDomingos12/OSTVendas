@@ -76,7 +76,6 @@ interface POSModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
-  onTriggerPanic?: () => void;
 }
 
 // Static helper for certified digital signing (Moçambique fiscal standards)
@@ -113,7 +112,6 @@ function POSModule({
   onShowToast,
   isPOSFullscreen = false,
   onChangePOSFullscreen,
-  onTriggerPanic
 }: POSModuleProps) {
   const { formattedVersion } = useSystemVersion();
   
@@ -911,6 +909,17 @@ function POSModule({
 
     onCompleteSale(transaction);
     setCurrentSaleNumber(prev => prev + 1);
+
+    // Abater imediatamente também no catálogo local do POS para feedback visual instantâneo
+    setLocalProducts(prev => {
+      return prev.map(p => {
+        const itemMatch = cart.find(c => c.product.id === p.id);
+        if (itemMatch) {
+          return { ...p, stock: Math.max(0, p.stock - itemMatch.quantity) };
+        }
+        return p;
+      });
+    });
 
     if (emitReceipt) {
       onAddAuditLog(
@@ -2485,7 +2494,7 @@ function POSModule({
                 Voltar e Ajustar
               </button>
               <button
-                onClick={() => handleCheckout(true)}
+                onClick={() => handleCheckout(true, true)}
                 disabled={selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal}
                 title="Confirmar e Faturar com Recibo (Atalho: F5 / F1)"
                 className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5 ${

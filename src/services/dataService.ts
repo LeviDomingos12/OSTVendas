@@ -38,6 +38,14 @@ import {
   CashShift
 } from "../types";
 
+export type DatabaseChangeEvent = {
+  table: "produtos" | "vendas" | "caixa" | "clientes" | "cash_closures" | string;
+  action?: "INSERT" | "UPDATE" | "DELETE" | "BATCH" | string;
+  record?: unknown;
+};
+
+const dbChangeSubscribers = new Set<(event: DatabaseChangeEvent) => void>();
+
 /**
  * Sanitização e normalização de mensagens de erro para proteção de dados e logs amigáveis.
  */
@@ -138,7 +146,7 @@ export const AuthService = {
     return await SupabaseSyncService.signInWithEmail(email, pass);
   },
 
-  async signUpWithEmail(email: string, pass: string, name: string, branch: string, role: string = "Administrador", plan: string = "OURO") {
+  async signUpWithEmail(email: string, pass: string, name: string, branch: string, role: string, plan: string = "OURO") {
     return await SupabaseSyncService.signUpWithEmail(email, pass, name, branch, role, plan);
   },
 
@@ -343,9 +351,14 @@ export const CommercialDataService = {
   async saveTransactionsBatch(transactions: Transaction[]): Promise<void> {
     try {
       await SupabaseSyncService.syncTransactions(transactions);
+      CommercialDataService.notifyDatabaseChange("vendas", "BATCH", transactions);
     } catch (err) {
       console.warn("Erro ao salvar lote de transações:", err);
     }
+  },
+
+  subscribeTransactions(onUpdate: (payload?: Record<string, unknown>) => void) {
+    return SupabaseSyncService.subscribeToTableChanges("vendas", onUpdate);
   },
 
   // --- FLUXO DE CAIXA ---
@@ -362,6 +375,8 @@ export const CommercialDataService = {
       const ok = await SupabaseSyncService.saveCashFlowEntry(entry);
       if (!ok) {
         OfflineQueueService.enqueue({ type: "CASHFLOW", payload: entry, timestamp: new Date().toISOString() });
+      } else {
+        CommercialDataService.notifyDatabaseChange("caixa", "INSERT", entry);
       }
     } catch {
       OfflineQueueService.enqueue({ type: "CASHFLOW", payload: entry, timestamp: new Date().toISOString() });
@@ -371,9 +386,14 @@ export const CommercialDataService = {
   async saveCashFlowBatch(movements: CashFlowEntry[]): Promise<void> {
     try {
       await SupabaseSyncService.syncCashFlow(movements);
+      CommercialDataService.notifyDatabaseChange("caixa", "BATCH", movements);
     } catch (err) {
       console.warn("Erro ao salvar lote de movimentos de caixa:", err);
     }
+  },
+
+  subscribeCashFlow(onUpdate: (payload?: Record<string, unknown>) => void) {
+    return SupabaseSyncService.subscribeToTableChanges("caixa", onUpdate);
   },
 
   // --- FECHAMENTOS DE CAIXA / BALANCETES ---
@@ -502,6 +522,24 @@ export const CommercialDataService = {
     } catch (err) {
       console.warn("Erro ao salvar configurações:", err);
     }
+  },
+
+  // --- BARRAMENTO REATIVO DE MUDANÇAS DE DADOS (REAL-TIME REACTIVE EVENT BUS) ---
+  onDatabaseChange(callback: (event: DatabaseChangeEvent) => void): () => void {
+    dbChangeSubscribers.add(callback);
+    return () => {
+      dbChangeSubscribers.delete(callback);
+    };
+  },
+
+  notifyDatabaseChange(table: string, action?: string, record?: unknown): void {
+    dbChangeSubscribers.forEach(cb => {
+      try {
+        cb({ table, action, record });
+      } catch (err) {
+        console.warn(`[CommercialDataService] Erro no listener de alteração de banco (${table}):`, err);
+      }
+    });
   }
 };
 

@@ -41,9 +41,9 @@ app.get("/api/health", (_req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.json({
     status: "ok",
-    version: "32.0",
-    buildDate: "2026-09-07",
-    formattedVersion: "v32.0",
+    version: "34.0",
+    buildDate: "2026-09-08",
+    formattedVersion: "v34.0",
     timestamp: new Date().toISOString()
   });
 });
@@ -52,9 +52,9 @@ app.get("/api/system/version", (_req, res) => {
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.json({
     status: "ok",
-    version: "32.0",
-    formattedVersion: "v32.0",
-    buildDate: "2026-09-07",
+    version: "34.0",
+    formattedVersion: "v34.0",
+    buildDate: "2026-09-08",
     channel: "stable-production",
     timestamp: new Date().toISOString()
   });

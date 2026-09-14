@@ -12,6 +12,19 @@ export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+type RateLimitCallback = (message: string) => void;
+let rateLimitCallback: RateLimitCallback | null = null;
+let lastRateLimitToastTime = 0;
+
+export function setRateLimitCallback(cb: RateLimitCallback | null): () => void {
+  rateLimitCallback = cb;
+  return () => {
+    if (rateLimitCallback === cb) {
+      rateLimitCallback = null;
+    }
+  };
+}
+
 /**
  * Executa uma requisição HTTP incluindo automaticamente o cabeçalho Authorization com o Bearer Token do Supabase.
  */
@@ -64,6 +77,36 @@ export async function authenticatedFetch(input: string | URL, init: ApiFetchOpti
       headers,
       signal: init.signal || controller.signal
     });
+
+    if (response.status === 429 && rateLimitCallback) {
+      const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request)?.url || "";
+      const isBackgroundCall =
+        rawUrl.includes("/api/db/save") ||
+        rawUrl.includes("/api/db/load") ||
+        rawUrl.includes("/api/health") ||
+        rawUrl.includes("/api/system/version") ||
+        rawUrl.includes("/api/security/storage-health") ||
+        rawUrl.includes("/api/security/firewall-status") ||
+        rawUrl.includes("/api/security/rate-limit-status");
+
+      const now = Date.now();
+      if (!isBackgroundCall && now - lastRateLimitToastTime > 30000) {
+        lastRateLimitToastTime = now;
+        response
+          .clone()
+          .json()
+          .then((data: Record<string, unknown>) => {
+            const msg = (typeof data?.message === "string" ? data.message : undefined) || 
+                        (typeof data?.error === "string" ? data.error : undefined) || 
+                        "Limite de requisições ao servidor atingido (429). Aguarde alguns segundos.";
+            rateLimitCallback?.(msg);
+          })
+          .catch(() => {
+            rateLimitCallback?.("Limite de requisições ao servidor atingido (429). Aguarde alguns segundos.");
+          });
+      }
+    }
+
     return response;
   } finally {
     clearTimeout(timeoutId);

@@ -22,6 +22,7 @@ import {
   Flame 
 } from "lucide-react";
 import { Transaction, SystemSettings, AuditLog } from "../types";
+import { normalizeTransaction, extractDateOnly } from "../lib/normalizeTransaction";
 import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
@@ -66,12 +67,18 @@ function ReportsModule({
 
   // Date limit selector states
   const [startDate, setStartDate] = useState(() => {
-    const today = new Date();
-    const past = new Date(today.getTime() - (30 * 24 * 60 * 60 * 1000)); // default to 30 days ago
-    return past.toISOString().split("T")[0];
+    const past = new Date(Date.now() - (30 * 24 * 60 * 60 * 1000)); // default to 30 days ago
+    const year = past.getFullYear();
+    const month = String(past.getMonth() + 1).padStart(2, "0");
+    const day = String(past.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   });
   const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split("T")[0];
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, "0");
+    const day = String(today.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
   });
 
   // Automated email configuration states
@@ -109,16 +116,23 @@ function ReportsModule({
     return months[monthIndex];
   };
 
+  const safeTransactions = useMemo(() => {
+    return (transactions || []).map(normalizeTransaction);
+  }, [transactions]);
+
   const monthlyStats = useMemo(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0-indexed
 
     // Filter transactions for current month
-    const monthlyTx = transactions.filter(t => {
-      if (!t.timestamp) return false;
-      const d = new Date(t.timestamp);
-      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+    const monthlyTx = safeTransactions.filter(t => {
+      const tDate = extractDateOnly(t.timestamp);
+      if (!tDate) return false;
+      const parts = tDate.split("-");
+      const yr = parseInt(parts[0], 10);
+      const mo = parseInt(parts[1], 10) - 1;
+      return yr === currentYear && mo === currentMonth;
     });
 
     let totalSales = 0;
@@ -129,18 +143,25 @@ function ReportsModule({
     const productSales: { [productName: string]: { qty: number; revenue: number } } = {};
 
     monthlyTx.forEach(t => {
-      totalSales += t.grandTotal;
-      totalVat += t.vatTotal;
-      totalDiscount += t.discountTotal;
-      t.items.forEach(item => {
-        const name = item.productName || "Produto Geral";
-        if (!productSales[name]) {
-          productSales[name] = { qty: 0, revenue: 0 };
-        }
-        productSales[name].qty += item.quantity;
-        productSales[name].revenue += (item.price * item.quantity);
-        totalItemsCount += item.quantity;
-      });
+      const grand = Number(t.grandTotal) || 0;
+      const vat = Number(t.vatTotal) || 0;
+      const disc = Number(t.discountTotal) || 0;
+      totalSales += grand;
+      totalVat += vat;
+      totalDiscount += disc;
+      if (Array.isArray(t.items)) {
+        t.items.forEach(item => {
+          const name = item.productName || "Produto Geral";
+          if (!productSales[name]) {
+            productSales[name] = { qty: 0, revenue: 0 };
+          }
+          const q = Number(item.quantity) || 1;
+          const p = Number(item.price) || 0;
+          productSales[name].qty += q;
+          productSales[name].revenue += (p * q);
+          totalItemsCount += q;
+        });
+      }
     });
 
     const averageTicket = monthlyTx.length ? Math.round(totalSales / monthlyTx.length) : 0;
@@ -161,7 +182,7 @@ function ReportsModule({
       monthName: getMonthNamePT(currentMonth),
       year: currentYear
     };
-  }, [transactions]);
+  }, [safeTransactions]);
 
   // Active sub-tab state inside ReportsModule
   const [activeSubTab, setActiveSubTab] = useState<"general" | "iva" | "activity">("general");
@@ -176,12 +197,12 @@ function ReportsModule({
 
   // Memoized filtered transactions list by custom date interval selected
   const filteredTransactions = useMemo(() => {
-    return transactions.filter(t => {
-      if (!t.timestamp) return false;
-      const tDate = t.timestamp.split("T")[0];
+    return safeTransactions.filter(t => {
+      const tDate = extractDateOnly(t.timestamp);
+      if (!tDate) return true;
       return tDate >= startDate && tDate <= endDate;
     });
-  }, [transactions, startDate, endDate]);
+  }, [safeTransactions, startDate, endDate]);
 
   // Consolidated values (using date filtered records!)
   const financialTotals = useMemo(() => {
@@ -191,10 +212,10 @@ function ReportsModule({
     let subtotalTotal = 0;
 
     filteredTransactions.forEach(t => {
-      salesTotal += t.grandTotal;
-      vatTotal += t.vatTotal;
-      discountTotal += t.discountTotal;
-      subtotalTotal += t.subtotal;
+      salesTotal += Number(t.grandTotal) || 0;
+      vatTotal += Number(t.vatTotal) || 0;
+      discountTotal += Number(t.discountTotal) || 0;
+      subtotalTotal += Number(t.subtotal) || Number(t.grandTotal) || 0;
     });
 
     const profitTotal = Math.round(salesTotal * 0.32); // margin estimate
@@ -216,11 +237,13 @@ function ReportsModule({
     let totalTransactions = filteredTransactions.length;
 
     filteredTransactions.forEach(t => {
-      if (t.vatTotal > 0) {
-        taxableSalesSubtotal += t.subtotal;
-        realVatCollected += t.vatTotal;
+      const vat = Number(t.vatTotal) || 0;
+      const sub = Number(t.subtotal) || Number(t.grandTotal) || 0;
+      if (vat > 0) {
+        taxableSalesSubtotal += sub;
+        realVatCollected += vat;
       } else {
-        exemptSalesSubtotal += t.subtotal;
+        exemptSalesSubtotal += sub;
       }
     });
 

@@ -47,10 +47,10 @@ describe("🔴 Teste Real de Isolamento Tenant A / Tenant B", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.tenantId).toBe("tenant_a");
     expect(res.body.items).toHaveLength(2);
-    expect(res.body.items.every((p: any) => p.tenant_id === "tenant_a")).toBe(true);
+    expect(res.body.items.every((p: { tenant_id: string }) => p.tenant_id === "tenant_a")).toBe(true);
     
     // NENHUM produto do Tenant B deve ser exposto ao Tenant A
-    const containsTenantBData = res.body.items.some((p: any) => p.tenant_id === "tenant_b");
+    const containsTenantBData = res.body.items.some((p: { tenant_id: string }) => p.tenant_id === "tenant_b");
     expect(containsTenantBData).toBe(false);
   });
 
@@ -63,10 +63,10 @@ describe("🔴 Teste Real de Isolamento Tenant A / Tenant B", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.tenantId).toBe("tenant_b");
     expect(res.body.items).toHaveLength(2);
-    expect(res.body.items.every((p: any) => p.tenant_id === "tenant_b")).toBe(true);
+    expect(res.body.items.every((p: { tenant_id: string }) => p.tenant_id === "tenant_b")).toBe(true);
     
     // NENHUM produto do Tenant A deve ser exposto ao Tenant B
-    const containsTenantAData = res.body.items.some((p: any) => p.tenant_id === "tenant_a");
+    const containsTenantAData = res.body.items.some((p: { tenant_id: string }) => p.tenant_id === "tenant_a");
     expect(containsTenantAData).toBe(false);
   });
 

@@ -3,14 +3,27 @@ import { authenticatedFetch } from "./apiClient";
 import { generateUUID } from "./deterministic";
 
 export const getGoogleAccessToken = async (): Promise<string | null> => {
-  const token = localStorage.getItem("google_access_token");
-  if (token) return token;
+  // Elimina resíduos inseguros de tokens em localStorage caso existam
+  if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
+    try {
+      localStorage.removeItem("google_access_token");
+    } catch {}
+  }
+
+  // 1. Prioriza token da sessão ativa do Supabase
   const client = getSupabaseClient();
   if (client) {
     const { data: { session } } = await client.auth.getSession();
     if (session?.provider_token) return session.provider_token;
     if (session?.access_token) return session.access_token;
   }
+
+  // 2. Fallback somente em memória de sessão temporária (sessionStorage volátil, nunca persistente)
+  if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+    const token = window.sessionStorage.getItem("google_access_token");
+    if (token) return token;
+  }
+
   return null;
 };
 

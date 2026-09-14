@@ -51,15 +51,15 @@ function Sidebar({
   const effectivePlan: SubscriptionPlan = activeUser?.subscriptionPlan || subscriptionPlan || "OURO";
   const userRole: UserRole = activeUser ? normalizeUserRole(activeUser) : currentRole;
 
-  // Itens do menu com restrições por perfil estritas
+  // Itens do menu com restrições por perfil estritas e nomes claros
   const allMenuItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-    { id: "pos", label: "Vendas (POS)", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-    { id: "stock", label: "Gestão de Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-    { id: "cash", label: "Gestão de Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
-    { id: "customers", label: "Gestão de Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-    { id: "reports", label: "Relatórios & Faturação", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-    { id: "settings", label: "Configurações Gerais", icon: Settings, roles: ["ADMIN"] },
+    { id: "dashboard", label: "Painel Principal", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+    { id: "pos", label: "Registar Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+    { id: "stock", label: "Produtos em Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+    { id: "cash", label: "Livro de Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
+    { id: "customers", label: "Lista de Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+    { id: "reports", label: "Relatórios de Vendas", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+    { id: "settings", label: "Configurações da Loja", icon: Settings, roles: ["ADMIN"] },
   ];
 
   // Se for Caixa (CASHIER), filtramos os itens para exibir apenas os seus módulos permitidos
@@ -142,8 +142,7 @@ function Sidebar({
           
           {visibleMenuItems.map((item) => {
             const roleCheck = canRoleAccessModule(userRole, item.id);
-            const planCheck = canAccessModule(item.id, effectivePlan);
-            const authorized = roleCheck.allowed && planCheck.allowed;
+            const authorized = roleCheck.allowed;
             const active = activeModule.toLowerCase() === item.id;
             
             return (
@@ -165,7 +164,7 @@ function Sidebar({
                         : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/70 cursor-pointer"
                       : "opacity-40 text-slate-400 cursor-not-allowed bg-slate-100/30 dark:bg-zinc-900/30"
                 }`}
-                title={!roleCheck.allowed ? "Módulo restrito para o seu cargo" : !planCheck.allowed ? `Requer plano ${planCheck.requiredPlan}` : item.label}
+                title={!roleCheck.allowed ? "Módulo restrito para o seu cargo" : item.label}
               >
                 <div className="flex items-center gap-2.5">
                   <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
@@ -180,14 +179,9 @@ function Sidebar({
                   <span>{item.label}</span>
                 </div>
                 
-                {!roleCheck.allowed ? (
+                {!roleCheck.allowed && (
                   <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                ) : !planCheck.allowed ? (
-                  <span className="text-[9px] font-mono font-bold bg-amber-500/15 text-amber-500 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0 flex items-center gap-1">
-                    <Lock className="w-2.5 h-2.5" />
-                    {planCheck.requiredPlan}
-                  </span>
-                ) : null}
+                )}
               </button>
             );
           })}

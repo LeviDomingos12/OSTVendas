@@ -37,36 +37,19 @@ interface DatabaseSnapshotPayload {
 
 // Import modules
 import Sidebar from "./components/Sidebar";
-import POSModule from "./components/POSModule";
-import DashboardModule from "./components/DashboardModule";
-import CashRegisterModule from "./components/CashRegisterModule";
-import StockModule from "./components/StockModule";
-import CustomersModule from "./components/CustomersModule";
-import StaffModule from "./components/StaffModule";
-import ReportsModule from "./components/ReportsModule";
-import SettingsModule from "./components/SettingsModule";
-import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
-import PlanLockScreen from "./components/PlanLockScreen";
-import { canAccessModule } from "./lib/planPermissions";
-import { RoleAccessDeniedScreen } from "./components/RoleAccessDeniedScreen";
+import { AppTabContent } from "./components/layout/AppTabContent";
+import { AppModalsContainer } from "./components/modals/AppModalsContainer";
+import { OnboardingTutorial } from "./components/OnboardingTutorial";
 import { canRoleAccessModule, normalizeUserRole, getDefaultModuleForRole } from "./lib/rolePermissions";
 import LoginModule from "./components/LoginModule";
-import { UserSwitchModal } from "./components/UserSwitchModal";
-import { PinVerificationModal } from "./components/modals/PinVerificationModal";
 import { ForcePinChangeModal } from "./components/modals/ForcePinChangeModal";
 import { AppHeader } from "./components/layout/AppHeader";
 import { ToastContainer } from "./components/layout/ToastContainer";
 import { FloatingNavFab } from "./components/layout/FloatingNavFab";
 import { createLocalBackup, shouldRunAutoBackup } from "./services/backupService";
-import { triggerPanicAlert, fetchGeoLocationInfo, detectDeviceType } from "./services/securityAlertService";
+import { fetchGeoLocationInfo, detectDeviceType } from "./services/securityAlertService";
 import { processSaleDeductions, processDevolutionRestock } from "./services/posTransactionProcessor";
 import { loadSyncQueue, processSyncQueue as syncOfflineQueueService } from "./services/syncQueueService";
-import AiForecastModule from "./components/AiForecastModule";
-import StockReplenishModal from "./components/StockReplenishModal";
-import QuickLogoModal from "./components/QuickLogoModal";
-import TutorialModal from "./components/TutorialModal";
-import OnboardingTutorial from "./components/OnboardingTutorial";
-import { SystemInfoHub } from "./components/SystemInfoHub";
 import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
 import { sanitizeUserSession, hashSecurityPin, verifySecurityPin } from "./lib/security";
 import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
@@ -79,10 +62,11 @@ import {
   sanitizeServiceError 
 } from "./services/dataService";
 import { getSupabaseClient } from "./lib/supabase";
-import { authenticatedFetch } from "./lib/apiClient";
+import { authenticatedFetch, setRateLimitCallback } from "./lib/apiClient";
 import { SupabaseSyncService, saveSupabaseConfig } from "./services/supabaseService";
 import { operationalCache, ErpSnapshotData } from "./lib/indexedDbStorage";
-import { setLogCallback, initErrorCapturing } from "./lib/logger";
+import { normalizeTransaction } from "./lib/normalizeTransaction";
+import { setLogCallback } from "./lib/logger";
 import { generateUUID, generateEntityId, generateDeterministicCreditNoteNumber, generateSecurePin } from "./lib/deterministic";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
@@ -165,16 +149,14 @@ interface Toast {
 }
 
 const NAV_MENU_ITEMS = [
-  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
-  { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
+  { id: "dashboard", label: "Painel Principal", shortLabel: "Início", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "pos", label: "Registar Vendas", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "stock", label: "Produtos em Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "cash", label: "Livro de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
+  { id: "customers", label: "Lista de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "reports", label: "Relatórios de Vendas", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações da Loja", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
 ];
-
-import { AuditLogsD3BarChart } from "./components/AuditLogsD3BarChart";
 
 export default function App() {
   
@@ -205,54 +187,15 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Global Fetch Rate Limit (429) Interceptor with Toast Throttling & Auto-Recovery
+  // Global Fetch Rate Limit (429) listener with Toast Throttling & Auto-Recovery
   useEffect(() => {
-    const originalFetch = window.fetch;
-    let lastToastTime = 0;
-
-    window.fetch = async (...args) => {
-      const response = await originalFetch(...args);
-      if (response.status === 429) {
-        const input = args[0];
-        const rawUrl = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request)?.url || "";
-        
-        // Suppress toasts for background telemetry, health pings, and silent sync polling
-        const isBackgroundCall = 
-          rawUrl.includes("/api/db/save") || 
-          rawUrl.includes("/api/db/load") ||
-          rawUrl.includes("/api/health") || 
-          rawUrl.includes("/api/system/version") ||
-          rawUrl.includes("/api/security/storage-health") ||
-          rawUrl.includes("/api/security/firewall-status") ||
-          rawUrl.includes("/api/security/rate-limit-status");
-
-        const now = Date.now();
-        if (!isBackgroundCall && now - lastToastTime > 30000) {
-          lastToastTime = now;
-          try {
-            const clone = response.clone();
-            const data = await clone.json();
-            showToast(
-              data.message || data.error || "Operação adiada temporariamente pelo sistema de proteção. Tente novamente em instantes.",
-              "warning",
-              "🛡️ Rate Limit"
-            );
-          } catch {
-            showToast(
-              "Limite de requisições ao servidor atingido (429). Aguarde alguns segundos.",
-              "warning",
-              "🛡️ Rate Limit"
-            );
-          }
-        }
-      }
-      return response;
-    };
-
+    const unsubscribe = setRateLimitCallback((message) => {
+      showToast(message, "warning", "🛡️ Rate Limit");
+    });
     return () => {
-      window.fetch = originalFetch;
+      unsubscribe();
     };
-  }, []);
+  }, [showToast]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -286,21 +229,8 @@ export default function App() {
   // User Switch & Account Linking (Vínculo de Conta) States
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
   const [isQuickLogoModalOpen, setIsQuickLogoModalOpen] = useState(false);
-  const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
-  const [isOnboardingTutorialOpen, setIsOnboardingTutorialOpen] = useState(false);
   const [isSystemInfoHubOpen, setIsSystemInfoHubOpen] = useState(false);
-
-  // Keyboard shortcut listener for F1 help
-  useEffect(() => {
-    const handleF1Help = (e: KeyboardEvent) => {
-      if (e.key === "F1") {
-        e.preventDefault();
-        setIsTutorialModalOpen(true);
-      }
-    };
-    window.addEventListener("keydown", handleF1Help);
-    return () => window.removeEventListener("keydown", handleF1Help);
-  }, []);
+  const [isOnboardingTutorialOpen, setIsOnboardingTutorialOpen] = useState(false);
 
   const handleUpdateUserPlan = async (employeeId: string, newPlan: SubscriptionPlan) => {
     const updatedEmployees = employees.map(emp => 
@@ -485,15 +415,6 @@ export default function App() {
     });
   }, []);
 
-  // Initialize system error capturing
-  useEffect(() => {
-    // Initialize standard error capturing (console.error, unhandled promises, fetch errors)
-    const destroyCapturing = initErrorCapturing();
-    return () => {
-      destroyCapturing();
-    };
-  }, []);
-
   // Fetch client IP and geolocation for Audit logs
   useEffect(() => {
     fetchGeoLocationInfo().then(info => {
@@ -560,6 +481,30 @@ export default function App() {
     if (!isDbLoaded && Array.isArray(updatedData) && updatedData.length === 0) return;
     setLastSyncTime(new Date().toLocaleTimeString());
     await incrementVersionCounter();
+
+    // Sempre atualizar imediatamente o snapshot local no IndexedDB para persistência garantida
+    try {
+      const effectiveTenantId = (activeUser?.tenantId || (typeof window !== "undefined" ? localStorage.getItem("erp_current_tenant_id") : null)) || "default_tenant";
+      const cacheKey = activeUser?.id ? `erp_cache_snapshot_${effectiveTenantId}_${activeUser.id}` : `erp_cache_snapshot_${effectiveTenantId}`;
+      const currentSnap = (await operationalCache.loadSnapshot(cacheKey)) || {
+        products: [],
+        customers: [],
+        transactions: [],
+        cashflow: [],
+        employees: [],
+        auditlogs: [],
+        settings: settings || defaultSettings,
+        cachedAt: new Date().toISOString()
+      };
+      await operationalCache.saveSnapshot(cacheKey, {
+        ...currentSnap,
+        [tableName]: updatedData,
+        cachedAt: new Date().toISOString()
+      } as ErpSnapshotData);
+    } catch (cacheSaveErr) {
+      console.warn(`[CACHE] Não foi possível atualizar snapshot para ${tableName}:`, cacheSaveErr);
+    }
+
     try {
       if (!navigator.onLine) {
         throw new Error("O navegador está offline");
@@ -604,13 +549,6 @@ export default function App() {
     } catch (err: unknown) {
       const errMessage = err instanceof Error ? err.message : String(err);
       console.warn(`[OFFLINE CACHE] Não foi possível sincronizar a tabela '${tableName}' (${errMessage}). Guardando no IndexedDB para reenvio automático.`);
-      if (tableName !== "auditlogs") {
-        handleAddAuditLog(
-          "Falha de Sincronização",
-          "Erros do Sistema",
-          `Erro de conexão ao sincronizar tabela '${tableName}': ${errMessage}. Guardado na fila de reenvio offline.`
-        );
-      }
       try {
         const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
         queue[tableName] = updatedData;
@@ -659,6 +597,13 @@ export default function App() {
     
     try {
       await processSyncQueue();
+      
+      // Recarrega todos os registros mais recentes (vendas, produtos, caixa) para atualizar o dashboard e tabelas
+      try {
+        await hydrateDatabaseForUser(activeUser);
+      } catch (hydrateErr) {
+        console.warn("[SYNC] Aviso ao atualizar dados locais após sincronização:", hydrateErr);
+      }
       
       const currentQueue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
       const keys = Object.keys(currentQueue);
@@ -737,7 +682,7 @@ export default function App() {
 
       isSyncProcessingRef.current = true;
       try {
-        const queue = await operationalCache.getItem<Record<string, any>>("pos_sync_queue");
+        const queue = await operationalCache.getItem<{ transactions?: Transaction[] }>("pos_sync_queue");
         if (!queue) return;
 
         const pendingTxs = queue["transactions"];
@@ -862,7 +807,7 @@ export default function App() {
         if (cached && typeof cached === "object") {
           if (Array.isArray(cached.products)) setProducts(cached.products);
           if (Array.isArray(cached.customers)) setCustomers(cached.customers);
-          if (Array.isArray(cached.transactions)) setTransactions(cached.transactions);
+          if (Array.isArray(cached.transactions)) setTransactions(cached.transactions.map(normalizeTransaction));
           if (Array.isArray(cached.cashflow)) setCashFlow(cached.cashflow);
           if (Array.isArray(cached.employees) && cached.employees.length > 0) setEmployees(cached.employees);
           if (Array.isArray(cached.auditlogs)) setAuditLogs(cached.auditlogs);
@@ -880,7 +825,9 @@ export default function App() {
         SyncService.prefetchRecentTransactions24h().then(recentTx => {
           if (recentTx && recentTx.length > 0) {
             setTransactions(prev => {
-              const merged = SupabaseSyncService.mergeRecordsById(prev || [], recentTx);
+              const safeRecent = recentTx.map(normalizeTransaction);
+              const safePrev = (prev || []).map(normalizeTransaction);
+              const merged = SupabaseSyncService.mergeRecordsById(safePrev, safeRecent);
               return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
             });
             console.log(`[PREFETCH 24H] ${recentTx.length} transações recentes integradas imediatamente ao POS.`);
@@ -916,7 +863,7 @@ export default function App() {
         }
       } catch {}
 
-      // 4. Merge products (garante que dados cadastrados na conta venham do servidor/nuvem)
+      // 4. Merge products (garante que dados cadastrados na conta venham do servidor/nuvem preservando criações locais)
       let finalProducts: Product[] = [];
       const remoteProds = Array.isArray(sbProducts) ? sbProducts : [];
       const serverProds = Array.isArray(serverData?.products) ? serverData.products : [];
@@ -929,7 +876,12 @@ export default function App() {
       } else {
         finalProducts = [];
       }
-      setProducts(finalProducts);
+
+      setProducts(prev => {
+        const merged = SupabaseSyncService.mergeRecordsById(prev || [], finalProducts);
+        finalProducts = merged; // atualiza referência para o snapshot
+        return merged;
+      });
 
       // 5. Merge customers by ID
       let finalCustomers: Customer[] = [];
@@ -944,22 +896,34 @@ export default function App() {
       } else {
         finalCustomers = [];
       }
-      setCustomers(finalCustomers);
+
+      setCustomers(prev => {
+        const merged = SupabaseSyncService.mergeRecordsById(prev || [], finalCustomers);
+        finalCustomers = merged;
+        return merged;
+      });
 
       // 6. Merge transactions by ID and sort chronologically
       let finalTransactions: Transaction[] = [];
-      const remoteTxs = Array.isArray(sbTransactions) ? sbTransactions : [];
-      const serverTxs = Array.isArray(serverData?.transactions) ? serverData.transactions : [];
+      const remoteTxs = (Array.isArray(sbTransactions) ? sbTransactions : []).map(normalizeTransaction);
+      const serverTxs = (Array.isArray(serverData?.transactions) ? serverData.transactions : []).map(normalizeTransaction);
       const combinedTxs = SupabaseSyncService.mergeRecordsById(serverTxs, remoteTxs);
 
       if (combinedTxs.length > 0) {
         finalTransactions = combinedTxs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       } else if (cached?.transactions && Array.isArray(cached.transactions)) {
-        finalTransactions = cached.transactions;
+        finalTransactions = cached.transactions.map(normalizeTransaction);
       } else {
         finalTransactions = [];
       }
-      setTransactions(finalTransactions);
+
+      setTransactions(prev => {
+        const safePrev = (prev || []).map(normalizeTransaction);
+        const merged = SupabaseSyncService.mergeRecordsById(safePrev, finalTransactions);
+        const sorted = merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        finalTransactions = sorted;
+        return sorted;
+      });
 
       // 7. Merge cashflow by ID
       let finalCashflow: CashFlowEntry[] = [];
@@ -1191,30 +1155,38 @@ export default function App() {
     }
   }, []);
 
-  // Real-time products subscription and initial sync
+  // Real-time reactive triggers and database subscriptions for products, transactions, and cashflow
   useEffect(() => {
     if (isAuthenticated) {
-      console.log("[SUPABASE] Ativando subscrição em tempo real para produtos...");
-      
-      const unsubscribe = CommercialDataService.subscribeProducts(async () => {
+      console.log("[SUPABASE] Ativando subscrições em tempo real para produtos, vendas e caixa...");
+
+      const reloadProducts = async () => {
         setIsOnline(true);
         try {
           const sbProducts = await CommercialDataService.fetchProducts();
           if (sbProducts && sbProducts.length > 0) {
             console.log(`[SUPABASE] Recebidos ${sbProducts.length} produtos em tempo real.`);
-            setProducts(sbProducts);
+            setProducts(prev => {
+              return SupabaseSyncService.mergeRecordsById(prev, sbProducts);
+            });
           }
         } catch (error) {
           console.error("[SUPABASE] Erro no listener em tempo real de produtos:", error);
         }
-      });
+      };
 
-      const loadTransactions = async () => {
+      const reloadTransactions = async () => {
+        setIsOnline(true);
         try {
           const sbTx = await CommercialDataService.fetchTransactions();
           if (sbTx && sbTx.length > 0) {
-            console.log(`[SUPABASE] Carregadas ${sbTx.length} transações.`);
-            setTransactions(sbTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+            console.log(`[SUPABASE] Carregadas ${sbTx.length} transações em tempo real.`);
+            setTransactions(prev => {
+              const safePrev = (prev || []).map(normalizeTransaction);
+              const safeRemote = sbTx.map(normalizeTransaction);
+              const merged = SupabaseSyncService.mergeRecordsById(safePrev, safeRemote);
+              return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            });
           } else {
             console.log("[SUPABASE] Sem transações registradas.");
             setTransactions(prev => prev || []);
@@ -1224,15 +1196,55 @@ export default function App() {
         }
       };
 
-      loadTransactions();
+      const reloadCashFlow = async () => {
+        setIsOnline(true);
+        try {
+          const sbCash = await CommercialDataService.fetchCashFlow();
+          if (sbCash && sbCash.length > 0) {
+            console.log(`[SUPABASE] Carregados ${sbCash.length} movimentos de caixa em tempo real.`);
+            setCashFlow(prev => {
+              return SupabaseSyncService.mergeRecordsById(prev, sbCash);
+            });
+          }
+        } catch (err) {
+          console.error("[SUPABASE] Erro ao carregar fluxo de caixa:", err);
+        }
+      };
+
+      // 1. Inscrições em canais em tempo real do Supabase
+      const unsubProducts = CommercialDataService.subscribeProducts(reloadProducts);
+      const unsubTransactions = CommercialDataService.subscribeTransactions(reloadTransactions);
+      const unsubCashFlow = CommercialDataService.subscribeCashFlow(reloadCashFlow);
+
+      // 2. Ouvinte local reativo do barramento de alterações do banco de dados
+      const unsubDbChanges = CommercialDataService.onDatabaseChange((event) => {
+        if (event.table === "vendas") {
+          reloadTransactions();
+        } else if (event.table === "produtos") {
+          reloadProducts();
+        } else if (event.table === "caixa") {
+          reloadCashFlow();
+        }
+      });
+
+      // 3. Carga inicial síncrona
+      reloadProducts();
+      reloadTransactions();
+      reloadCashFlow();
 
       return () => {
-        console.log("[SUPABASE] Desativando subscrição em tempo real para produtos.");
-        if (unsubscribe && typeof (unsubscribe as { unsubscribe?: () => void }).unsubscribe === "function") {
-          (unsubscribe as { unsubscribe: () => void }).unsubscribe();
-        } else if (typeof unsubscribe === "function") {
-          (unsubscribe as () => void)();
-        }
+        console.log("[SUPABASE] Desativando subscrições em tempo real.");
+        const cleanup = (sub: unknown) => {
+          if (sub && typeof (sub as { unsubscribe?: () => void }).unsubscribe === "function") {
+            (sub as { unsubscribe: () => void }).unsubscribe();
+          } else if (typeof sub === "function") {
+            (sub as () => void)();
+          }
+        };
+        cleanup(unsubProducts);
+        cleanup(unsubTransactions);
+        cleanup(unsubCashFlow);
+        cleanup(unsubDbChanges);
       };
     }
   }, [isAuthenticated]);
@@ -1461,37 +1473,88 @@ export default function App() {
     setForcePinTargetEmployee(null);
   };
 
-  // PANIC SYSTEM / EMERGENCY SECURITY ALERT
-  const handleTriggerPanic = async () => {
-    const result = await triggerPanicAlert({
-      activeUser,
-      userIpInfo,
-      deviceInfo,
-      employees,
-      settings,
-      onAddAuditLog: handleAddAuditLog
-    });
-
-    showToast(
-      `Alerta crítico disparado! ${result.successfulEmailsCount} e-mails e ${result.successfulSmsCount} SMS de emergência enviados aos administradores.`,
-      "warning",
-      "🚨 ALERTA MÁXIMO"
-    );
-  };
-
   // CENTRAL MUTATION HOOKS - PRODUCTS
   const handleAddProduct = (newP: Product) => {
+    const cleanProduct: Product = {
+      ...newP,
+      id: newP.id || generateEntityId("prod"),
+      code: newP.code || generateEntityId("sku"),
+      costPrice: Number(newP.costPrice || 0),
+      salePrice: Number(newP.salePrice || 0),
+      stock: Number(newP.stock || 0),
+      minStock: Number(newP.minStock !== undefined ? newP.minStock : 5),
+      vatRate: Number(newP.vatRate !== undefined ? newP.vatRate : (settings?.vatDefaultRate || 16)),
+      image: newP.image || newP.imageUrl || "",
+      imageUrl: newP.imageUrl || newP.image || "",
+      supplier: newP.supplier || "Geral",
+      category: newP.category || "Geral",
+      emoji: newP.emoji || "📦",
+      createdAt: newP.createdAt || new Date().toISOString()
+    };
+
     setProducts(prev => {
-      const updated = [newP, ...prev];
+      const updated = [cleanProduct, ...prev.filter(p => p.id !== cleanProduct.id && (!cleanProduct.code || p.code !== cleanProduct.code))];
+      // Persiste imediatamente no IndexedDB e backend com a lista de produtos atualizada
       syncTable("products", updated);
       return updated;
+    });
+
+    // Salva imediatamente também o registro individual no serviço comercial
+    CommercialDataService.saveProduct(cleanProduct).catch(err => {
+      console.warn("Aviso ao persistir produto individual:", err);
+    });
+  };
+
+  const handleAddProductsBatch = async (newProducts: Product[]) => {
+    if (!newProducts || newProducts.length === 0) return;
+
+    setProducts(prev => {
+      const existingMap = new Map<string, Product>(prev.map(p => [p.id, p]));
+      const codeMap = new Map<string, string>(prev.filter(p => p.code).map(p => [p.code.toLowerCase().trim(), p.id]));
+
+      for (const np of newProducts) {
+        const cleanCode = np.code ? np.code.toLowerCase().trim() : "";
+        const existingIdByCode = cleanCode ? codeMap.get(cleanCode) : undefined;
+
+        if (existingIdByCode && existingMap.has(existingIdByCode)) {
+          const existing = existingMap.get(existingIdByCode)!;
+          existingMap.set(existingIdByCode, {
+            ...existing,
+            stock: Number(np.stock !== undefined ? np.stock : existing.stock),
+            salePrice: np.salePrice > 0 ? np.salePrice : existing.salePrice,
+            costPrice: np.costPrice > 0 ? np.costPrice : existing.costPrice,
+            category: np.category || existing.category,
+            supplier: np.supplier || existing.supplier,
+            minStock: np.minStock !== undefined ? np.minStock : existing.minStock
+          });
+        } else if (existingMap.has(np.id)) {
+          const existing = existingMap.get(np.id)!;
+          existingMap.set(np.id, {
+            ...existing,
+            ...np
+          });
+        } else {
+          existingMap.set(np.id, np);
+        }
+      }
+
+      const updatedCatalog = Array.from(existingMap.values());
+      syncTable("products", updatedCatalog);
+      return updatedCatalog;
     });
   };
   const handleUpdateProduct = (updatedP: Product) => {
+    const productWithDate: Product = {
+      ...updatedP,
+      updatedAt: new Date().toISOString()
+    };
     setProducts(prev => {
-      const updated = prev.map(p => p.id === updatedP.id ? updatedP : p);
+      const updated = prev.map(p => p.id === productWithDate.id ? productWithDate : p);
       syncTable("products", updated);
       return updated;
+    });
+    CommercialDataService.saveProduct(productWithDate).catch(err => {
+      console.warn("Aviso ao persistir produto atualizado:", err);
     });
   };
   const handleDeleteProduct = async (productId: string) => {
@@ -1501,7 +1564,6 @@ export default function App() {
       console.warn("Erro ao apagar produto:", err);
     }
 
-    // Update local state and sync batch
     setProducts(prev => {
       const updated = prev.filter(p => p.id !== productId);
       syncTable("products", updated);
@@ -1513,6 +1575,13 @@ export default function App() {
   const handleAddCustomer = (newC: Customer) => {
     setCustomers(prev => {
       const updated = [newC, ...prev];
+      syncTable("customers", updated);
+      return updated;
+    });
+  };
+  const handleUpdateCustomer = (updatedC: Customer) => {
+    setCustomers(prev => {
+      const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
       syncTable("customers", updated);
       return updated;
     });
@@ -1942,23 +2011,36 @@ export default function App() {
 
   // CENTRAL POS SALES TRANSACTION COMPLETION
   const handleCompleteSaleAction = (transaction: Transaction) => {
-    // 1. Add to general transactions history list
+    const normalized = normalizeTransaction(transaction);
+
+    // 1. Add to general transactions history list immediately with guaranteed immutability
     setTransactions(prev => {
-      const updated = [transaction, ...prev];
-      syncTable("transactions", updated);
+      const filteredPrev = (prev || []).filter(t => t.id !== normalized.id);
+      const updated = [normalized, ...filteredPrev];
       return updated;
     });
 
-    const activeBranch = transaction.branchId || settings.activeBranchId || "central";
+    // Sincronizar persistência local
+    setTimeout(() => {
+      setTransactions(current => {
+        syncTable("transactions", current);
+        return current;
+      });
+    }, 50);
+
+    const activeBranch = normalized.branchId || settings.activeBranchId || "central";
 
     // 2. Dynamic stock levels deduction via specialized processor
-    const saleResult = processSaleDeductions(transaction, products, settings, activeUser);
-    setProducts(saleResult.updatedProducts);
-    syncTable("products", saleResult.updatedProducts);
-
-    if (saleResult.updatedBatches) {
-      handleUpdateSettings({ batches: saleResult.updatedBatches });
-    }
+    const saleResult = processSaleDeductions(normalized, products, settings, activeUser);
+    setProducts(prevProducts => {
+      const currentList = prevProducts && prevProducts.length > 0 ? prevProducts : products;
+      const deductionResult = processSaleDeductions(normalized, currentList, settings, activeUser);
+      syncTable("products", deductionResult.updatedProducts);
+      if (deductionResult.updatedBatches) {
+        handleUpdateSettings({ batches: deductionResult.updatedBatches });
+      }
+      return deductionResult.updatedProducts;
+    });
 
     // Trigger individual minimum stock alerting
     const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
@@ -1977,18 +2059,18 @@ export default function App() {
     }
 
     // 3. Update customer loyalty points accumulated
-    if (transaction.customerId && transaction.customerId !== "WALK_IN") {
+    if (normalized.customerId && normalized.customerId !== "WALK_IN") {
       setCustomers(prevCustomers => {
         const updated = prevCustomers.map(cust => {
-          if (cust.id === transaction.customerId) {
-            const addedPoints = Math.floor(transaction.grandTotal / 100); // 1 point every 100 MT
+          if (cust.id === normalized.customerId) {
+            const addedPoints = Math.floor(normalized.grandTotal / 100); // 1 point every 100 MT
             return {
               ...cust,
-              totalSpent: cust.totalSpent + transaction.grandTotal,
+              totalSpent: cust.totalSpent + normalized.grandTotal,
               purchaseCount: cust.purchaseCount + 1,
               loyaltyPoints: cust.loyaltyPoints + addedPoints,
               lastPurchaseDate: new Date().toLocaleDateString(),
-              debt: transaction.paymentMethod === "DEBT" ? (cust.debt || 0) + transaction.grandTotal : cust.debt
+              debt: normalized.paymentMethod === "DEBT" ? (cust.debt || 0) + normalized.grandTotal : cust.debt
             };
           }
           return cust;
@@ -1999,7 +2081,7 @@ export default function App() {
     }
 
     // 4. Atomic PostgreSQL / Supabase Sale persistence with offline queue fallback
-    CommercialDataService.saveTransaction(transaction).catch(err => {
+    CommercialDataService.saveTransaction(normalized).catch(err => {
       console.warn("Processamento atómico em segundo plano (offline queue):", err);
     });
 
@@ -2017,8 +2099,15 @@ export default function App() {
     handleAddAuditLog(
       "Completar Transação de POS",
       "VENDAS",
-      `Fatura ${transaction.invoiceNumber} processada na filial ${activeBranch}. Cliente: ${transaction.customerName}, Método: ${transaction.paymentMethod}. Total Pago: ${transaction.grandTotal} MT. Abate de Stock concluído.`
+      `Fatura ${normalized.invoiceNumber} processada na filial ${activeBranch}. Cliente: ${normalized.customerName}, Método: ${normalized.paymentMethod}. Total Pago: ${normalized.grandTotal} MT. Abate de Stock concluído.`
     );
+
+    // 7. Disparo de gatilho reativo em tempo real para recalcular Dashboard, Stock e Fluxo de Caixa
+    CommercialDataService.notifyDatabaseChange("vendas", "INSERT", normalized);
+    CommercialDataService.notifyDatabaseChange("produtos", "UPDATE", saleResult.updatedProducts);
+    if (saleResult.cashFlowEntry) {
+      CommercialDataService.notifyDatabaseChange("caixa", "INSERT", saleResult.cashFlowEntry);
+    }
   };
 
   // CENTRAL POS RETURN / DEVOLUTION & CREDIT NOTE HANDLER
@@ -2041,12 +2130,28 @@ export default function App() {
       transactions.length
     );
 
-    const { creditNoteNum, refundTotal, updatedProducts, refundCashEntry } = devolutionResult;
     const activeBranch = transaction.branchId || settings.activeBranchId || "central";
 
     // 1. Restock products in inventory
-    setProducts(updatedProducts);
-    syncTable("products", updatedProducts);
+    let devolutionResultForCashFlow: ReturnType<typeof processDevolutionRestock> | null = null;
+    setProducts(prevProducts => {
+      const currentList = prevProducts && prevProducts.length > 0 ? prevProducts : products;
+      const devolutionResult = processDevolutionRestock(
+        transaction,
+        returnedItems,
+        returnReason,
+        refundMethod,
+        currentList,
+        settings,
+        activeUser,
+        transactions.length
+      );
+      devolutionResultForCashFlow = devolutionResult;
+      syncTable("products", devolutionResult.updatedProducts);
+      return devolutionResult.updatedProducts;
+    });
+
+    const { creditNoteNum, refundTotal, refundCashEntry } = devolutionResult;
 
     // 2. Record cash refund in cashflow if refunded from register
     if (refundCashEntry) {
@@ -2082,6 +2187,13 @@ export default function App() {
       "VENDAS",
       `Nota de Crédito ${creditNoteNum} emitida para a fatura ${transaction.invoiceNumber}. Total Reembolsado: ${refundTotal} MT. Motivo: ${returnReason}. Stock de ${returnedItems.length} artigo(s) restaurado.`
     );
+
+    // 5. Disparo de gatilho reativo em tempo real para recalcular Dashboard, Stock e Fluxo de Caixa
+    CommercialDataService.notifyDatabaseChange("vendas", "UPDATE", transaction);
+    CommercialDataService.notifyDatabaseChange("produtos", "UPDATE", devolutionResult.updatedProducts);
+    if (refundCashEntry) {
+      CommercialDataService.notifyDatabaseChange("caixa", "INSERT", refundCashEntry);
+    }
 
     if (showToast) {
       showToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteNum}`, "success", "Devolução Concluída");
@@ -2185,10 +2297,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
   }, [simplifiedRole, isAuthenticated, activeUser, activeTab]);
 
-  // Filtra dados para que vendedores (CASHIER) e supervisores (SUPERVISOR) vejam apenas os seus registos, enquanto o ADMIN tem acesso total
+  // Filtra dados para operadores de caixa específicos (CASHIER), enquanto ADMIN, SUPERVISOR, AUDITOR e FINANCEIRO têm acesso aos registos
   const filteredTransactions = useMemo(() => {
     if (!activeUser) return [];
-    if (simplifiedRole === "ADMIN") {
+    if (simplifiedRole === "ADMIN" || simplifiedRole === "SUPERVISOR" || (activeUser.role && ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO", "GERENTE"].includes(activeUser.role.toUpperCase()))) {
       return transactions;
     }
     return transactions.filter(t => {
@@ -2201,7 +2313,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
   const filteredCashFlow = useMemo(() => {
     if (!activeUser) return [];
-    if (simplifiedRole === "ADMIN") {
+    if (simplifiedRole === "ADMIN" || simplifiedRole === "SUPERVISOR" || (activeUser.role && ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO", "GERENTE"].includes(activeUser.role.toUpperCase()))) {
       return cashFlow;
     }
     return cashFlow.filter(c => {
@@ -2253,8 +2365,16 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
 
     const safeUser = sanitizeUserSession(user);
-    localStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
-    localStorage.removeItem("erp_simulated_logged_in_user");
+    if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+      try {
+        window.sessionStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
+      } catch {}
+    }
+    // Remove qualquer resíduo legado de sessão em localStorage
+    try {
+      localStorage.removeItem("erp_logged_in_user");
+      localStorage.removeItem("erp_simulated_logged_in_user");
+    } catch {}
 
     // Limpar resíduos de memória de outra conta antes de hidratar a nova
     setProducts([]);
@@ -2461,9 +2581,15 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         );
       }
       await SupabaseSyncService.signOut();
-      localStorage.removeItem("erp_logged_in_user");
-      localStorage.removeItem("erp_simulated_logged_in_user");
-      localStorage.removeItem("erp_current_tenant_id");
+      try {
+        if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+          window.sessionStorage.removeItem("erp_logged_in_user");
+          window.sessionStorage.removeItem("erp_simulated_logged_in_user");
+        }
+        localStorage.removeItem("erp_logged_in_user");
+        localStorage.removeItem("erp_simulated_logged_in_user");
+        localStorage.removeItem("erp_current_tenant_id");
+      } catch {}
       setProducts([]);
       setCustomers([]);
       setTransactions([]);
@@ -2478,9 +2604,15 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       try {
         await SupabaseSyncService.signOut();
       } catch {}
-      localStorage.removeItem("erp_logged_in_user");
-      localStorage.removeItem("erp_simulated_logged_in_user");
-      localStorage.removeItem("erp_current_tenant_id");
+      try {
+        if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
+          window.sessionStorage.removeItem("erp_logged_in_user");
+          window.sessionStorage.removeItem("erp_simulated_logged_in_user");
+        }
+        localStorage.removeItem("erp_logged_in_user");
+        localStorage.removeItem("erp_simulated_logged_in_user");
+        localStorage.removeItem("erp_current_tenant_id");
+      } catch {}
       setProducts([]);
       setCustomers([]);
       setTransactions([]);
@@ -2511,6 +2643,103 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
       "Vínculo de Conta",
       "SISTEMA",
       `Perfil de colaborador ${employeeId} vinculado ao e-mail ${emailStr}`
+    );
+  };
+
+  const handleResetEmployeePin = async (empId: string) => {
+    const target = employees.find(e => e.id === empId);
+    if (!target) return;
+    const generatedPin = generateSecurePin(6);
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === empId) {
+        return {
+          ...emp,
+          pin: generatedPin,
+          password: generatedPin,
+          pinChanged: false,
+          pinCreatedAt: new Date().toISOString()
+        };
+      }
+      return emp;
+    });
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+    handleAddAuditLog(
+      "Reset de PIN Forçado",
+      "SEGURANÇA",
+      `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
+    );
+
+    let emailDetails = "";
+    const targetEmail = target.email?.trim();
+    if (targetEmail) {
+      try {
+        await sendEmail({
+          to: targetEmail,
+          subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
+          body: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+            <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+              <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+              <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
+            </div>
+            <h2 style="color: #1e293b; font-size: 18px;">Olá, ${target.name}!</h2>
+            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que as suas credenciais de acesso ao sistema <strong>OST Vendas</strong> foram redefinidas com sucesso pela Administração.</p>
+            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+              <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN Temporário de Acesso:</span>
+              <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
+            </div>
+            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize este PIN temporário para efetuar o login. O sistema exigirá que defina uma senha definitiva personalizada no primeiro acesso.</p>
+            <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, entre em contacto imediatamente com o Administrador.</p>
+          </div>
+        `,
+          isHtml: true
+        });
+        emailDetails = ` Um e-mail com a nova senha foi enviado com sucesso para ${targetEmail}.`;
+      } catch (emailErr) {
+        console.error("Erro ao enviar e-mail de redefinição de PIN:", emailErr);
+        emailDetails = " (Nota: Ocorreu um erro ao enviar o e-mail de notificação. Certifique-se de que as configurações de SMTP estão ativas).";
+      }
+    } else {
+      emailDetails = " (Aviso: O colaborador não possui e-mail cadastrado no sistema para o envio automático).";
+    }
+
+    showToast(
+      `PIN do colaborador ${target.name} redefinido com sucesso para '${generatedPin}'.${emailDetails}`,
+      "success",
+      "Reset de PIN Concluído"
+    );
+  };
+
+  const handleUpdateEmployeeTheme = async (empId: string, themeId: string) => {
+    const target = employees.find(e => e.id === empId);
+    if (!target) return;
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === empId) {
+        return {
+          ...emp,
+          theme: themeId
+        };
+      }
+      return emp;
+    });
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+    
+    if (activeUser && activeUser.id === empId) {
+      setActiveColorTheme(themeId);
+      localStorage.setItem("erp_theme_" + empId, themeId);
+    }
+
+    handleAddAuditLog(
+      "Definição de Tema de Colaborador",
+      "SEGURANÇA",
+      `Tema do colaborador ${target.name} (${target.username}) atualizado para ${themeId} pelo Administrador.`
+    );
+    showToast(
+      `Preferência de cor para ${target.name} atualizada para '${themeId}'.`,
+      "success",
+      "Tema de Colaborador"
     );
   };
 
@@ -2596,428 +2825,92 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
         />
   
         {/* INNER SCROLLABLE WORKPORT PANEL CONTENT */}
-        <main className={`flex-1 overflow-y-auto relative ${isPOSFullscreen ? "p-0" : "p-4 md:p-6"}`}>
-          <AnimatePresence mode="wait">
-            {/* POS DIRECT CHECKOUT */}
-            {activeTab === "POS" && (
-              <motion.div
-                key="POS"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "pos").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="pos"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <POSModule
-                    products={products}
-                    customers={customers}
-                    transactions={filteredTransactions}
-                    onCompleteSale={handleCompleteSaleAction}
-                    onReturnSale={handleReturnSaleAction}
-                    activeUsername={activeUserDisplayName}
-                    settings={settings}
-                    onAddAuditLog={handleAddAuditLog}
-                    currency={currency}
-                    onShowToast={showToast}
-                    isPOSFullscreen={isPOSFullscreen}
-                    onChangePOSFullscreen={setIsPOSFullscreen}
-                    onTriggerPanic={handleTriggerPanic}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* STATS ANALYTICS CONTROL PANEL */}
-            {activeTab === "DASHBOARD" && (
-              <motion.div
-                key="DASHBOARD"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "dashboard").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="dashboard"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <DashboardModule
-                    transactions={filteredTransactions}
-                    products={products}
-                    customers={customers}
-                    cashFlow={filteredCashFlow}
-                    currency={currency}
-                    activeUser={activeUser}
-                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    settings={settings}
-                    onUpdateSettings={handleUpdateSettings}
-                    onUpdateProduct={handleUpdateProduct}
-                    onAddAuditLog={handleAddAuditLog}
-                    onShowToast={showToast}
-                    onCompleteSale={handleCompleteSaleAction}
-                    pendingSyncQueue={pendingSyncQueue}
-                    isManualSyncing={isManualSyncing}
-                    isOnline={isOnline}
-                    onManualSync={handleManualSync}
-                    theme={theme}
-                    onTriggerPanic={handleTriggerPanic}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* DAILY BOOK BALANCE CASH OPERATIONS */}
-            {activeTab === "CASH" && (
-              <motion.div
-                key="CASH"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "cash").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="cash"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <CashRegisterModule
-                    cashFlow={filteredCashFlow}
-                    transactions={filteredTransactions}
-                    onAddCashFlowEntry={handleAddCashFlowEntry}
-                    activeUsername={activeUserDisplayName}
-                    activeUser={activeUser}
-                    employees={employees}
-                    currentRole={simplifiedRole}
-                    onAddAuditLog={handleAddAuditLog}
-                    currency={currency}
-                    settings={settings}
-                    theme={theme}
-                    onShowToast={showToast}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* ACTIVE STOCK INVENTORY MANAGER */}
-            {activeTab === "STOCK" && (
-              <motion.div
-                key="STOCK"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "stock").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="stock"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : !canAccessModule("stock", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
-                  <PlanLockScreen
-                    moduleName="Gestão Avançada de Stock"
-                    requiredPlan="PRATA"
-                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-                    description="O Plano Bronze inclui apenas vendas rápidas POS e catálogo básico. Atualize para o Plano Prata ou Ouro para gerir lotes, datas de expiração e reabastecimentos."
-                    onUpgradeClick={() => setActiveTab("PLANS")}
-                  />
-                ) : (
-                  <StockModule
-                    products={products}
-                    transactions={filteredTransactions}
-                    onAddProduct={handleAddProduct}
-                    onUpdateProduct={handleUpdateProduct}
-                    onDeleteProduct={handleDeleteProduct}
-                    onAddAuditLog={handleAddAuditLog}
-                    currentRole={simplifiedRole}
-                    currency={currency}
-                    settings={settings}
-                    onShowToast={showToast}
-                    onUpdateSettings={handleUpdateSettings}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* CUSTOMER LOYALTY CRM & MARKETING SMS */}
-            {(activeTab === "CUSTOMERS" || activeTab === "CLIENTES") && (
-              <motion.div
-                key="CUSTOMERS"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "customers").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="customers"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <CustomersModule
-                    customers={customers}
-                    transactions={transactions}
-                    settings={settings}
-                    onAddCustomer={handleAddCustomer}
-                    onUpdateCustomer={(updatedC) => {
-                      setCustomers(prev => {
-                        const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
-                        syncTable("customers", updated);
-                        return updated;
-                      });
-                    }}
-                    onAddCashFlowEntry={handleAddCashFlowEntry}
-                    onDeleteCustomer={handleDeleteCustomer}
-                    onAddAuditLog={handleAddAuditLog}
-                    currentRole={simplifiedRole}
-                    activeUsername={activeUserDisplayName}
-                    currency={currency}
-                    onShowToast={showToast}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
-            {activeTab === "REPORTS" && (
-              <motion.div
-                key="REPORTS"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, "reports").allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId="reports"
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <ReportsModule
-                    transactions={filteredTransactions}
-                    settings={settings}
-                    onUpdateSettings={handleUpdateSettings}
-                    onAddAuditLog={handleAddAuditLog}
-                    currency={currency}
-                    onShowToast={showToast}
-                    auditLogs={auditLogs}
-                  />
-                )}
-              </motion.div>
-            )}
-
-            {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS (INCLUDING ADVANCED CONSOLIDATED SUBMODULES) */}
-            {(activeTab === "SETTINGS" || activeTab === "STAFF" || activeTab === "AI" || activeTab === "TRAINING" || activeTab === "GATEWAY" || activeTab === "PLANS") && (
-              <motion.div
-                key="SETTINGS"
-                initial={{ opacity: 0, y: 12, scale: 0.995 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -12, scale: 0.995 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
-              >
-                {!canRoleAccessModule(simplifiedRole, activeTab.toLowerCase()).allowed ? (
-                  <RoleAccessDeniedScreen
-                    moduleId={activeTab.toLowerCase()}
-                    userRole={simplifiedRole}
-                    activeUser={activeUser}
-                    theme={theme}
-                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-                  />
-                ) : (
-                  <SettingsModule
-                    settings={settings}
-                    onUpdateSettings={handleUpdateSettings}
-                    onAddAuditLog={handleAddAuditLog}
-                    currentRole={simplifiedRole}
-                    currency={currency}
-                    onShowToast={showToast}
-                    activeUser={activeUser}
-                    activeColorTheme={activeColorTheme}
-                    onChangeColorTheme={handleThemeChange}
-                    onExportLocalDB={handleExportLocalDB}
-                    onImportLocalDB={handleImportLocalDB}
-                    onTriggerLocalBackup={handleTriggerLocalBackup}
-                    onGetBackupPayload={handleGetBackupPayload}
-                    onPurgeMockData={handlePurgeMockData}
-                    systemVersion={currentSystemVersion}
-                    employees={employees}
-                    auditLogs={auditLogs}
-                    products={products}
-                    onUpdateProduct={handleUpdateProduct}
-                    onUpdateProducts={(updatedList) => {
-                      setProducts(updatedList);
-                      syncTable("products", updatedList);
-                    }}
-                    transactions={filteredTransactions}
-                    customers={customers}
-                    onAddEmployee={handleAddEmployee}
-                    onUpdateEmployees={handleUpdateEmployees}
-                    masterclassVideos={masterclassVideos}
-                    theme={theme}
-                    onUpdateUserPlan={handleUpdateUserPlan}
-                    onUpdateSystemPlan={handleUpdateSystemPlan}
-                    initialSubTab={
-                      activeTab === "STAFF" ? "staff" :
-                      activeTab === "AI" ? "ai" :
-                      activeTab === "TRAINING" ? "training" :
-                      activeTab === "GATEWAY" ? "gateway" :
-                      activeTab === "PLANS" ? "plans" : undefined
-                    }
-                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
-                    onResetEmployeePin={async (empId) => {
-                      const target = employees.find(e => e.id === empId);
-                      if (!target) return;
-                      const generatedPin = generateSecurePin(6);
-                      const updatedEmployees = employees.map(emp => {
-                        if (emp.id === empId) {
-                          return {
-                            ...emp,
-                            pin: generatedPin,
-                            password: generatedPin,
-                            pinChanged: false,
-                            pinCreatedAt: new Date().toISOString()
-                          };
-                        }
-                        return emp;
-                      });
-                      setEmployees(updatedEmployees);
-                      await syncTable("employees", updatedEmployees);
-                      handleAddAuditLog(
-                        "Reset de PIN Forçado",
-                        "SEGURANÇA",
-                        `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
-                      );
-
-                      let emailDetails = "";
-                      const targetEmail = target.email?.trim();
-                      if (targetEmail) {
-                        try {
-                          await sendEmail({
-                            to: targetEmail,
-                            subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
-                            body: `
-                              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-                              <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
-                                <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
-                                <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
-                              </div>
-                              <h2 style="color: #1e293b; font-size: 18px;">Olá, ${target.name}!</h2>
-                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que as suas credenciais de acesso ao sistema <strong>OST Vendas</strong> foram redefinidas com sucesso pela Administração.</p>
-                              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
-                                <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN Temporário de Acesso:</span>
-                                <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
-                              </div>
-                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize este PIN temporário para efetuar o login. O sistema exigirá que defina uma senha definitiva personalizada no primeiro acesso.</p>
-                              <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, entre em contacto imediatamente com o Administrador.</p>
-                            </div>
-                          `,
-                          isHtml: true
-                        });
-                        emailDetails = ` Um e-mail com a nova senha foi enviado com sucesso para ${targetEmail}.`;
-                      } catch (emailErr) {
-                        console.error("Erro ao enviar e-mail de redefinição de PIN:", emailErr);
-                        emailDetails = " (Nota: Ocorreu um erro ao enviar o e-mail de notificação. Certifique-se de que as configurações de SMTP estão ativas).";
-                      }
-                    } else {
-                      emailDetails = " (Aviso: O colaborador não possui e-mail cadastrado no sistema para o envio automático).";
-                    }
-
-                    showToast(
-                      `PIN do colaborador ${target.name} redefinido com sucesso para '${generatedPin}'.${emailDetails}`,
-                      "success",
-                      "Reset de PIN Concluído"
-                    );
-                  }}
-                  onUpdateEmployeeTheme={async (empId, themeId) => {
-                    const target = employees.find(e => e.id === empId);
-                    if (!target) return;
-                    const updatedEmployees = employees.map(emp => {
-                      if (emp.id === empId) {
-                        return {
-                          ...emp,
-                          theme: themeId
-                        };
-                      }
-                      return emp;
-                    });
-                    setEmployees(updatedEmployees);
-                    await syncTable("employees", updatedEmployees);
-                    
-                    if (activeUser && activeUser.id === empId) {
-                      setActiveColorTheme(themeId);
-                      localStorage.setItem("erp_theme_" + empId, themeId);
-                    }
-
-                    handleAddAuditLog(
-                      "Definição de Tema de Colaborador",
-                      "SEGURANÇA",
-                      `Tema do colaborador ${target.name} (${target.username}) atualizado para ${themeId} pelo Administrador.`
-                    );
-                    showToast(
-                      `Preferência de cor para ${target.name} atualizada para '${themeId}'.`,
-                      "success",
-                      "Tema de Colaborador"
-                    );
-                  }}
-                />
-                )}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </main>
-
+        <AppTabContent
+          activeTab={activeTab}
+          isPOSFullscreen={isPOSFullscreen}
+          simplifiedRole={simplifiedRole}
+          activeUser={activeUser}
+          activeUserDisplayName={activeUserDisplayName}
+          theme={theme}
+          settings={settings}
+          currency={currency}
+          products={products}
+          customers={customers}
+          transactions={transactions}
+          filteredTransactions={filteredTransactions}
+          cashFlow={cashFlow}
+          filteredCashFlow={filteredCashFlow}
+          employees={employees}
+          auditLogs={auditLogs}
+          pendingSyncQueue={pendingSyncQueue}
+          isManualSyncing={isManualSyncing}
+          isOnline={isOnline}
+          activeColorTheme={activeColorTheme}
+          currentSystemVersion={currentSystemVersion}
+          onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+          onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
+          onChangePOSFullscreen={setIsPOSFullscreen}
+          onShowToast={showToast}
+          onAddAuditLog={handleAddAuditLog}
+          onManualSync={handleManualSync}
+          onUpdateSettings={handleUpdateSettings}
+          onThemeChange={handleThemeChange}
+          onExportLocalDB={handleExportLocalDB}
+          onImportLocalDB={handleImportLocalDB}
+          onTriggerLocalBackup={handleTriggerLocalBackup}
+          onGetBackupPayload={handleGetBackupPayload}
+          onPurgeMockData={handlePurgeMockData}
+          onUpdateUserPlan={handleUpdateUserPlan}
+          onUpdateSystemPlan={handleUpdateSystemPlan}
+          onCompleteSale={handleCompleteSaleAction}
+          onReturnSale={handleReturnSaleAction}
+          onAddProduct={handleAddProduct}
+          onUpdateProduct={handleUpdateProduct}
+          onDeleteProduct={handleDeleteProduct}
+          onImportProductsBatch={handleAddProductsBatch}
+          onAddCustomer={handleAddCustomer}
+          onUpdateCustomer={handleUpdateCustomer}
+          onDeleteCustomer={handleDeleteCustomer}
+          onAddCashFlowEntry={handleAddCashFlowEntry}
+          onAddEmployee={handleAddEmployee}
+          onUpdateEmployees={handleUpdateEmployees}
+          onResetEmployeePin={handleResetEmployeePin}
+          onUpdateEmployeeTheme={handleUpdateEmployeeTheme}
+          onUpdateProductsList={(updatedList) => {
+            setProducts(updatedList);
+            syncTable("products", updatedList);
+          }}
+        />
       </div>
 
-      {/* PIN Verification Modal for Switching Operator */}
-      <PinVerificationModal
-        isOpen={pinVerificationOpen}
-        onClose={() => {
+      {/* Floating Action Navigation Hub (FAB) */}
+      <FloatingNavFab
+        isPOSFullscreen={isPOSFullscreen}
+        isFabOpen={isFabOpen}
+        onToggleFab={() => setIsFabOpen(!isFabOpen)}
+        activeTab={activeTab}
+        onSelectTab={(tabId) => setActiveTab(tabId)}
+        navMenuItems={NAV_MENU_ITEMS}
+        canRoleAccess={canRoleAccessModule}
+        simplifiedRole={simplifiedRole}
+        activeUser={activeUser}
+        theme={theme}
+        onOpenSidebar={() => setIsSidebarOpen(true)}
+        onLogout={handleLogout}
+      />
+
+      {/* System Modals Overlay Container */}
+      <AppModalsContainer
+        theme={theme}
+        employees={employees}
+        activeUser={activeUser}
+        settings={settings}
+        showToast={showToast}
+        handleAddAuditLog={handleAddAuditLog}
+        pinVerificationOpen={pinVerificationOpen}
+        onClosePinVerification={() => {
           setPinVerificationOpen(false);
           setPinTargetEmployee(null);
-        }}
-        theme={theme}
-        loginMethod={loginMethod}
-        onLoginMethodChange={(m) => {
-          setLoginMethod(m);
-          setPinError("");
         }}
         pinTargetEmployee={pinTargetEmployee}
         onPinTargetEmployeeChange={(emp) => {
@@ -3025,7 +2918,11 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           setEnteredPin("");
           setPinError("");
         }}
-        employees={employees}
+        loginMethod={loginMethod}
+        onLoginMethodChange={(m) => {
+          setLoginMethod(m);
+          setPinError("");
+        }}
         enteredUsername={enteredUsername}
         onEnteredUsernameChange={(u) => {
           setEnteredUsername(u);
@@ -3037,245 +2934,22 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           if (pinError) setPinError("");
         }}
         pinError={pinError}
-        onVerify={handleVerifyAndSwitchProfile}
-      />
-
-
-
-      {/* Ultra-Clean User / Collaborator Switch Modal */}
-      <UserSwitchModal
-        isOpen={isUserSwitchModalOpen}
-        onClose={() => setIsUserSwitchModalOpen(false)}
-        theme={theme}
-        employees={employees}
-        activeUser={activeUser}
-        settings={settings}
-        onSelectEmployee={(newEmp) => {
+        onVerifyPin={handleVerifyAndSwitchProfile}
+        isUserSwitchModalOpen={isUserSwitchModalOpen}
+        onCloseUserSwitchModal={() => setIsUserSwitchModalOpen(false)}
+        onSelectEmployeeForSwitch={(newEmp) => {
           setActiveUser(newEmp);
           showToast(`Operador alterado para ${newEmp.name}!`, "success");
         }}
-        onAuditLog={(action, module, details) => {
-          handleAddAuditLog(action, module, details);
-        }}
-      />
-
-      <StockReplenishModal
-        isOpen={showReplenishModal}
-        onClose={() => setShowReplenishModal(false)}
+        showReplenishModal={showReplenishModal}
+        onCloseReplenishModal={() => setShowReplenishModal(false)}
         products={products}
         onUpdateProduct={handleUpdateProduct}
         activeBranchId={settings.activeBranchId || "central"}
-        onShowToast={showToast}
-        theme={theme}
-      />
-
-      {/* Toast Notifications Overlay Container */}
-      <div className="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
-        <AnimatePresence>
-          {toasts.map((t) => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, x: 50, scale: 0.9 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: 50, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-              className={`p-4 rounded-xl border shadow-lg pointer-events-auto flex gap-3 relative overflow-hidden backdrop-blur-md ${
-                theme === "night"
-                  ? "bg-zinc-950/95 border-zinc-850/80 text-slate-100 shadow-zinc-950/45"
-                  : "bg-white/95 border-slate-200 text-slate-800 shadow-slate-200/40"
-              }`}
-            >
-              {/* Vertical side glow indicator bar according to toast type */}
-              <div
-                className={`absolute top-0 left-0 bottom-0 w-1.5 ${
-                  t.type === "success"
-                    ? "bg-emerald-500"
-                    : t.type === "error"
-                    ? "bg-rose-500"
-                    : t.type === "warning"
-                    ? "bg-amber-500"
-                    : "bg-blue-500"
-                }`}
-              />
-
-              {/* Icon selection dynamically */}
-              <div className="mt-0.5 shrink-0">
-                {t.type === "success" && (
-                  <CheckCircle className="w-5 h-5 text-emerald-500" />
-                )}
-                {t.type === "error" && (
-                  <XCircle className="w-5 h-5 text-rose-500" />
-                )}
-                {t.type === "warning" && (
-                  <AlertCircle className="w-5 h-5 text-amber-500" />
-                )}
-                {t.type === "info" && (
-                  <Activity className="w-5 h-5 text-blue-500" />
-                )}
-              </div>
-
-              {/* Contents block */}
-              <div className="flex-1 pr-6">
-                <h4 className="font-extrabold text-xs tracking-tight uppercase">
-                  {t.title}
-                </h4>
-                <p className={`text-[11px] mt-1 pr-1 font-semibold leading-relaxed ${
-                  theme === "night" ? "text-slate-350" : "text-slate-550"
-                }`}>
-                  {t.message}
-                </p>
-              </div>
-
-              {/* Manual Close Button */}
-              <button
-                type="button"
-                onClick={() => removeToast(t.id)}
-                className={`absolute top-3 right-3 p-1 rounded-lg transition-colors cursor-pointer ${
-                  theme === "night"
-                    ? "hover:bg-zinc-900 text-slate-400 hover:text-white"
-                    : "hover:bg-slate-100 text-slate-400 hover:text-slate-900"
-                }`}
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* Floating Action Navigation Hub (FAB) */}
-      {!isPOSFullscreen && (
-        <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end gap-3 no-print">
-          <AnimatePresence>
-            {isFabOpen && (
-              <motion.div
-                initial={{ opacity: 0, y: 15, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 15, scale: 0.9 }}
-                transition={{ duration: 0.15 }}
-                className={`p-4 rounded-3xl border shadow-2xl w-64 md:w-72 max-h-[75vh] overflow-y-auto backdrop-blur-xl flex flex-col gap-2 ${
-                  theme === "night"
-                    ? "bg-zinc-950/95 border-zinc-850/80 shadow-zinc-950/50 text-slate-100"
-                    : "bg-white/95 border-slate-200 shadow-slate-350/30 text-slate-800"
-                }`}
-              >
-                <div className="flex items-center justify-between pb-2 mb-1 border-b border-dashed border-slate-700/20 dark:border-zinc-800">
-                  <span className="text-[10px] font-black tracking-widest uppercase text-orange-500 font-mono">Navegação Rápida</span>
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-900 border dark:border-zinc-800 font-mono">
-                    {activeUser ? activeUser.role : "Sessão"}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-1 gap-1">
-                  {NAV_MENU_ITEMS.map((item) => {
-                    const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
-                    const authorized = roleCheck.allowed;
-                    const active = activeTab.toLowerCase() === item.id;
-                    
-                    return (
-                      <button
-                        key={item.id}
-                        disabled={!authorized}
-                        onClick={() => {
-                          if (authorized) {
-                            setActiveTab(item.id.toUpperCase());
-                            setIsFabOpen(false);
-                          }
-                        }}
-                        className={`w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all group ${
-                          active
-                            ? "bg-orange-500 text-white shadow-md shadow-orange-500/25"
-                            : authorized
-                            ? theme === "night"
-                              ? "text-slate-300 hover:text-white hover:bg-zinc-900 cursor-pointer"
-                              : "text-slate-700 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
-                            : "opacity-35 cursor-not-allowed text-slate-400"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
-                            active
-                              ? "text-white"
-                              : authorized
-                              ? theme === "night"
-                                ? "text-slate-500 group-hover:text-slate-300"
-                                : "text-slate-400 group-hover:text-orange-500"
-                              : "text-slate-400"
-                          }`} />
-                          <span className="truncate">{item.label}</span>
-                        </div>
-                        
-                        {!authorized && (
-                          <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                
-                <div className="border-t border-slate-700/10 dark:border-zinc-800/80 pt-2 mt-1 flex flex-col gap-1">
-                  <button
-                    onClick={() => {
-                      setIsSidebarOpen(true);
-                      setIsFabOpen(false);
-                    }}
-                    className={`w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                      theme === "night"
-                        ? "bg-zinc-900/60 border-zinc-850 text-orange-400 hover:bg-zinc-900 hover:text-orange-300"
-                        : "bg-orange-50/40 border-orange-100 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
-                    }`}
-                  >
-                    <Menu className="w-3.5 h-3.5" />
-                    <span>Ver Painel Lateral 📋</span>
-                  </button>
-                  
-                  <button
-                    onClick={() => {
-                      setIsFabOpen(false);
-                      handleLogout();
-                    }}
-                    className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider text-red-500 hover:text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-all cursor-pointer"
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                    <span>Terminar Sessão 🔒</span>
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          
-          <button
-            onClick={() => setIsFabOpen(!isFabOpen)}
-            className={`w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all cursor-pointer border relative group ${
-              isFabOpen
-                ? "bg-slate-900 text-white border-slate-800 hover:bg-slate-800 scale-105"
-                : theme === "night"
-                ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 hover:scale-110"
-                : "bg-orange-500 hover:bg-orange-600 text-white border-orange-400 hover:scale-110"
-            }`}
-            title="Menu de Navegação Rápida"
-          >
-            {isFabOpen ? (
-              <X className="w-6 h-6 animate-in spin-in duration-200" />
-            ) : (
-              <Compass className="w-6 h-6 group-hover:rotate-45 transition-transform duration-300 animate-pulse" />
-            )}
-            
-            {/* Soft pulsing visual outer ring */}
-            {!isFabOpen && (
-              <span className="absolute -inset-0.5 rounded-full border border-orange-500 animate-ping opacity-25 pointer-events-none"></span>
-            )}
-          </button>
-        </div>
-      )}
-
-      {/* Quick Logo Config Modal */}
-      <QuickLogoModal
-        isOpen={isQuickLogoModalOpen}
-        onClose={() => setIsQuickLogoModalOpen(false)}
+        isQuickLogoModalOpen={isQuickLogoModalOpen}
+        onCloseQuickLogoModal={() => setIsQuickLogoModalOpen(false)}
         currentLogoUrl={settings.logoUrl}
-        companyName={companyDisplayName}
-        theme={theme}
+        companyDisplayName={companyDisplayName}
         onSaveLogo={(newLogoUrl) => {
           handleUpdateSettings({ logoUrl: newLogoUrl });
           handleAddAuditLog(
@@ -3284,39 +2958,28 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
             `Logotipo da empresa atualizado para '${newLogoUrl.substring(0, 40)}...' via Painel de Configuração Rápida.`
           );
         }}
-        onShowToast={showToast}
+        isSystemInfoHubOpen={isSystemInfoHubOpen}
+        onCloseSystemInfoHub={() => setIsSystemInfoHubOpen(false)}
+        isOnline={isOnline}
+        currentSystemVersion={currentSystemVersion}
+        sessionStartTime={sessionStartTimeRef.current}
+        onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
+        onOpenLogoModal={() => setIsQuickLogoModalOpen(true)}
       />
 
-      {/* Tutorial & Keyboard Shortcuts Modal */}
-      <TutorialModal
-        isOpen={isTutorialModalOpen}
-        onClose={() => setIsTutorialModalOpen(false)}
-        theme={theme}
-        onNavigateModule={(moduleKey) => setActiveTab(moduleKey)}
-      />
-
-      {/* Interactive Step-by-Step Onboarding Tutorial */}
+      {/* Onboarding Interactive Tutorial */}
       <OnboardingTutorial
         isOpen={isOnboardingTutorialOpen}
         onClose={() => setIsOnboardingTutorialOpen(false)}
-        userName={activeUser?.name || "Utilizador"}
-        theme={theme === "night" ? "night" : "day"}
         onNavigateTab={(tab) => setActiveTab(tab)}
+        userName={activeUser?.name || "Operador"}
+        theme={theme === "night" ? "night" : "day"}
       />
 
-      {/* Unified System Info Hub Modal */}
-      <SystemInfoHub
-        isOpen={isSystemInfoHubOpen}
-        onClose={() => setIsSystemInfoHubOpen(false)}
-        isOnline={isOnline}
-        companyName={companyDisplayName}
-        logoUrl={settings.logoUrl}
-        version={currentSystemVersion}
-        sessionSeconds={Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)}
-        activeUser={activeUser}
-        onSwitchUser={() => setIsUserSwitchModalOpen(true)}
-        onOpenLogoModal={() => setIsQuickLogoModalOpen(true)}
-        onOpenTutorial={() => setIsTutorialModalOpen(true)}
+      {/* Global Toast Notifications Container */}
+      <ToastContainer
+        toasts={toasts}
+        onRemoveToast={removeToast}
         theme={theme}
       />
     </div>

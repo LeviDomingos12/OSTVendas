@@ -101,7 +101,7 @@ export function processDigitalPaymentMock(
   const isValidPhone = phoneOrAccount.length >= 9;
 
   return {
-    transactionId: `TX_${provider}_${Date.now()}`,
+    transactionId: `TX_${provider}_${generateUUID().slice(0, 8).toUpperCase()}`,
     provider,
     amount,
     status: isValidPhone && amount > 0 ? "SUCCESS" : "FAILED",
@@ -119,7 +119,7 @@ export interface BackupSnapshot {
   transactionsCount: number;
 }
 
-export function validateDatabaseBackupSnapshot(payload: any): {
+export function validateDatabaseBackupSnapshot(payload: unknown): {
   valid: boolean;
   errors: string[];
 } {
@@ -129,16 +129,18 @@ export function validateDatabaseBackupSnapshot(payload: any): {
     return { valid: false, errors: ["Payload de backup inválido ou vazio."] };
   }
 
-  if (!Array.isArray(payload.products)) {
+  const p = payload as Record<string, unknown>;
+
+  if (!Array.isArray(p.products)) {
     errors.push("Array de produtos ausente ou corrompido.");
   }
-  if (!Array.isArray(payload.customers)) {
+  if (!Array.isArray(p.customers)) {
     errors.push("Array de clientes ausente ou corrompido.");
   }
-  if (!Array.isArray(payload.transactions)) {
+  if (!Array.isArray(p.transactions)) {
     errors.push("Array de transações ausente ou corrompido.");
   }
-  if (!payload.settings) {
+  if (!p.settings) {
     errors.push("Configurações do sistema ausentes.");
   }
 

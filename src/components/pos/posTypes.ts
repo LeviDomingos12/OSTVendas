@@ -22,7 +22,6 @@ export interface POSModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
-  onTriggerPanic?: () => void;
 }
 
 export interface SuspendedCartRecord {
