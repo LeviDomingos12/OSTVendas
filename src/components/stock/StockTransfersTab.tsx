@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ArrowLeftRight, CheckCircle2, Building2, Package, Calendar } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, Calendar } from "lucide-react";
 import { Product, SystemSettings, StockTransfer } from "../../types";
 import { generateEntityId } from "../../lib/deterministic";
 
@@ -20,9 +20,9 @@ export const StockTransfersTab: React.FC<StockTransfersTabProps> = ({
   onShowToast,
   activeUsername
 }) => {
-  const branches = settings?.branches || [
-    { id: "central", name: "Loja Principal / Sede", address: "Av. 24 de Julho, Maputo" },
-    { id: "filial_matola", name: "Filial Matola", address: "Av. da Namaacha, Matola" }
+  const branches = settings?.branches && settings.branches.length > 0 ? settings.branches : [
+    { id: "central", name: settings?.companyName || "Loja Principal / Sede", address: settings?.storeAddress || settings?.companyAddress || "Indisponível" },
+    { id: "filial", name: "Filial", address: "Indisponível" }
   ];
 
   const [originBranchId, setOriginBranchId] = useState(branches[0]?.id || "central");

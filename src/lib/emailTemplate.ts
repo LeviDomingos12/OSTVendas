@@ -1,18 +1,9 @@
-import { Transaction } from "../types";
-
-export interface InvoiceEmailItem {
-  name?: string;
-  productName?: string;
-  quantity: number;
-  price: number;
-}
-
-export const generateInvoiceEmailHtml = (transaction: Transaction, companyName: string = "OST COMÉRCIO CENTRAL") => {
+export const generateInvoiceEmailHtml = (transaction: any, companyName: string = "Indisponível") => {
   const invoiceNumber = transaction.invoiceNumber;
   const customerName = transaction.customerName || "Consumidor Geral";
   const date = new Date(transaction.timestamp).toLocaleString();
-  const total = (transaction.grandTotal || 0).toLocaleString();
-  const items = (transaction.items || []) as unknown as InvoiceEmailItem[];
+  const total = transaction.grandTotal.toLocaleString();
+  const items = transaction.items || [];
 
   return `
     <!DOCTYPE html>
@@ -66,12 +57,12 @@ export const generateInvoiceEmailHtml = (transaction: Transaction, companyName: 
             </tr>
           </thead>
           <tbody>
-            ${items.map((item: InvoiceEmailItem) => `
+            ${items.map((item: any) => `
               <tr>
-                <td>${item.name || item.productName || "Item"}</td>
+                <td>${item.name}</td>
                 <td class="text-right">${item.quantity}</td>
-                <td class="text-right">${(item.price || 0).toLocaleString()} MT</td>
-                <td class="text-right">${((item.quantity || 0) * (item.price || 0)).toLocaleString()} MT</td>
+                <td class="text-right">${item.price.toLocaleString()} MT</td>
+                <td class="text-right">${(item.quantity * item.price).toLocaleString()} MT</td>
               </tr>
             `).join('')}
             ${items.length === 0 ? `
@@ -90,7 +81,7 @@ export const generateInvoiceEmailHtml = (transaction: Transaction, companyName: 
             </tr>
             <tr>
               <td>Desconto</td>
-              <td style="text-align: right">-${(transaction.discountTotal || 0).toLocaleString()} MT</td>
+              <td style="text-align: right">-${transaction.discount.toLocaleString()} MT</td>
             </tr>
             <tr>
               <td>IVA (16%)</td>

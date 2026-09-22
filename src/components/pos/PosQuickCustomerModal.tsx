@@ -32,9 +32,9 @@ export const PosQuickCustomerModal: React.FC<PosQuickCustomerModalProps> = ({
     const newCust: Customer = {
       id: generateEntityId("cust"),
       name: name.trim(),
-      phone: phone.trim() || "Sem Telemóvel",
-      email: `${name.trim().toLowerCase().replace(/\s+/g, "")}@gmail.com`,
-      address: "Maputo, Moçambique",
+      phone: phone.trim() || "",
+      email: "",
+      address: "Indisponível",
       nuit: nuit.trim() || "",
       totalSpent: 0,
       purchaseCount: 0,

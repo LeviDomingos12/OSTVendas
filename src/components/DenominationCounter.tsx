@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { Coins, Plus, Minus, RotateCcw, Sparkles } from "lucide-react";
+import { Coins, Plus, Minus, RotateCcw } from "lucide-react";
 
 export interface Denomination {
   value: number;

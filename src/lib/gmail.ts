@@ -1,29 +1,37 @@
 import { getSupabaseClient } from "./supabase";
 import { authenticatedFetch } from "./apiClient";
-import { generateUUID } from "./deterministic";
 
+/**
+ * Obtém o token de acesso Google de forma estritamente efêmera da sessão em memória do Supabase Auth.
+ * 
+ * GARANTIA DE SEGURANÇA:
+ * - google_access_token NUNCA é armazenado no localStorage ou sessionStorage.
+ * - Credenciais e tokens temporários não são gravados em disco nem persistidos.
+ * - Limpa proativamente qualquer chave legada residual que possa ter existido no storage do cliente.
+ */
 export const getGoogleAccessToken = async (): Promise<string | null> => {
-  // Elimina resíduos inseguros de tokens em localStorage caso existam
-  if (typeof window !== "undefined" && typeof window.localStorage !== "undefined") {
-    try {
+  // Clear any insecure legacy google_access_token or variants from client storages
+  try {
+    if (typeof localStorage !== "undefined") {
       localStorage.removeItem("google_access_token");
-    } catch {}
-  }
+      localStorage.removeItem("google_token");
+      localStorage.removeItem("gmail_token");
+      localStorage.removeItem("provider_token");
+    }
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem("google_access_token");
+      sessionStorage.removeItem("google_token");
+      sessionStorage.removeItem("gmail_token");
+      sessionStorage.removeItem("provider_token");
+    }
+  } catch {}
 
-  // 1. Prioriza token da sessão ativa do Supabase
   const client = getSupabaseClient();
   if (client) {
     const { data: { session } } = await client.auth.getSession();
     if (session?.provider_token) return session.provider_token;
     if (session?.access_token) return session.access_token;
   }
-
-  // 2. Fallback somente em memória de sessão temporária (sessionStorage volátil, nunca persistente)
-  if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
-    const token = window.sessionStorage.getItem("google_access_token");
-    if (token) return token;
-  }
-
   return null;
 };
 
@@ -67,7 +75,7 @@ export const sendEmail = async ({ to, subject, body, isHtml = true, attachments 
       let emailContent = "";
 
       if (attachments && attachments.length > 0) {
-        const boundary = `----=_NextPart_${generateUUID().replace(/-/g, "")}`;
+        const boundary = "----=_NextPart_" + Math.random().toString(36).substring(2);
         emailContent += `To: ${to}\r\n`;
         emailContent += `Subject: ${subject}\r\n`;
         emailContent += `MIME-Version: 1.0\r\n`;

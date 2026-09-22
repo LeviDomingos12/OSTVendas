@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { SubscriptionPlan, SystemSettings } from "../types";
-import { generateUUID } from "../lib/deterministic";
 
 // ==========================================
 // Phase 9: Settings, Multi-Currency, Gateways & SaaS Plans
@@ -101,11 +100,11 @@ export function processDigitalPaymentMock(
   const isValidPhone = phoneOrAccount.length >= 9;
 
   return {
-    transactionId: `TX_${provider}_${generateUUID().slice(0, 8).toUpperCase()}`,
+    transactionId: `TX_${provider}_${Date.now()}`,
     provider,
     amount,
     status: isValidPhone && amount > 0 ? "SUCCESS" : "FAILED",
-    reference: `REF_${generateUUID().slice(0, 6).toUpperCase()}`,
+    reference: `REF_${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
     timestamp: new Date().toISOString()
   };
 }
@@ -119,7 +118,7 @@ export interface BackupSnapshot {
   transactionsCount: number;
 }
 
-export function validateDatabaseBackupSnapshot(payload: unknown): {
+export function validateDatabaseBackupSnapshot(payload: any): {
   valid: boolean;
   errors: string[];
 } {
@@ -129,18 +128,16 @@ export function validateDatabaseBackupSnapshot(payload: unknown): {
     return { valid: false, errors: ["Payload de backup inválido ou vazio."] };
   }
 
-  const p = payload as Record<string, unknown>;
-
-  if (!Array.isArray(p.products)) {
+  if (!Array.isArray(payload.products)) {
     errors.push("Array de produtos ausente ou corrompido.");
   }
-  if (!Array.isArray(p.customers)) {
+  if (!Array.isArray(payload.customers)) {
     errors.push("Array de clientes ausente ou corrompido.");
   }
-  if (!Array.isArray(p.transactions)) {
+  if (!Array.isArray(payload.transactions)) {
     errors.push("Array de transações ausente ou corrompido.");
   }
-  if (!p.settings) {
+  if (!payload.settings) {
     errors.push("Configurações do sistema ausentes.");
   }
 

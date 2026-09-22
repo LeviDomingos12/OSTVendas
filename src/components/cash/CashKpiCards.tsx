@@ -1,13 +1,6 @@
 import React from "react";
 import { 
-  PiggyBank, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
   Coins, 
-  ShieldCheck, 
-  AlertTriangle, 
-  CheckCircle2, 
-  Smartphone, 
   Receipt,
   Scale,
   Edit3

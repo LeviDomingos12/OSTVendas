@@ -3,27 +3,17 @@ import {
   Search, 
   Filter, 
   Calendar, 
-  ArrowUpRight, 
-  ArrowDownLeft, 
-  TrendingDown, 
-  RotateCcw, 
-  DollarSign, 
-  Coins, 
   User, 
-  Building2, 
   FileSpreadsheet, 
   FileText,
   Info,
   X,
   ShieldCheck,
-  Monitor,
-  Tag,
-  Receipt
+  Monitor
 } from "lucide-react";
-import { CashFlowEntry, Transaction } from "../../types";
 
 interface CashbookLedgerProps {
-  entries: CashFlowEntry[];
+  entries: any[];
   startDate: string;
   endDate: string;
   onStartDateChange: (val: string) => void;
@@ -47,7 +37,7 @@ export const CashbookLedger: React.FC<CashbookLedgerProps> = ({
   const [filterType, setFilterType] = useState<string>("TODOS");
   const [selectedTerminal, setSelectedTerminal] = useState<string>("TODOS");
   const [selectedOperator, setSelectedOperator] = useState<string>("TODOS");
-  const [selectedEntry, setSelectedEntry] = useState<CashFlowEntry | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
 
   // Extract unique operators and terminals
   const availableOperators = useMemo(() => {

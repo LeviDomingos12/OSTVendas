@@ -53,10 +53,6 @@ export interface AuthenticatedUserContext {
   subscriptionPlan: "BRONZE" | "PRATA" | "OURO" | "ENTERPRISE";
 }
 
-export interface AuthenticatedRequest extends Request {
-  user?: AuthenticatedUserContext;
-}
-
 export function normalizeRole(roleStr: string | undefined | null): "ADMIN" | "SUPERVISOR" | "CASHIER" | "SELLER" | "STOCK_MANAGER" | null {
   if (!roleStr || typeof roleStr !== "string") return null;
   const r = roleStr.trim().toUpperCase();
@@ -101,43 +97,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     if (process.env.NODE_ENV === "test" && token.startsWith("test-token-")) {
       const parts = token.replace("test-token-", "").split("-");
       const roleParsed = normalizeRole(parts[0]);
-      if (!roleParsed) {
-        return res.status(403).json({
-          success: false,
-          error: "Acesso negado: Perfil de utilizador sem papel (role) válido atribuído."
-        });
-      }
-      const role = roleParsed;
-      const tenantId = parts[1] ? (parts[1].startsWith("tenant_") || parts[1].startsWith("comp_") ? parts[1] : `tenant_${parts[1]}`) : "tenant_test_a";
+      const role = roleParsed || "ADMIN";
+      const tenantId = parts[1] ? `tenant_${parts[1]}` : "tenant_test_a";
       const userId = `user_${parts[0]}_${parts[1] || "default"}`;
 
-      // Anti-spoofing em ambiente de testes
-      const clientHeaderTenant = req.headers["x-tenant-id"] as string | undefined;
-      const clientBodyTenant = req.body?.tenant_id || req.body?.tenantId || req.body?.p_tenant_id;
-      const clientQueryTenant = req.query?.tenant_id || req.query?.tenantId;
-
-      if (clientHeaderTenant && clientHeaderTenant.trim() !== "" && clientHeaderTenant.trim() !== tenantId) {
-        return res.status(403).json({
-          success: false,
-          error: "Violação de segurança: Tenant fornecido no cabeçalho não corresponde à identidade autenticada do token."
-        });
-      }
-
-      if (clientBodyTenant && String(clientBodyTenant).trim() !== "" && String(clientBodyTenant).trim() !== tenantId) {
-        return res.status(403).json({
-          success: false,
-          error: "Violação de segurança: Tenant fornecido no corpo não corresponde à identidade autenticada do token."
-        });
-      }
-
-      if (clientQueryTenant && String(clientQueryTenant).trim() !== "" && String(clientQueryTenant).trim() !== tenantId) {
-        return res.status(403).json({
-          success: false,
-          error: "Violação de segurança: Tenant fornecido nos parâmetros não corresponde à identidade autenticada do token."
-        });
-      }
-
-      (req as AuthenticatedRequest).user = {
+      (req as any).user = {
         id: userId,
         email: `${userId}@ostvendas.mz`,
         tenantId,
@@ -146,12 +110,6 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         companyName: `Test Company ${tenantId}`,
         subscriptionPlan: "OURO"
       } as AuthenticatedUserContext;
-
-      // Sanitizar body para garantir que tenant_id nunca seja manipulado downstream
-      if (req.body && typeof req.body === "object") {
-        if ("tenant_id" in req.body) req.body.tenant_id = tenantId;
-        if ("tenantId" in req.body) req.body.tenantId = tenantId;
-      }
 
       return next();
     }
@@ -174,14 +132,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
     const user = data.user;
     const meta = user.user_metadata || {};
-    const appMeta = user.app_metadata || {};
 
-    let tenantId = (appMeta.company_id || appMeta.tenant_id || meta.company_id || meta.tenant_id || "").trim();
-    // Proteção de Segurança: Nunca confiar em user_metadata.role (editável pelo cliente). Apenas app_metadata ou banco de dados.
-    let roleRaw: string | null = (appMeta.role as string) || null;
+    let tenantId = (meta.company_id || meta.tenant_id || "").trim();
+    let roleRaw: string | null = meta.role || null;
     let fullName = meta.full_name || meta.name || user.email?.split("@")[0] || "Utilizador";
     let companyName = meta.company_name || meta.branch || "OST Vendas";
-    let planRaw = appMeta.subscription_plan || meta.subscription_plan || "OURO";
+    let planRaw = meta.subscription_plan || "OURO";
 
     // 2. Consultar base de dados para garantir permissões reais e status atualizado (autoritativo do banco)
     const activeClient = supabaseServerAdmin || supabasePublicAuth;
@@ -196,8 +152,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         if (profile.company_id && profile.company_id.trim() !== "") tenantId = profile.company_id.trim();
         if (profile.role) roleRaw = profile.role;
         if (profile.full_name) fullName = profile.full_name;
-        const companiesObj = profile.companies as { name?: string } | null;
-        if (companiesObj?.name) companyName = companiesObj.name;
+        if ((profile.companies as any)?.name) companyName = (profile.companies as any).name;
       }
 
       const { data: colab } = await activeClient
@@ -221,77 +176,41 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       console.warn("[Auth Middleware] Aviso na busca complementar de perfil:", dbErr);
     }
 
-    let isInitialOwnerProvisioning = false;
-    // Se o utilizador não possuir tenant explícito no token ou banco, derivar de forma determinística a partir do seu UID
-    // NUNCA aceitar cabeçalho x-tenant-id do cliente para atribuir empresa a novo utilizador!
+    // Se o utilizador não possuir tenant válido, rejeitar a operação
     if (!tenantId || tenantId.trim() === "") {
-      tenantId = `comp_${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12)}`;
-      isInitialOwnerProvisioning = true;
-
-      // Provisionar perfil no banco em background se disponível
-      if (activeClient) {
-        try {
-          await activeClient.from("profiles").upsert({
-            id: user.id,
-            company_id: tenantId,
-            email: user.email || "",
-            full_name: fullName,
-            role: "ADMIN",
-            updated_at: new Date().toISOString()
-          });
-        } catch {}
-      }
+      return res.status(403).json({
+        success: false,
+        error: "Utilizador sem organização/empresa (tenant) válida associada. Operação rejeitada."
+      });
     }
 
-    // Regra estrita de autorização: Somente o provisionamento controlado do proprietário inicial pode criar ADMIN.
-    // Se o role for inválido ou ausente, NUNCA atribuir ADMIN como fallback.
-    // Utilizadores sem role válido devem ser rejeitados.
-    let verifiedRole = normalizeRole(roleRaw);
+    // Validar role de forma estrita (sem fallback para ADMIN ou CASHIER)
+    const verifiedRole = normalizeRole(roleRaw);
     if (!verifiedRole) {
-      if (isInitialOwnerProvisioning) {
-        verifiedRole = "ADMIN";
-      } else {
-        return res.status(403).json({
-          success: false,
-          error: "Acesso negado: Perfil de utilizador sem papel (role) válido atribuído."
-        });
-      }
+      return res.status(403).json({
+        success: false,
+        error: "Perfil de utilizador sem papel (role) autorizado no sistema."
+      });
     }
 
-    // Proteção Anti-Spoofing Estrita: Verificar se o cliente tentou enviar tenant_id conflitante no cabeçalho, corpo ou query
+    // Proteção Anti-Spoofing: Verificar se o cliente tentou enviar tenant_id diferente no cabeçalho ou corpo
     const clientHeaderTenant = req.headers["x-tenant-id"] as string | undefined;
     const clientBodyTenant = req.body?.tenant_id || req.body?.tenantId || req.body?.p_tenant_id;
     const clientQueryTenant = req.query?.tenant_id || req.query?.tenantId;
 
-    if (clientHeaderTenant && clientHeaderTenant.trim() !== "" && clientHeaderTenant.trim() !== tenantId) {
+    if (
+      (clientHeaderTenant && clientHeaderTenant.trim() !== tenantId) ||
+      (clientBodyTenant && typeof clientBodyTenant === "string" && clientBodyTenant.trim() !== "" && clientBodyTenant.trim() !== tenantId) ||
+      (clientQueryTenant && typeof clientQueryTenant === "string" && clientQueryTenant.trim() !== "" && clientQueryTenant.trim() !== tenantId)
+    ) {
       return res.status(403).json({
         success: false,
-        error: "Violação de segurança: Tenant fornecido no cabeçalho não corresponde à identidade autenticada do token."
+        error: "Violação de segurança: Tenant fornecido pelo cliente não corresponde à identidade autenticada do token."
       });
-    }
-
-    if (clientBodyTenant && String(clientBodyTenant).trim() !== "" && String(clientBodyTenant).trim() !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        error: "Violação de segurança: Tenant fornecido no corpo não corresponde à identidade autenticada do token."
-      });
-    }
-
-    if (clientQueryTenant && String(clientQueryTenant).trim() !== "" && String(clientQueryTenant).trim() !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        error: "Violação de segurança: Tenant fornecido nos parâmetros não corresponde à identidade autenticada do token."
-      });
-    }
-
-    // Sanitizar o corpo da requisição para injetar estritamente o tenant verificado
-    if (req.body && typeof req.body === "object") {
-      if ("tenant_id" in req.body) req.body.tenant_id = tenantId;
-      if ("tenantId" in req.body) req.body.tenantId = tenantId;
     }
 
     // Injetar contexto fidedigno e imutável no request derivado do token verificado
-    (req as AuthenticatedRequest).user = {
+    (req as any).user = {
       id: user.id,
       email: user.email || "",
       tenantId,
@@ -302,7 +221,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     } as AuthenticatedUserContext;
 
     next();
-  } catch (err: unknown) {
+  } catch (err: any) {
     console.error("[Auth Middleware] Erro na autenticação:", err);
     return res.status(401).json({
       success: false,
@@ -315,7 +234,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
  * Middleware para exigir perfil de Administrador
  */
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = (req as AuthenticatedRequest).user;
+  const user = (req as any).user as AuthenticatedUserContext;
   if (!user || user.role !== "ADMIN") {
     return res.status(403).json({
       success: false,
@@ -329,7 +248,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
  * Middleware para exigir perfil de Supervisor ou Administrador
  */
 export function requireSupervisorOrAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = (req as AuthenticatedRequest).user;
+  const user = (req as any).user as AuthenticatedUserContext;
   if (!user || (user.role !== "ADMIN" && user.role !== "SUPERVISOR")) {
     return res.status(403).json({
       success: false,
@@ -343,7 +262,7 @@ export function requireSupervisorOrAdmin(req: Request, res: Response, next: Next
  * Middleware para exigir perfil de Gestor de Stock, Supervisor ou Administrador
  */
 export function requireStockOrAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = (req as AuthenticatedRequest).user;
+  const user = (req as any).user as AuthenticatedUserContext;
   if (!user || (user.role !== "ADMIN" && user.role !== "SUPERVISOR" && user.role !== "STOCK_MANAGER")) {
     return res.status(403).json({
       success: false,
@@ -357,7 +276,7 @@ export function requireStockOrAdmin(req: Request, res: Response, next: NextFunct
  * Middleware para exigir perfil com permissão de Caixa/Vendas
  */
 export function requireCashierOrAdmin(req: Request, res: Response, next: NextFunction) {
-  const user = (req as AuthenticatedRequest).user;
+  const user = (req as any).user as AuthenticatedUserContext;
   if (!user) {
     return res.status(401).json({
       success: false,

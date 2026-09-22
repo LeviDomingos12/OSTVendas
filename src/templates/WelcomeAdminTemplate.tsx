@@ -24,8 +24,8 @@ export function renderWelcomeAdminHtml(props: WelcomeAdminTemplateProps): string
     password,
     role = "Administrador do Sistema",
     branchName = "Sede Principal",
-    loginUrl = "https://ais-dev-uuyegxgvrlue6jzznxo63t-994236815891.europe-west2.run.app",
-    adminCopyEmail = "levidomingos12@gmail.com",
+    loginUrl = typeof window !== "undefined" ? window.location.origin : "#",
+    adminCopyEmail = "",
     createdAt = new Date().toLocaleString("pt-PT")
   } = props;
 
@@ -162,7 +162,7 @@ export const WelcomeAdminTemplate: React.FC<WelcomeAdminTemplateProps> = (props)
     role = "Administrador do Sistema",
     branchName = "Sede Principal",
     loginUrl = "#",
-    adminCopyEmail = "levidomingos12@gmail.com",
+    adminCopyEmail = "",
     createdAt = new Date().toLocaleString("pt-PT")
   } = props;
 

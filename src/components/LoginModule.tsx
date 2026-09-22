@@ -7,17 +7,13 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   ChevronRight, 
-  RefreshCw, 
   AlertTriangle, 
   Building2, 
   QrCode, 
   Monitor, 
-  Sparkles, 
   Fingerprint, 
-  Keyboard, 
   Check,
   Mail,
-  UserPlus,
   ArrowLeft,
   Chrome,
   Crown,
@@ -25,9 +21,8 @@ import {
   Award,
   Phone
 } from "lucide-react";
-import { Employee, SystemSettings, SubscriptionPlan, Branch } from "../types";
+import { Employee, SystemSettings, SubscriptionPlan } from "../types";
 import { verifySecurityPin } from "../lib/security";
-import { getSupabaseClient } from "../lib/supabase";
 import { SupabaseSyncService } from "../services/supabaseService";
 import { sendEmail } from "../lib/gmail";
 import { renderWelcomeAdminHtml } from "../templates/WelcomeAdminTemplate";
@@ -41,7 +36,7 @@ interface LoginModuleProps {
   employees: Employee[];
   companyName: string;
   logoUrl?: string;
-  branches?: Branch[];
+  branches?: any[];
   onLoginSuccess: (user: Employee, company: string) => void;
   onShowToast: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   onAddAuditLog?: (action: string, module: string, details: string) => void;
@@ -84,10 +79,7 @@ function LoginModule({
   // PIN Form State
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(employees[0]?.id || "");
   const [pin, setPin] = useState("");
-  const [requireOperatorPin, setRequireOperatorPin] = useState<boolean>(() => {
-    const saved = localStorage.getItem("erp_require_operator_pin");
-    return saved !== "false"; // Defaults to true
-  });
+  const [requireOperatorPin, setRequireOperatorPin] = useState<boolean>(true);
   const [showOperatorPassword, setShowOperatorPassword] = useState(false);
 
   // Caps Lock State
@@ -202,6 +194,9 @@ function LoginModule({
   // 1. Supabase Auth - Sign-in Handler with E-mail Hint
   const handleRealSignIn = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("erp_user_logged_out");
+    }
     setErrorMessage(null);
     setSuccessMessage(null);
 
@@ -220,7 +215,7 @@ function LoginModule({
         setLoadingState("CONNECTING");
         setLoadingProgress(45);
 
-        const result = await signInWithEmail(inputEmail, password);
+        const result: any = await signInWithEmail(inputEmail, password);
         if (result && result.user) {
           const { employee, companyName: userCompany } = await SupabaseSyncService.syncUserProfileFromAuth(result.user, employees);
 
@@ -259,7 +254,7 @@ function LoginModule({
       setLoadingState("IDLE");
       setLoadingProgress(0);
       setErrorMessage("Por favor, introduza a palavra-passe para aceder.");
-    } catch (err) {
+    } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
       const msg = err.message?.includes("Invalid login credentials")
@@ -347,7 +342,7 @@ function LoginModule({
       setSignupContact("");
       setSignupPassword("");
       setSignupConfirmPassword("");
-    } catch (err) {
+    } catch (err: any) {
       setLoadingState("IDLE");
       const translatedError = err.message?.includes("email-already-in-use") || err.message?.includes("already registered")
         ? "Este endereço de e-mail já está associado a uma conta."
@@ -465,7 +460,7 @@ function LoginModule({
       setSuccessMessage("Link de recuperação enviado! O administrador também foi notificado sobre o seu pedido.");
       onShowToast("Pedido de recuperação e e-mail enviados com sucesso.", "success");
       setRecoveryEmail("");
-    } catch (err) {
+    } catch (err: any) {
       setErrorMessage(`❌ Erro na recuperação: ${err.message}`);
       onShowToast("Erro ao solicitar recuperação.", "error");
     }
@@ -473,6 +468,9 @@ function LoginModule({
 
   // 4. Autenticação Oficial com Google OAuth (Via Supabase Auth / Google Identity)
   const handleGoogleSignIn = async () => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("erp_user_logged_out");
+    }
     setErrorMessage(null);
     setSuccessMessage(null);
     setLoadingState("AUTHENTICATING");
@@ -491,7 +489,7 @@ function LoginModule({
       setLoadingState("CONNECTING");
       setLoadingProgress(60);
       onShowToast("A conectar aos servidores seguros da Google...", "info");
-    } catch (err) {
+    } catch (err: any) {
       setLoadingState("IDLE");
       setLoadingProgress(0);
       setErrorMessage(`Erro ao iniciar autenticação Google: ${err.message || err}`);
@@ -506,6 +504,9 @@ function LoginModule({
 
   // PIN / Credential Login para Operador de Caixa e Loja
   const handleOperatorLogin = async (pinVal: string) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("erp_user_logged_out");
+    }
     setErrorMessage(null);
     if (!pinVal.trim()) {
       setErrorMessage("Por favor, introduza a palavra-passe ou PIN do operador.");
@@ -530,7 +531,7 @@ function LoginModule({
     // Se o colaborador possui email registrado, validar via Supabase Auth se aplicável
     if (match.email) {
       try {
-        const res = await signInWithEmail(match.email, pinVal.trim());
+        const res: any = await signInWithEmail(match.email, pinVal.trim());
         if (res && res.user) {
           triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
           return;
@@ -581,13 +582,16 @@ function LoginModule({
         onAddAuditLog("Login Biométrico WebAuthn", "AUTENTICAÇÃO", `Login biométrico efetuado com sucesso pelo operador ${match.name}.`);
       }
       triggerLoadingPipeline(match, match.companyId || companyName || "OST Comércio Geral");
-    } catch (err) {
+    } catch (err: any) {
       setErrorMessage("Erro na validação biométrica: " + (err.message || "Tente novamente."));
     }
   };
 
   // QR Code Login via credencial autorizada
   const handleQrCodeLogin = () => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem("erp_user_logged_out");
+    }
     setErrorMessage(null);
     const authorizedEmp = employees.find(emp => emp.status === "ACTIVE" && emp.role === "ADMIN");
     if (authorizedEmp) {
@@ -1337,7 +1341,7 @@ function LoginModule({
 
                             onShowToast(`Solicitação enviada ao administrador para ${currentEmp.name}!`, "success");
                             setSuccessMessage(`Pedido de recuperação para ${currentEmp.name} enviado ao Administrador.`);
-                          } catch (err) {
+                          } catch (err: any) {
                             onShowToast("Erro ao solicitar recuperação.", "error");
                           }
                         }}

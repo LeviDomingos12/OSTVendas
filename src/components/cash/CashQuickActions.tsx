@@ -1,6 +1,5 @@
 import React from "react";
 import { 
-  Plus, 
   Lock, 
   Unlock, 
   ArrowDownLeft, 
@@ -8,11 +7,8 @@ import {
   Coins, 
   FileText, 
   FileSpreadsheet, 
-  ShieldAlert, 
-  DollarSign,
-  TrendingDown,
-  RotateCcw,
-  AlertOctagon
+  TrendingDown, 
+  RotateCcw
 } from "lucide-react";
 
 interface CashQuickActionsProps {

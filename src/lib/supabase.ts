@@ -9,7 +9,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 // Resolução segura de variáveis de ambiente sem secrets ou fallbacks hardcoded
-const env = (import.meta as { env?: Record<string, string | undefined> }).env || {};
+const env = (import.meta as any).env || {};
 export const SUPABASE_URL: string = env.VITE_SUPABASE_URL || "";
 export const SUPABASE_ANON_KEY: string = env.VITE_SUPABASE_ANON_KEY || "";
 

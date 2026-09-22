@@ -81,8 +81,8 @@ export const DashboardSalesTab: React.FC<DashboardSalesTabProps> = ({
                 <XAxis dataKey="dayLabel" stroke="#94a3b8" tick={{ fontSize: 10 }} />
                 <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} />
                 <Tooltip 
-                  formatter={(value: unknown, name: string) => [
-                    name === "totalSales" ? `${Number(value || 0).toLocaleString()} ${currency}` : `${value} vendas`,
+                  formatter={(value: any, name: string) => [
+                    name === "totalSales" ? `${Number(value).toLocaleString()} ${currency}` : `${value} vendas`,
                     name === "totalSales" ? "Volume de Vendas" : "Transações"
                   ]}
                   contentStyle={{ backgroundColor: "#0f172a", borderRadius: "12px", border: "none", color: "#fff", fontSize: "11px" }}

@@ -1,4 +1,4 @@
-import { Product, UserRole, Transaction, SystemSettings, StockTransfer } from "../../types";
+import { Product, UserRole, Transaction, SystemSettings } from "../../types";
 
 export interface StockModuleProps {
   products: Product[];

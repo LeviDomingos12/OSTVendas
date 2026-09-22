@@ -10,7 +10,7 @@ export interface POSModuleProps {
   transactions: Transaction[];
   activeUsername: string;
   settings: SystemSettings;
-  onCompleteSale: (tx: Transaction) => void;
+  onCompleteSale: (tx: Transaction) => Promise<boolean | void> | void;
   onReturnSale?: (
     tx: Transaction,
     reason: string,
@@ -22,6 +22,7 @@ export interface POSModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
+  onTriggerPanic?: () => void;
 }
 
 export interface SuspendedCartRecord {

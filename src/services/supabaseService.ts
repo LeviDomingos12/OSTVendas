@@ -1,114 +1,2534 @@
 /**
  * @file supabaseService.ts
- * Fachada Oficial de Backend, Diagnósticos, Autenticação e Persistência Relacional (Supabase PostgreSQL).
- *
- * Arquitetura Modular por Domínios:
- * - supabaseConfigService: Configuração, conexão, testes de latência e validação de sessão
- * - supabaseAuthService: Autenticação de utilizadores, gestão de sessões e mapeamento de perfis
- * - supabaseProductService: Catálogo de artigos, inventário e reabastecimento atómico
- * - supabaseCustomerService: Clientes, contas correntes e fidelidade
- * - supabaseTransactionService: Vendas, liquidação de dívidas e operações atómicas de POS
- * - supabaseCashService: Fluxo de caixa diário, balancetes e turnos
- * - supabaseEmployeeService: Gestão de colaboradores, PINs criptográficos e recuperação
- * - supabaseAuditSettingsService: Logs imutáveis de auditoria, definições e backups na Cloud
+ * Driver Oficial de Backend, Diagnósticos, Autenticação e Persistência Relacional (Supabase PostgreSQL).
+ * 
+ * Arquitetura:
+ * OST Vendas Frontend -> Supabase Auth -> Supabase Client -> PostgreSQL + RLS + RPCs -> Supabase Storage
  */
 
-export * from "./supabase/supabaseConfigService";
-export * from "./supabase/supabaseAuthService";
-export * from "./supabase/supabaseProductService";
-export * from "./supabase/supabaseCustomerService";
-export * from "./supabase/supabaseTransactionService";
-export * from "./supabase/supabaseCashService";
-export * from "./supabase/supabaseEmployeeService";
-export * from "./supabase/supabaseAuditSettingsService";
-
+import { createClient, SupabaseClient, Session, User } from "@supabase/supabase-js";
+import { supabase as singletonClient } from "../lib/supabase";
 import { 
-  getSupabaseConfig, 
-  saveSupabaseConfig, 
-  getSupabaseClient, 
-  measureSupabaseLatency, 
-  validateSupabaseSession, 
-  testSupabaseConnection 
-} from "./supabase/supabaseConfigService";
+  Product, 
+  Customer, 
+  Transaction, 
+  CashFlowEntry, 
+  Employee, 
+  AuditLog, 
+  SystemSettings, 
+  UserRole, 
+  CashClosure 
+} from "../types";
+import { generateEntityId } from "../lib/deterministic";
 
-import { SupabaseAuthService } from "./supabase/supabaseAuthService";
-import { SupabaseProductService } from "./supabase/supabaseProductService";
-import { SupabaseCustomerService } from "./supabase/supabaseCustomerService";
-import { SupabaseTransactionService } from "./supabase/supabaseTransactionService";
-import { SupabaseCashService } from "./supabase/supabaseCashService";
-import { SupabaseEmployeeService } from "./supabase/supabaseEmployeeService";
-import { SupabaseAuditSettingsService } from "./supabase/supabaseAuditSettingsService";
+export interface SupabaseConfig {
+  url: string;
+  anonKey: string;
+  enabled: boolean;
+  autoSync: boolean;
+  tenantId: string;
+}
+
+export interface LatencyResult {
+  latencyMs: number;
+  status: "optimal" | "good" | "slow" | "error";
+  message: string;
+  timestamp: string;
+}
+
+export interface SessionValidationResult {
+  isValid: boolean;
+  user: User | null;
+  session: Session | null;
+  expiresAt: string | null;
+  email: string | null;
+  role: string | null;
+  message: string;
+}
+
+export interface CloudBackupItem {
+  name: string;
+  filename: string;
+  fullPath: string;
+  size: number;
+  updated: string;
+  downloadUrl: string;
+}
+
+const STORAGE_KEY_CONFIG = "ostvendas_supabase_config";
+const DEFAULT_TENANT_ID = "ost-tenant-001";
 
 /**
- * Fachada unificada SupabaseSyncService para compatibilidade total com os módulos existentes.
+ * Obtém a configuração ativa do Supabase (lê de variáveis de ambiente ou do armazenamento local)
  */
+export function getSupabaseConfig(): SupabaseConfig {
+  const metaEnv = (import.meta as any).env || {};
+  const procEnv = typeof process !== "undefined" && process.env ? process.env : ({} as Record<string, string | undefined>);
+  const envUrl = (metaEnv.VITE_SUPABASE_URL as string) || (procEnv.VITE_SUPABASE_URL as string) || "";
+  const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY as string) || (procEnv.VITE_SUPABASE_ANON_KEY as string) || "";
+
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const stored = window.localStorage.getItem(STORAGE_KEY_CONFIG);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return {
+          url: parsed.url || envUrl,
+          anonKey: parsed.anonKey || envKey,
+          enabled: parsed.enabled ?? Boolean(envUrl && envKey),
+          autoSync: parsed.autoSync ?? true,
+          tenantId: parsed.tenantId || DEFAULT_TENANT_ID
+        };
+      }
+    }
+  } catch (e) {
+    console.error("Erro ao ler configuração do Supabase", e);
+  }
+
+  return {
+    url: envUrl,
+    anonKey: envKey,
+    enabled: Boolean(envUrl && envKey),
+    autoSync: true,
+    tenantId: DEFAULT_TENANT_ID
+  };
+}
+
+/**
+ * Salva a configuração do Supabase
+ */
+export function saveSupabaseConfig(config: Partial<SupabaseConfig>): void {
+  const current = getSupabaseConfig();
+  const updated: SupabaseConfig = { ...current, ...config };
+  if (typeof window !== "undefined" && window.localStorage) {
+    window.localStorage.setItem(STORAGE_KEY_CONFIG, JSON.stringify(updated));
+  }
+  cachedClient = null;
+}
+
+let cachedClient: SupabaseClient | null = null;
+
+/**
+ * Define explicitamente o cliente Supabase (útil para injeção de dependência e testes)
+ */
+export function setSupabaseClient(client: SupabaseClient | null): void {
+  cachedClient = client;
+}
+
+/**
+ * Obtém ou instancia o cliente Supabase de forma lazy
+ */
+export function getSupabaseClient(): SupabaseClient | null {
+  if (cachedClient) {
+    return cachedClient;
+  }
+
+  const config = getSupabaseConfig();
+  if (!config.url || !config.anonKey || !config.enabled) {
+    return singletonClient;
+  }
+
+  try {
+    cachedClient = createClient(config.url, config.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  } catch (err) {
+    console.warn("Falha ao inicializar cliente Supabase personalizado, usando singleton:", err);
+    return singletonClient;
+  }
+
+  return cachedClient || singletonClient;
+}
+
+/**
+ * Mede a latência real da rede com o Supabase (Ping em milissegundos)
+ */
+export async function measureSupabaseLatency(customUrl?: string, customKey?: string): Promise<LatencyResult> {
+  const url = customUrl || getSupabaseConfig().url;
+  const key = customKey || getSupabaseConfig().anonKey;
+
+  if (!url || !key) {
+    return {
+      latencyMs: 0,
+      status: "error",
+      message: "Credenciais do servidor de dados não configuradas.",
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  const startTime = performance.now();
+  try {
+    const client = createClient(url, key);
+    let connError: any = null;
+    for (const testTable of ["products", "produtos", "vendas"]) {
+      const { error } = await client.from(testTable).select("id").limit(1);
+      if (!error) {
+        connError = null;
+        break;
+      }
+      connError = error;
+    }
+    const endTime = performance.now();
+    const latencyMs = Math.round(endTime - startTime);
+
+    if (connError && connError.code !== "PGRST116" && connError.code !== "42P01" && connError.code !== "PGRST205") {
+      return {
+        latencyMs,
+        status: "error",
+        message: `Falha na resposta: ${connError.message}`,
+        timestamp: new Date().toISOString()
+      };
+    }
+
+    let status: "optimal" | "good" | "slow" = "optimal";
+    let message = `Excelente conexão com o Servidor Backend (${latencyMs}ms)`;
+    if (latencyMs > 350) {
+      status = "slow";
+      message = `Latência elevada (${latencyMs}ms) - Verifique a sua ligação de rede.`;
+    } else if (latencyMs > 150) {
+      status = "good";
+      message = `Boa conexão estável com o Servidor Backend (${latencyMs}ms)`;
+    }
+
+    return {
+      latencyMs,
+      status,
+      message,
+      timestamp: new Date().toISOString()
+    };
+  } catch (err: any) {
+    const endTime = performance.now();
+    return {
+      latencyMs: Math.round(endTime - startTime),
+      status: "error",
+      message: err?.message || "Sem resposta do servidor remoto.",
+      timestamp: new Date().toISOString()
+    };
+  }
+}
+
+/**
+ * Validação em tempo real da sessão do utilizador com o Supabase Auth
+ */
+export async function validateSupabaseSession(): Promise<SessionValidationResult> {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      isValid: false,
+      user: null,
+      session: null,
+      expiresAt: null,
+      email: null,
+      role: null,
+      message: "Servidor de dados inativo ou não configurado."
+    };
+  }
+
+  try {
+    const { data: { session }, error } = await client.auth.getSession();
+    if (error) {
+      return {
+        isValid: false,
+        user: null,
+        session: null,
+        expiresAt: null,
+        email: null,
+        role: null,
+        message: `Erro na sessão: ${error.message}`
+      };
+    }
+
+    if (!session || !session.user) {
+      return {
+        isValid: false,
+        user: null,
+        session: null,
+        expiresAt: null,
+        email: null,
+        role: null,
+        message: "Nenhuma sessão ativa encontrada."
+      };
+    }
+
+    return {
+      isValid: true,
+      user: session.user,
+      session,
+      expiresAt: session.expires_at ? new Date(session.expires_at * 1000).toISOString() : null,
+      email: session.user.email || null,
+      role: session.user.role || (session.user.user_metadata as any)?.role || "Utilizador Autenticado",
+      message: `Sessão ativa e válida para ${session.user.email || "Utilizador"}`
+    };
+  } catch (err: any) {
+    return {
+      isValid: false,
+      user: null,
+      session: null,
+      expiresAt: null,
+      email: null,
+      role: null,
+      message: err?.message || "Falha ao validar sessão."
+    };
+  }
+}
+
+/**
+ * Testa a conexão com o Supabase
+ */
+export async function testSupabaseConnection(url?: string, key?: string): Promise<{ success: boolean; message: string; latencyMs?: number }> {
+  const targetUrl = url || getSupabaseConfig().url;
+  const targetKey = key || getSupabaseConfig().anonKey;
+
+  if (!targetUrl || !targetKey) {
+    return { success: false, message: "URL ou Chave do Supabase não fornecidas." };
+  }
+
+  try {
+    const latency = await measureSupabaseLatency(targetUrl, targetKey);
+    if (latency.status === "error") {
+      return { success: false, message: latency.message, latencyMs: latency.latencyMs };
+    }
+    return { 
+      success: true, 
+      message: `Conexão estabelecida com sucesso! (${latency.latencyMs}ms)`, 
+      latencyMs: latency.latencyMs 
+    };
+  } catch (err: any) {
+    return { success: false, message: err.message || "Erro desconhecido ao conectar ao Supabase." };
+  }
+}
+
+/**
+ * ============================================================================
+ * SERVIÇO PRINCIPAL SUPABASE (CRUD, TRANSAÇÕES ATÓMICAS, AUTH & STORAGE)
+ * ============================================================================
+ */
+
+// Mapa de operações de venda em curso (in-flight) para prevenir duplicações concorrentes (Idempotência)
+const inFlightSaleRequests = new Map<string, Promise<{ success: boolean; error?: string; saleId?: string; invoiceNumber?: string; idempotent?: boolean }>>();
+
+/**
+ * Identifica com precisão se o erro é de TABELA/RELAÇÃO inexistente no PostgreSQL / PostgREST,
+ * sem confundir com erros de COLUNA inexistente (PGRST204).
+ */
+export function isTableMissingError(error: any): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST205" || error.code === "42P01") {
+    return true;
+  }
+  const msg = typeof error.message === "string" ? error.message.toLowerCase() : "";
+  if (
+    (msg.includes("does not exist") || msg.includes("in the schema cache") || msg.includes("could not find the table")) &&
+    !msg.includes("column")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Extrai o nome da coluna que está faltando no cache de esquemas do PostgREST (PGRST204) ou PostgreSQL (42703).
+ */
+export function extractMissingColumn(error: any): string | null {
+  if (!error || typeof error.message !== "string") return null;
+  const m1 = error.message.match(/Could not find the '([^']+)' column/i);
+  if (m1) return m1[1];
+  const m2 = error.message.match(/column "?([^"\s]+)"? of relation/i);
+  if (m2) return m2[1];
+  const m3 = error.message.match(/column "?([^"\s]+)"? does not exist/i);
+  if (m3) return m3[1];
+  return null;
+}
+
+/**
+ * Constrói o registro de produto adaptado para a tabela destino ('products' ou 'produtos'),
+ * suportando esquemas flexíveis com resiliência automática para variações de colunas.
+ */
+export function buildProductRecord(
+  table: string,
+  p: Product,
+  tenantId: string,
+  excludedCols?: Set<string>,
+  useAltPricing?: boolean
+): Record<string, any> {
+  const isEnglish = table === "products";
+  const record: Record<string, any> = {
+    id: p.id,
+    tenant_id: tenantId,
+    name: p.name,
+    code: p.code || p.id,
+    barcode: p.barcode || p.code || "",
+    category: p.category || "Geral",
+    stock: p.stock ?? 0,
+    min_stock: p.minStock ?? 0,
+    unit: (p as any).unit || "un",
+    image_url: p.image || (p as any).imageUrl || "",
+    is_active: true,
+    updated_at: new Date().toISOString()
+  };
+
+  if (p.supplier) {
+    record.supplier = p.supplier;
+  }
+  if (p.vatRate !== undefined) {
+    record.vat_rate = p.vatRate;
+  }
+
+  const sPrice = Number(p.salePrice ?? (p as any).price ?? (p as any).sale_price ?? 0);
+  const cPrice = Number(p.costPrice ?? (p as any).cost ?? (p as any).cost_price ?? 0);
+
+  if (isEnglish) {
+    if (!useAltPricing) {
+      record.price = sPrice;
+      record.cost = cPrice;
+      record.sale_price = sPrice;
+      record.cost_price = cPrice;
+    } else {
+      record.sale_price = sPrice;
+      record.cost_price = cPrice;
+      record.price = sPrice;
+      record.cost = cPrice;
+    }
+  } else {
+    record.cost_price = cPrice;
+    record.sale_price = sPrice;
+    record.cost = cPrice;
+    record.price = sPrice;
+  }
+
+  if (excludedCols && excludedCols.size > 0) {
+    for (const col of excludedCols) {
+      delete record[col];
+    }
+  }
+
+  return record;
+}
+
 export const SupabaseSyncService = {
-  // Configurações e Utilitários de Conexão
-  getConfig: getSupabaseConfig,
-  saveConfig: saveSupabaseConfig,
-  getClient: getSupabaseClient,
-  measureLatency: measureSupabaseLatency,
-  validateSession: validateSupabaseSession,
-  testConnection: testSupabaseConnection,
 
-  // Autenticação e Sessão
-  signUpWithEmail: SupabaseAuthService.signUpWithEmail,
-  signInWithEmail: SupabaseAuthService.signInWithEmail,
-  signInWithGoogle: SupabaseAuthService.signInWithGoogle,
-  recoverPassword: SupabaseAuthService.recoverPassword,
-  signOut: SupabaseAuthService.signOut,
-  mergeRecordsById: SupabaseAuthService.mergeRecordsById,
-  syncUserProfileFromAuth: SupabaseAuthService.syncUserProfileFromAuth,
-  onAuthStateChange: SupabaseAuthService.onAuthStateChange,
+  // --- AUTENTICAÇÃO SUPABASE COM VALIDAÇÃO ESTRITA DE SEGURANÇA ---
+  async signUpWithEmail(email: string, password: string, name: string, branch: string, role: string = "Administrador", plan: string = "OURO") {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { user: null, error: new Error("Servidor de autenticação Supabase não está configurado.") };
+    }
 
-  // Catálogo & Produtos
-  fetchProducts: SupabaseProductService.fetchProducts,
-  saveProduct: SupabaseProductService.saveProduct,
-  syncProducts: SupabaseProductService.syncProducts,
-  deleteProduct: SupabaseProductService.deleteProduct,
-  replenishStockAtomic: SupabaseProductService.replenishStockAtomic,
+    try {
+      const { data, error } = await client.auth.signUp({
+        email: email.trim().toLowerCase(),
+        password,
+        options: {
+          data: {
+            name: name.trim(),
+            branch: branch.trim(),
+            role,
+            subscription_plan: plan
+          }
+        }
+      });
 
-  // Clientes
-  fetchCustomers: SupabaseCustomerService.fetchCustomers,
-  saveCustomer: SupabaseCustomerService.saveCustomer,
-  syncCustomers: SupabaseCustomerService.syncCustomers,
-  deleteCustomer: SupabaseCustomerService.deleteCustomer,
+      if (error) {
+        console.warn("[Supabase Auth] Erro no signUp:", error.message);
+        return { user: null, error };
+      }
 
-  // Transações & POS
-  fetchTransactions: SupabaseTransactionService.fetchTransactions,
-  fetchRecentTransactions24h: SupabaseTransactionService.fetchRecentTransactions24h,
-  processSaleAtomic: SupabaseTransactionService.processSaleAtomic,
-  settleDebtPaymentAtomic: SupabaseTransactionService.settleDebtPaymentAtomic,
-  saveTransactionDirect: SupabaseTransactionService.saveTransactionDirect,
-  syncTransactions: SupabaseTransactionService.syncTransactions,
+      if (data && data.user) {
+        try {
+          const tenantId = getSupabaseConfig().tenantId;
+          const empRecord = {
+            id: `emp_${data.user.id.slice(0, 8)}`,
+            tenant_id: tenantId,
+            auth_uid: data.user.id,
+            name: name.trim(),
+            email: email.trim().toLowerCase(),
+            role,
+            status: "ACTIVE",
+            branch: branch.trim(),
+            subscription_plan: plan,
+            created_at: new Date().toISOString()
+          };
+          await client.from("colaboradores").upsert(empRecord, { onConflict: "email" });
+        } catch (colabErr) {
+          console.warn("[Supabase Auth] Aviso ao sincronizar colaborador:", colabErr);
+        }
+      }
 
-  // Caixa & Balancetes
-  fetchCashFlow: SupabaseCashService.fetchCashFlow,
-  saveCashFlowEntry: SupabaseCashService.saveCashFlowEntry,
-  syncCashFlow: SupabaseCashService.syncCashFlow,
-  fetchCashClosures: SupabaseCashService.fetchCashClosures,
-  saveCashClosure: SupabaseCashService.saveCashClosure,
-  syncCashClosures: SupabaseCashService.syncCashClosures,
-  fetchActiveCashShift: SupabaseCashService.fetchActiveCashShift,
-  saveActiveCashShift: SupabaseCashService.saveActiveCashShift,
+      return data;
+    } catch (err: any) {
+      console.error("[Supabase Auth] Exceção no signUpWithEmail:", err?.message);
+      return { user: null, error: err };
+    }
+  },
 
-  // Colaboradores & Segurança
-  fetchEmployees: SupabaseEmployeeService.fetchEmployees,
-  saveEmployee: SupabaseEmployeeService.saveEmployee,
-  syncEmployees: SupabaseEmployeeService.syncEmployees,
-  getRecoveryRequests: SupabaseEmployeeService.getRecoveryRequests,
-  createRecoveryRequest: SupabaseEmployeeService.createRecoveryRequest,
-  resolveRecoveryRequest: SupabaseEmployeeService.resolveRecoveryRequest,
+  async signInWithEmail(email: string, password: string) {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { user: null, error: new Error("Servidor de autenticação Supabase não está configurado.") };
+    }
 
-  // Auditoria, Definições & Backups
-  fetchAuditLogs: SupabaseAuditSettingsService.fetchAuditLogs,
-  saveAuditLog: SupabaseAuditSettingsService.saveAuditLog,
-  syncAuditLogs: SupabaseAuditSettingsService.syncAuditLogs,
-  fetchSettings: SupabaseAuditSettingsService.fetchSettings,
-  saveSettings: SupabaseAuditSettingsService.saveSettings,
-  uploadBackupToStorage: SupabaseAuditSettingsService.uploadBackupToStorage,
-  listBackupsFromStorage: SupabaseAuditSettingsService.listBackupsFromStorage,
-  deleteBackupFromStorage: SupabaseAuditSettingsService.deleteBackupFromStorage,
-  subscribeToTableChanges: SupabaseAuditSettingsService.subscribeToTableChanges,
-  syncAll: SupabaseAuditSettingsService.syncAll
+    try {
+      const { data, error } = await client.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password
+      });
+
+      if (error) {
+        console.warn("[Supabase Auth] Falha no signInWithPassword:", error.message);
+        return { user: null, error };
+      }
+      return data;
+    } catch (err: any) {
+      console.error("[Supabase Auth] Exceção no signInWithEmail:", err?.message);
+      return { user: null, error: err };
+    }
+  },
+
+  async signInWithGoogle(options?: { popup?: boolean }) {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { url: null, error: new Error("Cliente Supabase não configurado.") };
+    }
+
+    try {
+      const redirectUri = typeof window !== "undefined" && window.location.origin ? window.location.origin : "";
+      const isIframe = typeof window !== "undefined" && window.self !== window.top;
+
+      const { data, error } = await client.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: redirectUri,
+          queryParams: {
+            access_type: "offline",
+            prompt: "select_account"
+          },
+          skipBrowserRedirect: isIframe
+        }
+      });
+
+      if (error) {
+        console.warn("[Supabase Auth] Erro no signInWithOAuth Google:", error.message);
+        return { data: null, error, url: null };
+      }
+
+      if (data?.url && typeof window !== "undefined") {
+        if (isIframe) {
+          const popup = window.open(
+            data.url,
+            "google_oauth_popup",
+            "width=550,height=650,left=250,top=100,status=no,resizable=yes"
+          );
+          if (!popup || popup.closed || typeof popup.closed === "undefined") {
+            if (window.top) {
+              window.top.location.href = data.url;
+            } else {
+              window.location.assign(data.url);
+            }
+          }
+        } else {
+          window.location.assign(data.url);
+        }
+      }
+
+      return { data, error: null, url: data?.url || null };
+    } catch (err: any) {
+      console.error("[Supabase Auth] Exceção no signInWithOAuth Google:", err?.message || err);
+      return { data: null, error: err, url: null };
+    }
+  },
+
+  async recoverPassword(email: string) {
+    const client = getSupabaseClient();
+    if (!client) return { data: null, error: null };
+
+    try {
+      const { data, error } = await client.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
+
+      if (error) {
+        console.warn("[Supabase Auth] Aviso no resetPasswordForEmail:", error.message);
+      }
+      return data;
+    } catch (err: any) {
+      console.warn("[Supabase Auth] Exceção no resetPasswordForEmail:", err);
+      return null;
+    }
+  },
+
+  async signOut() {
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        await client.auth.signOut({ scope: "local" });
+      } catch (err: any) {
+        console.warn("[Supabase Auth] Erro no signOut local:", err?.message || err);
+      }
+      try {
+        await client.auth.signOut();
+      } catch (err: any) {
+        console.warn("[Supabase Auth] Erro no signOut global:", err?.message || err);
+      }
+    }
+    const storage = typeof window !== "undefined" && window.localStorage ? window.localStorage : (typeof localStorage !== "undefined" ? localStorage : null);
+    if (storage) {
+      try {
+        for (let i = storage.length - 1; i >= 0; i--) {
+          const k = storage.key(i);
+          if (k && (k.startsWith("sb-") && (k.endsWith("-auth-token") || k.includes("token")))) {
+            storage.removeItem(k);
+          }
+        }
+      } catch {}
+    }
+  },
+
+  /**
+   * @deprecated Removido na Etapa 3. O Supabase/PostgreSQL é a fonte autoritativa única.
+   */
+  mergeRecordsById<T extends { id: string }>(_localList: T[] = [], remoteList: T[] = []): T[] {
+    return remoteList;
+  },
+
+  /**
+   * Sincroniza e Mapeia o Utilizador Autenticado (via Google Provider ou Email)
+   * com verificação estrita de integridade de dados para evitar sobrescrita de perfis locais existentes.
+   */
+  async syncUserProfileFromAuth(user: User, localEmployees: Employee[] = []): Promise<{ employee: Employee; companyId: string; companyName: string }> {
+    const client = getSupabaseClient();
+    const uid = user.id;
+    const email = (user.email || "").toLowerCase().trim();
+    const meta = user.user_metadata || {};
+    const fullName = meta.full_name || meta.name || email.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase());
+    const avatarUrl = meta.avatar_url || meta.picture || "";
+    const phone = meta.phone || meta.contact || "+258 84 000 0000";
+    const defaultCompanyName = meta.company_name || meta.branch || "";
+    
+    // Verificar se já existe colaborador local com este email ou ID correspondente para preservar PIN e configurações
+    const localMatch = localEmployees.find(e => 
+      (e.email && e.email.toLowerCase().trim() === email) ||
+      e.id === "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8) ||
+      (e.username && e.username.toLowerCase() === email.split("@")[0].toLowerCase())
+    );
+
+    let role: string = localMatch?.role || "ADMIN";
+    let companyId = "comp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+    let companyName = defaultCompanyName || (localMatch?.companyId && !localMatch.companyId.startsWith("comp_") ? localMatch.companyId : "");
+    let status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "BLOCKED" = localMatch?.status || "ACTIVE";
+    let subscriptionPlan: any = localMatch?.subscriptionPlan || meta.subscription_plan || "OURO";
+    let existingEmpId = localMatch?.id || "emp_" + uid.replace(/[^a-zA-Z0-9]/g, "").slice(0, 8);
+    let pin = localMatch?.pin || "";
+    let pinChanged = localMatch?.pinChanged ?? true;
+    let pinCreatedAt = localMatch?.pinCreatedAt || new Date().toISOString();
+    let fotoPerfil = localMatch?.fotoPerfil || avatarUrl;
+
+    if (client) {
+      try {
+        // 1. Verificar se este email já foi pré-cadastrado como colaborador por um Administrador
+        const { data: existingColab } = await client
+          .from("colaboradores")
+          .select("*")
+          .or(`auth_uid.eq.${uid},email.eq.${email}`)
+          .maybeSingle();
+
+        if (existingColab) {
+          if (existingColab.id) existingEmpId = existingColab.id;
+          if (existingColab.tenant_id) companyId = existingColab.tenant_id;
+          if (existingColab.role) role = existingColab.role as UserRole;
+          if (existingColab.status) status = existingColab.status as any;
+          if (existingColab.branch) companyName = existingColab.branch;
+          if (existingColab.subscription_plan) subscriptionPlan = existingColab.subscription_plan;
+          if (existingColab.foto_perfil) fotoPerfil = existingColab.foto_perfil;
+          if (existingColab.pin) pin = existingColab.pin;
+
+          // Vincular auth_uid se ainda não estava vinculado
+          if (!existingColab.auth_uid || existingColab.auth_uid !== uid) {
+            await client
+              .from("colaboradores")
+              .update({ auth_uid: uid, updated_at: new Date().toISOString() })
+              .eq("id", existingColab.id);
+          }
+        }
+
+        // 2. Procurar perfil na tabela 'profiles'
+        const { data: profile } = await client
+          .from("profiles")
+          .select("*, companies(*)")
+          .eq("id", uid)
+          .maybeSingle();
+
+        if (profile) {
+          if (profile.company_id) companyId = profile.company_id;
+          if (profile.role && !existingColab) role = profile.role as UserRole;
+          if (profile.companies && profile.companies.name) {
+            companyName = profile.companies.name;
+          }
+        } else if (!existingColab) {
+          // 3. Verificar se já existe empresa criada para este owner_uid
+          const { data: existingComp } = await client
+            .from("companies")
+            .select("*")
+            .eq("owner_uid", uid)
+            .maybeSingle();
+
+          if (existingComp) {
+            companyId = existingComp.id;
+            companyName = existingComp.name;
+          } else {
+            // Criar nova empresa para este novo administrador
+            const { data: newComp } = await client
+              .from("companies")
+              .upsert({
+                id: companyId,
+                name: companyName,
+                owner_uid: uid,
+                email: email,
+                phone: phone,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .select()
+              .maybeSingle();
+
+            if (newComp && newComp.id) {
+              companyId = newComp.id;
+            }
+          }
+
+          // Inserir ou atualizar na tabela profiles
+          await client.from("profiles").upsert({
+            id: uid,
+            company_id: companyId,
+            email: email,
+            full_name: fullName,
+            role: role,
+            avatar_url: fotoPerfil,
+            phone: phone,
+            updated_at: new Date().toISOString()
+          });
+
+          // Inserir na tabela colaboradores como Administrador da Empresa
+          await client.from("colaboradores").upsert({
+            id: existingEmpId,
+            tenant_id: companyId,
+            auth_uid: uid,
+            name: fullName,
+            email: email,
+            role: role,
+            contact: phone,
+            salary: localMatch?.salary || 0,
+            admission_date: localMatch?.admissionDate || new Date().toISOString().split("T")[0],
+            status: status,
+            branch: companyName,
+            subscription_plan: subscriptionPlan,
+            foto_perfil: fotoPerfil,
+            pin: pin,
+            updated_at: new Date().toISOString()
+          }, { onConflict: "id" });
+        }
+
+        // 4. Configurar tenant_id do Supabase Service para isolamento estrito
+        saveSupabaseConfig({ tenantId: companyId });
+
+      } catch (dbErr) {
+        console.warn("[Supabase Sync Profile] Falha ao sincronizar perfil:", dbErr);
+      }
+    }
+
+    const employee: Employee = {
+      id: existingEmpId,
+      name: localMatch?.name || fullName,
+      email: email,
+      role: role,
+      contact: localMatch?.contact || phone,
+      salary: localMatch?.salary || 0,
+      admissionDate: localMatch?.admissionDate || new Date().toISOString().split("T")[0],
+      status: status,
+      username: localMatch?.username || email.split("@")[0],
+      pin: pin,
+      pinCreatedAt: pinCreatedAt,
+      pinChanged: pinChanged,
+      companyId: companyName,
+      subscriptionPlan: subscriptionPlan,
+      fotoPerfil: fotoPerfil,
+      theme: localMatch?.theme
+    };
+
+    return { employee, companyId, companyName };
+  },
+
+  onAuthStateChange(callback: (event: string, session: Session | null) => void) {
+    const client = getSupabaseClient();
+    if (!client) return { unsubscribe: () => {} };
+
+    const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
+      callback(event, session);
+    });
+
+    return {
+      unsubscribe: () => subscription.unsubscribe()
+    };
+  },
+
+  // --- DIAGNÓSTICO & VALIDAÇÃO DA TABELA DE PRODUTOS ---
+  async verifyProductsTable(): Promise<{
+    connected: boolean;
+    activeTable: string | null;
+    error?: string;
+  }> {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { connected: false, activeTable: null, error: "Cliente Supabase não inicializado ou credenciais ausentes." };
+    }
+
+    // Prioriza 'products' (tabela padrão da interface), com fallback para 'produtos' e 'artigos'
+    const candidateTables = ["products", "produtos", "artigos"];
+    let lastError: any = null;
+
+    for (const table of candidateTables) {
+      try {
+        const { error } = await client.from(table).select("id").limit(1);
+        if (!error) {
+          return { connected: true, activeTable: table };
+        }
+        if (!isTableMissingError(error)) {
+          return { connected: false, activeTable: null, error: error.message };
+        }
+        lastError = error;
+      } catch (err: any) {
+        return { connected: false, activeTable: null, error: err?.message || String(err) };
+      }
+    }
+
+    return {
+      connected: false,
+      activeTable: null,
+      error: `Tabela de produtos ('public.products' ou 'public.produtos') não encontrada no PostgreSQL (PGRST205). Motivo: ${lastError?.message || "Tabela inexistente"}`
+    };
+  },
+
+  // --- DIAGNÓSTICO DA FUNÇÃO ATÓMICA DE VENDAS (process_sale_atomic) ---
+  async verifySalesRpc(): Promise<{
+    installed: boolean;
+    error?: string;
+  }> {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { installed: false, error: "Cliente Supabase não inicializado ou credenciais ausentes." };
+    }
+
+    try {
+      const { error } = await client.rpc("process_sale_atomic", {
+        p_sale_id: "probe-check-rpc",
+        p_company_id: "ost-tenant-001",
+        p_user_id: "probe",
+        p_items: [],
+        p_payment_method: "CASH",
+        p_total: 0
+      });
+
+      if (error) {
+        if (error.code === "PGRST202" || error.message.includes("Could not find the function") || error.message.includes("schema cache")) {
+          return { installed: false, error: error.message };
+        }
+        return { installed: true };
+      }
+
+      return { installed: true };
+    } catch (err: any) {
+      return { installed: false, error: err?.message || String(err) };
+    }
+  },
+
+  // --- PRODUTOS / CATÁLOGO & INVENTÁRIO (Estrito PostgreSQL - Erro nunca convertido em []) ---
+  async fetchProducts(): Promise<Product[]> {
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não inicializado ou credenciais ausentes.");
+    }
+
+    // Prioriza 'products' (tabela padrão da interface), com fallback para 'produtos' e 'artigos'
+    const candidateTables = ["products", "produtos", "artigos"];
+    let data: any = null;
+    let lastError: any = null;
+
+    for (const table of candidateTables) {
+      try {
+        const res = await client
+          .from(table)
+          .select("*")
+          .order("name", { ascending: true });
+
+        if (!res.error) {
+          data = res.data;
+          lastError = null;
+          break;
+        }
+
+        if (isTableMissingError(res.error)) {
+          lastError = res.error;
+          continue;
+        }
+
+        // Erro real do PostgreSQL (ex: 57P01, 08006, 42501)
+        lastError = res.error;
+        break;
+      } catch (e) {
+        lastError = e;
+        break;
+      }
+    }
+
+    if (lastError) {
+      console.error("[SupabaseSyncService.fetchProducts] Erro retornado pelo PostgreSQL:", lastError);
+      const isMissingTable = isTableMissingError(lastError);
+
+      if (isMissingTable) {
+        throw new Error(
+          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no SQL Editor do Supabase.`
+        );
+      }
+
+      throw new Error(
+        `Erro ao ler produtos do PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+      );
+    }
+
+    if (!data) {
+      throw new Error("Falha ao ler produtos do PostgreSQL: resposta de dados nula.");
+    }
+
+    return data
+      .filter((row: any) => row.is_active !== false)
+      .map((row: any) => {
+        const rowSalePrice = (row.sale_price != null && Number(row.sale_price) > 0)
+          ? Number(row.sale_price)
+          : (row.price != null && Number(row.price) > 0)
+            ? Number(row.price)
+            : Number(row.sale_price ?? row.price ?? 0);
+
+        const rowCostPrice = (row.cost_price != null && Number(row.cost_price) > 0)
+          ? Number(row.cost_price)
+          : (row.cost != null && Number(row.cost) > 0)
+            ? Number(row.cost)
+            : Number(row.cost_price ?? row.cost ?? 0);
+
+        return {
+          id: row.id,
+          name: row.name,
+          code: row.code || row.id,
+          category: row.category || "Geral",
+          costPrice: rowCostPrice,
+          salePrice: rowSalePrice,
+          stock: Number(row.stock || 0),
+          minStock: Number(row.min_stock || 0),
+          vatRate: Number(row.vat_rate || 16),
+          unit: row.unit || "un",
+          barcode: row.barcode || row.code || "",
+          supplier: row.supplier || "",
+          expiryDate: row.expiry_date || row.expiryDate || undefined,
+          imageUrl: row.image_url || row.imageUrl || row.image || "",
+          image: row.image_url || row.imageUrl || row.image || "",
+          emoji: row.emoji || undefined,
+          promotion: row.promotion || undefined,
+          isFavorite: Boolean(row.is_favorite ?? row.isFavorite ?? false),
+          brand: row.brand || undefined,
+          weightBased: Boolean(row.weight_based ?? row.weightBased ?? false),
+          tenantId: row.tenant_id || undefined,
+          createdBy: row.created_by || undefined,
+          createdAt: row.created_at || undefined,
+          updatedAt: row.updated_at || undefined
+        };
+      });
+  },
+
+  async saveProduct(product: Product): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não configurado para salvar produto.");
+    }
+
+    const tenantId = getSupabaseConfig().tenantId;
+    const candidateTables = ["products", "produtos", "artigos"];
+    let lastError: any = null;
+
+    for (const table of candidateTables) {
+      const excludedCols = new Set<string>();
+      let useAltPricing = false;
+      let saved = false;
+
+      // Resiliência de schema: ajusta mapeamento de colunas em até 3 tentativas sem trocar de tabela indevidamente
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const record = buildProductRecord(table, product, tenantId, excludedCols, useAltPricing);
+          const res = await client.from(table).upsert(record as any, { onConflict: "id" });
+
+          if (!res.error) {
+            saved = true;
+            lastError = null;
+            break;
+          }
+
+          if (isTableMissingError(res.error)) {
+            lastError = res.error;
+            break;
+          }
+
+          const missingCol = extractMissingColumn(res.error);
+          if (missingCol) {
+            if (missingCol === "price" || missingCol === "cost") {
+              useAltPricing = true;
+              continue;
+            } else if (missingCol === "sale_price" || missingCol === "cost_price") {
+              useAltPricing = false;
+              continue;
+            } else {
+              excludedCols.add(missingCol);
+              continue;
+            }
+          }
+
+          lastError = res.error;
+          break;
+        } catch (err) {
+          lastError = err;
+          break;
+        }
+      }
+
+      if (saved) {
+        return true;
+      }
+
+      if (lastError && !isTableMissingError(lastError)) {
+        break;
+      }
+    }
+
+    if (lastError) {
+      console.error("[SupabaseSyncService.saveProduct] Erro ao gravar produto no PostgreSQL:", lastError);
+      const isMissingTable = isTableMissingError(lastError);
+
+      if (isMissingTable) {
+        throw new Error(
+          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
+        );
+      }
+
+      throw new Error(
+        `Erro ao gravar produto no PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+      );
+    }
+
+    return true;
+  },
+
+  async syncProducts(products: Product[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não configurado para sincronizar produtos.");
+    }
+    if (products.length === 0) return true;
+
+    const tenantId = getSupabaseConfig().tenantId;
+    const candidateTables = ["products", "produtos", "artigos"];
+    let lastError: any = null;
+
+    for (const table of candidateTables) {
+      const excludedCols = new Set<string>();
+      let useAltPricing = false;
+      let synced = false;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const records = products.map((p) => buildProductRecord(table, p, tenantId, excludedCols, useAltPricing));
+          const res = await client.from(table).upsert(records as any, { onConflict: "id" });
+
+          if (!res.error) {
+            synced = true;
+            lastError = null;
+            break;
+          }
+
+          if (isTableMissingError(res.error)) {
+            lastError = res.error;
+            break;
+          }
+
+          const missingCol = extractMissingColumn(res.error);
+          if (missingCol) {
+            if (missingCol === "price" || missingCol === "cost") {
+              useAltPricing = true;
+              continue;
+            } else if (missingCol === "sale_price" || missingCol === "cost_price") {
+              useAltPricing = false;
+              continue;
+            } else {
+              excludedCols.add(missingCol);
+              continue;
+            }
+          }
+
+          lastError = res.error;
+          break;
+        } catch (err) {
+          lastError = err;
+          break;
+        }
+      }
+
+      if (synced) {
+        return true;
+      }
+
+      if (lastError && !isTableMissingError(lastError)) {
+        break;
+      }
+    }
+
+    if (lastError) {
+      console.error("[SupabaseSyncService.syncProducts] Erro ao sincronizar lote de produtos no PostgreSQL:", lastError);
+      const isMissingTable = isTableMissingError(lastError);
+
+      if (isMissingTable) {
+        throw new Error(
+          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
+        );
+      }
+
+      throw new Error(
+        `Erro ao sincronizar produtos no PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+      );
+    }
+
+    return true;
+  },
+
+  async deleteProduct(productId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) {
+      throw new Error("Cliente Supabase não configurado para remover produto.");
+    }
+
+    const candidateTables = ["products", "produtos", "artigos"];
+    let lastError: any = null;
+
+    for (const table of candidateTables) {
+      try {
+        const res = await client.from(table).update({ is_active: false }).eq("id", productId);
+        if (!res.error) {
+          return true;
+        }
+
+        if (isTableMissingError(res.error)) {
+          lastError = res.error;
+          continue;
+        }
+
+        lastError = res.error;
+        break;
+      } catch (err) {
+        lastError = err;
+        break;
+      }
+    }
+
+    if (lastError) {
+      console.error("[SupabaseSyncService.deleteProduct] Erro ao desativar produto no PostgreSQL:", lastError);
+      throw new Error(
+        `Erro ao desativar produto no PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+      );
+    }
+
+    return true;
+  },
+
+  // --- REPLENISH STOCK ATOMIC (RPC) ---
+  async replenishStockAtomic(params: {
+    productId: string;
+    quantity: number;
+    costPrice?: number;
+    reason?: string;
+    userName?: string;
+  }): Promise<{ success: boolean; error?: string; newStock?: number }> {
+    const client = getSupabaseClient();
+    if (!client) return { success: false, error: "Supabase não conectado." };
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const basePayload: Record<string, any> = {
+        p_tenant_id: tenantId,
+        p_product_id: params.productId,
+        p_quantity: params.quantity,
+        p_cost_price: params.costPrice || null,
+        p_reason: params.reason || "Reabastecimento de Stock",
+        p_user_name: params.userName || "Sistema"
+      };
+
+      let { data, error } = await client.rpc("replenish_stock_atomic", basePayload);
+
+      if (error && error.message && error.message.includes("schema cache")) {
+        const altRes = await client.rpc("replenish_stock_atomic", {
+          ...basePayload,
+          p_received_by: params.userName || "Sistema"
+        });
+        data = altRes.data;
+        error = altRes.error;
+      }
+
+      if (error) return { success: false, error: error.message };
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  // --- CLIENTES ---
+  async fetchCustomers(): Promise<Customer[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("clientes")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        nuit: row.nuit || "",
+        email: row.email || "",
+        phone: row.phone || "",
+        address: row.address || "",
+        totalSpent: Number(row.total_spent || 0),
+        purchaseCount: Number(row.purchase_count || 0),
+        debt: Number(row.debt || row.balance || 0),
+        loyaltyPoints: Number(row.loyalty_points || 0),
+        notes: row.notes || ""
+      })) as Customer[];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveCustomer(customer: Customer): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: customer.id,
+        tenant_id: tenantId,
+        name: customer.name,
+        nuit: customer.nuit || "",
+        email: customer.email || "",
+        phone: customer.phone || "",
+        address: customer.address || "",
+        debt: customer.debt || (customer as any).balance || 0,
+        balance: (customer as any).balance || customer.debt || 0,
+        total_spent: customer.totalSpent || 0,
+        purchase_count: customer.purchaseCount || 0,
+        loyalty_points: customer.loyaltyPoints || 0,
+        credit_limit: (customer as any).creditLimit || 0,
+        notes: (customer as any).notes || "",
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await client.from("clientes").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async syncCustomers(customers: Customer[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || customers.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = customers.map((c) => ({
+        id: c.id,
+        tenant_id: tenantId,
+        name: c.name,
+        nuit: c.nuit || "",
+        email: c.email || "",
+        phone: c.phone || "",
+        address: c.address || "",
+        debt: c.debt || (c as any).balance || 0,
+        balance: (c as any).balance || c.debt || 0,
+        total_spent: c.totalSpent || 0,
+        purchase_count: c.purchaseCount || 0,
+        loyalty_points: c.loyaltyPoints || 0,
+        credit_limit: (c as any).creditLimit || 0,
+        notes: (c as any).notes || "",
+        updated_at: new Date().toISOString()
+      }));
+
+      const { error } = await client.from("clientes").upsert(records, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async deleteCustomer(customerId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const { error } = await client.from("clientes").delete().eq("id", customerId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- VENDAS / TRANSAÇÕES ---
+  async fetchTransactions(sinceIsoDate?: string): Promise<Transaction[]> {
+    const client = getSupabaseClient();
+    if (!client) {
+      const err = new Error("Cliente PostgreSQL/Supabase não está disponível ou não foi inicializado.");
+      console.error("[SupabaseSyncService.fetchTransactions]", err.message);
+      throw err;
+    }
+
+    try {
+      const candidateTables = ["vendas", "sales", "transactions"];
+      let lastError: any = null;
+      let data: any[] | null = null;
+
+      for (const table of candidateTables) {
+        let query = client.from(table).select("*");
+
+        if (table === "sales") {
+          query = query.order("created_at", { ascending: false });
+          if (sinceIsoDate) {
+            query = query.gte("created_at", sinceIsoDate);
+          }
+        } else {
+          query = query.order("timestamp", { ascending: false });
+          if (sinceIsoDate) {
+            query = query.gte("timestamp", sinceIsoDate);
+          }
+        }
+
+        const res = await query;
+        if (!res.error) {
+          data = res.data;
+          lastError = null;
+          break;
+        }
+
+        const isSchemaCacheMissing =
+          res.error.code === "PGRST205" ||
+          (typeof res.error.message === "string" && res.error.message.includes("in the schema cache"));
+
+        if (isSchemaCacheMissing) {
+          lastError = res.error;
+          continue;
+        }
+
+        // Se for um erro real do PostgreSQL (ex: timeout 57P01, permissão negada 42501, relation doesn't exist 42P01),
+        // não prossegue para outras tabelas para manter fidelidade estrita ao erro do banco.
+        lastError = res.error;
+        break;
+      }
+
+      if (lastError) {
+        const isSchemaCacheMissing =
+          lastError.code === "PGRST205" ||
+          (typeof lastError.message === "string" && lastError.message.includes("in the schema cache"));
+
+        if (isSchemaCacheMissing) {
+          console.warn(
+            "[SupabaseSyncService.fetchTransactions] Tabela de vendas ('vendas'/'sales') não encontrada no schema cache (PGRST205). Base sem vendas registradas. Retornando lista inicial vazia."
+          );
+          return [];
+        }
+
+        console.error("[SupabaseSyncService.fetchTransactions] Erro retornado pelo PostgreSQL:", lastError);
+        throw new Error(
+          `Erro ao ler vendas do PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+        );
+      }
+
+      if (!data) {
+        return [];
+      }
+
+      return data.map((row: any) => ({
+        id: row.id,
+        invoiceNumber: row.invoice_number || row.invoiceNumber || row.id,
+        customerName: row.customer_name || row.customerName || "Consumidor Final",
+        customerId: row.customer_id || row.customerId || undefined,
+        grandTotal: Number(row.grand_total || row.grandTotal || 0),
+        subtotal: Number(row.subtotal || row.grand_total || row.grandTotal || 0),
+        vatTotal: Number(row.vat_total || row.vatTotal || 0),
+        discountTotal: Number(row.discount_total || row.discountTotal || 0),
+        paymentMethod: row.payment_method || row.paymentMethod || "CASH",
+        cashierName: row.operator_name || row.seller_name || row.sellerName || "",
+        items: Array.isArray(row.items)
+          ? row.items
+          : (typeof row.items_json === "string" ? JSON.parse(row.items_json || "[]") : []),
+        timestamp: row.timestamp || row.created_at || row.createdAt || new Date().toISOString(),
+        paymentStatus: row.payment_status || row.status || "PAID",
+        idempotencyKey: row.idempotency_key || undefined
+      }));
+    } catch (err: any) {
+      if (
+        err?.code === "PGRST205" ||
+        (typeof err?.message === "string" && err.message.includes("in the schema cache"))
+      ) {
+        console.warn("[SupabaseSyncService.fetchTransactions] Schema cache PGRST205 capturado. Retornando [].");
+        return [];
+      }
+      console.error("[SupabaseSyncService.fetchTransactions] Exceção ao ler vendas do PostgreSQL:", err);
+      throw err instanceof Error ? err : new Error(String(err));
+    }
+  },
+
+  async fetchRecentTransactions24h(): Promise<Transaction[]> {
+    const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return await this.fetchTransactions(since24h);
+  },
+
+  // --- PROCESS SALE ATOMIC (RPC) ---
+
+  async processSaleAtomic(params: {
+    saleId: string;
+    invoiceNumber: string;
+    customerId?: string;
+    customerName?: string;
+    customerNuit?: string;
+    userId?: string | null;
+    userName?: string;
+    sellerId?: string | null;
+    sellerName?: string;
+    paymentMethod: string;
+    subtotal: number;
+    discountTotal: number;
+    vatTotal: number;
+    grandTotal: number;
+    amountPaid: number;
+    changeAmount: number;
+    items: any[];
+    notes?: string;
+    idempotencyKey?: string;
+  }): Promise<{ success: boolean; error?: string; saleId?: string; invoiceNumber?: string; idempotent?: boolean }> {
+    const idempotencyKey = params.idempotencyKey || params.saleId;
+    
+    // Se uma operação com a mesma chave de idempotência já estiver a correr em paralelo, reaproveita a promessa em curso
+    if (idempotencyKey && inFlightSaleRequests.has(idempotencyKey)) {
+      console.warn(`[SupabaseSyncService] Pedido concorrente para a venda/chave ${idempotencyKey}. Retornando a promessa em curso.`);
+      return await inFlightSaleRequests.get(idempotencyKey)!;
+    }
+
+    const executeSale = async (): Promise<{ success: boolean; error?: string; saleId?: string; invoiceNumber?: string; idempotent?: boolean }> => {
+      const client = getSupabaseClient();
+      if (!client) {
+        return { success: false, error: "Supabase não conectado. Conexão ao PostgreSQL obrigatória para registar vendas." };
+      }
+
+      try {
+        const companyId = getSupabaseConfig().tenantId;
+        if (!companyId) {
+          return { success: false, error: "Identificador de empresa/tenant ausente. Operação cancelada." };
+        }
+
+        // Contrato Oficial Único: Frontend <-> PostgreSQL (public.process_sale_atomic)
+        const officialPayload = {
+          p_sale_id: params.saleId,
+          p_company_id: companyId,
+          p_user_id: params.userId || params.sellerId || "Operador",
+          p_items: (params.items || []).map((it: any) => ({
+            productId: it.productId || it.id,
+            productName: it.productName || it.name || "Artigo",
+            quantity: Number(it.quantity || 1),
+            salePrice: Number(it.price || it.salePrice || it.unitPrice || 0),
+            costPrice: Number(it.costPrice || it.cost || 0),
+            vatRate: Number(it.vatRate || 16)
+          })),
+          p_payment_method: params.paymentMethod,
+          p_total: Number(params.grandTotal || 0),
+          p_idempotency_key: idempotencyKey,
+          p_invoice_number: params.invoiceNumber || params.saleId,
+          p_customer_id: params.customerId || null,
+          p_customer_name: params.customerName || "Consumidor Final",
+          p_customer_nuit: params.customerNuit || null,
+          p_user_name: params.userName || params.sellerName || "Operador",
+          p_subtotal: Number(params.subtotal ?? params.grandTotal ?? 0),
+          p_discount_total: Number(params.discountTotal || 0),
+          p_vat_total: Number(params.vatTotal || 0),
+          p_amount_paid: Number(params.amountPaid ?? params.grandTotal ?? 0),
+          p_change_amount: Number(params.changeAmount || 0),
+          p_notes: params.notes || null
+        };
+
+        // Invocação oficial direta
+        const { data, error } = await client.rpc("process_sale_atomic", officialPayload);
+
+        // Função de contingência: Gravação direta nas tabelas em caso de erro na RPC de Stored Procedure (ex: falta de uuid_generate_v4)
+        const fallbackDirectSale = async (reason: string): Promise<{ success: boolean; error?: string; saleId?: string; invoiceNumber?: string }> => {
+          console.warn(`[processSaleAtomic] Contingência acionada (${reason}). Gravando venda diretamente nas tabelas public.vendas, venda_itens, stock_movements e caixa...`);
+          try {
+            const saleId = params.saleId;
+            const invoiceNumber = params.invoiceNumber || params.saleId;
+            const paymentMethod = params.paymentMethod || "DINHEIRO";
+            const grandTotal = Number(params.grandTotal || 0);
+            const amountPaid = Number(params.amountPaid ?? grandTotal);
+            const changeAmount = Number(params.changeAmount || 0);
+            const subtotal = Number(params.subtotal ?? grandTotal);
+            const discountTotal = Number(params.discountTotal || 0);
+            const vatTotal = Number(params.vatTotal || 0);
+            const userName = params.userName || params.sellerName || "Operador";
+            const isCredit = ["A Prazo / Dívida", "Crédito", "CREDITO", "DEBT"].includes(paymentMethod);
+
+            // 1. Gravar em public.vendas
+            const { error: saleErr } = await client.from("vendas").upsert([{
+              id: saleId,
+              tenant_id: companyId,
+              idempotency_key: idempotencyKey,
+              invoice_number: invoiceNumber,
+              customer_id: params.customerId || null,
+              customer_name: params.customerName || "Consumidor Final",
+              customer_nuit: params.customerNuit || null,
+              seller_id: params.userId || null,
+              seller_name: userName,
+              operator_name: userName,
+              payment_method: paymentMethod,
+              payment_status: isCredit ? "PENDING_DEBT" : "PAID",
+              subtotal: subtotal,
+              discount_total: discountTotal,
+              vat_total: vatTotal,
+              grand_total: grandTotal,
+              amount_paid: amountPaid,
+              change_amount: changeAmount,
+              total_amount: grandTotal,
+              tax_amount: vatTotal,
+              status: "COMPLETED",
+              items: params.items || [],
+              notes: params.notes || null,
+              timestamp: new Date().toISOString(),
+              created_at: new Date().toISOString()
+            }], { onConflict: "id" });
+
+            if (saleErr) {
+              console.error("[fallbackDirectSale] Erro ao gravar em public.vendas:", saleErr.message);
+              return { success: false, error: saleErr.message };
+            }
+
+            // 2. Gravar itens e abater stock
+            for (const item of (params.items || [])) {
+              const prodId = item.productId || item.id;
+              const prodName = item.productName || item.name || "Artigo";
+              const qty = Number(item.quantity || 1);
+              const unitPrice = Number(item.price || item.salePrice || item.unitPrice || 0);
+              const costPrice = Number(item.costPrice || item.cost || 0);
+              const vatRate = Number(item.vatRate || 16);
+              const vatAmount = Number(item.vatAmount || 0);
+              const totalPrice = Number(item.totalPrice || item.total || (qty * unitPrice));
+              const itemId = `vi_${saleId}_${prodId}`.slice(0, 60);
+
+              await client.from("venda_itens").upsert([{
+                id: itemId,
+                tenant_id: companyId,
+                sale_id: saleId,
+                product_id: prodId,
+                product_name: prodName,
+                unit_price: unitPrice,
+                quantity: qty,
+                cost_price: costPrice,
+                discount: 0,
+                vat_rate: vatRate,
+                vat_amount: vatAmount,
+                total_price: totalPrice,
+                created_at: new Date().toISOString()
+              }], { onConflict: "id" });
+
+              try {
+                const { data: prodData } = await client.from("products").select("stock, name").eq("id", prodId).single();
+                const currStock = Number(prodData?.stock || 0);
+                const newStock = Math.max(0, currStock - qty);
+                await client.from("products").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", prodId);
+                try {
+                  await client.from("produtos").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", prodId);
+                } catch {}
+
+                const movId = `sm_${saleId}_${prodId}`.slice(0, 60);
+                await client.from("stock_movements").upsert([{
+                  id: movId,
+                  tenant_id: companyId,
+                  product_id: prodId,
+                  type: "EXIT_SALE",
+                  quantity: qty,
+                  previous_stock: currStock,
+                  new_stock: newStock,
+                  cost_price: costPrice,
+                  reason: `Venda ${invoiceNumber}`,
+                  reference_id: saleId,
+                  user_id: params.userId || "Operador",
+                  user_name: userName,
+                  timestamp: new Date().toISOString()
+                }], { onConflict: "id" });
+              } catch (stkErr) {
+                console.warn("[fallbackDirectSale] Falha ao atualizar stock de artigo:", stkErr);
+              }
+            }
+
+            // 3. Registar entrada de caixa se pago a dinheiro
+            const isCash = paymentMethod.toUpperCase().includes("DINHEIRO") || paymentMethod.toUpperCase().includes("CASH") || paymentMethod.toUpperCase().includes("NUMER");
+            if (isCash && amountPaid > 0) {
+              const caixaId = `cx_${saleId}`.slice(0, 60);
+              await client.from("caixa").upsert([{
+                id: caixaId,
+                tenant_id: companyId,
+                type: "INPUT",
+                amount: amountPaid,
+                reason: `Recebimento Venda ${invoiceNumber}`,
+                responsible_user: userName,
+                reference_id: saleId,
+                timestamp: new Date().toISOString()
+              }], { onConflict: "id" });
+            }
+
+            // 4. Registar crédito / dívida de cliente se venda a prazo
+            if (isCredit && params.customerId) {
+              const remainingDebt = Math.max(0, grandTotal - amountPaid);
+              const debtId = `debt_${saleId}`.slice(0, 60);
+              await client.from("customer_debts").upsert([{
+                id: debtId,
+                tenant_id: companyId,
+                customer_id: params.customerId,
+                sale_id: saleId,
+                total_amount: grandTotal,
+                paid_amount: amountPaid,
+                remaining_balance: remainingDebt,
+                due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+                status: remainingDebt <= 0 ? "SETTLED" : "PENDING",
+                created_at: new Date().toISOString()
+              }], { onConflict: "id" });
+
+              try {
+                const { data: custData } = await client.from("clientes").select("balance").eq("id", params.customerId).single();
+                const currBal = Number(custData?.balance || 0);
+                await client.from("clientes").update({
+                  balance: currBal + remainingDebt,
+                  updated_at: new Date().toISOString()
+                }).eq("id", params.customerId);
+              } catch {}
+            }
+
+            // 5. Registar log de auditoria
+            try {
+              const auditId = `aud_${saleId}`.slice(0, 60);
+              await client.from("audit_logs").upsert([{
+                id: auditId,
+                tenant_id: companyId,
+                user_id: params.userId || "Operador",
+                user_name: userName,
+                action: "VENDA_CONCLUIDA",
+                module: "POS",
+                details: `Venda ${invoiceNumber} no valor de ${grandTotal} MT concluída com sucesso.`,
+                timestamp: new Date().toISOString()
+              }], { onConflict: "id" });
+            } catch {}
+
+            return {
+              success: true,
+              saleId: saleId,
+              invoiceNumber: invoiceNumber
+            };
+          } catch (directErr: any) {
+            console.error("[fallbackDirectSale] Falha crítica:", directErr.message);
+            return { success: false, error: directErr.message || "Erro ao gravar venda no PostgreSQL." };
+          }
+        };
+
+        // 1. Falha de rede ou erro na chamada do RPC
+        if (error) {
+          const errStr = error.message || "";
+          if (errStr.includes("uuid_generate_v4") || errStr.includes("PGRST202") || errStr.includes("schema cache") || errStr.includes("does not exist")) {
+            return await fallbackDirectSale(`RPC indisponível ou função em falta: ${errStr}`);
+          }
+          console.error("[RPC process_sale_atomic] Erro de execução (Rollback acionado):", error.message);
+          return { success: false, error: error.message };
+        }
+
+        // 2. O PostgreSQL executou a função mas retornou success: false (ex: erro de função de UUID ausente)
+        if (!data || data.success !== true) {
+          const failureReason = data?.error || data?.message || "O PostgreSQL não confirmou a gravação da venda.";
+          if (typeof failureReason === "string" && (failureReason.includes("uuid_generate_v4") || failureReason.includes("does not exist"))) {
+            return await fallbackDirectSale(`Erro interno de UUID na procedure: ${failureReason}`);
+          }
+          console.error("[RPC process_sale_atomic] Rejeição pelo PostgreSQL:", failureReason);
+          return { success: false, error: failureReason };
+        }
+
+        // 3. PostgreSQL confirmou explicitamente com success: true (novo registo ou resultado idempotente)
+        return {
+          success: true,
+          saleId: data.sale_id || params.saleId,
+          invoiceNumber: data.invoice_number || params.invoiceNumber,
+          idempotent: data.idempotent === true
+        };
+      } catch (err: any) {
+        console.error("[RPC process_sale_atomic] Erro inesperado:", err.message);
+        return { success: false, error: err.message || "Erro inesperado ao contactar o PostgreSQL." };
+      }
+    };
+
+    const promise = executeSale();
+    if (idempotencyKey) {
+      inFlightSaleRequests.set(idempotencyKey, promise);
+    }
+
+    try {
+      return await promise;
+    } finally {
+      if (idempotencyKey) {
+        inFlightSaleRequests.delete(idempotencyKey);
+      }
+    }
+  },
+
+  async settleDebtPaymentAtomic(params: {
+    debtId: string;
+    customerId: string;
+    amount: number;
+    paymentMethod?: string;
+    notes?: string;
+    userName?: string;
+    idempotencyKey?: string;
+  }): Promise<{ success: boolean; error?: string; remainingDebt?: number }> {
+    const client = getSupabaseClient();
+    if (!client) return { success: false, error: "Supabase não conectado." };
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const fullPayload: Record<string, any> = {
+        p_tenant_id: tenantId,
+        p_debt_id: params.debtId,
+        p_customer_id: params.customerId,
+        p_amount: params.amount,
+        p_payment_method: params.paymentMethod || "Dinheiro",
+        p_notes: params.notes || null,
+        p_user_name: params.userName || "Operador",
+        p_received_by: params.userName || "Operador",
+        p_idempotency_key: params.idempotencyKey || null
+      };
+
+      let { data, error } = await client.rpc("settle_debt_payment_atomic", fullPayload);
+
+      // Fallback compatível se o banco utilizar a assinatura anterior (6 parâmetros com p_received_by)
+      if (error && error.message && error.message.includes("schema cache")) {
+        const legacyPayload = {
+          p_tenant_id: tenantId,
+          p_debt_id: params.debtId,
+          p_customer_id: params.customerId,
+          p_amount: params.amount,
+          p_payment_method: params.paymentMethod || "Dinheiro",
+          p_received_by: params.userName || "Operador"
+        };
+        const legacyRes = await client.rpc("settle_debt_payment_atomic", legacyPayload);
+        data = legacyRes.data;
+        error = legacyRes.error;
+      }
+
+      if (error) return { success: false, error: error.message };
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
+  /**
+   * @deprecated Fluxo oficial de vendas: POS -> saveTransaction -> processSaleAtomic -> process_sale_atomic -> PostgreSQL.
+   * Não permite caminhos alternativos que burlem a transação atómica no PostgreSQL.
+   */
+  async saveTransactionDirect(params: any): Promise<{ success: boolean; error?: string }> {
+    return this.processSaleAtomic(params);
+  },
+
+  async syncTransactions(transactions: Transaction[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || transactions.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = transactions.map((t) => ({
+        id: t.id,
+        tenant_id: tenantId,
+        invoice_number: t.invoiceNumber || t.id,
+        customer_name: t.customerName || "Consumidor Final",
+        customer_id: t.customerId || null,
+        grand_total: t.grandTotal || t.subtotal || 0,
+        subtotal: t.subtotal || t.grandTotal || 0,
+        vat_total: t.vatTotal || 0,
+        discount_total: t.discountTotal || 0,
+        payment_method: t.paymentMethod,
+        operator_name: t.cashierName || "",
+        items: t.items || [],
+        created_at: t.timestamp || new Date().toISOString(),
+        timestamp: t.timestamp || new Date().toISOString()
+      }));
+
+      let { error } = await client.from("vendas").upsert(records, { onConflict: "id" });
+      if (error && (error.code === "PGRST205" || error.message?.includes("in the schema cache"))) {
+        const salesRecords = transactions.map((t) => ({
+          id: t.id,
+          tenant_id: tenantId,
+          invoice_number: t.invoiceNumber || t.id,
+          customer_name: t.customerName || "Consumidor Final",
+          customer_id: t.customerId || null,
+          grand_total: t.grandTotal || t.subtotal || 0,
+          subtotal: t.subtotal || t.grandTotal || 0,
+          vat_total: t.vatTotal || 0,
+          discount_total: t.discountTotal || 0,
+          payment_method: t.paymentMethod,
+          seller_name: t.cashierName || "",
+          items_json: JSON.stringify(t.items || []),
+          created_at: t.timestamp || new Date().toISOString()
+        }));
+        const salesRes = await client.from("sales").upsert(salesRecords, { onConflict: "id" });
+        error = salesRes.error;
+      }
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- FLUXO DE CAIXA ---
+  async fetchCashFlow(): Promise<CashFlowEntry[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("caixa")
+        .select("*")
+        .order("timestamp", { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        type: row.type || "INPUT",
+        amount: Number(row.amount || 0),
+        reason: row.reason || "",
+        responsibleUser: row.responsible_user || "",
+        timestamp: row.timestamp || new Date().toISOString()
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async saveCashFlowEntry(entry: CashFlowEntry): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: entry.id,
+        tenant_id: tenantId,
+        type: entry.type,
+        amount: entry.amount,
+        reason: entry.reason || "",
+        responsible_user: entry.responsibleUser || "",
+        timestamp: entry.timestamp || new Date().toISOString()
+      };
+
+      const { error } = await client.from("caixa").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async syncCashFlow(movements: CashFlowEntry[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || movements.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = movements.map((m) => ({
+        id: m.id,
+        tenant_id: tenantId,
+        type: m.type,
+        amount: m.amount,
+        reason: m.reason || "",
+        responsible_user: m.responsibleUser || "",
+        timestamp: m.timestamp || new Date().toISOString()
+      }));
+
+      const { error } = await client.from("caixa").upsert(records, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- FECHAMENTOS DE CAIXA / BALANCETES ---
+  async fetchCashClosures(): Promise<CashClosure[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("cash_closures")
+        .select("*")
+        .order("closed_at", { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        shiftId: row.shift_id || row.id,
+        openedAt: row.opened_at,
+        closedAt: row.closed_at,
+        openedBy: row.opened_by,
+        closedBy: row.closed_by,
+        openingSupervisor: row.opening_supervisor || "",
+        closingSupervisor: row.closing_supervisor || "",
+        openingBalance: Number(row.opening_balance || 0),
+        theoreticalBalance: Number(row.theoretical_balance || 0),
+        physicalBalance: Number(row.physical_balance || 0),
+        difference: Number(row.difference || 0),
+        differenceType: row.difference_type || (Number(row.difference || 0) === 0 ? "EXACT" : Number(row.difference || 0) > 0 ? "SURPLUS" : "SHORTAGE"),
+        reconciliation: typeof row.reconciliation === "object" && row.reconciliation !== null ? row.reconciliation : {},
+        denominations: typeof row.denominations === "object" && row.denominations !== null ? row.denominations : {},
+        closingNotes: row.closing_notes || ""
+      })) as CashClosure[];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveCashClosure(closure: CashClosure): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: closure.id,
+        tenant_id: tenantId,
+        shift_id: closure.shiftId || closure.id,
+        opened_at: closure.openedAt,
+        closed_at: closure.closedAt,
+        opened_by: closure.openedBy,
+        closed_by: closure.closedBy,
+        opening_supervisor: closure.openingSupervisor || "",
+        closing_supervisor: closure.closingSupervisor || "",
+        opening_balance: closure.openingBalance,
+        theoretical_balance: closure.theoreticalBalance,
+        physical_balance: closure.physicalBalance,
+        difference: closure.difference,
+        difference_type: closure.differenceType || "EXACT",
+        reconciliation: closure.reconciliation || {},
+        denominations: closure.denominations || {},
+        closing_notes: closure.closingNotes || "",
+        created_at: new Date().toISOString()
+      };
+
+      const { error } = await client.from("cash_closures").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async syncCashClosures(closures: CashClosure[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || closures.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = closures.map((c) => ({
+        id: c.id,
+        tenant_id: tenantId,
+        shift_id: c.shiftId || c.id,
+        opened_at: c.openedAt,
+        closed_at: c.closedAt,
+        opened_by: c.openedBy,
+        closed_by: c.closedBy,
+        opening_supervisor: c.openingSupervisor || "",
+        closing_supervisor: c.closingSupervisor || "",
+        opening_balance: c.openingBalance,
+        theoretical_balance: c.theoreticalBalance,
+        physical_balance: c.physicalBalance,
+        difference: c.difference,
+        difference_type: c.differenceType || "EXACT",
+        reconciliation: c.reconciliation || {},
+        denominations: c.denominations || {},
+        closing_notes: c.closingNotes || "",
+        created_at: new Date().toISOString()
+      }));
+
+      const { error } = await client.from("cash_closures").upsert(records, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- ESTADO DO TURNO ATIVO ---
+  async fetchActiveCashShift(): Promise<{
+    status: "OPEN" | "CLOSED";
+    openingBalance: number;
+    openedAt: string;
+    openedBy: string;
+    openingSupervisor?: string;
+    openingNotes?: string;
+  } | null> {
+    const client = getSupabaseClient();
+    if (!client) return null;
+
+    try {
+      const { data, error } = await client
+        .from("cash_shifts")
+        .select("*")
+        .eq("id", "current_shift")
+        .single();
+
+      if (error || !data) return null;
+
+      return {
+        status: data.status === "CLOSED" ? "CLOSED" : "OPEN",
+        openingBalance: Number(data.opening_balance || 0),
+        openedAt: data.opened_at || new Date().toISOString(),
+        openedBy: data.opened_by || "Admin",
+        openingSupervisor: data.opening_supervisor || "",
+        openingNotes: data.opening_notes || ""
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  async saveActiveCashShift(shiftData: {
+    status: "OPEN" | "CLOSED";
+    openingBalance: number;
+    openedAt: string;
+    openedBy: string;
+    openingSupervisor?: string;
+    openingNotes?: string;
+  }): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: "current_shift",
+        tenant_id: tenantId,
+        status: shiftData.status,
+        opening_balance: shiftData.openingBalance,
+        opened_at: shiftData.openedAt,
+        opened_by: shiftData.openedBy,
+        opening_supervisor: shiftData.openingSupervisor || "",
+        opening_notes: shiftData.openingNotes || "",
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await client.from("cash_shifts").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- COLABORADORES / STAFF ---
+  async fetchEmployees(): Promise<Employee[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("colaboradores")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        email: row.email || "",
+        contact: row.contact || "",
+        whatsapp: row.whatsapp || "",
+        role: row.role || "Operador",
+        salary: Number(row.salary || 0),
+        admissionDate: row.admission_date || new Date().toISOString().split("T")[0],
+        status: row.status || "ACTIVE",
+        pin: row.pin || "",
+        pinCreatedAt: row.pin_created_at || "",
+        pinChanged: row.pin_changed ?? true,
+        fotoPerfil: row.foto_perfil || "",
+        subscriptionPlan: row.subscription_plan || "OURO",
+        branch: row.branch || "Sede Principal"
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async saveEmployee(employee: Employee): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: employee.id,
+        tenant_id: tenantId,
+        name: employee.name,
+        email: employee.email || "",
+        contact: employee.contact || "",
+        whatsapp: (employee as any).whatsapp || "",
+        role: employee.role || "Operador",
+        salary: employee.salary || 0,
+        admission_date: employee.admissionDate || new Date().toISOString().split("T")[0],
+        status: employee.status || "ACTIVE",
+        pin: employee.pin || "",
+        pin_created_at: (employee as any).pinCreatedAt || new Date().toISOString(),
+        pin_changed: (employee as any).pinChanged ?? true,
+        foto_perfil: (employee as any).fotoPerfil || "",
+        subscription_plan: (employee as any).subscriptionPlan || "OURO",
+        branch: (employee as any).branch || "Sede Principal",
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await client.from("colaboradores").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async syncEmployees(employees: Employee[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || employees.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = employees.map((emp) => ({
+        id: emp.id,
+        tenant_id: tenantId,
+        name: emp.name,
+        email: emp.email || "",
+        contact: emp.contact || "",
+        whatsapp: (emp as any).whatsapp || "",
+        role: emp.role || "Operador",
+        salary: emp.salary || 0,
+        admission_date: emp.admissionDate || new Date().toISOString().split("T")[0],
+        status: emp.status || "ACTIVE",
+        pin: emp.pin || "",
+        pin_created_at: (emp as any).pinCreatedAt || new Date().toISOString(),
+        pin_changed: (emp as any).pinChanged ?? true,
+        foto_perfil: (emp as any).fotoPerfil || "",
+        subscription_plan: (emp as any).subscriptionPlan || "OURO",
+        branch: (emp as any).branch || "Sede Principal",
+        updated_at: new Date().toISOString()
+      }));
+
+      const { error } = await client.from("colaboradores").upsert(records, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- PEDIDOS DE RECUPERAÇÃO DE ACESSO ---
+  async getRecoveryRequests(): Promise<any[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("recovery_requests")
+        .select("*")
+        .eq("status", "PENDING")
+        .order("created_at", { ascending: false });
+
+      if (error || !data) return [];
+      return data.map((r: any) => ({
+        id: r.id,
+        employeeId: r.employee_id,
+        employeeName: r.employee_name,
+        email: r.email,
+        status: r.status,
+        timestamp: r.created_at
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async createRecoveryRequest(empId: string, empName: string, email?: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const { error } = await client.from("recovery_requests").insert({
+        tenant_id: tenantId,
+        employee_id: empId,
+        employee_name: empName,
+        email: email || "",
+        status: "PENDING",
+        created_at: new Date().toISOString()
+      });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async resolveRecoveryRequest(requestId: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const { error } = await client
+        .from("recovery_requests")
+        .update({ status: "RESOLVED", resolved_at: new Date().toISOString() })
+        .eq("id", requestId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- AUDIT LOGS ---
+  async fetchAuditLogs(): Promise<AuditLog[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("audit_logs")
+        .select("*")
+        .order("timestamp", { ascending: false })
+        .limit(300);
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        user: row.user_name || "Sistema",
+        userRole: (row.user_role as UserRole) || "ADMIN",
+        userId: row.user_id || undefined,
+        action: row.action,
+        module: row.module,
+        details: row.details || "",
+        ip: row.ip_address || undefined,
+        device: row.device || undefined,
+        timestamp: row.timestamp || new Date().toISOString()
+      })) as AuditLog[];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveAuditLog(log: AuditLog): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: log.id || generateEntityId("log"),
+        tenant_id: tenantId,
+        user_id: (log as any).userId || (log as any).user || null,
+        user_name: log.user || "Sistema",
+        user_role: log.userRole || "ADMIN",
+        action: log.action,
+        module: log.module,
+        details: log.details || "",
+        ip_address: log.ip || null,
+        device: log.device || null,
+        timestamp: log.timestamp || new Date().toISOString()
+      };
+
+      const { error } = await client.from("audit_logs").insert(record);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async syncAuditLogs(logs: AuditLog[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || logs.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = logs.map((l) => ({
+        id: l.id,
+        tenant_id: tenantId,
+        user_id: (l as any).userId || (l as any).user || null,
+        user_name: l.user || "Sistema",
+        user_role: l.userRole || "ADMIN",
+        action: l.action,
+        module: l.module,
+        details: l.details || "",
+        ip_address: l.ip || null,
+        device: l.device || null,
+        timestamp: l.timestamp || new Date().toISOString()
+      }));
+
+      const { error } = await client.from("audit_logs").upsert(records, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- DEFINIÇÕES DO SISTEMA (SETTINGS) ---
+  async fetchSettings(): Promise<SystemSettings | null> {
+    const client = getSupabaseClient();
+    if (!client) return null;
+
+    try {
+      const { data, error } = await client
+        .from("settings")
+        .select("*")
+        .eq("id", "config")
+        .single();
+
+      if (error || !data) return null;
+
+      return {
+        companyName: data.company_name,
+        companyAddress: data.company_address,
+        companyNuit: data.company_nuit,
+        companyPhone: data.company_phone,
+        companyEmail: data.company_email,
+        receiptFooterMessage: data.receipt_footer_message,
+        enableVat: data.enable_vat ?? true,
+        vatPercentage: Number(data.vat_percentage || 16),
+        vatDefaultRate: Number(data.vat_percentage || 16),
+        defaultVat: Number(data.vat_percentage || 16),
+        currency: data.currency || "MT",
+        lowStockThreshold: Number(data.low_stock_threshold || 5),
+        smsStockThreshold: Number(data.low_stock_threshold || 5),
+        defaultPrinter: data.default_printer || "thermal_80mm",
+        printerName: data.default_printer || "thermal_80mm",
+        cloudBackupEnabled: data.cloud_backup_enabled ?? true,
+        backupFrequency: data.backup_frequency || "daily",
+        backupTime: data.backup_time || "18:00",
+        logoUrl: data.logo_url || "",
+        theme: data.theme || "laranja",
+        autoBackup: data.cloud_backup_enabled ?? true,
+        smsGateway: "",
+        smtpServer: "",
+        reportRecipientEmail: "",
+        reportHour: "18:00",
+        reportFrequency: "daily",
+        ...(data.val_json || {})
+      } as SystemSettings;
+    } catch {
+      return null;
+    }
+  },
+
+  async saveSettings(settings: SystemSettings): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: "config",
+        tenant_id: tenantId,
+        company_name: settings.companyName,
+        company_address: settings.companyAddress || settings.storeAddress || "",
+        company_nuit: settings.companyNuit || settings.nuit || "",
+        company_phone: (settings as any).companyPhone || settings.storeContact || "",
+        company_email: settings.email || settings.storeEmail || (settings as any).companyEmail || "",
+        receipt_footer_message: (settings as any).receiptFooterMessage || settings.slogan || "",
+        enable_vat: (settings as any).enableVat ?? true,
+        vat_percentage: settings.defaultVat ?? settings.vatDefaultRate ?? 16,
+        currency: settings.currency || "MT",
+        low_stock_threshold: settings.smsStockThreshold ?? (settings as any).lowStockThreshold ?? 5,
+        default_printer: settings.printerName || (settings as any).defaultPrinter || "thermal_80mm",
+        cloud_backup_enabled: settings.cloudBackupEnabled ?? true,
+        backup_frequency: settings.backupFrequency || "daily",
+        backup_time: settings.backupTime || "18:00",
+        logo_url: settings.logoUrl || "",
+        theme: settings.theme || "laranja",
+        val_json: settings,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await client.from("settings").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- SUPABASE STORAGE (BACKUPS & ARQUIVOS) ---
+  async uploadBackupToStorage(fileName: string, jsonString: string): Promise<string | null> {
+    const client = getSupabaseClient();
+    if (!client) return null;
+
+    try {
+      const bucketName = "ostvendas-backups";
+      const blob = new Blob([jsonString], { type: "application/json" });
+      const filePath = `backups/${fileName}`;
+
+      const { data, error } = await client.storage
+        .from(bucketName)
+        .upload(filePath, blob, {
+          contentType: "application/json",
+          upsert: true
+        });
+
+      if (error) {
+        console.warn("Falha no upload para o Supabase Storage:", error.message);
+        return null;
+      }
+
+      const { data: publicUrlData } = client.storage.from(bucketName).getPublicUrl(filePath);
+      return publicUrlData.publicUrl || filePath;
+    } catch (err) {
+      console.warn("Erro ao fazer upload de backup no Storage:", err);
+      return null;
+    }
+  },
+
+  async listBackupsFromStorage(): Promise<CloudBackupItem[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const bucketName = "ostvendas-backups";
+      const { data, error } = await client.storage.from(bucketName).list("backups");
+      if (error || !data) return [];
+
+      return data.map((item) => {
+        const { data: publicUrlData } = client.storage.from(bucketName).getPublicUrl(`backups/${item.name}`);
+        return {
+          name: item.name,
+          filename: item.name,
+          fullPath: `backups/${item.name}`,
+          size: item.metadata?.size || 0,
+          updated: item.updated_at || item.created_at || new Date().toISOString(),
+          downloadUrl: publicUrlData.publicUrl
+        };
+      });
+    } catch {
+      return [];
+    }
+  },
+
+  async deleteBackupFromStorage(fileName: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const bucketName = "ostvendas-backups";
+      const { error } = await client.storage.from(bucketName).remove([`backups/${fileName}`]);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  // --- REALTIME CHANNEL SUBSCRIPTIONS ---
+  subscribeToTableChanges(table: string, onUpdate: (payload: any) => void): { unsubscribe: () => void } {
+    const client = getSupabaseClient();
+    if (!client) return { unsubscribe: () => {} };
+
+    try {
+      const channel = client
+        .channel(`public:${table}`)
+        .on(
+          "postgres_changes",
+          { event: "*", schema: "public", table },
+          (payload) => {
+            onUpdate(payload);
+          }
+        )
+        .subscribe();
+
+      return {
+        unsubscribe: () => {
+          client.removeChannel(channel);
+        }
+      };
+    } catch {
+      return { unsubscribe: () => {} };
+    }
+  },
+
+  // --- SINCRONIZAÇÃO COMPLETA (ALL DATA) ---
+  async syncAll(data: {
+    products: Product[];
+    customers: Customer[];
+    transactions: Transaction[];
+    cashFlow: CashFlowEntry[];
+    cashClosures?: CashClosure[];
+    employees?: Employee[];
+    auditLogs?: AuditLog[];
+    settings?: SystemSettings;
+  }): Promise<{ success: boolean; count: number; error?: string }> {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { success: false, count: 0, error: "Supabase não está configurado ou ativo." };
+    }
+
+    let synced = 0;
+    try {
+      if (data.products && data.products.length > 0) {
+        const ok = await this.syncProducts(data.products);
+        if (ok) synced += data.products.length;
+      }
+      if (data.customers && data.customers.length > 0) {
+        const ok = await this.syncCustomers(data.customers);
+        if (ok) synced += data.customers.length;
+      }
+      if (data.transactions && data.transactions.length > 0) {
+        const ok = await this.syncTransactions(data.transactions);
+        if (ok) synced += data.transactions.length;
+      }
+      if (data.cashFlow && data.cashFlow.length > 0) {
+        const ok = await this.syncCashFlow(data.cashFlow);
+        if (ok) synced += data.cashFlow.length;
+      }
+      if (data.cashClosures && data.cashClosures.length > 0) {
+        const ok = await this.syncCashClosures(data.cashClosures);
+        if (ok) synced += data.cashClosures.length;
+      }
+      if (data.employees && data.employees.length > 0) {
+        const ok = await this.syncEmployees(data.employees);
+        if (ok) synced += data.employees.length;
+      }
+      if (data.auditLogs && data.auditLogs.length > 0) {
+        const ok = await this.syncAuditLogs(data.auditLogs);
+        if (ok) synced += data.auditLogs.length;
+      }
+      if (data.settings) {
+        await this.saveSettings(data.settings);
+        synced += 1;
+      }
+
+      return { success: true, count: synced };
+    } catch (err: any) {
+      return { success: false, count: synced, error: err.message };
+    }
+  }
 };

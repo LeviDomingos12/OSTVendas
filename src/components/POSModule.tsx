@@ -13,7 +13,6 @@ import {
   Printer,
   Smartphone,
   ShoppingCart,
-  Wifi,
   Camera,
   AlertTriangle,
   History,
@@ -28,22 +27,11 @@ import {
   Zap,
   Barcode,
   Clock,
-  RotateCcw
+  RotateCcw,
+  Loader2
 } from "lucide-react";
 import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
 import QrCodeScannerComponent from "./QrCodeScannerComponent";
-import { PosShortcutsHelpModal } from "./pos/PosShortcutsHelpModal";
-import { PosCriticalStockModal } from "./pos/PosCriticalStockModal";
-import { PosQuickCustomerModal } from "./pos/PosQuickCustomerModal";
-import { PosCreditNoteModal, CompletedCreditNote } from "./pos/PosCreditNoteModal";
-import { PosReturnModal } from "./pos/PosReturnModal";
-import { PosBudgetModal, PosBudgetData } from "./pos/PosBudgetModal";
-import { PosWeightModal } from "./pos/PosWeightModal";
-import { PosScannerModal } from "./pos/PosScannerModal";
-import { PosSalesHistoryModal } from "./pos/PosSalesHistoryModal";
-import { PosWhatsappModal } from "./pos/PosWhatsappModal";
-import { PosReceiptModal } from "./pos/PosReceiptModal";
-import { ModuleShortcutsHelp } from "./common/ModuleShortcutsHelp";
 import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
 import jsPDF from "jspdf";
@@ -64,7 +52,7 @@ interface POSModuleProps {
   transactions: Transaction[];
   activeUsername: string;
   settings: SystemSettings;
-  onCompleteSale: (tx: Transaction) => void;
+  onCompleteSale: (tx: Transaction) => Promise<boolean | void> | void;
   onReturnSale?: (
     tx: Transaction,
     reason: string,
@@ -76,6 +64,7 @@ interface POSModuleProps {
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
+  onTriggerPanic?: () => void;
 }
 
 // Static helper for certified digital signing (Moçambique fiscal standards)
@@ -112,6 +101,7 @@ function POSModule({
   onShowToast,
   isPOSFullscreen = false,
   onChangePOSFullscreen,
+  onTriggerPanic
 }: POSModuleProps) {
   const { formattedVersion } = useSystemVersion();
   
@@ -126,7 +116,7 @@ function POSModule({
   const [customReturnReason, setCustomReturnReason] = useState<string>("");
   const [returnedItemQuantities, setReturnedItemQuantities] = useState<Record<string, number>>({});
   const [returnRefundMethod, setReturnRefundMethod] = useState<string>("CASH");
-  const [completedCreditNote, setCompletedCreditNote] = useState<CompletedCreditNote | null>(null);
+  const [completedCreditNote, setCompletedCreditNote] = useState<any | null>(null);
   
   // Minimized / Focus mode state
   const [isLocalMinimized, setIsLocalMinimized] = useState<boolean>(() => {
@@ -275,9 +265,44 @@ function POSModule({
   }, [completedTx]);
 
   // Completed Budget (Orçamento) Popup State
-  const [completedBudget, setCompletedBudget] = useState<PosBudgetData | null>(null);
+  const [completedBudget, setCompletedBudget] = useState<{
+    budgetNumber: string;
+    timestamp: number;
+    customerName: string;
+    customerEmail?: string;
+    customerPhone?: string;
+    customerNuit?: string;
+    items: Array<{
+      productId: string;
+      productName: string;
+      quantity: number;
+      price: number;
+    }>;
+    subtotal: number;
+    discountTotal: number;
+    vatTotal: number;
+    grandTotal: number;
+  } | null>(null);
+  const [sendBudgetEmailStatus, setSendBudgetEmailStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [sendBudgetSmsStatus, setSendBudgetSmsStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [sendBudgetWhatsAppStatus, setSendBudgetWhatsAppStatus] = useState<"idle" | "sending" | "sent">("idle");
+  const [budgetTargetEmail, setBudgetTargetEmail] = useState("");
+  const [budgetTargetPhone, setBudgetTargetPhone] = useState("");
+  
+  // Custom states for budget printing and ESC/POS styling
+  const [budgetPrintFormat, setBudgetPrintFormat] = useState<"A4_DOC" | "ESC_POS">("A4_DOC");
+  const [budgetTab, setBudgetTab] = useState<"PREVIEW" | "RAW_COMMANDS">("PREVIEW");
+  const [selectedPaperSize, setSelectedPaperSize] = useState<"80MM" | "58MM">("80MM");
   const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
   const [showCriticalStockModal, setShowCriticalStockModal] = useState(false);
+
+  useEffect(() => {
+    if (completedBudget) {
+      setBudgetPrintFormat(settings.printerEnabled ? "ESC_POS" : "A4_DOC");
+      setBudgetTab("PREVIEW");
+      setSelectedPaperSize(settings.paperSize === "58MM" ? "58MM" : "80MM");
+    }
+  }, [completedBudget, settings.printerEnabled, settings.paperSize]);
 
   const [whatsappModalOpen, setWhatsappModalOpen] = useState(false);
   const [whatsappMessage, setWhatsappMessage] = useState("");
@@ -315,6 +340,8 @@ function POSModule({
   const [showPreCheckoutModal, setShowPreCheckoutModal] = useState(false);
   const [showFinalConfirmModal, setShowFinalConfirmModal] = useState(false);
   const [pendingEmitReceipt, setPendingEmitReceipt] = useState<boolean>(true);
+  const [isProcessingSale, setIsProcessingSale] = useState<boolean>(false);
+  const isProcessingSaleRef = useRef<boolean>(false);
 
   // 10. Quick Add Customer Modal State
   const [quickCustomerModalOpen, setQuickCustomerModalOpen] = useState(false);
@@ -406,7 +433,7 @@ function POSModule({
   // Web Audio API feedback for retail barcode scanner
   const playBarcodeBeep = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const ctx = new AudioCtx();
         const osc = ctx.createOscillator();
@@ -425,7 +452,7 @@ function POSModule({
 
   const playErrorBeep = () => {
     try {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (AudioCtx) {
         const ctx = new AudioCtx();
         const osc = ctx.createOscillator();
@@ -446,7 +473,7 @@ function POSModule({
   useEffect(() => {
     let lastKeyTime = Date.now();
     let scanBuffer = "";
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let timeoutId: any = null;
 
     const processBuffer = () => {
       const code = scanBuffer.trim();
@@ -742,7 +769,7 @@ function POSModule({
   }, [selectedPaymentMethod, mobilePaymentProvider, mobileMerchantCode, calculations.grandTotal, mobileReference, mobileCustomerPhone]);
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
+    let interval: any = null;
     const isMobilePayment = selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA";
     const isTimerRunning = mobilePaymentStatus !== "CONFIRMED" && 
                            mobilePaymentStatus !== "IDLE" && 
@@ -816,9 +843,16 @@ function POSModule({
     setMobilePaymentTimer(120);
   };
 
-  // Execute checkout
-  const handleCheckout = (emitReceipt: boolean = true, isConfirmed: boolean = false, overridePaymentMethod?: string) => {
+  // Execute checkout (Online Only: direct frontend -> Supabase -> PostgreSQL)
+  const handleCheckout = async (emitReceipt: boolean = true, isConfirmed: boolean = false, overridePaymentMethod?: string) => {
     if (cart.length === 0) return;
+
+    // Bloqueio rigoroso contra duplo clique (Garantia de que 2 cliques não criam 2 vendas)
+    if (isProcessingSaleRef.current) {
+      console.warn("[POS] Tentativa de duplo clique prevenida: venda já em processamento.");
+      if (onShowToast) onShowToast("A venda já está a ser processada pelo PostgreSQL. Aguarde a confirmação...", "info");
+      return;
+    }
 
     const paymentMethodToUse = overridePaymentMethod || selectedPaymentMethod;
 
@@ -864,86 +898,101 @@ function POSModule({
       return;
     }
 
-    setShowFinalConfirmModal(false);
+    // Ativação atómica do bloqueio antes de qualquer chamada remota
+    isProcessingSaleRef.current = true;
+    setIsProcessingSale(true);
 
-    const nextInvoiceSeq = transactions.length + 1;
-    const invoiceNum = generateDeterministicInvoiceNumber(nextInvoiceSeq, settings.invoiceSeries || "A");
-    const nowStr = new Date().toISOString();
+    try {
+      setShowFinalConfirmModal(false);
 
-    const fiscalSign = settings.fiscalModeEnabled !== false
-      ? generateFiscalSignature(invoiceNum, nowStr, calculations.grandTotal)
-      : {};
+      const nextInvoiceSeq = transactions.length + 1;
+      const invoiceNum = generateDeterministicInvoiceNumber(nextInvoiceSeq, settings.invoiceSeries || "A");
+      const nowStr = new Date().toISOString();
+      const saleUUID = generateUUID();
 
-    const transaction: Transaction = {
-      id: generateUUID(),
-      invoiceNumber: invoiceNum,
-      timestamp: nowStr,
-      subtotal: calculations.subtotal,
-      vatTotal: calculations.vatTotal,
-      discountTotal: calculations.discountTotal,
-      grandTotal: calculations.grandTotal,
-      paymentMethod: paymentMethodToUse as Transaction["paymentMethod"],
-      cashierName: activeUsername,
-      customerName: selectedCustomer?.name,
-      customerId: selectedCustomer?.id,
-      customerPhone: selectedCustomer?.phone,
-      customerEmail: selectedCustomer?.email,
-      nuit: selectedCustomer?.nuit,
-      branchId: settings.activeBranchId || "central",
-      ...fiscalSign,
-      paymentDetails: paymentMethodToUse === "MIXED" 
-        ? `Misto: Dinheiro: ${mixedCash} MT | M-Pesa: ${mixedMpesa} MT | POS: ${mixedPOS} MT`
-        : paymentMethodToUse === "DEBT"
-        ? `Prazo: ${debtDays} dias. Vencimento: ${new Date(Date.now() + debtDays * 24 * 60 * 60 * 1000).toLocaleDateString()}`
-        : undefined,
-      items: cart.map(item => ({
-        productId: item.product.id,
-        productName: item.product.name + (item.observation ? ` (${item.observation})` : ""),
-        quantity: item.quantity,
-        price: item.product.salePrice,
-        vatAmount: Math.round(item.product.salePrice * item.quantity * (item.product.vatRate / 100)),
-        discountAmount: 0,
-        subtotal: item.product.salePrice * item.quantity
-      }))
-    };
+      const fiscalSign = settings.fiscalModeEnabled !== false
+        ? generateFiscalSignature(invoiceNum, nowStr, calculations.grandTotal)
+        : {};
 
-    onCompleteSale(transaction);
-    setCurrentSaleNumber(prev => prev + 1);
+      const transaction: Transaction = {
+        id: saleUUID,
+        idempotencyKey: saleUUID,
+        invoiceNumber: invoiceNum,
+        timestamp: nowStr,
+        subtotal: calculations.subtotal,
+        vatTotal: calculations.vatTotal,
+        discountTotal: calculations.discountTotal,
+        grandTotal: calculations.grandTotal,
+        paymentMethod: paymentMethodToUse as any,
+        cashierName: activeUsername,
+        customerName: selectedCustomer?.name,
+        customerId: selectedCustomer?.id,
+        customerPhone: selectedCustomer?.phone,
+        customerEmail: selectedCustomer?.email,
+        nuit: selectedCustomer?.nuit,
+        branchId: settings.activeBranchId || "central",
+        ...fiscalSign,
+        paymentDetails: paymentMethodToUse === "MIXED" 
+          ? `Misto: Dinheiro: ${mixedCash} MT | M-Pesa: ${mixedMpesa} MT | POS: ${mixedPOS} MT`
+          : paymentMethodToUse === "DEBT"
+          ? `Prazo: ${debtDays} dias. Vencimento: ${new Date(Date.now() + debtDays * 24 * 60 * 60 * 1000).toLocaleDateString()}`
+          : undefined,
+        items: cart.map(item => ({
+          productId: item.product.id,
+          productName: item.product.name + (item.observation ? ` (${item.observation})` : ""),
+          quantity: item.quantity,
+          price: item.product.salePrice,
+          vatAmount: Math.round(item.product.salePrice * item.quantity * (item.product.vatRate / 100)),
+          discountAmount: 0,
+          subtotal: item.product.salePrice * item.quantity
+        }))
+      };
 
-    // Abater imediatamente também no catálogo local do POS para feedback visual instantâneo
-    setLocalProducts(prev => {
-      return prev.map(p => {
-        const itemMatch = cart.find(c => c.product.id === p.id);
-        if (itemMatch) {
-          return { ...p, stock: Math.max(0, p.stock - itemMatch.quantity) };
-        }
-        return p;
-      });
-    });
+      // Online only: await PostgreSQL confirmation (POS → saveTransaction → processSaleAtomic → process_sale_atomic → PostgreSQL)
+      let saleSuccess = false;
+      try {
+        const res = await onCompleteSale(transaction);
+        saleSuccess = res === true;
+      } catch (err: any) {
+        console.error("[POS] Erro ao gravar venda no PostgreSQL:", err);
+        saleSuccess = false;
+      }
 
-    if (emitReceipt) {
-      onAddAuditLog(
-        "Efetuar Venda POS",
-        "VENDAS",
-        `Fatura ${invoiceNum} registrada por ${activeUsername}. Total: ${calculations.grandTotal} ${currency}. Cliente: ${selectedCustomer?.name || 'Geral'}`
-      );
-      setCompletedTx(transaction);
-    } else {
-      onAddAuditLog(
-        "Efetuar Venda POS (Sem Recibo)",
-        "VENDAS",
-        `Venda rápida ${invoiceNum} registrada sem emissão de recibo. Total: ${calculations.grandTotal} ${currency}`
-      );
-      handleReset();
-      setNoReceiptSuccess(true);
-      setTimeout(() => { setNoReceiptSuccess(false); }, 3000);
+      if (!saleSuccess) {
+        // Falha ou rejeição pelo PostgreSQL: A venda NÃO foi efetuada nem emitida.
+        return;
+      }
+
+      setCurrentSaleNumber(prev => prev + 1);
+
+      if (emitReceipt) {
+        onAddAuditLog(
+          "Efetuar Venda POS",
+          "VENDAS",
+          `Fatura ${invoiceNum} registrada por ${activeUsername}. Total: ${calculations.grandTotal} ${currency}. Cliente: ${selectedCustomer?.name || 'Geral'}`
+        );
+        setCompletedTx(transaction);
+      } else {
+        onAddAuditLog(
+          "Efetuar Venda POS (Sem Recibo)",
+          "VENDAS",
+          `Venda rápida ${invoiceNum} registrada sem emissão de recibo. Total: ${calculations.grandTotal} ${currency}`
+        );
+        handleReset();
+        setNoReceiptSuccess(true);
+        setTimeout(() => { setNoReceiptSuccess(false); }, 3000);
+      }
+      setShowPreCheckoutModal(false);
+    } finally {
+      isProcessingSaleRef.current = false;
+      setIsProcessingSale(false);
     }
-    setShowPreCheckoutModal(false);
   };
 
   // One-Click Checkout for pre-configured registered customers
   const handleOneClickCheckout = () => {
     if (cart.length === 0) return;
+    if (isProcessingSaleRef.current) return;
     if (!selectedCustomer) {
       if (onShowToast) onShowToast("Selecione um cliente para prosseguir com a venda rápida.", "warning");
       return;
@@ -993,6 +1042,7 @@ function POSModule({
   // Global Keyboard Shortcuts (F1, F2, F3, F4, F5, F6, F8, F9, F10, F11, ESC)
   useEffect(() => {
     const executeShortcut = (key: string) => {
+      if (isProcessingSaleRef.current) return;
       if (key === "F1") {
         if (showPreCheckoutModal) {
           // If the pre-checkout modal is already open, F1 confirms and finalizes the sale
@@ -1193,8 +1243,12 @@ function POSModule({
       setQuickCustomerModalOpen(true);
       return;
     }
+    if (!selectedCustomer.email) {
+      if (onShowToast) onShowToast("O cliente selecionado não possui um endereço de e-mail cadastrado.", "warning", "E-mail Indisponível");
+      return;
+    }
     setSendEmailStatus("sending");
-    const targetEmail = selectedCustomer?.email || "vendas.central@ost.co.mz";
+    const targetEmail = selectedCustomer.email;
     try {
       const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
       const rgbArray = activeTheme.rgb.split(",").map(Number);
@@ -1216,14 +1270,14 @@ function POSModule({
       doc.setFontSize(18);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(30, 41, 59);
-      doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+      doc.text(settings.companyName || "Indisponível", 14, 22);
       
       doc.setFontSize(9);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(100, 116, 139);
-      doc.text(`NUIT: ${settings.companyNuit || "400293112"}`, 14, 28);
-      doc.text(`Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 33);
-      doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"}`, 14, 38);
+      doc.text(`NUIT: ${settings.companyNuit || "Indisponível"}`, 14, 28);
+      doc.text(`Endereço: ${settings.storeAddress || settings.companyAddress || "Indisponível"}`, 14, 33);
+      doc.text(`Contacto: ${settings.storeContact || "Indisponível"}`, 14, 38);
       
       doc.setDrawColor(226, 232, 240);
       doc.line(14, 44, 196, 44);
@@ -1260,7 +1314,7 @@ function POSModule({
         styles: { fontSize: 8, cellPadding: 3 }
       });
 
-      const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
       
       // Totals container box
       doc.setFillColor(248, 250, 252);
@@ -1326,7 +1380,7 @@ function POSModule({
               </tr>
             </thead>
             <tbody>
-              ${completedTx.items.map((item) => `
+              ${completedTx.items.map((item: any) => `
                 <tr style="border-bottom: 1px solid #f1f5f9;">
                   <td style="padding: 10px; color: #1e293b;">${item.productName}</td>
                   <td style="padding: 10px; color: #475569; text-align: center;">${item.quantity}</td>
@@ -1364,7 +1418,7 @@ function POSModule({
       setSendEmailStatus("sent");
       onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail real para ${targetEmail} com PDF anexo.`);
       if (onShowToast) onShowToast("Recibo enviado por email com sucesso via Gmail API!", "success");
-    } catch (realEmailErr: unknown) {
+    } catch (realEmailErr: any) {
       console.warn("Could not send email via Gmail API, falling back to mock endpoint:", realEmailErr);
       
       try {
@@ -1382,13 +1436,13 @@ function POSModule({
         }
         doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
-        doc.text(settings.companyName || "OST COMÉRCIO CENTRAL", 14, 22);
+        doc.text(settings.companyName || "Indisponível", 14, 22);
         doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(100, 116, 139);
-        doc.text(`NUIT: ${settings.companyNuit || "400293112"}`, 14, 28);
-        doc.text(`Endereço: ${settings.storeAddress || "Av. Marginal, Maputo"}`, 14, 33);
-        doc.text(`Contacto: ${settings.storeContact || "+258 84 900 1202"}`, 14, 38);
+        doc.text(`NUIT: ${settings.companyNuit || "Indisponível"}`, 14, 28);
+        doc.text(`Endereço: ${settings.storeAddress || settings.companyAddress || "Indisponível"}`, 14, 33);
+        doc.text(`Contacto: ${settings.storeContact || "Indisponível"}`, 14, 38);
         doc.setDrawColor(226, 232, 240);
         doc.line(14, 44, 196, 44);
         doc.setFontSize(14);
@@ -1417,7 +1471,7 @@ function POSModule({
           headStyles: { fillColor: [rgbArray[0], rgbArray[1], rgbArray[2]] as [number, number, number] },
           styles: { fontSize: 8, cellPadding: 3 }
         });
-        const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 10;
+        const finalY = (doc as any).lastAutoTable.finalY + 10;
         doc.setFillColor(248, 250, 252);
         doc.rect(120, finalY, 76, 35, "F");
         doc.setDrawColor(226, 232, 240);
@@ -1472,10 +1526,9 @@ function POSModule({
         setSendEmailStatus("sent");
         onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail para ${targetEmail} com PDF anexo.`);
         if (onShowToast) onShowToast("Recibo enviado por email com sucesso!", "success");
-      } catch (err: unknown) {
+      } catch (err: any) {
         setSendEmailStatus("idle");
-        const errMsg = err instanceof Error ? err.message : "Não foi possível enviar o e-mail. Verifique o servidor SMTP nas Definições.";
-        if (onShowToast) onShowToast(errMsg, "error", "Falha de E-mail");
+        if (onShowToast) onShowToast(err?.message || "Não foi possível enviar o e-mail. Verifique o servidor SMTP nas Definições.", "error", "Falha de E-mail");
       }
     }
   };
@@ -1506,10 +1559,9 @@ function POSModule({
       setSendSmsStatus("sent");
       onAddAuditLog("Enviar Recibo por SMS", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via SMS para ${selectedCustomer?.phone}.`);
       if (onShowToast) onShowToast("SMS de confirmação despachado!", "success");
-    } catch (err: unknown) {
+    } catch (err: any) {
       setSendSmsStatus("idle");
-      const errMsg = err instanceof Error ? err.message : "Falha ao enviar SMS. Verifique as credenciais do Gateway de SMS.";
-      if (onShowToast) onShowToast(errMsg, "error", "Falha de SMS");
+      if (onShowToast) onShowToast(err?.message || "Falha ao enviar SMS. Verifique as credenciais do Gateway de SMS.", "error", "Falha de SMS");
     }
   };
 
@@ -1598,15 +1650,93 @@ function POSModule({
       onAddAuditLog("Enviar Recibo WhatsApp", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via WhatsApp Gateway.`);
       if (onShowToast) onShowToast(resData.message || "Recibo enviado pelo WhatsApp com sucesso!", "success");
       setWhatsappModalOpen(false);
-    } catch (err: unknown) {
+    } catch (err: any) {
       setSendWhatsAppStatus("idle");
-      const errMsg = err instanceof Error ? err.message : "Erro desconhecido";
-      if (onShowToast) onShowToast(`Erro no Gateway: ${errMsg}. Redirecionando para Link Direto...`, "warning");
+      if (onShowToast) onShowToast(`Erro no Gateway: ${err.message}. Redirecionando para Link Direto...`, "warning");
       
       // Automatic fallback
       window.open(directUrl, "_blank", "noopener,noreferrer");
       setWhatsappModalOpen(false);
     }
+  };
+
+  // Helper for formatting budget or transaction details in ESC/POS layout
+  const getEscPosText = (budget: any, paperSize: "80MM" | "58MM") => {
+    const width = paperSize === "58MM" ? 32 : 48; // characters per line
+    
+    const padChar = (str: string, len: number, char: string = " ", right: boolean = false) => {
+      const cleanStr = String(str || "");
+      if (cleanStr.length >= len) return cleanStr.substring(0, len);
+      const pad = char.repeat(len - cleanStr.length);
+      return right ? pad + cleanStr : cleanStr + pad;
+    };
+    
+    const centerText = (str: string) => {
+      const cleanStr = String(str || "");
+      if (cleanStr.length >= width) return cleanStr.substring(0, width);
+      const leftPad = Math.floor((width - cleanStr.length) / 2);
+      return " ".repeat(leftPad) + cleanStr;
+    };
+
+    const lineSeparator = "-".repeat(width);
+    const doubleLineSeparator = "=".repeat(width);
+
+    let out = "";
+    out += "[ESC @] -- INICIALIZAR IMPRESSORA\n";
+    out += "[ESC a 1] -- ALINHAMENTO AO CENTRO\n";
+    out += centerText(settings.companyName || "Indisponível") + "\n";
+    if (settings.slogan) out += centerText(settings.slogan) + "\n";
+    out += centerText(settings.storeAddress || settings.companyAddress || "Indisponível") + "\n";
+    out += centerText(`NUIT EMPRESA: ${settings.companyNuit || "Indisponível"}`) + "\n";
+    if (settings.storeContact) out += centerText(`Tel: ${settings.storeContact}`) + "\n";
+    out += lineSeparator + "\n";
+    
+    out += "[ESC a 0] -- ALINHAMENTO À ESQUERDA\n";
+    out += `PROPOSTA COMERCIAL (ORÇAMENTO)\n`;
+    out += `NÚMERO : ${budget.budgetNumber}\n`;
+    out += `EMISSÃO: ${new Date(budget.timestamp).toLocaleString("pt-MZ")}\n`;
+    out += `VALIDADE: 15 DIAS DEPOIS\n`;
+    out += `OPERADOR: ${activeUsername}\n`;
+    out += lineSeparator + "\n";
+    out += `DADOS DO CLIENTE:\n`;
+    out += `NOME   : ${budget.customerName}\n`;
+    if (budget.customerNuit)  out += `NUIT   : ${budget.customerNuit}\n`;
+    if (budget.customerPhone) out += `CONTAC : ${budget.customerPhone}\n`;
+    if (budget.customerEmail) out += `EMAIL  : ${budget.customerEmail}\n`;
+    out += doubleLineSeparator + "\n";
+    
+    const itemLen = paperSize === "58MM" ? 14 : 24;
+    const qtyLen = paperSize === "58MM" ? 4 : 6;
+    const valLen = paperSize === "58MM" ? 14 : 18;
+    
+    out += padChar("ARTIGO", itemLen) + padChar("QTD", qtyLen, " ", true) + padChar("VALOR", valLen, " ", true) + "\n";
+    out += lineSeparator + "\n";
+    
+    budget.items.forEach((item: any) => {
+      const name = item.productName.substring(0, itemLen - 1);
+      const qty = String(item.quantity);
+      const val = (item.price * item.quantity).toLocaleString() + " MT";
+      out += padChar(name, itemLen) + padChar(qty, qtyLen, " ", true) + padChar(val, valLen, " ", true) + "\n";
+    });
+    
+    out += lineSeparator + "\n";
+    out += padChar("SUBTOTAL:", itemLen + qtyLen) + padChar(budget.subtotal.toLocaleString() + " MT", valLen, " ", true) + "\n";
+    if (budget.discountTotal > 0) {
+      out += padChar("DESCONTO:", itemLen + qtyLen) + padChar("-" + budget.discountTotal.toLocaleString() + " MT", valLen, " ", true) + "\n";
+    }
+    out += padChar("IVA ESTIMADO (16%):", itemLen + qtyLen) + padChar(budget.vatTotal.toLocaleString() + " MT", valLen, " ", true) + "\n";
+    out += doubleLineSeparator + "\n";
+    out += "[ESC ! 17] -- DOUBLE HEIGHT & DOUBLE WIDTH BOLD\n";
+    out += padChar("TOTAL PROP:", itemLen + qtyLen) + padChar(budget.grandTotal.toLocaleString() + " MT", valLen, " ", true) + "\n";
+    out += "[ESC ! 0] -- FONTE NORMAL\n";
+    out += doubleLineSeparator + "\n";
+    out += "[ESC a 1] -- ALINHAMENTO AO CENTRO\n";
+    out += centerText("*** VALIDADE 15 DIAS ***") + "\n";
+    out += centerText("Este documento nao serve como fatura.") + "\n";
+    out += centerText("Obrigado pela preferência!") + "\n";
+    out += "[GS V 66 0] -- CORTE TOTAL DE PAPEL\n";
+    
+    return out;
   };
 
   // --- ORÇAMENTO (BUDGET / QUOTE) FUNCTIONS ---
@@ -1619,7 +1749,7 @@ function POSModule({
     const budgetNumber = `ORC-${new Date().getFullYear()}-${String(currentSaleNumber).padStart(4, "0")}`;
     const timestamp = Date.now();
     
-    const budgetData: PosBudgetData = {
+    const budgetData = {
       budgetNumber,
       timestamp,
       customerName: selectedCustomer ? selectedCustomer.name : "Consumidor Geral",
@@ -1639,6 +1769,11 @@ function POSModule({
     };
 
     setCompletedBudget(budgetData);
+    setBudgetTargetEmail(budgetData.customerEmail || "");
+    setBudgetTargetPhone(budgetData.customerPhone || "");
+    setSendBudgetEmailStatus("idle");
+    setSendBudgetSmsStatus("idle");
+    setSendBudgetWhatsAppStatus("idle");
 
     onAddAuditLog(
       "Gerar Orçamento POS",
@@ -1651,7 +1786,287 @@ function POSModule({
     }
   };
 
+  const handleSendBudgetEmail = async () => {
+    if (!completedBudget) return;
+    const targetEmail = budgetTargetEmail || completedBudget.customerEmail;
+    if (!targetEmail) {
+      if (onShowToast) onShowToast("Nenhum endereço de e-mail informado para envio da cotação.", "warning", "E-mail Indisponível");
+      return;
+    }
+    setSendBudgetEmailStatus("sending");
+    try {
+      const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
+      const rgbArray = activeTheme.rgb.split(",").map(Number);
 
+      // 1. Generate client-side styled PDF for the budget
+      const doc = new jsPDF();
+      
+      // Top theme color bar
+      doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
+      doc.rect(0, 0, 210, 8, "F");
+
+      // Company Logo
+      const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+      if (logoData) {
+        const format = getFormatFromBase64(logoData);
+        doc.addImage(logoData, format, 165, 12, 30, 30);
+      }
+      
+      doc.setFontSize(18);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text(settings.companyName || "Indisponível", 14, 22);
+      
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(`NUIT: ${settings.companyNuit || "Indisponível"}`, 14, 28);
+      doc.text(`Endereço: ${settings.storeAddress || settings.companyAddress || "Indisponível"}`, 14, 33);
+      doc.text(`Contacto: ${settings.storeContact || "Indisponível"}`, 14, 38);
+      
+      doc.setDrawColor(226, 232, 240);
+      doc.line(14, 44, 196, 44);
+      
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(180, 83, 9); // Amber-700
+      doc.text(`PROPOSTA DE ORÇAMENTO: ${completedBudget.budgetNumber}`, 14, 52);
+      
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Data Emissão: ${new Date(completedBudget.timestamp).toLocaleString("pt-MZ")}`, 14, 59);
+      doc.text(`Validade: 15 Dias (Até ${new Date(completedBudget.timestamp + 15 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-MZ")})`, 14, 64);
+      doc.text(`Caixa/Operador: ${activeUsername || "Operador"}`, 14, 69);
+      doc.text(`Cliente: ${completedBudget.customerName}`, 14, 74);
+      if (completedBudget.customerNuit) {
+        doc.text(`NUIT Cliente: ${completedBudget.customerNuit}`, 14, 79);
+      }
+
+      const tableHead = [["ARTIGO / PRODUTO", "QUANTIDADE", "PREÇO UNIT.", "SUBTOTAL"]];
+      const tableBody = completedBudget.items.map(item => [
+        item.productName,
+        item.quantity.toString(),
+        `${item.price.toLocaleString()} MT`,
+        `${(item.price * item.quantity).toLocaleString()} MT`
+      ]);
+
+      autoTable(doc, {
+        startY: completedBudget.customerNuit ? 85 : 80,
+        head: tableHead,
+        body: tableBody,
+        theme: "grid",
+        headStyles: { fillColor: [rgbArray[0], rgbArray[1], rgbArray[2]] as [number, number, number] },
+        styles: { fontSize: 8, cellPadding: 3 }
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      
+      // Totals container box
+      doc.setFillColor(248, 250, 252);
+      doc.rect(120, finalY, 76, 30, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(120, finalY, 76, 30, "S");
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(71, 85, 105);
+      doc.text(`Subtotal:`, 124, finalY + 6);
+      doc.text(`${completedBudget.subtotal.toLocaleString()} MT`, 192, finalY + 6, { align: "right" });
+      if (completedBudget.discountTotal > 0) {
+        doc.setTextColor(239, 68, 68);
+        doc.text(`Desconto:`, 124, finalY + 12);
+        doc.text(`-${completedBudget.discountTotal.toLocaleString()} MT`, 192, finalY + 12, { align: "right" });
+        doc.setTextColor(71, 85, 105);
+      }
+      doc.text(`IVA Estimado:`, 124, finalY + 18);
+      doc.text(`${completedBudget.vatTotal.toLocaleString()} MT`, 192, finalY + 18, { align: "right" });
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(180, 83, 9); // Amber-700
+      doc.text(`TOTAL PROPOSTO:`, 124, finalY + 25);
+      doc.text(`${completedBudget.grandTotal.toLocaleString()} MT`, 192, finalY + 25, { align: "right" });
+
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(8);
+      doc.setTextColor(148, 163, 184);
+      doc.text("Este documento constitui apenas uma proposta comercial.", 105, finalY + 40, { align: "center" });
+
+      const pdfBase64DataUri = doc.output('datauristring');
+      const base64Content = pdfBase64DataUri.split(',')[1];
+
+      // Prepare email body
+      const itemsHtml = completedBudget.items
+        .map(item => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: left;">${item.productName}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: center;">${item.quantity}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${item.price.toLocaleString()} MT</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${(item.price * item.quantity).toLocaleString()} MT</td>
+          </tr>
+        `).join("");
+
+      const emailBody = `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+          <div style="text-align: center; margin-bottom: 20px;">
+            <h2 style="color: #ea580c; margin: 0;">${settings.companyName || "OST Vendas"}</h2>
+            <p style="color: #64748b; margin: 5px 0 0 0;">Orçamento Comercial</p>
+          </div>
+          <p><strong>Orçamento Nº:</strong> ${completedBudget.budgetNumber}</p>
+          <p><strong>Data de Emissão:</strong> ${new Date(completedBudget.timestamp).toLocaleString("pt-MZ")}</p>
+          <p><strong>Validade:</strong> 15 Dias (Até ${new Date(completedBudget.timestamp + 15 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-MZ")})</p>
+          <p><strong>Operador:</strong> ${activeUsername}</p>
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
+          <p>Olá <strong>${completedBudget.customerName}</strong>,</p>
+          <p>Abaixo encontra-se o orçamento comercial solicitado para a sua apreciação:</p>
+          
+          <table style="width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 13px;">
+            <thead>
+              <tr style="background-color: #f8fafc; color: #475569;">
+                <th style="padding: 8px; text-align: left; border-bottom: 2px solid #cbd5e1;">Artigo</th>
+                <th style="padding: 8px; text-align: center; border-bottom: 2px solid #cbd5e1;">Qtd</th>
+                <th style="padding: 8px; text-align: right; border-bottom: 2px solid #cbd5e1;">Preço Un.</th>
+                <th style="padding: 8px; text-align: right; border-bottom: 2px solid #cbd5e1;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+
+          <div style="text-align: right; font-size: 13px; color: #475569; line-height: 1.6;">
+            <p><strong>Subtotal:</strong> ${completedBudget.subtotal.toLocaleString()} MT</p>
+            ${completedBudget.discountTotal > 0 ? `<p style="color: #ef4444;"><strong>Desconto:</strong> -${completedBudget.discountTotal.toLocaleString()} MT</p>` : ""}
+            <p><strong>IVA Cobrado:</strong> ${completedBudget.vatTotal.toLocaleString()} MT</p>
+            <p style="font-size: 16px; color: #ea580c; border-top: 1px solid #e2e8f0; padding-top: 8px; margin-top: 8px;"><strong>Total Geral:</strong> ${completedBudget.grandTotal.toLocaleString()} MT</p>
+          </div>
+
+          <div style="background-color: #f8fafc; padding: 12px; border-radius: 8px; border-left: 4px solid #ea580c; font-size: 11px; color: #64748b; line-height: 1.5; margin-top: 25px;">
+            <strong>Nota:</strong> Este documento constitui apenas uma proposta comercial válida por 15 dias e não serve como recibo ou comprovativo de pagamento.
+          </div>
+
+          <p style="margin-top: 30px; font-size: 12px; color: #64748b; text-align: center;">Estamos à sua disposição!<br><em>${settings.companyName || "OST Vendas"}</em></p>
+        </div>
+      `;
+
+      // Try client-side Gmail API first
+      try {
+        await sendEmail({
+          to: targetEmail,
+          subject: `Orçamento ${completedBudget.budgetNumber} - ${settings.companyName || "OST Vendas"}`,
+          body: emailBody,
+          isHtml: true,
+          attachments: [{
+            filename: `Orcamento_${completedBudget.budgetNumber}.pdf`,
+            content: base64Content,
+            mimeType: "application/pdf"
+          }]
+        });
+
+        setSendBudgetEmailStatus("sent");
+        onAddAuditLog("Enviar Orçamento por Email", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via e-mail real para ${targetEmail} com PDF anexo.`);
+        if (onShowToast) onShowToast("Orçamento enviado por e-mail com sucesso via Gmail API!", "success");
+      } catch (gmailErr: any) {
+        console.warn("Could not send email via Gmail API, falling back to server-side SMTP:", gmailErr);
+        
+        // Fall back to server endpoint /api/email/dispatch-budget
+        const res = await authenticatedFetch("/api/email/dispatch-budget", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: targetEmail,
+            budgetNumber: completedBudget.budgetNumber,
+            grandTotal: completedBudget.grandTotal,
+            cashier: activeUsername,
+            customer: completedBudget.customerName,
+            items: completedBudget.items,
+            subtotal: completedBudget.subtotal,
+            discountTotal: completedBudget.discountTotal,
+            vatTotal: completedBudget.vatTotal,
+            pdfAttachment: base64Content
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Erro desconhecido no servidor.");
+        }
+
+        setSendBudgetEmailStatus("sent");
+        onAddAuditLog("Enviar Orçamento por Email", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via e-mail do servidor (SMTP) para ${targetEmail} com PDF.`);
+        if (onShowToast) onShowToast("Orçamento enviado por e-mail com sucesso!", "success");
+      }
+    } catch (err: any) {
+      console.error("Could not send budget email:", err);
+      setSendBudgetEmailStatus("idle");
+      if (onShowToast) onShowToast(`Erro ao enviar orçamento: ${err.message || err}`, "error");
+    }
+  };
+
+  const handleSendBudgetSms = async () => {
+    if (!completedBudget) return;
+    setSendBudgetSmsStatus("sending");
+    const targetPhone = budgetTargetPhone || completedBudget.customerPhone || "+258 84 900 1202";
+    try {
+      const resp = await authenticatedFetch("/api/sms/dispatch-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: targetPhone,
+          invoiceNumber: completedBudget.budgetNumber,
+          grandTotal: completedBudget.grandTotal
+        })
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data?.message || data?.error || `HTTP ${resp.status}`);
+      }
+      setSendBudgetSmsStatus("sent");
+      onAddAuditLog("Enviar Orçamento por SMS", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via SMS para ${targetPhone}.`);
+      if (onShowToast) onShowToast("Orçamento enviado por SMS com sucesso!", "success");
+    } catch (err: any) {
+      setSendBudgetSmsStatus("idle");
+      if (onShowToast) onShowToast(err?.message || "Falha ao enviar SMS do orçamento.", "error");
+    }
+  };
+
+  const handleOpenBudgetWhatsApp = () => {
+    if (!completedBudget) return;
+    
+    const dateStr = new Date(completedBudget.timestamp).toLocaleDateString("pt-MZ");
+    const validUntilStr = new Date(completedBudget.timestamp + 15 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-MZ");
+    const itemsText = completedBudget.items
+      .map(item => `▪️ ${item.quantity}x ${item.productName} - ${(item.price * item.quantity).toLocaleString()} MT`)
+      .join("\n");
+
+    const text = `📝 *ORÇAMENTO COMERCIAL* - ${settings.companyName || "OST Vendas"} 🇲🇿\n` +
+      `------------------------------------------\n` +
+      `*Orçamento:* ${completedBudget.budgetNumber}\n` +
+      `*Data de Emissão:* ${dateStr}\n` +
+      `*Validade:* 15 dias (Até ${validUntilStr})\n` +
+      `*Operador:* ${activeUsername}\n` +
+      `*Cliente:* ${completedBudget.customerName}\n` +
+      `------------------------------------------\n` +
+      `*Artigos:*\n${itemsText}\n` +
+      `------------------------------------------\n` +
+      `*Subtotal:* ${completedBudget.subtotal.toLocaleString()} MT\n` +
+      (completedBudget.discountTotal > 0 ? `*Desconto:* -${completedBudget.discountTotal.toLocaleString()} MT\n` : "") +
+      `*IVA:* ${completedBudget.vatTotal.toLocaleString()} MT\n` +
+      `*TOTAL PROPOSTO: ${completedBudget.grandTotal.toLocaleString()} MT*\n` +
+      `------------------------------------------\n\n` +
+      `Este documento é uma proposta comercial. Ficamos a aguardar o seu contacto! ✨`;
+
+    const cleanPhone = (budgetTargetPhone || completedBudget.customerPhone || "").replace(/\D/g, "");
+    const defaultPhone = cleanPhone.length === 9 && (cleanPhone.startsWith("84") || cleanPhone.startsWith("85") || cleanPhone.startsWith("82") || cleanPhone.startsWith("87") || cleanPhone.startsWith("86"))
+      ? `258${cleanPhone}`
+      : cleanPhone;
+
+    const whatsappUrl = `https://api.whatsapp.com/send?phone=${defaultPhone}&text=${encodeURIComponent(text)}`;
+    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    setSendBudgetWhatsAppStatus("sent");
+    onAddAuditLog("Enviar Orçamento WhatsApp", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via WhatsApp para o telemóvel ${defaultPhone}.`);
+    if (onShowToast) onShowToast("Link do WhatsApp aberto com sucesso!", "success");
+  };
 
   // Quick Customer Registration
   const handleQuickAddCustomer = (e: React.FormEvent) => {
@@ -1660,9 +2075,9 @@ function POSModule({
     const newCust: Customer = {
       id: generateEntityId("cust"),
       name: quickCustName,
-      phone: quickCustPhone || "Sem Telemóvel",
-      email: `${quickCustName.toLowerCase().replace(/\s+/g, "")}@gmail.com`,
-      address: "Maputo, Moçambique",
+      phone: quickCustPhone.trim() || "Indisponível",
+      email: "",
+      address: "Indisponível",
       nuit: "",
       totalSpent: 0,
       purchaseCount: 0,
@@ -2361,20 +2776,29 @@ function POSModule({
           {/* Primary Express 5-Second Checkout Button */}
           <button
             onClick={() => {
-              if (cart.length > 0) setShowPreCheckoutModal(true);
+              if (cart.length > 0 && !isProcessingSale) setShowPreCheckoutModal(true);
             }}
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || isProcessingSale}
             id="btn-pos-finalize-sale"
             className={`w-full ${
               isMinimized ? "py-4 text-base shadow-xl shadow-emerald-600/30 ring-2 ring-emerald-400/50" : "py-3 text-sm shadow-lg"
             } rounded-xl font-black flex items-center justify-center gap-2 transition-all ${
-              cart.length === 0
+              cart.length === 0 || isProcessingSale
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
                 : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-600/20 active:scale-[0.98]"
             }`}
           >
-            <Zap className="w-4 h-4 text-amber-300 fill-amber-300 animate-pulse" />
-            <span>⚡ Concluir Venda ({calculations.grandTotal.toLocaleString()} MT)</span>
+            {isProcessingSale ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-white" />
+                <span>A processar no PostgreSQL...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4 text-amber-300 fill-amber-300 animate-pulse" />
+                <span>⚡ Concluir Venda ({calculations.grandTotal.toLocaleString()} MT)</span>
+              </>
+            )}
           </button>
 
           {/* Auxiliary Actions (Suspend & Budget) - Ocultado em modo minimizado */}
@@ -2494,20 +2918,29 @@ function POSModule({
                 Voltar e Ajustar
               </button>
               <button
-                onClick={() => handleCheckout(true, true)}
-                disabled={selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal}
+                onClick={() => handleCheckout(true)}
+                disabled={isProcessingSale || (selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal)}
                 title="Confirmar e Faturar com Recibo (Atalho: F5 / F1)"
                 className={`py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shadow-lg flex items-center justify-center gap-1.5 ${
-                  selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
+                  isProcessingSale || (selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal)
                     ? "bg-slate-300 text-slate-500 cursor-not-allowed shadow-none"
                     : "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/15"
                 }`}
               >
-                <span>{selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
-                  ? "Valor Insuficiente"
-                  : "Confirmar e Faturar ✓"}</span>
-                {!(selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal) && (
-                  <kbd className="px-1.5 py-0.2 bg-white/25 text-white rounded text-[10px] font-mono font-bold">F5</kbd>
+                {isProcessingSale ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                    <span>A faturar no PostgreSQL...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal
+                      ? "Valor Insuficiente"
+                      : "Confirmar e Faturar ✓"}</span>
+                    {!(selectedPaymentMethod === "CASH" && receivedCashAmount > 0 && receivedCashAmount < calculations.grandTotal) && (
+                      <kbd className="px-1.5 py-0.2 bg-white/25 text-white rounded text-[10px] font-mono font-bold">F5</kbd>
+                    )}
+                  </>
                 )}
               </button>
             </div>
@@ -2562,154 +2995,1147 @@ function POSModule({
               <button
                 type="button"
                 onClick={() => handleCheckout(pendingEmitReceipt, true)}
-                className="flex-1 py-3 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 rounded-2xl text-xs font-black text-white transition-all cursor-pointer shadow-md shadow-orange-500/20 hover:scale-[1.02] active:scale-[0.98]"
+                disabled={isProcessingSale}
+                className={`flex-1 py-3 rounded-2xl text-xs font-black text-white transition-all shadow-md flex items-center justify-center gap-2 ${
+                  isProcessingSale
+                    ? "bg-slate-400 cursor-not-allowed shadow-none"
+                    : "bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 cursor-pointer shadow-orange-500/20 hover:scale-[1.02] active:scale-[0.98]"
+                }`}
               >
-                Sim, Finalizar ✓
+                {isProcessingSale ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>A processar...</span>
+                  </>
+                ) : (
+                  <span>Sim, Finalizar ✓</span>
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
-      <PosWeightModal
-        product={weightPromptProduct}
-        onClose={() => setWeightPromptProduct(null)}
-        onConfirmWeight={(prod, val) => {
-          handleTriggerAddToCart(prod, val);
-          setWeightPromptProduct(null);
-        }}
-      />
+      {weightPromptProduct && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-xs w-full border border-slate-100 shadow-2xl space-y-4 text-center animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto">
+              <span className="text-2xl">{weightPromptProduct.emoji || "⚖️"}</span>
+            </div>
+            
+            <div>
+              <h3 className="font-extrabold text-slate-900 text-sm">Pesagem de Artigo (Baloneta)</h3>
+              <p className="text-[11px] text-slate-400 mt-1">Insira a quantidade pesada de <span className="font-bold text-slate-700">{weightPromptProduct.name}</span></p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="1.25"
+                  value={weightInputValue}
+                  onChange={(e) => setWeightInputValue(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-3 text-center text-xl font-bold font-mono outline-none focus:ring-1 focus:ring-orange-500"
+                  autoFocus
+                />
+                <span className="absolute right-3.5 top-3.5 text-xs font-bold text-slate-400">kg</span>
+              </div>
+
+              {/* Fast weight presets */}
+              <div className="grid grid-cols-4 gap-1.5 text-[10px] font-bold text-slate-700">
+                {["0.25", "0.50", "1.0", "2.5"].map(w => (
+                  <button
+                    key={w}
+                    onClick={() => setWeightInputValue(w)}
+                    className="py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-200 cursor-pointer"
+                  >
+                    {w} kg
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                onClick={() => setWeightPromptProduct(null)}
+                className="py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  const val = parseFloat(weightInputValue);
+                  if (!isNaN(val) && val > 0) {
+                    handleTriggerAddToCart(weightPromptProduct, val);
+                    setWeightPromptProduct(null);
+                  }
+                }}
+                className="py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Lançar Peso ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 20. REAL CAMERA & EMULATED BARCODE SCANNER MODAL */}
-      <PosScannerModal
-        isOpen={scannerModalOpen}
-        onClose={() => setScannerModalOpen(false)}
-        localProducts={localProducts}
-        cartItemQuantities={cartItemQuantities}
-        onAddToCart={handleTriggerAddToCart}
-        onShowToast={onShowToast}
-      />
+      {scannerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-5 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            
+            {/* Header / Tab Switcher */}
+            <div className="text-center space-y-2.5">
+              <div className="w-11 h-11 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto">
+                <Camera className="w-5.5 h-5.5" />
+              </div>
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-sm">Leitor de Códigos de Barra</h3>
+                <p className="text-[10.5px] text-slate-400 mt-0.5">Efetue a leitura de artigos para o carrinho de compras de forma automática.</p>
+              </div>
+
+              {/* Tab Selector */}
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setScannerTab("camera")}
+                  className={`flex-1 py-1.5 text-[11px] font-extrabold rounded-lg transition-all cursor-pointer ${
+                    scannerTab === "camera" 
+                      ? "bg-white text-slate-900 shadow-sm" 
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  📷 Câmara Real
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScannerTab("simulation")}
+                  className={`flex-1 py-1.5 text-[11px] font-extrabold rounded-lg transition-all cursor-pointer ${
+                    scannerTab === "simulation" 
+                      ? "bg-white text-slate-900 shadow-sm" 
+                      : "text-slate-500 hover:text-slate-800"
+                  }`}
+                >
+                  🧪 Emulador POS
+                </button>
+              </div>
+            </div>
+
+            {/* TAB CONTENT 1: PHYSICAL CAMERA CAPTURE */}
+            {scannerTab === "camera" && (
+              <div className="space-y-3.5">
+                <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-950 flex items-center justify-center">
+                  
+                  {/* Glowing Laser line animation overlay */}
+                  <div className="absolute left-0 right-0 h-[1.5px] bg-red-500 shadow-[0_0_8px_#ef4444] z-10 animate-pulse" style={{
+                    top: "50%",
+                    transform: "translateY(-50%)"
+                  }} />
+                  
+                  {/* Viewfinder corner overlays */}
+                  <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-orange-500 z-10" />
+                  <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-orange-500 z-10" />
+                  <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-orange-500 z-10" />
+                  <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-orange-500 z-10" />
+
+                  {/* HTML5 QrReader Component */}
+                  <QrCodeScannerComponent
+                    onResult={(result, _error) => {
+                      if (result) {
+                        const textValue = result.text || String(result);
+                        if (textValue) {
+                          const trimmed = textValue.trim();
+                          const now = Date.now();
+
+                          // Prevent rapid duplicate scans within 2.5 seconds
+                          if (trimmed === lastScannedCodeRef.current && now - lastScannedTimeRef.current < 2500) {
+                            return;
+                          }
+
+                          lastScannedCodeRef.current = trimmed;
+                          lastScannedTimeRef.current = now;
+
+                          const match = localProducts.find(p => p.barcode === trimmed || p.code === trimmed);
+                          if (match) {
+                            handleTriggerAddToCart(match);
+                            if (!continuousScan) {
+                              setScannerModalOpen(false);
+                            }
+                          } else {
+                            if (onShowToast) {
+                              onShowToast(`Código lido: "${trimmed}" não registado no catálogo.`, "warning", "Código Desconhecido");
+                            }
+                          }
+                        }
+                      }
+                    }}
+                    facingMode="environment"
+                    scanDelay={400}
+                  />
+                </div>
+
+                {/* Continuous Scan Checkbox */}
+                <label className="flex items-center gap-2 px-3 py-2 text-slate-600 justify-center text-[10.5px] bg-slate-50 rounded-xl border border-slate-150 cursor-pointer hover:bg-slate-100 transition">
+                  <input
+                    type="checkbox"
+                    checked={continuousScan}
+                    onChange={(e) => setContinuousScan(e.target.checked)}
+                    className="rounded text-orange-500 focus:ring-orange-500 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <span className="font-bold select-none text-slate-700">Leitura Contínua (Não fechar painel após ler)</span>
+                </label>
+              </div>
+            )}
+
+            {/* TAB CONTENT 2: MOCK EMULATION LIST */}
+            {scannerTab === "simulation" && (
+              <div className="space-y-3.5">
+                {/* Simulated list of barcodes */}
+                <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                  <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider font-mono block">Barcodes Disponíveis:</span>
+                  {localProducts.map(p => {
+                    const inCartQty = cartItemQuantities.get(p.id) || 0;
+                    const liveStock = Math.max(0, p.stock - inCartQty);
+                    const isExhausted = liveStock <= 0;
+                    return (
+                      <button
+                        key={p.id}
+                        disabled={isExhausted}
+                        onClick={() => {
+                          handleTriggerAddToCart(p);
+                          setScannerModalOpen(false);
+                        }}
+                        className={`w-full text-left p-2 border rounded-lg text-xs flex justify-between items-center transition ${
+                          isExhausted
+                            ? "bg-slate-100/60 border-slate-200 cursor-not-allowed opacity-60"
+                            : "bg-slate-50 border-slate-150 hover:bg-orange-50 hover:border-orange-200 cursor-pointer"
+                        }`}
+                      >
+                        <div className="truncate pr-2">
+                          <span className="font-bold text-slate-700 block truncate">{p.name}</span>
+                          <span className="text-[9.5px] font-mono text-slate-400 block">{p.barcode || "Sem Barcode"} • Disp: {liveStock} un</span>
+                        </div>
+                        <span className="text-[10px] font-mono font-bold text-orange-600 bg-white border border-slate-100 px-1.5 py-0.5 rounded shrink-0">
+                          {isExhausted ? "Esgotado" : "Bipar"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="border-t border-slate-100 pt-3 flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Insira barcode manualmente..."
+                    value={manualBarcodeScan}
+                    onChange={(e) => setManualBarcodeScan(e.target.value)}
+                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono outline-none focus:ring-1 focus:ring-orange-500"
+                  />
+                  <button
+                    onClick={() => {
+                      if (manualBarcodeScan) {
+                        const match = localProducts.find(p => p.barcode === manualBarcodeScan.trim() || p.code === manualBarcodeScan.trim());
+                        if (match) {
+                          handleTriggerAddToCart(match);
+                          setScannerModalOpen(false);
+                          setManualBarcodeScan("");
+                        } else {
+                          if (onShowToast) onShowToast("Nenhum produto associado a este código.", "error", "Manual");
+                        }
+                      }
+                    }}
+                    className="px-3.5 bg-slate-900 text-white rounded-xl text-xs font-extrabold cursor-pointer hover:bg-slate-800"
+                  >
+                    Ler
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Footer Close Button */}
+            <button
+              onClick={() => setScannerModalOpen(false)}
+              className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer transition"
+            >
+              Fechar Painel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 10. QUICK REGISTER CUSTOMER MODAL */}
-      <PosQuickCustomerModal
-        isOpen={quickCustomerModalOpen}
-        onClose={() => setQuickCustomerModalOpen(false)}
-        onCustomerCreated={(newCust) => {
-          setLocalCustomers(prev => [...prev, newCust]);
-          setSelectedCustomerId(newCust.id);
-          if (completedTx) {
-            setCompletedTx(prev => {
-              if (!prev) return null;
-              return {
-                ...prev,
-                customerId: newCust.id,
-                customerName: newCust.name
-              };
-            });
-          }
-          setQuickCustomerModalOpen(false);
-          if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e selecionado!`, "success", "Cliente Adicionado");
-        }}
-        onShowToast={onShowToast}
-      />
+      {quickCustomerModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <form onSubmit={handleQuickAddCustomer} className="bg-white p-6 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="text-center">
+              <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-2">
+                <UserPlus className="w-6 h-6" />
+              </div>
+              <h3 className="font-extrabold text-slate-900 text-sm">👤 Cadastro Rápido de Cliente</h3>
+              <p className="text-xs text-slate-400 mt-1">Crie um cadastro de cliente fiduciário simplificado directamente do ponto de venda.</p>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-700">
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Nome Completo *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Armindo Chauque"
+                  value={quickCustName}
+                  onChange={(e) => setQuickCustName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-bold"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-600 block mb-1">Telemóvel (M-Pesa) *</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 843329102"
+                  value={quickCustPhone}
+                  onChange={(e) => setQuickCustPhone(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setQuickCustomerModalOpen(false)}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 cursor-pointer"
+              >
+                Voltar
+              </button>
+              <button
+                type="submit"
+                className="py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md"
+              >
+                Registar Cliente
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* 16. SESSION TRANSACTION HISTORY MODAL */}
-      <PosSalesHistoryModal
-        isOpen={showSalesHistoryModal}
-        onClose={() => setShowSalesHistoryModal(false)}
-        transactions={transactions}
-        settings={settings}
-        onViewReceipt={(tx) => {
-          setCompletedTx(tx);
-          setShowSalesHistoryModal(false);
-        }}
-        onStartReturn={(tx) => {
-          setSelectedTxForReturn(tx);
-          const initQtys: Record<string, number> = {};
-          (tx.items || []).forEach((it) => {
-            initQtys[it.productId] = it.quantity;
-          });
-          setReturnedItemQuantities(initQtys);
-          setReturnReason("Defeito / Avaria de Produto");
-          setReturnRefundMethod(tx.paymentMethod === "DEBT" ? "DEBT" : "CASH");
-          setShowReturnModal(true);
-          setShowSalesHistoryModal(false);
-        }}
-      />
+      {showSalesHistoryModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
+                  <History className="w-5 h-5 text-orange-500" />
+                  <span>Histórico Recente de Vendas</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Últimas vendas efetuadas na presente sessão de caixa.</p>
+              </div>
+              <button
+                onClick={() => setShowSalesHistoryModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                Fchar ×
+              </button>
+            </div>
+
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {transactions && transactions.length > 0 ? (
+                transactions.slice(0, 8).map((tx, idx) => (
+                  <div key={`${tx.id || ""}-${idx}`} className="p-3 bg-slate-50 border border-slate-150 rounded-xl flex items-center justify-between text-xs transition hover:bg-slate-100">
+                    <div>
+                      <span className="font-bold text-slate-700 block">{tx.invoiceNumber}</span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {tx.paymentMethod} • Op: {tx.cashierName}
+                      </span>
+                    </div>
+                    <div className="text-right flex items-center gap-2">
+                      <span className="font-extrabold text-slate-800">{tx.grandTotal.toLocaleString()} MT</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCompletedTx(tx);
+                          setShowSalesHistoryModal(false);
+                        }}
+                        className="p-1.5 bg-white border border-slate-200 hover:bg-orange-50 rounded text-[10px] font-bold text-orange-600 transition cursor-pointer"
+                        title="Visualizar Recibo"
+                      >
+                        Visualizar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          try {
+                            printInvoiceHTML(tx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
+                          } catch (err) {
+                            console.error(err);
+                          }
+                        }}
+                        className="p-1.5 bg-slate-100 hover:bg-orange-600 hover:text-white rounded text-[10px] font-bold text-slate-650 transition cursor-pointer flex items-center justify-center"
+                        title="Imprimir Fatura em Nova Janela"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTxForReturn(tx);
+                          const initQtys: Record<string, number> = {};
+                          (tx.items || []).forEach(it => {
+                            initQtys[it.productId] = it.quantity;
+                          });
+                          setReturnedItemQuantities(initQtys);
+                          setReturnReason("Defeito / Avaria de Produto");
+                          setReturnRefundMethod(tx.paymentMethod === "DEBT" ? "DEBT" : "CASH");
+                          setShowReturnModal(true);
+                          setShowSalesHistoryModal(false);
+                        }}
+                        className="p-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white rounded text-[10px] font-bold text-rose-600 border border-rose-200 transition cursor-pointer flex items-center gap-1"
+                        title="Devolver Artigos / Emitir Nota de Crédito"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Devolver</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-xs text-slate-400 py-6">Nenhuma venda realizada neste terminal ainda.</p>
+              )}
+            </div>
+
+            <button
+              onClick={() => setShowSalesHistoryModal(false)}
+              className="w-full py-2.5 bg-slate-900 text-white text-xs font-bold rounded-xl cursor-pointer hover:bg-slate-850"
+            >
+              Fechar Painel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 17. RETURN / DEVOLUTION & CREDIT NOTE MODAL */}
-      <PosReturnModal
-        isOpen={showReturnModal && !!selectedTxForReturn}
-        selectedTx={selectedTxForReturn}
-        onClose={() => {
-          setShowReturnModal(false);
-          setSelectedTxForReturn(null);
-        }}
-        onConfirm={(itemsToReturn, finalReason, returnRefundMethod) => {
-          if (!selectedTxForReturn) return;
-          const totalRefund = itemsToReturn.reduce((sum, it) => sum + (it.price * it.quantity), 0);
-          const nextReturnSeq = transactions.length + 1;
-          const creditNoteId = generateDeterministicCreditNoteNumber(nextReturnSeq);
+      {showReturnModal && selectedTxForReturn && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="border-b border-slate-100 pb-3 flex justify-between items-center">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2 text-rose-600">
+                  <RotateCcw className="w-5 h-5" />
+                  <span>Devolução & Nota de Crédito Fiscal</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Fatura: <span className="font-bold text-slate-700">{selectedTxForReturn.invoiceNumber}</span> • Cliente: {selectedTxForReturn.customerName || "Consumidor Final"}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold"
+              >
+                ×
+              </button>
+            </div>
 
-          if (onReturnSale) {
-            onReturnSale(selectedTxForReturn, finalReason, itemsToReturn, returnRefundMethod);
-          } else {
-            onAddAuditLog(
-              "Devolução de Venda",
-              "VENDAS",
-              `Devolução da fatura ${selectedTxForReturn.invoiceNumber} efetuada por ${activeUsername}. Total: ${totalRefund} MT. Motivo: ${finalReason}`
-            );
-            if (onShowToast) onShowToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteId}`, "success");
-          }
+            {/* List of items to return */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-slate-700 block">Artigos a Devolver e Quantidades:</label>
+              <div className="max-h-44 overflow-y-auto space-y-2 border border-slate-200 rounded-xl p-2.5 bg-slate-50">
+                {(selectedTxForReturn.items || []).map((it) => {
+                  const currQty = returnedItemQuantities[it.productId] || 0;
+                  return (
+                    <div key={it.productId} className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 text-xs">
+                      <div className="flex-1 pr-2">
+                        <span className="font-bold text-slate-800 block truncate">{it.productName}</span>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          Preço: {it.price.toLocaleString()} MT • Faturado: {it.quantity} un
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setReturnedItemQuantities(prev => ({ ...prev, [it.productId]: Math.max(0, (prev[it.productId] || 0) - 1) }))}
+                          className="w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold flex items-center justify-center cursor-pointer"
+                        >
+                          -
+                        </button>
+                        <span className="font-mono font-bold w-7 text-center">{currQty}</span>
+                        <button
+                          type="button"
+                          onClick={() => setReturnedItemQuantities(prev => ({ ...prev, [it.productId]: Math.min(it.quantity, (prev[it.productId] || 0) + 1) }))}
+                          className="w-6 h-6 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-bold flex items-center justify-center cursor-pointer"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
-          setCompletedCreditNote({
-            id: creditNoteId,
-            invoiceRef: selectedTxForReturn.invoiceNumber,
-            date: new Date().toLocaleString(),
-            customerName: selectedTxForReturn.customerName,
-            items: itemsToReturn,
-            totalRefund,
-            reason: finalReason,
-            refundMethod: returnRefundMethod
-          });
+            {/* Reason selection */}
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div>
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">Motivo da Devolução:</label>
+                <select
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                >
+                  <option value="Defeito / Avaria de Produto">Defeito / Avaria de Produto</option>
+                  <option value="Troca por Outro Artigo">Troca por Outro Artigo</option>
+                  <option value="Erro de Registo no Caixa">Erro de Registo no Caixa</option>
+                  <option value="Desistência do Cliente">Desistência do Cliente</option>
+                  <option value="Outro Motivo">Outro Motivo</option>
+                </select>
+              </div>
 
-          setShowReturnModal(false);
-          setSelectedTxForReturn(null);
-        }}
-        onShowToast={onShowToast}
-      />
+              <div>
+                <label className="text-[10.5px] font-bold text-slate-600 block mb-1">Modalidade de Reembolso:</label>
+                <select
+                  value={returnRefundMethod}
+                  onChange={(e) => setReturnRefundMethod(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs font-bold text-slate-800 outline-none"
+                >
+                  <option value="CASH">Dinheiro (Caixa)</option>
+                  <option value="MPESA_PAGA_FACIL">M-Pesa</option>
+                  <option value="EMOLA">e-Mola</option>
+                  <option value="POS_CARD">Cartão POS / Bancário</option>
+                  <option value="DEBT">Abate na Conta Corrente (Dívida)</option>
+                </select>
+              </div>
+            </div>
+
+            {returnReason === "Outro Motivo" && (
+              <input
+                type="text"
+                value={customReturnReason}
+                onChange={(e) => setCustomReturnReason(e.target.value)}
+                placeholder="Especifique detalhadamente o motivo..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none"
+              />
+            )}
+
+            {/* Refund Totals Summary */}
+            {(() => {
+              const itemsToReturn = (selectedTxForReturn.items || []).filter(it => (returnedItemQuantities[it.productId] || 0) > 0);
+              const totalRefund = itemsToReturn.reduce((sum, it) => sum + (it.price * (returnedItemQuantities[it.productId] || 0)), 0);
+
+              return (
+                <div className="bg-rose-50 p-3.5 rounded-xl border border-rose-200 space-y-1 text-xs">
+                  <div className="flex justify-between font-bold text-rose-900">
+                    <span>Total a Reembolsar / Creditar:</span>
+                    <span className="text-base font-black font-mono">{totalRefund.toLocaleString()} MT</span>
+                  </div>
+                  <p className="text-[10.5px] text-rose-700">
+                    O stock dos {itemsToReturn.length} artigo(s) selecionados será restaurado automaticamente no inventário e registado em auditoria.
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Actions */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const itemsToReturn = (selectedTxForReturn.items || [])
+                    .filter(it => (returnedItemQuantities[it.productId] || 0) > 0)
+                    .map(it => ({
+                      productId: it.productId,
+                      quantity: returnedItemQuantities[it.productId],
+                      price: it.price
+                    }));
+
+                  if (itemsToReturn.length === 0) {
+                    if (onShowToast) onShowToast("Selecione pelo menos um artigo com quantidade superior a zero para devolver.", "warning");
+                    return;
+                  }
+
+                  const finalReason = returnReason === "Outro Motivo" && customReturnReason.trim() ? customReturnReason.trim() : returnReason;
+                  const totalRefund = itemsToReturn.reduce((sum, it) => sum + (it.price * it.quantity), 0);
+                  const nextReturnSeq = transactions.length + 1;
+                  const creditNoteId = generateDeterministicCreditNoteNumber(nextReturnSeq);
+
+                  if (onReturnSale) {
+                    onReturnSale(selectedTxForReturn, finalReason, itemsToReturn, returnRefundMethod);
+                  } else {
+                    onAddAuditLog(
+                      "Devolução de Venda",
+                      "VENDAS",
+                      `Devolução da fatura ${selectedTxForReturn.invoiceNumber} efetuada por ${activeUsername}. Total: ${totalRefund} MT. Motivo: ${finalReason}`
+                    );
+                    if (onShowToast) onShowToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteId}`, "success");
+                  }
+
+                  setCompletedCreditNote({
+                    id: creditNoteId,
+                    invoiceRef: selectedTxForReturn.invoiceNumber,
+                    date: new Date().toLocaleString(),
+                    customerName: selectedTxForReturn.customerName,
+                    items: itemsToReturn,
+                    totalRefund,
+                    reason: finalReason,
+                    refundMethod: returnRefundMethod
+                  });
+
+                  setShowReturnModal(false);
+                  setSelectedTxForReturn(null);
+                }}
+                className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-rose-600/20"
+              >
+                Confirmar Devolução & Estorno ✓
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 18. CREDIT NOTE / NOTA DE CRÉDITO SUCCESS & PRINT MODAL */}
-      <PosCreditNoteModal
-        completedCreditNote={completedCreditNote}
-        onClose={() => setCompletedCreditNote(null)}
-      />
+      {completedCreditNote && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-4 text-center animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="font-extrabold text-slate-900 text-base">Nota de Crédito Emitida!</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                N/Crédito: <span className="font-bold text-slate-700">{completedCreditNote.id}</span>
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-left font-mono text-[11px] text-slate-700 space-y-1.5">
+              <div className="flex justify-between">
+                <span>Fatura Original:</span>
+                <span className="font-bold">{completedCreditNote.invoiceRef}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Total Estornado:</span>
+                <span className="font-bold text-rose-600">{completedCreditNote.totalRefund.toLocaleString()} MT</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Reembolso:</span>
+                <span>{completedCreditNote.refundMethod}</span>
+              </div>
+              <div className="border-t border-slate-200 pt-1 text-[10px] text-slate-500 font-sans">
+                Motivo: {completedCreditNote.reason}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setCompletedCreditNote(null)}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer"
+              >
+                Fechar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  try {
+                    window.print();
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                }}
+                className="py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center justify-center gap-1"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir N/C</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* POPUP MODAL: Receipt & Communications */}
-      <PosReceiptModal
-        completedTx={completedTx}
-        selectedCustomer={selectedCustomer}
-        printMode={printMode}
-        setPrintMode={setPrintMode}
-        settings={settings}
-        qrCodeDataUrl={qrCodeDataUrl}
-        formattedVersion={formattedVersion}
-        sendEmailStatus={sendEmailStatus}
-        sendSmsStatus={sendSmsStatus}
-        sendWhatsAppStatus={sendWhatsAppStatus}
-        onSendEmail={handleSendEmail}
-        onSendSms={handleSendSms}
-        onOpenWhatsAppModal={handleOpenWhatsAppModal}
-        onTriggerPrintReceipt={triggerPrintReceipt}
-        onRegisterCustomerForEmail={() => {
-          setPendingReceiptAction("email");
-          setQuickCustomerModalOpen(true);
-        }}
-        onRegisterCustomerForWhatsApp={() => {
-          setPendingReceiptAction("whatsapp");
-          setQuickCustomerModalOpen(true);
-        }}
-        onReset={handleReset}
-      />
+      {completedTx && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl flex flex-col gap-4 animate-in fade-in duration-200">
+            <div className="text-center">
+              <div className="w-12 h-12 bg-green-100 text-green-700 rounded-full flex items-center justify-center mx-auto mb-2.5">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <h3 className="font-bold text-slate-900 text-base">Venda Concluída com Sucesso!</h3>
+              <p className="text-xs text-slate-400 mt-1">Transação consolidada e stock comercial deduzido.</p>
+            </div>
+
+              {/* Simulated Receipt Display */}
+              <div id="pos-completed-receipt" className="border border-slate-200 bg-slate-50 rounded-xl p-4 font-mono text-[11px] leading-tight text-slate-700 select-all max-h-60 overflow-y-auto">
+                <style>{`
+                  @media print {
+                    @page {
+                      size: ${printMode === "invoice" ? "A4 portrait" : "80mm auto"};
+                      margin: ${printMode === "invoice" ? "10mm" : "0mm"};
+                    }
+                    body * {
+                      visibility: hidden !important;
+                    }
+                    ${printMode === "invoice" ? `
+                    #pos-completed-invoice, #pos-completed-invoice * {
+                      visibility: visible !important;
+                    }
+                    #pos-completed-invoice {
+                      position: absolute !important;
+                      left: 0 !important;
+                      top: 0 !important;
+                      width: 100% !important;
+                      height: auto !important;
+                      border: none !important;
+                      background: white !important;
+                      color: #1e293b !important;
+                      padding: 40px !important;
+                      margin: 0 !important;
+                      box-shadow: none !important;
+                      overflow: visible !important;
+                      display: block !important;
+                    }
+                    ` : `
+                    #pos-completed-receipt, #pos-completed-receipt * {
+                      visibility: visible !important;
+                    }
+                    #pos-completed-receipt {
+                      position: absolute !important;
+                      left: 0 !important;
+                      top: 0 !important;
+                      width: 76mm !important;
+                      max-width: 80mm !important;
+                      height: auto !important;
+                      border: none !important;
+                      background: white !important;
+                      color: black !important;
+                      padding: ${settings?.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4}mm 1mm ${settings?.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8}mm 1mm !important;
+                      margin: 0 auto !important;
+                      box-shadow: none !important;
+                      overflow: visible !important;
+                      display: block !important;
+                      font-family: 'Courier New', Courier, monospace !important;
+                      font-size: 11px !important;
+                      line-height: 1.25 !important;
+                    }
+                    `}
+                    .no-print {
+                      display: none !important;
+                    }
+                  }
+                `}</style>
+                <div className="text-center font-bold text-slate-800 mb-2 border-b border-dashed border-slate-300 pb-2">
+                  {settings.logoUrl && (
+                    <img
+                      src={settings.logoUrl}
+                      alt="Logo Recibo"
+                      className="w-10 h-10 object-contain mx-auto mb-1.5 bg-white p-0.5 rounded border border-slate-200"
+                      referrerPolicy="no-referrer"
+                    />
+                  )}
+                  <p className="uppercase">{settings.companyName || "Indisponível"}</p>
+                  <p className="font-normal text-[9px] text-slate-500 font-sans">{settings.storeAddress || settings.companyAddress || "Indisponível"}</p>
+                  <p className="font-normal text-[9px] text-slate-500 font-sans">NUIT: {settings.companyNuit || "Indisponível"}</p>
+                </div>
+
+              <div className="space-y-1 mb-2">
+                <p><span className="text-slate-450">Fatura:</span> {completedTx.invoiceNumber}</p>
+                <p><span className="text-slate-450">Data/Hora:</span> {new Date(completedTx.timestamp).toLocaleString()}</p>
+                <p><span className="text-slate-450">Operador:</span> {completedTx.cashierName}</p>
+                <p><span className="text-slate-450">Cliente:</span> {completedTx.customerName || "Consumidor Geral"}</p>
+                {completedTx.nuit && <p><span className="text-slate-450">NUIT Cli:</span> {completedTx.nuit}</p>}
+              </div>
+
+              <div className="border-b border-dashed border-slate-300 py-1 mb-2">
+                <div className="grid grid-cols-12 gap-1 font-bold text-slate-800 text-[10px]">
+                  <span className="col-span-6 truncate">PRODUTO</span>
+                  <span className="col-span-2 text-center">QTD</span>
+                  <span className="col-span-4 text-right">VALOR</span>
+                </div>
+                 {completedTx.items.map((item, i) => (
+                   <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
+                     <span className="col-span-6 truncate">{item.productName}</span>
+                     <span className="col-span-2 text-center">{item.quantity}</span>
+                     <span className="col-span-4 text-right">{(item.price * item.quantity).toLocaleString()} MT</span>
+                   </div>
+                 ))}
+              </div>
+
+              <div className="space-y-1 text-slate-600 text-right">
+                <p>SUBTOTAL: {completedTx.subtotal.toLocaleString()} MT</p>
+                {completedTx.discountTotal > 0 && <p className="text-red-650 font-bold">DESC. GER: -{completedTx.discountTotal.toLocaleString()} MT</p>}
+                <p>TOTAL IVA COBRADO: {completedTx.vatTotal.toLocaleString()} MT</p>
+                <p className="text-slate-900 font-bold text-xs border-t border-dashed border-slate-300 pt-1">
+                  TOTAL PAGO: {completedTx.grandTotal.toLocaleString()} MT
+                </p>
+                <p className="text-[10px] text-slate-500 font-medium italic mt-1">Método: {completedTx.paymentMethod}</p>
+                {completedTx.paymentDetails && (
+                  <p className="text-[9.5px] text-red-600 font-semibold italic mt-0.5">{completedTx.paymentDetails}</p>
+                )}
+              </div>
+
+              <p className="text-center font-semibold text-[9px] text-slate-500 mt-3 border-t border-dashed border-slate-300 pt-2 block">
+                *** Muito Obrigado Pela Visita! ***
+              </p>
+
+              {/* Unique QR Code Generator for Digital Receipt */}
+              {qrCodeDataUrl && (
+                <div className="mt-3 pt-3 border-t border-dashed border-slate-300 flex flex-col items-center justify-center gap-1.5 bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-sm animate-in zoom-in-95 duration-200">
+                  <div className="p-1.5 bg-slate-50 rounded-lg border border-slate-200">
+                    <img
+                      src={qrCodeDataUrl}
+                      alt={`QR Code Fatura ${completedTx.invoiceNumber}`}
+                      className="w-24 h-24 object-contain"
+                    />
+                  </div>
+                  <div className="text-center">
+                    <span className="text-[8px] font-black text-slate-700 tracking-wider font-sans uppercase">RECIBO DIGITAL</span>
+                    <p className="text-[7.5px] text-slate-400 font-sans mt-0.5 max-w-[180px] mx-auto leading-tight">
+                      Aponte a câmara para visualizar a fatura digital <strong className="font-semibold text-slate-600">#{completedTx.invoiceNumber}</strong>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {completedTx.fiscalCertified && (
+                <div className="mt-3 pt-2 border-t border-dashed border-slate-300 text-center text-[9px] text-slate-500 font-sans space-y-2 animate-in fade-in duration-300">
+                  <div className="flex flex-col items-center justify-center gap-1 bg-slate-100 p-1.5 rounded-lg border border-slate-200">
+                    {qrCodeDataUrl ? (
+                      <img src={qrCodeDataUrl} className="w-14 h-14 object-contain bg-white p-0.5 rounded border border-slate-200" alt="QR Code Fiscal" />
+                    ) : (
+                      <QrCode className="w-14 h-14 text-slate-800" />
+                    )}
+                    <span className="text-[7.5px] font-bold text-slate-600 tracking-wide font-mono uppercase">Controle Fiscal - AGT/MEF</span>
+                  </div>
+                  <div className="space-y-0.5">
+                    <p className="font-extrabold text-slate-700 tracking-wider">DOCUMENTO FISCAL HOMOLOGADO</p>
+                    <p className="text-[8px]">Certificação Nº: {settings.fiscalCertificationNumber || "Indisponível"}</p>
+                    <p className="font-mono text-[8px] bg-white py-0.5 rounded border border-slate-200 px-1 font-bold text-slate-800 select-all">Chave: {completedTx.fiscalKeys}</p>
+                    <p className="font-mono text-[6.5px] text-slate-400 break-all leading-tight">Assinatura: {completedTx.fiscalHash}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Printable Invoice Container (A4 Layout) - Hidden on screen, shown on print when printMode is 'invoice' */}
+            <div 
+              id="pos-completed-invoice" 
+              className="hidden print:block bg-white p-10 font-sans text-slate-800 border border-slate-200 rounded-2xl w-full max-w-[800px] mx-auto text-sm"
+            >
+              {/* Header */}
+              <div className="text-center border-b-2 border-dashed border-slate-200 pb-6 mb-6">
+                {settings.logoUrl && (
+                  <div className="mb-3">
+                    <img
+                      src={settings.logoUrl}
+                      alt="Logo"
+                      className="w-16 h-16 object-contain mx-auto bg-white p-1 rounded-xl border border-slate-200"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                )}
+                <h1 className="text-xl font-extrabold uppercase text-slate-900 tracking-tight">
+                  {settings.companyName || "Indisponível"}
+                </h1>
+                <p className="text-xs text-slate-500 mt-1">{settings.companyAddress || settings.storeAddress || "Indisponível"}</p>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                  NUIT: {settings.companyNuit || "Indisponível"} | Tel: {settings.storeContact || "Indisponível"}
+                </p>
+              </div>
+
+              {/* Metadata Grid */}
+              <div className="grid grid-cols-2 gap-4 mb-6 text-left">
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Dados do Documento</span>
+                  <span className="font-mono font-bold text-slate-900 text-sm block">
+                    {completedTx.invoiceNumber}
+                  </span>
+                  <div className="text-xs text-slate-500 mt-2 space-y-0.5">
+                    <p>Emissão: <strong className="text-slate-700">{new Date(completedTx.timestamp).toLocaleString()}</strong></p>
+                    <p>Filial: <strong className="text-slate-700 uppercase">{completedTx.branchId || "Central"}</strong></p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Cliente & Operador</span>
+                  <span className="font-semibold text-slate-900 text-sm block">
+                    {completedTx.customerName || "Consumidor Geral"}
+                  </span>
+                  <div className="text-xs text-slate-500 mt-2 space-y-0.5">
+                    {completedTx.nuit && <p>NUIT: <strong className="text-slate-700">{completedTx.nuit}</strong></p>}
+                    <p>Operador: <strong className="text-slate-700">{completedTx.cashierName}</strong></p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden mb-6">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider">
+                      <th className="py-3 px-4 text-center w-12">Item</th>
+                      <th className="py-3 px-4">Descrição</th>
+                      <th className="py-3 px-4 text-center w-16">Qtd</th>
+                      <th className="py-3 px-4 text-right w-28">P. Unitário</th>
+                      <th className="py-3 px-4 text-right w-32">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {completedTx.items.map((item, index) => (
+                      <tr key={`${item.productId}-${index}`} className="text-slate-700">
+                        <td className="py-3 px-4 text-center font-mono text-slate-400">
+                          {String(index + 1).padStart(2, "0")}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-900">
+                          {item.productName}
+                        </td>
+                        <td className="py-3 px-4 text-center font-mono">
+                          {item.quantity}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono">
+                          {item.price.toLocaleString()} {settings.currency || "MT"}
+                        </td>
+                        <td className="py-3 px-4 text-right font-semibold font-mono text-slate-900">
+                          {(item.price * item.quantity).toLocaleString()} {settings.currency || "MT"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Summary Grid */}
+              <div className="flex justify-end mb-6 text-right">
+                <div className="w-full max-w-xs space-y-2 text-xs border-b border-slate-100 pb-4">
+                  <div className="flex justify-between text-slate-500">
+                    <span>Subtotal</span>
+                    <span className="font-mono">{completedTx.subtotal.toLocaleString()} {settings.currency || "MT"}</span>
+                  </div>
+                  {completedTx.discountTotal > 0 && (
+                    <div className="flex justify-between text-red-650 font-semibold">
+                      <span>Desconto</span>
+                      <span className="font-mono">-{completedTx.discountTotal.toLocaleString()} {settings.currency || "MT"}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-slate-500">
+                    <span>IVA Incluído</span>
+                    <span className="font-mono">{completedTx.vatTotal.toLocaleString()} {settings.currency || "MT"}</span>
+                  </div>
+                  <div className="flex justify-between text-base font-extrabold text-slate-900 border-t border-slate-200 pt-2">
+                    <span>Total Pago</span>
+                    <span className="font-mono">{completedTx.grandTotal.toLocaleString()} {settings.currency || "MT"}</span>
+                  </div>
+                  <div className="text-right text-[10px] text-slate-400 italic mt-1">
+                    Método: <strong>{completedTx.paymentMethod}</strong>
+                    {completedTx.paymentDetails && ` (${completedTx.paymentDetails})`}
+                  </div>
+                </div>
+              </div>
+
+              {/* Fiscal Cert & QR Section */}
+              <div className="border-t-2 border-dashed border-slate-200 pt-6 text-center">
+                <div className="flex flex-col items-center justify-center gap-2 mb-4">
+                  {qrCodeDataUrl ? (
+                    <div className="p-1.5 bg-white rounded-xl border border-slate-200 shadow-sm">
+                      <img
+                        src={qrCodeDataUrl}
+                        alt="Código QR Fiscal"
+                        className="w-24 h-24 object-contain"
+                      />
+                    </div>
+                  ) : (
+                    <QrCode className="w-20 h-20 text-slate-400" />
+                  )}
+                  <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                    Documento Fiscal Homologado
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 max-w-md mx-auto text-[10px] font-mono text-slate-500 space-y-1.5 text-left">
+                  <div className="flex justify-between border-b border-slate-100 pb-1">
+                    <span>Autoridade Tributária (AT):</span>
+                    <span className="font-bold text-slate-700">PROCESSO DE CERTIFICAÇÃO</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-100 pb-1">
+                    <span>Certificado Nº:</span>
+                    <span className="font-bold text-slate-700">{settings.fiscalCertificationNumber || "Indisponível"}</span>
+                  </div>
+                  {completedTx.fiscalKeys && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span>Chaves de Assinatura:</span>
+                      <span className="font-bold text-slate-700 text-right truncate max-w-xs">{completedTx.fiscalKeys}</span>
+                    </div>
+                  )}
+                  {completedTx.fiscalHash && (
+                    <div className="flex justify-between border-b border-slate-100 pb-1">
+                      <span>Assinatura Digital (Hash):</span>
+                      <span className="font-bold text-slate-750 text-right break-all max-w-xs leading-tight">{completedTx.fiscalHash}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span>Software de Faturação:</span>
+                    <span className="text-slate-700">OST VENDAS ERP {formattedVersion}</span>
+                  </div>
+                </div>
+
+                <p className="text-xs font-semibold text-slate-400 mt-6 uppercase tracking-wider">
+                  *** Muito obrigado pela preferência! Volte sempre! ***
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Digital Dispatchers */}
+            <div className="space-y-2">
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Comunicações Digitais</p>
+
+              {!selectedCustomer && (
+                <div className="bg-amber-50 border border-amber-100 rounded-xl p-2.5 text-[10.5px] leading-relaxed text-amber-850 space-y-1">
+                  <p className="font-extrabold flex items-center gap-1.5">
+                    <UserPlus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    Cliente não Registado
+                  </p>
+                  <p className="text-slate-600">
+                    O cliente atual é Consumidor Geral. Deseja registá-lo agora para enviar o recibo?
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1 font-bold">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingReceiptAction("email");
+                        setQuickCustomerModalOpen(true);
+                      }}
+                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                    >
+                      Registar e Enviar Email
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPendingReceiptAction("whatsapp");
+                        setQuickCustomerModalOpen(true);
+                      }}
+                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                    >
+                      Registar e Enviar WhatsApp
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  onClick={handleSendEmail}
+                  disabled={sendEmailStatus !== "idle"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-blue-50 text-blue-750 hover:bg-blue-100 transition border border-blue-100 disabled:opacity-75 cursor-pointer"
+                >
+                  <Mail className="w-3.5 h-3.5 shrink-0" />
+                  {sendEmailStatus === "idle" ? "Email" : sendEmailStatus === "sending" ? "..." : "✓"}
+                </button>
+                <button
+                  onClick={handleSendSms}
+                  disabled={sendSmsStatus !== "idle"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition border border-indigo-100 disabled:opacity-75 cursor-pointer"
+                >
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  {sendSmsStatus === "idle" ? "SMS" : sendSmsStatus === "sending" ? "..." : "✓"}
+                </button>
+                <button
+                  onClick={handleOpenWhatsAppModal}
+                  disabled={sendWhatsAppStatus === "sending"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-emerald-50 text-emerald-850 hover:bg-emerald-100 transition border border-emerald-150 cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                  {sendWhatsAppStatus === "idle" ? "WhatsApp" : sendWhatsAppStatus === "sending" ? "..." : "✓"}
+                </button>
+              </div>
+
+              {/* Primary 80mm Thermal Receipt Button */}
+              <button
+                type="button"
+                onClick={() => triggerPrintReceipt("receipt")}
+                className="w-full flex items-center justify-between px-4 py-3 bg-gradient-to-r from-orange-600 to-amber-600 hover:from-orange-700 hover:to-amber-700 rounded-xl text-xs font-bold text-white transition shadow-lg shadow-orange-600/20 cursor-pointer active:scale-[0.99]"
+                title="Imprimir Fita Térmica de 80mm (Atalho: F5)"
+              >
+                <div className="flex items-center gap-2">
+                  <Printer className="w-4 h-4 shrink-0" />
+                  <span>Imprimir Recibo</span>
+                  <kbd className="px-1.5 py-0.5 bg-white/20 text-white rounded text-[10px] font-mono font-bold shadow-inner">
+                    F5
+                  </kbd>
+                </div>
+                <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-mono font-semibold tracking-wide">
+                  Térmica 80mm
+                </span>
+              </button>
+
+              {/* Secondary A4 Invoice Button */}
+              <button
+                type="button"
+                onClick={() => triggerPrintReceipt("invoice")}
+                className="w-full flex items-center justify-between px-4 py-2.5 border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700 transition cursor-pointer"
+                title="Imprimir Fatura em Folha A4"
+              >
+                <div className="flex items-center gap-2">
+                  <Printer className="w-3.5 h-3.5 shrink-0 text-slate-500" />
+                  <span>Imprimir Fatura (A4)</span>
+                </div>
+                <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-sans">
+                  Folha A4
+                </span>
+              </button>
+
+              {/* Popup window options */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      printThermal80mmReceipt(completedTx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1.5 border border-orange-200 bg-orange-50/50 hover:bg-orange-100/80 text-orange-800 text-[10.5px] font-semibold transition rounded-lg cursor-pointer"
+                >
+                  <Printer className="w-3 h-3 text-orange-600" />
+                  <span>Janela Recibo 80mm</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      printInvoiceHTML(completedTx, settings || { companyName: "OST VENDAS", currency: "MT" } as SystemSettings);
+                    } catch (err) {
+                      console.error(err);
+                    }
+                  }}
+                  className="flex items-center justify-center gap-1.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-600 text-[10.5px] font-semibold transition rounded-lg cursor-pointer"
+                >
+                  <Printer className="w-3 h-3 text-slate-400" />
+                  <span>Janela Fatura A4</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Close button */}
+            <button
+              onClick={handleReset}
+              className="w-full py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
+            >
+              Completar e Iniciar Nova Venda
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Elegant Real-time Virtual Printer Animation Overlay Safeguard */}
       {isSimulatingPrint && (
@@ -2772,44 +4198,810 @@ function POSModule({
       )}
 
       {/* 26. WHATSAPP SEND DIALOG MODAL */}
-      <PosWhatsappModal
-        isOpen={whatsappModalOpen}
-        onClose={() => setWhatsappModalOpen(false)}
-        settings={settings}
-        whatsappPhone={whatsappPhone}
-        setWhatsappPhone={setWhatsappPhone}
-        whatsappMessage={whatsappMessage}
-        setWhatsappMessage={setWhatsappMessage}
-        sendWhatsAppStatus={sendWhatsAppStatus}
-        onDispatch={(useDirectLink) => dispatchWhatsAppReceipt(useDirectLink)}
-      />
+      {whatsappModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-800">
+            <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base flex items-center gap-2">
+                  <MessageSquare className="w-5 h-5 text-emerald-600" />
+                  <span>Enviar Recibo via WhatsApp</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">Revise o contacto e o formato do documento antes de despachar.</p>
+              </div>
+              <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${settings.whatsappEnabled ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-500"}`}>
+                {settings.whatsappEnabled ? `API: ${settings.whatsappProvider}` : "Modo Link Direto"}
+              </span>
+            </div>
+
+            <div className="space-y-3.5">
+              {/* Phone number field */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Número do Cliente (Com WhatsApp)</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={whatsappPhone}
+                    onChange={(e) => setWhatsappPhone(e.target.value)}
+                    placeholder="Ex: +258 84 900 1202"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 pl-10 text-xs font-bold outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                  <span className="absolute left-3.5 top-2.5 text-slate-400 text-xs font-bold font-mono">🇲🇿</span>
+                </div>
+                <p className="text-[9px] text-slate-400">Insira com o indicativo (Ex: +258 ou 258) ou apenas o número celular de Moçambique de 9 dígitos.</p>
+              </div>
+
+              {/* Message preview body */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Mensagem de Texto Pré-formatada</label>
+                  <span className="text-[9.5px] font-mono text-slate-400">{whatsappMessage.length} caracteres</span>
+                </div>
+                <textarea
+                  value={whatsappMessage}
+                  onChange={(e) => setWhatsappMessage(e.target.value)}
+                  rows={8}
+                  className="w-full bg-slate-50/50 border border-slate-200 rounded-xl p-3 text-[10.5px] font-mono leading-relaxed outline-none focus:ring-1 focus:ring-emerald-500 max-h-60"
+                />
+              </div>
+
+              {/* Helper guide on chosen provider */}
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 text-[10px] space-y-1 font-mono text-slate-500">
+                <p className="font-bold text-slate-700">⚙️ Canal de Comunicação Ativo:</p>
+                {settings.whatsappEnabled && settings.whatsappProvider !== "DIRECT_LINK" ? (
+                  <>
+                    <p>• Provedor: <span className="text-emerald-700 font-bold">{settings.whatsappProvider}</span></p>
+                    <p>• Endpoint: <span className="truncate block max-w-full">{settings.whatsappApiEndpoint || "Configurado"}</span></p>
+                    <p className="text-[9px] text-slate-400">As mensagens serão disparadas via servidor invisível sem intervenção manual. Se houver falha, reverteremos para Link Direto.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>• Provedor: <span className="text-orange-600 font-bold">Link Direto (wa.me)</span></p>
+                    <p>• Custo: <span className="text-emerald-700 font-bold">100% Grátis e Ilimitado</span></p>
+                    <p className="text-[9px] text-slate-400">O sistema abrirá uma nova aba do navegador para o WhatsApp Web ou aplicação móvel do operador com a mensagem pré-carregada.</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Actions choosing triggers */}
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setWhatsappModalOpen(false)}
+                className="py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 transition cursor-pointer"
+              >
+                Voltar
+              </button>
+              
+              {settings.whatsappEnabled && settings.whatsappProvider !== "DIRECT_LINK" ? (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => dispatchWhatsAppReceipt(true)}
+                    className="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 rounded-xl text-[10px] font-bold text-slate-700 transition cursor-pointer"
+                    title="Usar link wa.me direto em vez de gateway"
+                  >
+                    Link Direto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => dispatchWhatsAppReceipt(false)}
+                    disabled={sendWhatsAppStatus === "sending"}
+                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-[10px] font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-600/15"
+                  >
+                    {sendWhatsAppStatus === "sending" ? "A Enviar..." : "Disparar API ✓"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => dispatchWhatsAppReceipt(true)}
+                  className="py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-600/15"
+                >
+                  Abrir WhatsApp Link ✓
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* POPUP MODAL: Orçamento & Proposta Comercial */}
       {completedBudget && (
-        <PosBudgetModal
-          completedBudget={completedBudget}
-          settings={settings}
-          activeUsername={activeUsername}
-          onClose={() => setCompletedBudget(null)}
-          onAddAuditLog={onAddAuditLog}
-          onShowToast={onShowToast}
-        />
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 overflow-y-auto">
+          {/* Inject Dynamic Print Overrides */}
+          <style dangerouslySetInnerHTML={{ __html: `
+            @media print {
+              /* Hide everything else */
+              body * {
+                visibility: hidden !important;
+                background: none !important;
+              }
+              /* Show and target ONLY our printable paper block */
+              #budget-print-area, #budget-print-area * {
+                visibility: visible !important;
+              }
+              #budget-print-area {
+                position: absolute !important;
+                left: 0 !important;
+                top: 0 !important;
+                margin: 0 !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+                color: black !important;
+                width: ${budgetPrintFormat === "ESC_POS" ? (selectedPaperSize === "58MM" ? "58mm" : "80mm") : "210mm"} !important;
+                max-width: ${budgetPrintFormat === "ESC_POS" ? (selectedPaperSize === "58MM" ? "58mm" : "80mm") : "210mm"} !important;
+                padding: ${budgetPrintFormat === "ESC_POS" ? "4mm" : "15mm"} !important;
+                font-family: ${budgetPrintFormat === "ESC_POS" ? "monospace" : "sans-serif"} !important;
+                font-size: ${budgetPrintFormat === "ESC_POS" ? "11px" : "13px"} !important;
+                line-height: 1.2 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          <div className="bg-white p-6 rounded-2xl max-w-2xl w-full border border-slate-100 shadow-2xl flex flex-col gap-4 animate-in fade-in duration-200 no-print">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-amber-50 text-amber-600 rounded-xl flex items-center justify-center">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-slate-900 text-sm">Template de Orçamento POS</h3>
+                  <p className="text-[11px] text-slate-400">Emissão e formatação de propostas comerciais.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {settings.printerEnabled ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    ESC/POS Ativo ({settings.paperSize || "80MM"})
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-bold bg-slate-50 text-slate-500 rounded-full border border-slate-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                    Impressora Térmica Desativada
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Template & Size Controllers */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-xl text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => setBudgetPrintFormat("A4_DOC")}
+                className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  budgetPrintFormat === "A4_DOC" 
+                    ? "bg-white text-slate-950 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <span>📄 Proposta A4 Corporativa</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBudgetPrintFormat("ESC_POS")}
+                className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                  budgetPrintFormat === "ESC_POS" 
+                    ? "bg-white text-slate-950 shadow-sm" 
+                    : "text-slate-500 hover:text-slate-800"
+                }`}
+              >
+                <span>📠 Recibo Térmico ESC/POS</span>
+              </button>
+            </div>
+
+            {/* Sub-selectors for ESC/POS mode */}
+            {budgetPrintFormat === "ESC_POS" && (
+              <div className="flex items-center justify-between bg-amber-500/5 border border-amber-500/10 p-2.5 rounded-xl">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBudgetTab("PREVIEW")}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${
+                      budgetTab === "PREVIEW" ? "bg-amber-100 text-amber-800" : "text-amber-600 hover:bg-amber-100/40"
+                    }`}
+                  >
+                    Fita Térmica Simulada
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBudgetTab("RAW_COMMANDS")}
+                    className={`px-3 py-1 text-[10px] font-bold rounded-lg cursor-pointer ${
+                      budgetTab === "RAW_COMMANDS" ? "bg-amber-100 text-amber-800" : "text-amber-600 hover:bg-amber-100/40"
+                    }`}
+                  >
+                    Comandos Brutos (Raw ESC/POS)
+                  </button>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                  <span>Papel:</span>
+                  <select
+                    value={selectedPaperSize}
+                    onChange={(e: any) => setSelectedPaperSize(e.target.value)}
+                    className="bg-white border border-slate-200 rounded px-1.5 py-0.5 text-[10px] outline-none"
+                  >
+                    <option value="80MM">80mm (Largo)</option>
+                    <option value="58MM">58mm (Estreito)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* PREVIEW CONTAINER */}
+            <div className="max-h-80 overflow-y-auto border border-slate-100 rounded-xl bg-slate-50 p-4 shadow-inner">
+              {budgetPrintFormat === "A4_DOC" ? (
+                /* --- Template A4 CORPORATIVO --- */
+                <div id="budget-print-area" className="bg-white p-6 rounded-xl border border-slate-200 text-left font-sans text-xs text-slate-700 shadow-md">
+                  {/* Corporate Header */}
+                  <div className="flex justify-between items-start border-b border-slate-200 pb-4 mb-4">
+                    <div>
+                      {settings.logoUrl ? (
+                        <img
+                          src={settings.logoUrl}
+                          alt="Logo Empresa"
+                          className="h-10 w-auto object-contain mb-2 bg-white rounded"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-8 h-8 rounded-lg bg-orange-500 text-white flex items-center justify-center font-bold text-sm mb-1.5">
+                          OST
+                        </div>
+                      )}
+                      <h4 className="font-extrabold text-sm text-slate-900 uppercase tracking-wide">{settings.companyName || "Indisponível"}</h4>
+                      {settings.slogan && <p className="text-[10px] text-slate-400 italic font-medium">{settings.slogan}</p>}
+                      <p className="text-[10px] text-slate-500 mt-1">{settings.storeAddress || settings.companyAddress || "Indisponível"}</p>
+                      <p className="text-[10px] text-slate-500">NUIT: {settings.companyNuit || "Indisponível"}</p>
+                      {settings.storeContact && <p className="text-[10px] text-slate-500">Contacto: {settings.storeContact}</p>}
+                    </div>
+
+                    <div className="text-right">
+                      <span className="px-2.5 py-1 bg-amber-50 text-amber-700 font-extrabold text-[10px] uppercase rounded-full tracking-wider border border-amber-200">
+                        Proposta de Orçamento
+                      </span>
+                      <h3 className="font-black text-slate-950 text-lg mt-3">{completedBudget.budgetNumber}</h3>
+                      <p className="text-[10px] text-slate-500">Emissão: {new Date(completedBudget.timestamp).toLocaleString("pt-MZ")}</p>
+                      <p className="text-[10px] text-amber-700 font-semibold mt-1">Validade: 15 dias (Até {new Date(completedBudget.timestamp + 15 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-MZ")})</p>
+                    </div>
+                  </div>
+
+                  {/* Customer / Operators details block */}
+                  <div className="grid grid-cols-2 gap-4 bg-slate-50 p-3 rounded-xl border border-slate-150 mb-4">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Destinatário (Cliente)</span>
+                      <p className="font-extrabold text-slate-955 text-xs">{completedBudget.customerName}</p>
+                      {completedBudget.customerNuit && <p className="text-[10px] mt-0.5">NUIT: <span className="font-mono">{completedBudget.customerNuit}</span></p>}
+                      {completedBudget.customerPhone && <p className="text-[10px] mt-0.5">Tel: {completedBudget.customerPhone}</p>}
+                      {completedBudget.customerEmail && <p className="text-[10px] mt-0.5">E-mail: {completedBudget.customerEmail}</p>}
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Emissor / Responsável</span>
+                      <p className="font-extrabold text-slate-955 text-xs">{activeUsername}</p>
+                      <p className="text-[10px] mt-0.5">Terminal: POS-01 Central</p>
+                      <p className="text-[10px] text-slate-500 italic mt-1">Este orçamento é uma proposta provisória para fornecimento.</p>
+                    </div>
+                  </div>
+
+                  {/* Itemized Grid */}
+                  <table className="w-full text-left border-collapse mb-4">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold uppercase text-[9px] border-b border-slate-200">
+                        <th className="py-2.5 px-2">Artigo / Descrição</th>
+                        <th className="py-2.5 px-2 text-center w-16">Qtd</th>
+                        <th className="py-2.5 px-2 text-right w-24">Preço Unitário</th>
+                        <th className="py-2.5 px-2 text-right w-28">Total Parcial</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-150">
+                      {completedBudget.items.map((item, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 text-slate-650">
+                          <td className="py-2.5 px-2 font-bold text-slate-800">{item.productName}</td>
+                          <td className="py-2.5 px-2 text-center font-mono">{item.quantity}</td>
+                          <td className="py-2.5 px-2 text-right font-mono">{item.price.toLocaleString()} MT</td>
+                          <td className="py-2.5 px-2 text-right font-mono font-bold text-slate-950">{(item.price * item.quantity).toLocaleString()} MT</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {/* Pricing Summary block */}
+                  <div className="flex justify-between items-end border-t border-slate-200 pt-4">
+                    <div className="text-[10px] text-slate-400 max-w-sm">
+                      <p className="font-bold text-slate-500">Termos e Condições:</p>
+                      <p className="mt-1 leading-normal">1. Os preços apresentados incluem IVA à taxa em vigor.<br/>2. Esta proposta comercial é válida por 15 dias de calendário.<br/>3. O fornecimento dos artigos está sujeito ao stock disponível.</p>
+                    </div>
+                    <div className="w-64 space-y-1.5 text-right font-mono text-[11px] text-slate-600">
+                      <div className="flex justify-between">
+                        <span>SUBTOTAL:</span>
+                        <span>{completedBudget.subtotal.toLocaleString()} MT</span>
+                      </div>
+                      {completedBudget.discountTotal > 0 && (
+                        <div className="flex justify-between text-red-600 font-bold">
+                          <span>DESCONTO:</span>
+                          <span>-{completedBudget.discountTotal.toLocaleString()} MT</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between">
+                        <span>IVA ESTIMADO (16%):</span>
+                        <span>{completedBudget.vatTotal.toLocaleString()} MT</span>
+                      </div>
+                      <div className="flex justify-between text-slate-900 font-black text-sm border-t border-dashed border-slate-200 pt-2 mt-1">
+                        <span>TOTAL PROPOSTO:</span>
+                        <span className="text-amber-800">{completedBudget.grandTotal.toLocaleString()} MT</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Footer Seal */}
+                  <div className="text-center text-[9px] text-slate-400 mt-8 border-t border-dashed border-slate-150 pt-4">
+                    <p className="uppercase tracking-widest font-bold text-slate-500">{settings.companyName || "Indisponível"}</p>
+                    <p className="mt-1">Obrigado pela preferência! Processado por computador.</p>
+                  </div>
+                </div>
+              ) : budgetTab === "PREVIEW" ? (
+                /* --- Template ESC/POS RECIBO TÉRMICO (Papel Contínuo) --- */
+                <div className="flex justify-center">
+                  <div 
+                    id="budget-print-area" 
+                    className="bg-white p-4 text-left font-mono text-[10px] leading-snug text-zinc-800 border border-zinc-200 shadow-lg relative rounded-md select-all"
+                    style={{ width: selectedPaperSize === "58MM" ? "240px" : "320px" }}
+                  >
+                    {/* Simulated paper roll edges */}
+                    <div className="absolute inset-x-0 -top-1.5 h-1.5 bg-zinc-100 border-b border-dashed border-zinc-300"></div>
+                    <div className="absolute inset-x-0 -bottom-1.5 h-1.5 bg-zinc-100 border-t border-dashed border-zinc-300"></div>
+
+                    {/* Logo & Header */}
+                    <div className="text-center mb-2.5">
+                      {settings.logoUrl && (
+                        <img
+                          src={settings.logoUrl}
+                          alt="Logo Recibo"
+                          className="w-12 h-12 object-contain mx-auto mb-1.5 bg-white p-0.5 rounded border border-slate-200"
+                          referrerPolicy="no-referrer"
+                        />
+                      )}
+                      <p className="font-extrabold uppercase text-xs tracking-wider">{settings.companyName || "Indisponível"}</p>
+                      {settings.slogan && <p className="text-[8px] text-zinc-500 italic mt-0.5">{settings.slogan}</p>}
+                      <p className="text-[8px] text-zinc-500 mt-1">{settings.storeAddress || settings.companyAddress || "Indisponível"}</p>
+                      <p className="text-[8px] text-zinc-500">NUIT Empr: {settings.companyNuit || "Indisponível"}</p>
+                      {settings.storeContact && <p className="text-[8px] text-zinc-500">Tel: {settings.storeContact}</p>}
+                    </div>
+
+                    <div className="border-b border-dashed border-zinc-300 pb-1.5 mb-2.5 space-y-0.5">
+                      <p className="font-bold text-amber-700 text-[11px]">*** PROPOSTA COMERCIAL ***</p>
+                      <p><span className="text-zinc-500">ORÇAMENTO Nº:</span> <span className="font-bold">{completedBudget.budgetNumber}</span></p>
+                      <p><span className="text-zinc-500">EMISSÃO:</span> {new Date(completedBudget.timestamp).toLocaleString("pt-MZ")}</p>
+                      <p><span className="text-zinc-500">VALIDADE:</span> 15 Dias (Até {new Date(completedBudget.timestamp + 15 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-MZ")})</p>
+                      <p><span className="text-zinc-500">OPERADOR:</span> {activeUsername}</p>
+                      <p className="border-t border-dashed border-zinc-200 pt-1 mt-1"><span className="text-zinc-500">CLIENTE:</span> <span className="font-bold">{completedBudget.customerName}</span></p>
+                      {completedBudget.customerNuit && <p><span className="text-zinc-500">NUIT CLI:</span> {completedBudget.customerNuit}</p>}
+                      {completedBudget.customerPhone && <p><span className="text-zinc-500">CONTAC :</span> {completedBudget.customerPhone}</p>}
+                    </div>
+
+                    {/* Table Headers */}
+                    <div className="border-b border-dashed border-zinc-300 pb-1 mb-1 font-bold text-zinc-900 grid grid-cols-12 gap-1 text-[9px]">
+                      <span className="col-span-6">ARTIGO</span>
+                      <span className="col-span-2 text-center">QTD</span>
+                      <span className="col-span-4 text-right">VALOR</span>
+                    </div>
+
+                    {/* Items */}
+                    <div className="space-y-1 py-1 border-b border-dashed border-zinc-300 mb-2">
+                      {completedBudget.items.map((item, idx) => (
+                        <div key={idx} className="grid grid-cols-12 gap-1 text-[9px] text-zinc-700">
+                          <span className="col-span-6 truncate font-medium">{item.productName}</span>
+                          <span className="col-span-2 text-center font-mono">{item.quantity}</span>
+                          <span className="col-span-4 text-right font-mono">{(item.price * item.quantity).toLocaleString()} MT</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Calculations */}
+                    <div className="space-y-1 text-right text-[9px] text-zinc-600">
+                      <p>SUBTOTAL: {completedBudget.subtotal.toLocaleString()} MT</p>
+                      {completedBudget.discountTotal > 0 && <p className="text-red-650 font-bold">DESCONTO: -{completedBudget.discountTotal.toLocaleString()} MT</p>}
+                      <p>IVA ESTIMADO: {completedBudget.vatTotal.toLocaleString()} MT</p>
+                      <p className="text-zinc-900 font-bold text-[11px] border-t border-dashed border-zinc-300 pt-1.5 mt-1">
+                        TOTAL PROP: {completedBudget.grandTotal.toLocaleString()} MT
+                      </p>
+                    </div>
+
+                    <div className="text-center mt-4 border-t border-dashed border-zinc-300 pt-2 text-[8px] text-zinc-400 space-y-0.5">
+                      <p className="font-bold uppercase tracking-wider text-zinc-500">*** PROPOSTA SEM VALOR FISCAL ***</p>
+                      <p>Obrigado pela preferência e confiança!</p>
+                      <p>Emitido via Terminal Térmico ESC/POS.</p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                /* --- RAW ESC/POS COMMAND TEXT LAYOUT --- */
+                <div className="bg-zinc-950 p-4 rounded-xl text-left font-mono text-[10px] text-emerald-400 leading-normal select-all whitespace-pre">
+                  {getEscPosText(completedBudget, selectedPaperSize)}
+                </div>
+              )}
+            </div>
+
+            {/* Quick Dispatchers */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-0.5 text-left">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">E-mail de Envio</label>
+                  <input
+                    type="email"
+                    placeholder="exemplo@cliente.com"
+                    value={budgetTargetEmail}
+                    onChange={(e) => setBudgetTargetEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-800 outline-none focus:bg-white focus:border-blue-500 transition"
+                  />
+                </div>
+                <div className="space-y-0.5 text-left">
+                  <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Telemóvel (WhatsApp/SMS)</label>
+                  <input
+                    type="text"
+                    placeholder="+258 84 000 0000"
+                    value={budgetTargetPhone}
+                    onChange={(e) => setBudgetTargetPhone(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-800 outline-none focus:bg-white focus:border-indigo-500 transition"
+                  />
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide text-left">Entregar / Enviar ao Cliente</p>
+              
+              <div className="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSendBudgetEmail}
+                  disabled={sendBudgetEmailStatus !== "idle"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-blue-50 text-blue-750 hover:bg-blue-100 transition border border-blue-100 disabled:opacity-75 cursor-pointer"
+                >
+                  <Mail className="w-3.5 h-3.5 shrink-0" />
+                  {sendBudgetEmailStatus === "idle" ? "E-mail" : sendBudgetEmailStatus === "sending" ? "..." : "✓ Enviado"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendBudgetSms}
+                  disabled={sendBudgetSmsStatus !== "idle"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition border border-indigo-100 disabled:opacity-75 cursor-pointer"
+                >
+                  <Smartphone className="w-3.5 h-3.5 shrink-0" />
+                  {sendBudgetSmsStatus === "idle" ? "SMS" : sendBudgetSmsStatus === "sending" ? "..." : "✓ Enviado"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleOpenBudgetWhatsApp}
+                  disabled={sendBudgetWhatsAppStatus === "sending"}
+                  className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-emerald-50 text-emerald-850 hover:bg-emerald-100 transition border border-emerald-150 cursor-pointer"
+                >
+                  <MessageSquare className="w-3.5 h-3.5 shrink-0 text-emerald-600" />
+                  WhatsApp
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSimulatingPrint(true);
+                  try {
+                    window.print();
+                  } catch (err) {
+                    console.warn("Dispositivo em iFrame bloqueado para window.print. Impressora Virtual Ativada.");
+                  }
+                  setTimeout(() => {
+                    setIsSimulatingPrint(false);
+                  }, 4000);
+                }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-lg shadow-amber-600/15"
+                title="Imprimir Orçamento (Atalho: F5)"
+              >
+                <Printer className="w-4 h-4 text-amber-100" />
+                <span>{budgetPrintFormat === "ESC_POS" ? `Imprimir Fita Térmica (${selectedPaperSize})` : "Imprimir Proposta A4"}</span>
+                <kbd className="px-1.5 py-0.5 bg-white/20 text-white rounded text-[10px] font-mono font-bold shadow-inner ml-1">
+                  F5
+                </kbd>
+              </button>
+            </div>
+
+            {/* Close button */}
+            <button
+              type="button"
+              onClick={() => setCompletedBudget(null)}
+              className="w-full py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center hover:bg-slate-800"
+            >
+              Fechar Orçamento (Manter Carrinho)
+            </button>
+          </div>
+        </div>
       )}
 
-      {/* 26. Modal de Alerta de Stock Crítico */}
-      <PosCriticalStockModal
-        isOpen={showCriticalStockModal}
-        onClose={() => setShowCriticalStockModal(false)}
-        itemsLeavingStockBelowCritical={itemsLeavingStockBelowCritical}
-      />
+      {/* Floating Help Button in Bottom Right */}
+      <button
+        type="button"
+        onClick={() => setShowShortcutsHelp(true)}
+        className="fixed bottom-6 right-6 p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl transition-all duration-200 transform hover:scale-110 active:scale-95 cursor-pointer z-40 flex items-center justify-center border border-indigo-500/20"
+        title="Ajuda e Atalhos de Teclado (F1)"
+        id="pos-shortcuts-floating-btn"
+      >
+        <HelpCircle className="w-6 h-6 animate-pulse" />
+      </button>
 
-      {/* Small Help / Info Button in Bottom Corner & Shortcuts Modal */}
-      <ModuleShortcutsHelp
-        moduleName="Ponto de Venda (POS)"
-        moduleCode="POS"
-        isOpen={showShortcutsHelp}
-        onOpenChange={setShowShortcutsHelp}
-      />
+      {/* 26. Modal de Alerta de Stock Crítico */}
+      {showCriticalStockModal && (
+        <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div 
+            className="bg-white rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]"
+            id="pos-critical-stock-modal"
+          >
+            {/* Header */}
+            <div className="p-6 bg-red-50 border-b border-red-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-red-100 text-red-600 rounded-xl flex items-center justify-center shadow-inner animate-pulse">
+                  <AlertTriangle className="w-5 h-5 text-red-600" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-slate-900 text-sm">Alerta de Stock Crítico</h3>
+                  <p className="text-[11px] text-red-650 font-bold">Produtos que ficarão abaixo do nível de alerta após a venda</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowCriticalStockModal(false)}
+                className="w-8 h-8 rounded-full bg-white hover:bg-red-100 border border-red-200 text-red-400 hover:text-red-600 flex items-center justify-center transition cursor-pointer font-bold text-xs font-mono"
+                title="Fechar"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-6 overflow-y-auto space-y-4">
+              <p className="text-[11.5px] text-slate-500 leading-normal text-left">
+                Os seguintes itens no carrinho de compras atual têm quantidades que reduzirão o estoque restante abaixo ou ao nível crítico definido individualmente nas configurações de stock.
+              </p>
+
+              <div className="space-y-3">
+                {itemsLeavingStockBelowCritical.map(item => {
+                  const currentStock = item.product.stock;
+                  const saleQty = item.quantity;
+                  const finalStock = currentStock - saleQty;
+                  const minStock = item.product.minStock || 0;
+
+                  return (
+                    <div 
+                      key={item.product.id}
+                      className="p-3.5 bg-slate-50 border border-slate-150 rounded-xl flex flex-col gap-2 hover:bg-slate-100/70 transition text-left"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider font-mono">{item.product.brand || "Genérico"} ({item.product.code})</span>
+                          <h4 className="text-xs font-bold text-slate-800 line-clamp-1 leading-tight">{item.product.name}</h4>
+                        </div>
+                        <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2 py-0.5 rounded-full">
+                          Mín Alerta: {minStock}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-100 text-center">
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase">Stock Atual</span>
+                          <span className="text-xs font-mono font-bold text-slate-600">{currentStock}</span>
+                        </div>
+                        <div className="bg-white p-2 rounded-lg border border-slate-100">
+                          <span className="text-[9px] font-bold text-slate-400 block uppercase">No Carrinho</span>
+                          <span className="text-xs font-mono font-bold text-orange-600">-{saleQty}</span>
+                        </div>
+                        <div className="bg-red-50 p-2 rounded-lg border border-red-100">
+                          <span className="text-[9px] font-bold text-red-400 block uppercase">Stock Final</span>
+                          <span className={`text-xs font-mono font-bold ${finalStock < 0 ? "text-red-700 underline" : "text-red-600"}`}>
+                            {finalStock}
+                          </span>
+                        </div>
+                      </div>
+
+                      {finalStock < 0 && (
+                        <p className="text-[9.5px] text-red-600 font-bold flex items-center gap-1">
+                          ⚠️ Atenção: Esta transação causará ruptura de stock (estoque negativo)!
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCriticalStockModal(false)}
+                className="py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs cursor-pointer transition shadow-sm"
+              >
+                Entendi, Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Keyboard Shortcuts Floating Help Overlay */}
+      {showShortcutsHelp && (
+        <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div 
+            className="bg-white rounded-2xl max-w-lg w-full border border-slate-100 shadow-2xl overflow-hidden animate-in zoom-in-95 duration-150 flex flex-col max-h-[90vh]"
+            id="pos-shortcuts-help-modal"
+          >
+            {/* Header */}
+            <div className="p-6 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center shadow-inner">
+                  <Keyboard className="w-5 h-5" />
+                </div>
+                <div className="text-left">
+                  <h3 className="font-extrabold text-slate-900 text-sm">Ajuda e Atalhos do POS</h3>
+                  <p className="text-[11px] text-slate-500 font-medium">Aumente a sua eficiência de atendimento</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowShortcutsHelp(false)}
+                className="w-8 h-8 rounded-full bg-white hover:bg-slate-100 border border-slate-200 text-slate-400 hover:text-slate-600 flex items-center justify-center transition cursor-pointer font-bold text-xs"
+                title="Fechar (ESC)"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {/* Shortcut Rows */}
+              <div className="space-y-2.5">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-left">Atalhos de Operação do POS</p>
+                <div className="grid grid-cols-1 divide-y divide-slate-100 border border-slate-100 rounded-xl overflow-hidden bg-slate-50/50">
+                  
+                  {/* F1 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Painel de Ajuda / Atalhos</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F1</kbd>
+                  </div>
+
+                  {/* F2 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Focar Seleção de Cliente</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F2</kbd>
+                  </div>
+
+                  {/* F3 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Focar Pesquisa de Artigos</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F3</kbd>
+                  </div>
+
+                  {/* F4 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Registo Rápido de Cliente</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F4</kbd>
+                  </div>
+
+                  {/* F5 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-amber-50/70 transition bg-amber-50/40">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                      <div>
+                        <span className="text-xs font-bold text-amber-950 block">Imprimir Recibo / Finalização Rápida</span>
+                        <span className="text-[10.5px] text-amber-800/80">Imprime o recibo atual ou fatura imediatamente com emissão</span>
+                      </div>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-amber-500 text-white border border-amber-600 rounded-lg text-xs font-bold font-mono shadow-sm">F5</kbd>
+                  </div>
+
+                  {/* F6 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Aplicar Desconto Comercial %</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F6</kbd>
+                  </div>
+
+                  {/* F8 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Alternar Método de Pagamento</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F8</kbd>
+                  </div>
+
+                  {/* F9 */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-orange-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Abrir Confirmação / Pré-Checkout</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">F9</kbd>
+                  </div>
+
+                  {/* ESC */}
+                  <div className="flex items-center justify-between p-3 hover:bg-slate-50 transition">
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                      <span className="text-xs font-semibold text-slate-700">Esvaziar / Cancelar Venda Atual</span>
+                    </div>
+                    <kbd className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 font-mono shadow-sm">ESC</kbd>
+                  </div>
+
+                </div>
+              </div>
+
+              {/* Advanced info section */}
+              <div className="space-y-3 pt-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider text-left">Recursos de Automação & Eficiência</p>
+                
+                <div className="space-y-3 text-left">
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-orange-50 border border-orange-100">
+                    <span className="text-lg">🏷️</span>
+                    <div>
+                      <h4 className="text-xs font-extrabold text-orange-950">Leitura Inteligente por Código de Barras</h4>
+                      <p className="text-[11px] text-orange-800/80 leading-relaxed mt-0.5">
+                        O POS suporta o uso de leitores USB emulando teclado. Ao bipar um artigo em qualquer lugar, o sistema processa o código instantaneamente e insere-o no carrinho, prevenindo cliques desnecessários.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-50 border border-amber-100">
+                    <span className="text-lg">⚖️</span>
+                    <div>
+                      <h4 className="text-xs font-extrabold text-amber-950">Solicitação Automática de Peso</h4>
+                      <p className="text-[11px] text-amber-800/80 leading-relaxed mt-0.5">
+                        Para artigos vendidos ao quilo/peso, o sistema detecta de forma automática e abre um diálogo interativo para inserção da massa em gramas/kg, calculando com rigor a faturação.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <span className="text-lg">💡</span>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800">Agilidade no Trabalho</h4>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-0.5">
+                        Você pode fechar esta janela de ajuda a qualquer momento pressionando a tecla <kbd className="font-mono text-[10px] bg-white border px-1 py-0.5 rounded shadow-sm">ESC</kbd> ou <kbd className="font-mono text-[10px] bg-white border px-1 py-0.5 rounded shadow-sm">F1</kbd>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowShortcutsHelp(false)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition cursor-pointer"
+              >
+                Compreendi! Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

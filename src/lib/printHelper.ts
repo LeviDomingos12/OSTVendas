@@ -3,12 +3,12 @@ import { getFormattedSystemVersion } from "./versionManager";
 
 export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
   const currency = settings.currency || "MT";
-  const companyName = settings.companyName || "OST COMÉRCIO CENTRAL";
-  const address = settings.companyAddress || settings.storeAddress || "Av. Marginal, Kiosk 14, Maputo";
-  const nuit = settings.companyNuit || "400293112";
-  const contact = settings.storeContact || "+258 84 000 0000";
+  const companyName = settings.companyName || "Indisponível";
+  const address = settings.companyAddress || settings.storeAddress || "Indisponível";
+  const nuit = settings.companyNuit || "Indisponível";
+  const contact = settings.storeContact || "Indisponível";
   const logo = settings.logoUrl || "";
-  const certificationNumber = settings.fiscalCertificationNumber || "OST/CERT/00249/2026";
+  const certificationNumber = settings.fiscalCertificationNumber || "Indisponível";
 
   const printWindow = window.open("", "_blank", "width=800,height=900");
   if (!printWindow) {
@@ -521,12 +521,12 @@ export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
  */
 export function printThermal80mmReceipt(tx: Transaction, settings: SystemSettings) {
   const currency = settings.currency || "MT";
-  const companyName = settings.companyName || "OST COMÉRCIO CENTRAL";
-  const address = settings.companyAddress || settings.storeAddress || "Av. Marginal, Kiosk 14, Maputo";
-  const nuit = settings.companyNuit || "400293112";
-  const contact = settings.storeContact || "+258 84 000 0000";
+  const companyName = settings.companyName || "Indisponível";
+  const address = settings.companyAddress || settings.storeAddress || "Indisponível";
+  const nuit = settings.companyNuit || "Indisponível";
+  const contact = settings.storeContact || "Indisponível";
   const logo = settings.logoUrl || "";
-  const certificationNumber = settings.fiscalCertificationNumber || "OST/CERT/00249/2026";
+  const certificationNumber = settings.fiscalCertificationNumber || "Indisponível";
   
   const marginTop = settings.thermalMarginTop !== undefined ? settings.thermalMarginTop : 4;
   const marginBottom = settings.thermalMarginBottom !== undefined ? settings.thermalMarginBottom : 8;

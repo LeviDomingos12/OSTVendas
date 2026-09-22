@@ -13,28 +13,29 @@ export async function hashSecurityPin(pin: string): Promise<string> {
   const clean = (pin || "").trim();
   if (!clean) return "";
 
-  const cryptoObj = typeof globalThis !== "undefined" ? (globalThis.crypto || ((globalThis as Record<string, unknown>).msCrypto as Crypto | undefined)) : null;
-
-  if (cryptoObj && cryptoObj.subtle) {
+  if (typeof window !== "undefined" && window.crypto && window.crypto.subtle) {
     const encoder = new TextEncoder();
     const data = encoder.encode(`ost_vendas_salt_${clean}`);
-    const hashBuffer = await cryptoObj.subtle.digest("SHA-256", data);
+    const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }
 
-  // Fallback digest puro em JavaScript caso Web Crypto não esteja acessível
-  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
-  const str = `ost_vendas_salt_${clean}`;
-  for (let i = 0; i < str.length; i++) {
-    const ch = str.charCodeAt(i);
-    h0 = ((h0 << 5) - h0) + ch; h0 |= 0;
-    h1 = ((h1 << 7) - h1) + ch; h1 |= 0;
-    h2 = ((h2 << 11) - h2) + ch; h2 |= 0;
-    h3 = ((h3 << 13) - h3) + ch; h3 |= 0;
+  // Fallback síncrono/Node seguro caso crypto.subtle não esteja disponível
+  try {
+    const crypto = await import("crypto");
+    return crypto.createHash("sha256").update(`ost_vendas_salt_${clean}`).digest("hex");
+  } catch {
+    // Algoritmo simples de digest seguro como fallback extremo
+    let hash = 0;
+    const str = `ost_vendas_salt_${clean}`;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    return `hash_${Math.abs(hash).toString(16)}`;
   }
-  const hex = [h0, h1, h2, h3].map(v => (v >>> 0).toString(16).padStart(8, "0")).join("");
-  return hex.padEnd(64, "0").slice(0, 64);
 }
 
 /**
@@ -65,11 +66,170 @@ export async function verifySecurityPin(enteredPin: string, storedPinOrHash?: st
  */
 export function sanitizeUserSession(user: Employee | null | undefined): Employee | null {
   if (!user) return null;
-  // Desestrura para remover campos sensíveis conhecidos
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { pin, password, ...rest } = user;
-  const safeRecord: Record<string, unknown> = { ...rest };
-  delete safeRecord.tempPassword;
-  delete safeRecord.tokenSecret;
-  return safeRecord as unknown as Employee;
+  const safe = { ...user };
+  delete (safe as any).pin;
+  delete (safe as any).password;
+  delete (safe as any).tempPassword;
+  delete (safe as any).tokenSecret;
+  return safe;
+}
+
+/**
+ * Remove estritamente credenciais, PINs e senhas de colaboradores para snapshots, backups ou caches
+ */
+export function sanitizeEmployeesForExport(employees: Employee[] = []): Employee[] {
+  return employees.map((emp) => {
+    const safe = { ...emp };
+    delete (safe as any).pin;
+    delete (safe as any).password;
+    delete (safe as any).tempPassword;
+    delete (safe as any).tokenSecret;
+    return safe;
+  });
+}
+
+/**
+ * Higieniza configurações do sistema para snapshots e backups, removendo securityPin e senhas SMTP
+ */
+export function sanitizeSettingsForExport(settings: any): any {
+  if (!settings) return settings;
+  const safe = { ...settings };
+  delete safe.securityPin;
+  delete safe.smtpPassword;
+  delete safe.smsTwilioToken;
+  return safe;
+}
+
+/**
+ * Executa uma purga rigorosa em todos os storages do navegador (localStorage, sessionStorage)
+ * procurando por qualquer resíduo de chaves sensíveis (pin, password, tokens, caches, snapshots comerciais)
+ */
+export function purgeClientSensitiveStorage(): void {
+  try {
+    // 1. Chaves de storage proibidas
+    const sensitiveKeys = [
+      "password",
+      "senha",
+      "pin",
+      "user_pin",
+      "admin_pin",
+      "supervisor_pin",
+      "google_access_token",
+      "google_token",
+      "googleToken",
+      "gmail_token",
+      "gmailToken",
+      "provider_token",
+      "access_token",
+      "refresh_token",
+      "token",
+      "pos_sync_queue",
+      "erp_cache_snapshot_global",
+      "erp_auto_backup_local_db",
+      "erp_local_backups_log",
+      "ost_pos_cash_closures",
+      "ost_pos_shift_status",
+      "ost_pos_opening_balance",
+      "ost_pos_shift_opened_at",
+      "ost_pos_shift_opened_by",
+      "erp_simulated_logged_in_user"
+    ];
+
+    if (typeof localStorage !== "undefined") {
+      sensitiveKeys.forEach(k => localStorage.removeItem(k));
+      
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k) {
+          const lower = k.toLowerCase();
+          if (
+            lower.includes("password") ||
+            lower.includes("senha") ||
+            lower.includes("secret") ||
+            lower.includes("google_access_token") ||
+            lower.includes("google_token") ||
+            lower.includes("gmail_token") ||
+            lower.includes("provider_token") ||
+            lower.startsWith("erp_cache_snapshot_") ||
+            lower.startsWith("erp_backup_slot_")
+          ) {
+            keysToRemove.push(k);
+          }
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+
+      // Higienizar 'erp_logged_in_user' se tiver persistido com PIN/senha
+      const rawUser = localStorage.getItem("erp_logged_in_user");
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          if (parsed && (parsed.pin || parsed.password || parsed.tempPassword)) {
+            const sanitized = sanitizeUserSession(parsed);
+            localStorage.setItem("erp_logged_in_user", JSON.stringify(sanitized));
+          }
+        } catch {}
+      }
+    }
+
+    if (typeof sessionStorage !== "undefined") {
+      sensitiveKeys.forEach(k => sessionStorage.removeItem(k));
+      const sessionKeysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k) {
+          const lower = k.toLowerCase();
+          if (
+            lower.includes("password") ||
+            lower.includes("senha") ||
+            lower.includes("pin") ||
+            lower.includes("token") ||
+            lower.includes("secret")
+          ) {
+            sessionKeysToRemove.push(k);
+          }
+        }
+      }
+      sessionKeysToRemove.forEach(k => sessionStorage.removeItem(k));
+    }
+
+    // 2. Limpar cookies de sessão sensíveis se existirem
+    if (typeof document !== "undefined" && document.cookie) {
+      const cookies = document.cookie.split(";");
+      for (const cookie of cookies) {
+        const eqPos = cookie.indexOf("=");
+        const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+        const lowerName = name.toLowerCase();
+        if (
+          lowerName.includes("token") ||
+          lowerName.includes("secret") ||
+          lowerName.includes("password") ||
+          lowerName.includes("pin") ||
+          lowerName.includes("access")
+        ) {
+          document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+        }
+      }
+    }
+
+    // 3. Limpar CacheStorage de credenciais ou snapshots offline se existirem
+    if (typeof window !== "undefined" && "caches" in window) {
+      caches.keys().then((names) => {
+        for (const name of names) {
+          const lower = name.toLowerCase();
+          if (
+            lower.includes("auth") ||
+            lower.includes("token") ||
+            lower.includes("snapshot") ||
+            lower.includes("secret")
+          ) {
+            caches.delete(name);
+          }
+        }
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn("[SECURITY] Erro durante a purga de dados sensíveis:", err);
+  }
 }

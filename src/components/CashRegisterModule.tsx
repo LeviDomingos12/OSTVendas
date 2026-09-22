@@ -4,15 +4,7 @@ import {
   LayoutDashboard, 
   BookOpen, 
   History, 
-  BarChart3, 
-  AlertTriangle, 
-  ShieldCheck, 
-  Coins, 
-  Printer, 
-  Download,
-  Lock,
-  Unlock,
-  Plus
+  BarChart3
 } from "lucide-react";
 import { 
   CashFlowEntry, 
@@ -22,8 +14,7 @@ import {
   Employee, 
   CashClosure 
 } from "../types";
-import { generateEntityId, generateUUID } from "../lib/deterministic";
-import { operationalCache } from "../lib/indexedDbStorage";
+import { generateEntityId } from "../lib/deterministic";
 import { CommercialDataService } from "../services/dataService";
 import { CashKpiCards } from "./cash/CashKpiCards";
 import { CashQuickActions } from "./cash/CashQuickActions";
@@ -31,7 +22,7 @@ import { CashReconciliationPanel } from "./cash/CashReconciliationPanel";
 import { CashbookLedger } from "./cash/CashbookLedger";
 import { CashClosuresHistory } from "./cash/CashClosuresHistory";
 import { CashShiftModals } from "./cash/CashShiftModals";
-import { exportCashbookPdf, exportSingleClosurePdf, printThermalSlip } from "./cash/cashPdfService";
+import { exportCashbookPdf, exportSingleClosurePdf } from "./cash/cashPdfService";
 import CashAnalyticalCharts from "./CashAnalyticalCharts";
 import { DENOMINATIONS } from "./DenominationCounter";
 
@@ -67,52 +58,38 @@ function CashRegisterModule({
   // Main Module Tab Navigation
   const [activeTab, setActiveTab] = useState<"dashboard" | "cashbook" | "closures" | "analytics">("dashboard");
 
-  // Shift Status & Float
+  // Shift Status & Float (strictly in-memory, loaded directly from PostgreSQL/Supabase)
   const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("CLOSED");
   const [openingBalance, setOpeningBalance] = useState<number>(0);
-  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>(() => new Date().toISOString());
-  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>(() => activeUsername);
+  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>("");
+  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>("");
 
-  // Closures History State (Database-backed via Supabase)
+  // Closures History State (strictly in-memory, loaded directly from PostgreSQL/Supabase)
   const [closuresHistory, setClosuresHistory] = useState<CashClosure[]>([]);
 
-  // Fetch initial cache from IndexedDB and real data from Supabase
+  // Fetch real closures and active shift directly from PostgreSQL/Supabase on mount
   useEffect(() => {
     let isMounted = true;
 
-    // Load local operational cache first
-    operationalCache.getItem<CashClosure[]>("ost_pos_cash_closures").then(cachedClosures => {
-      if (isMounted && cachedClosures && Array.isArray(cachedClosures)) {
-        setClosuresHistory(cachedClosures);
-      }
-    });
-
-    operationalCache.getItem<"OPEN" | "CLOSED">("ost_pos_shift_status").then(s => {
-      if (isMounted && (s === "OPEN" || s === "CLOSED")) setShiftStatus(s);
-    });
-
-    operationalCache.getItem<number>("ost_pos_opening_balance").then(b => {
-      if (isMounted && typeof b === "number") setOpeningBalance(b);
-    });
-
-    // Load active shift status from Supabase
+    // Load active shift status from PostgreSQL
     CommercialDataService.fetchActiveCashShift().then((shift) => {
       if (isMounted && shift) {
         setShiftStatus(shift.status);
         setOpeningBalance(shift.openingBalance || 0);
-        setShiftOpenedAt(shift.openedAt);
+        setShiftOpenedAt(shift.openedAt || "");
         setShiftOpenedBy(shift.openedBy || activeUsername);
-        operationalCache.setItem("ost_pos_shift_status", shift.status);
-        operationalCache.setItem("ost_pos_opening_balance", shift.openingBalance || 0);
       }
+    }).catch(err => {
+      console.warn("[CAIXA] Erro ao carregar turno ativo do PostgreSQL:", err);
     });
 
-    // Load historical closures from Supabase
+    // Load historical closures from PostgreSQL
     CommercialDataService.fetchCashClosures().then((closures) => {
       if (isMounted && closures && closures.length > 0) {
         setClosuresHistory(closures);
-        operationalCache.setItem("ost_pos_cash_closures", closures);
       }
+    }).catch(err => {
+      console.warn("[CAIXA] Erro ao carregar fechos de caixa do PostgreSQL:", err);
     });
 
     // Subscribe to realtime cash closure events
@@ -120,9 +97,8 @@ function CashRegisterModule({
       CommercialDataService.fetchCashClosures().then((closures) => {
         if (isMounted && closures) {
           setClosuresHistory(closures);
-          operationalCache.setItem("ost_pos_cash_closures", closures);
         }
-      });
+      }).catch(() => {});
     });
 
     return () => {
@@ -130,21 +106,6 @@ function CashRegisterModule({
       sub?.unsubscribe?.();
     };
   }, [activeUsername]);
-
-  // Save Closures to IndexedDB Cache
-  useEffect(() => {
-    if (closuresHistory.length > 0) {
-      operationalCache.setItem("ost_pos_cash_closures", closuresHistory);
-    }
-  }, [closuresHistory]);
-
-  // Save Shift Status to IndexedDB Cache
-  useEffect(() => {
-    operationalCache.setItem("ost_pos_shift_status", shiftStatus);
-    operationalCache.setItem("ost_pos_opening_balance", openingBalance);
-    operationalCache.setItem("ost_pos_shift_opened_at", shiftOpenedAt);
-    operationalCache.setItem("ost_pos_shift_opened_by", shiftOpenedBy);
-  }, [shiftStatus, openingBalance, shiftOpenedAt, shiftOpenedBy]);
 
   // Denominations Counter State - Clean default initialized to 0 for production commercialization
   const [denomCounts, setDenomCounts] = useState<{ [key: string]: number }>({
@@ -294,21 +255,9 @@ function CashRegisterModule({
     };
   }, [filteredTransactions, filteredCashFlow, shiftStatus, openingBalance]);
 
-interface CashTimelineItem {
-  id: string;
-  timestamp: string;
-  type: string;
-  paymentMethod?: string;
-  amount: number;
-  reason: string;
-  responsibleUser: string;
-  supplier?: string;
-  isInput: boolean;
-}
-
   // Unified Chronological Timeline
   const unifiedTimeline = useMemo(() => {
-    const items: CashTimelineItem[] = [];
+    const items: any[] = [];
 
     // Transactions
     filteredTransactions.forEach(t => {
@@ -524,7 +473,6 @@ interface CashTimelineItem {
 
   const handleAdjustOpeningBalance = useCallback((newFloat: number, reason: string, supervisor: string) => {
     setOpeningBalance(newFloat);
-    operationalCache.setItem("ost_pos_opening_balance", newFloat);
     
     if (shiftStatus === "OPEN") {
       CommercialDataService.saveActiveCashShift({
@@ -562,7 +510,7 @@ interface CashTimelineItem {
       return `"${item.id}","${item.timestamp}","${item.type}","${item.responsibleUser}","${cleanReason}",${val},"${currency}"`;
     }).join("\n");
 
-    const blob = new Blob(["\uFEFF" + headers + rows], { type: "text/csv;charset=utf-8;" });
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
@@ -591,7 +539,7 @@ interface CashTimelineItem {
                 Gestão Profissional de Caixa & Turnos (ERP/POS)
               </h2>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-                v{settings?.systemVersion || "34.0"}
+                v{settings?.systemVersion || "2.1.0"}
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">

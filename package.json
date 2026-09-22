@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "34.0.0",
+  "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -10,8 +10,7 @@
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "ci": "npm run typecheck && npm run test && npm run build"
+    "test": "vitest run"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -21,6 +20,7 @@
     "@vitejs/plugin-react": "^5.0.4",
     "d3": "^7.9.0",
     "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.45.2",
     "express": "^4.21.2",
     "express-rate-limit": "^8.6.2",
     "html5-qrcode": "^2.3.8",
@@ -36,7 +36,6 @@
     "react-dom": "^19.0.1",
     "recharts": "^3.8.1",
     "vite": "^6.2.3",
-    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -48,6 +47,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.2.1",
     "autoprefixer": "^10.4.21",
+    "drizzle-kit": "^0.31.10",
     "esbuild": "^0.25.0",
     "supertest": "^7.2.2",
     "tailwindcss": "^4.1.14",

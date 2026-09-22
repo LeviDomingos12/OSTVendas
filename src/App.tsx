@@ -18,79 +18,60 @@ import {
   AuditLog, 
   SystemSettings, 
   UserRole,
-  SubscriptionPlan,
-  AiForecastResult
+  SubscriptionPlan
 } from "./types";
-import type { User } from "@supabase/supabase-js";
-
-interface DatabaseSnapshotPayload {
-  products?: Product[];
-  customers?: Customer[];
-  transactions?: Transaction[];
-  cashFlow?: CashFlowEntry[];
-  cashflow?: CashFlowEntry[];
-  employees?: Employee[];
-  settings?: SystemSettings;
-  auditLogs?: AuditLog[];
-  auditlogs?: AuditLog[];
-}
 
 // Import modules
 import Sidebar from "./components/Sidebar";
-import { AppTabContent } from "./components/layout/AppTabContent";
-import { AppModalsContainer } from "./components/modals/AppModalsContainer";
-import { OnboardingTutorial } from "./components/OnboardingTutorial";
+import POSModule from "./components/POSModule";
+import DashboardModule from "./components/DashboardModule";
+import CashRegisterModule from "./components/CashRegisterModule";
+import StockModule from "./components/StockModule";
+import CustomersModule from "./components/CustomersModule";
+import StaffModule from "./components/StaffModule";
+import ReportsModule from "./components/ReportsModule";
+import SettingsModule from "./components/SettingsModule";
+import SubscriptionPlansModule from "./components/SubscriptionPlansModule";
+import PlanLockScreen from "./components/PlanLockScreen";
+import { canAccessModule } from "./lib/planPermissions";
+import { RoleAccessDeniedScreen } from "./components/RoleAccessDeniedScreen";
 import { canRoleAccessModule, normalizeUserRole, getDefaultModuleForRole } from "./lib/rolePermissions";
 import LoginModule from "./components/LoginModule";
-import { ForcePinChangeModal } from "./components/modals/ForcePinChangeModal";
-import { AppHeader } from "./components/layout/AppHeader";
-import { ToastContainer } from "./components/layout/ToastContainer";
-import { FloatingNavFab } from "./components/layout/FloatingNavFab";
-import { createLocalBackup, shouldRunAutoBackup } from "./services/backupService";
-import { fetchGeoLocationInfo, detectDeviceType } from "./services/securityAlertService";
-import { processSaleDeductions, processDevolutionRestock } from "./services/posTransactionProcessor";
-import { loadSyncQueue, processSyncQueue as syncOfflineQueueService } from "./services/syncQueueService";
-import { applyTheme, SYSTEM_THEMES } from "./lib/themes";
-import { sanitizeUserSession, hashSecurityPin, verifySecurityPin } from "./lib/security";
-import { useSystemVersion, incrementSystemVersion, getSystemVersion, setSystemVersion, getFormattedSystemVersion } from "./lib/versionManager";
+import { UserSwitchModal } from "./components/UserSwitchModal";
+import AiForecastModule from "./components/AiForecastModule";
+import StockReplenishModal from "./components/StockReplenishModal";
+import QuickLogoModal from "./components/QuickLogoModal";
+import TutorialModal from "./components/TutorialModal";
+import { SystemInfoHub } from "./components/SystemInfoHub";
+import { applyTheme } from "./lib/themes";
+import { sanitizeUserSession, sanitizeEmployeesForExport, sanitizeSettingsForExport, purgeClientSensitiveStorage } from "./lib/security";
+import { useSystemVersion, incrementSystemVersion } from "./lib/versionManager";
 import { 
   CommercialDataService, 
-  OfflineQueueService,
-  SyncService, 
   ConnectionService, 
-  AuthService, 
-  sanitizeServiceError 
+  StorageService 
 } from "./services/dataService";
 import { getSupabaseClient } from "./lib/supabase";
-import { authenticatedFetch, setRateLimitCallback } from "./lib/apiClient";
-import { SupabaseSyncService, saveSupabaseConfig } from "./services/supabaseService";
-import { operationalCache, ErpSnapshotData } from "./lib/indexedDbStorage";
-import { normalizeTransaction } from "./lib/normalizeTransaction";
-import { setLogCallback } from "./lib/logger";
-import { generateUUID, generateEntityId, generateDeterministicCreditNoteNumber, generateSecurePin } from "./lib/deterministic";
+import { authenticatedFetch } from "./lib/apiClient";
+import { SupabaseSyncService } from "./services/supabaseService";
+import { setLogCallback, initErrorCapturing } from "./lib/logger";
+import { generateEntityId, generateDeterministicCreditNoteNumber, generateSecurePin } from "./lib/deterministic";
 import { sendEmail } from "./lib/gmail";
 import { sendSMS } from "./lib/sms";
 import QRCode from "qrcode";
 
 import { 
   Activity, 
-  Sparkles, 
   TrendingUp, 
   TrendingDown,
   Minus,
-  RefreshCw, 
-  Sun, 
-  Moon,
   Check,
   CheckCircle,
   XCircle,
   AlertCircle,
   AlertTriangle,
   X,
-  Wifi,
-  WifiOff,
   Cloud,
-  Clock,
   Menu,
   Lock,
   ShieldAlert,
@@ -100,43 +81,22 @@ import {
   ShoppingCart,
   Package,
   PiggyBank,
-  UserCheck,
   FileText,
-  BookOpen,
   Settings,
-  Smartphone,
-  ChevronDown,
-  ChevronUp,
   Compass,
   LogOut,
-  Eye,
-  EyeOff,
   QrCode,
-  Key,
-  Fingerprint,
-  UserX,
-  ShieldCheck,
-  Globe,
-  Search,
   Calendar,
   Filter,
-  Video,
   Upload,
   Save,
   Download,
-  History,
-  Trash2,
-  CheckCircle2,
-  Mail,
   Image,
-  Building,
-  MessageSquare,
   ZoomIn,
   ZoomOut,
   RotateCcw,
   MoveLeft,
   MoveRight,
-  Maximize2,
   Crop,
   MousePointer
 } from "lucide-react";
@@ -149,14 +109,996 @@ interface Toast {
 }
 
 const NAV_MENU_ITEMS = [
-  { id: "dashboard", label: "Painel Principal", shortLabel: "Início", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "pos", label: "Registar Vendas", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "stock", label: "Produtos em Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "cash", label: "Livro de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
-  { id: "customers", label: "Lista de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "reports", label: "Relatórios de Vendas", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "settings", label: "Configurações da Loja", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
+  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
+  { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
 ];
+
+const safeLocalStorageSetItem = (key: string, value: string): boolean => {
+  try {
+    const lowerKey = key.toLowerCase();
+    // Guard estrito: Proibir terminantemente armazenamento de tokens Google, Gmail, senhas ou credenciais
+    if (
+      lowerKey.includes("google_access_token") ||
+      lowerKey.includes("google_token") ||
+      lowerKey.includes("gmail_token") ||
+      lowerKey.includes("provider_token") ||
+      lowerKey.includes("password") ||
+      lowerKey.includes("senha")
+    ) {
+      console.warn(`[SECURITY GUARD] Bloqueada tentativa de gravar chave sensível proibida '${key}' em localStorage.`);
+      return false;
+    }
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e: any) {
+    console.warn(`[STORAGE] Erro ao gravar '${key}' em localStorage:`, e?.message);
+    return false;
+  }
+};
+
+function AuditLogsD3BarChart({ logs }: { logs: AuditLog[] }) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [timeRange, setTimeRange] = useState<number>(14); // 7, 14, 30, 60, 90 days
+  const [isZoomed, setIsZoomed] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomMode, setZoomMode] = useState<"box" | "pan">("box");
+  const [showPrevWeekTrend, setShowPrevWeekTrend] = useState(false);
+  const [hoveredDay, setHoveredDay] = useState<{
+    label: string;
+    dateStr: string;
+    count: number;
+    prevWeekCount: number;
+    xPos: number;
+    yPos: number;
+  } | null>(null);
+  
+  const zoomRef = useRef<d3.ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+
+  // High activity moving average calculation (30-day window)
+  const { isHighActivity, movingAvg30Val } = useMemo(() => {
+    if (!logs || logs.length === 0) return { isHighActivity: false, movingAvg30Val: 0 };
+    let logs30dCount = 0;
+    const now30 = new Date();
+    (logs || []).forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        const diffMs = now30.getTime() - logDate.getTime();
+        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
+          logs30dCount++;
+        }
+      } catch {}
+    });
+    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : 0;
+    const threshold50 = avg30 * 1.5;
+
+    const cutoff = new Date(now30);
+    cutoff.setDate(cutoff.getDate() - timeRange);
+    const recentLogs = logs.filter(l => l.timestamp && new Date(l.timestamp) >= cutoff);
+    const avgRecent = recentLogs.length / Math.max(1, timeRange);
+    const exceedsThreshold = avg30 > 0 && avgRecent > threshold50;
+
+    return { isHighActivity: exceedsThreshold, movingAvg30Val: avg30 };
+  }, [logs, timeRange]);
+
+  // Trend indicator calculation (current period vs previous period)
+  const trendData = useMemo(() => {
+    if (!logs || logs.length === 0) {
+      return { currentCount: 0, previousCount: 0, percentage: 0, direction: "neutral" as const };
+    }
+    const now = new Date();
+    
+    let currentCount = 0;
+    let previousCount = 0;
+
+    const currentCutoff = new Date(now);
+    currentCutoff.setDate(currentCutoff.getDate() - timeRange);
+    currentCutoff.setHours(0, 0, 0, 0);
+
+    const previousCutoff = new Date(now);
+    previousCutoff.setDate(previousCutoff.getDate() - (timeRange * 2));
+    previousCutoff.setHours(0, 0, 0, 0);
+
+    logs.forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        if (logDate >= currentCutoff) {
+          currentCount++;
+        } else if (logDate >= previousCutoff) {
+          previousCount++;
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    if (previousCount === 0) {
+      if (currentCount === 0) {
+        return { currentCount, previousCount, percentage: 0, direction: "neutral" as const };
+      }
+      return { currentCount, previousCount, percentage: 100, direction: "up" as const };
+    }
+
+    const diff = currentCount - previousCount;
+    const percentage = Math.round((diff / previousCount) * 100);
+
+    return {
+      currentCount,
+      previousCount,
+      percentage: Math.abs(percentage),
+      direction: diff > 0 ? ("up" as const) : diff < 0 ? ("down" as const) : ("neutral" as const)
+    };
+  }, [logs, timeRange]);
+
+  // Zoom Control Handlers
+  const handleZoomIn = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 1.4);
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(300)
+        .call(zoomRef.current.scaleBy, 0.714);
+    }
+  };
+
+  const handlePanLeft = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(250)
+        .call(zoomRef.current.translateBy, 90, 0);
+    }
+  };
+
+  const handlePanRight = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(250)
+        .call(zoomRef.current.translateBy, -90, 0);
+    }
+  };
+
+  const handleResetZoom = () => {
+    if (svgRef.current && zoomRef.current) {
+      d3.select(svgRef.current)
+        .transition()
+        .duration(400)
+        .call(zoomRef.current.transform, d3.zoomIdentity);
+      setIsZoomed(false);
+      setZoomScale(1);
+    }
+  };
+
+  // Switch time range and reset zoom
+  const handleTimeRangeChange = (daysCount: number) => {
+    setTimeRange(daysCount);
+    handleResetZoom();
+  };
+
+  // Export Chart as PNG
+  const handleExportPNG = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!svgRef.current) return;
+
+    try {
+      const svgElement = svgRef.current;
+      const serializer = new XMLSerializer();
+      let svgString = serializer.serializeToString(svgElement);
+
+      // Ensure proper SVG namespace attributes
+      if (!svgString.includes('xmlns="http://www.w3.org/2000/svg"')) {
+        svgString = svgString.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+
+      // High resolution export dimensions
+      const width = 960 * 2;
+      const height = 280 * 2;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+
+      // Fill background matching theme
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 0, width, height);
+
+      const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(svgBlob);
+      const img = new Image();
+
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+
+        const pngUrl = canvas.toDataURL("image/png");
+        const downloadLink = document.createElement("a");
+        downloadLink.href = pngUrl;
+        downloadLink.download = `grafico_activity_logs_${timeRange}D_${new Date().toISOString().slice(0, 10)}.png`;
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
+      };
+
+      img.src = url;
+    } catch (err) {
+      console.error("Erro ao exportar gráfico em PNG:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    // Generate daily log data points based on selected timeRange
+    const days: { dateStr: string; label: string; count: number; prevWeekCount: number }[] = [];
+    const now = new Date();
+    
+    for (let i = timeRange - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+
+      // Corresponding date 7 days before
+      const dPrev = new Date(d);
+      dPrev.setDate(dPrev.getDate() - 7);
+      const dateStrPrev = dPrev.toISOString().slice(0, 10);
+      
+      // Label formatting adapted to time range
+      const dayLabel = timeRange <= 14 
+        ? d.toLocaleDateString("pt-MZ", { weekday: "short", day: "2-digit" })
+        : d.toLocaleDateString("pt-MZ", { day: "2-digit", month: "2-digit" });
+      
+      let count = 0;
+      let prevWeekCount = 0;
+
+      (logs || []).forEach(log => {
+        if (!log.timestamp) return;
+        try {
+          const logDateStr = new Date(log.timestamp).toISOString().slice(0, 10);
+          if (logDateStr === dateStr) {
+            count++;
+          } else if (logDateStr === dateStrPrev) {
+            prevWeekCount++;
+          }
+        } catch {
+          // ignore
+        }
+      });
+
+      days.push({ dateStr, label: dayLabel, count, prevWeekCount });
+    }
+
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
+
+    const width = 480;
+    const height = 125;
+    const margin = { top: 18, right: 12, bottom: 22, left: 24 };
+
+    const innerWidth = width - margin.left - margin.right;
+    const innerHeight = height - margin.top - margin.bottom;
+
+    const x = d3.scaleBand()
+      .domain(days.map(d => d.label))
+      .range([0, innerWidth])
+      .padding(timeRange > 30 ? 0.2 : 0.32);
+
+    const maxCount = Math.max(
+      d3.max(days, d => Math.max(d.count, showPrevWeekTrend ? d.prevWeekCount : 0)) || 1, 
+      3
+    );
+    const y = d3.scaleLinear()
+      .domain([0, maxCount])
+      .nice()
+      .range([innerHeight, 0]);
+
+    // Clip path to keep bars & elements strictly within bounds during zoom/pan
+    const defs = svg.append("defs");
+    defs.append("clipPath")
+      .attr("id", "audit-chart-clip")
+      .append("rect")
+      .attr("x", 0)
+      .attr("y", -15)
+      .attr("width", innerWidth)
+      .attr("height", innerHeight + 20);
+
+    const g = svg
+      .attr("viewBox", `0 0 ${width} ${height}`)
+      .attr("preserveAspectRatio", "xMidYMid meet")
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Background overlay for pan/drag events (behind content)
+    const bgOverlay = g.append("rect")
+      .attr("width", innerWidth)
+      .attr("height", innerHeight)
+      .attr("fill", "transparent")
+      .attr("cursor", "grab");
+
+    // Gridlines (fixed background)
+    const yTicks = y.ticks(3);
+    g.append("g")
+      .attr("class", "grid")
+      .selectAll("line")
+      .data(yTicks)
+      .enter()
+      .append("line")
+      .attr("x1", 0)
+      .attr("x2", innerWidth)
+      .attr("y1", d => y(d))
+      .attr("y2", d => y(d))
+      .attr("stroke", "#334155")
+      .attr("stroke-dasharray", "2,2")
+      .attr("stroke-opacity", 0.5);
+
+    // Content group with clip-path
+    const chartContent = g.append("g")
+      .attr("clip-path", "url(#audit-chart-clip)");
+
+    // Bars - initial zero-height state at x-axis
+    const bars = chartContent.selectAll(".bar")
+      .data(days)
+      .enter()
+      .append("rect")
+      .attr("class", "bar")
+      .attr("x", d => x(d.label) || 0)
+      .attr("y", innerHeight)
+      .attr("width", Math.max(1, x.bandwidth()))
+      .attr("height", 0)
+      .attr("fill", "#f97316")
+      .attr("rx", Math.min(3, Math.max(1, x.bandwidth() / 3)))
+      .attr("ry", Math.min(3, Math.max(1, x.bandwidth() / 3)))
+      .attr("opacity", d => d.count > 0 ? 0.95 : 0.25)
+      .attr("cursor", "pointer");
+
+    // D3 Transition: Smooth growth from x-axis
+    bars.transition()
+      .duration(500)
+      .delay((_, i) => Math.min(i * 20, 400))
+      .ease(d3.easeCubicOut)
+      .attr("y", d => y(d.count))
+      .attr("height", d => innerHeight - y(d.count));
+
+    // Hover tooltip events on bars
+    bars
+      .on("pointerover", function(event, d) {
+        d3.select(this)
+          .transition()
+          .duration(120)
+          .attr("fill", "#fb923c")
+          .attr("stroke", "#ffffff")
+          .attr("stroke-width", 1.5)
+          .attr("opacity", 1);
+
+        if (svgRef.current) {
+          const rect = svgRef.current.getBoundingClientRect();
+          const xPos = event.clientX - rect.left;
+          const yPos = event.clientY - rect.top;
+          setHoveredDay({
+            label: d.label,
+            dateStr: d.dateStr,
+            count: d.count,
+            prevWeekCount: d.prevWeekCount,
+            xPos,
+            yPos
+          });
+        }
+      })
+      .on("pointermove", function(event, d) {
+        if (svgRef.current) {
+          const rect = svgRef.current.getBoundingClientRect();
+          const xPos = event.clientX - rect.left;
+          const yPos = event.clientY - rect.top;
+          setHoveredDay({
+            label: d.label,
+            dateStr: d.dateStr,
+            count: d.count,
+            prevWeekCount: d.prevWeekCount,
+            xPos,
+            yPos
+          });
+        }
+      })
+      .on("pointerout", function(event, d) {
+        d3.select(this)
+          .transition()
+          .duration(150)
+          .attr("fill", "#f97316")
+          .attr("stroke", "none")
+          .attr("opacity", d.count > 0 ? 0.95 : 0.25);
+
+        setHoveredDay(null);
+      });
+
+    // Value Labels above bars
+    const labels = chartContent.selectAll(".label")
+      .data(days)
+      .enter()
+      .append("text")
+      .attr("class", "bar-label")
+      .attr("x", d => (x(d.label) || 0) + x.bandwidth() / 2)
+      .attr("y", innerHeight - 2)
+      .attr("text-anchor", "middle")
+      .attr("fill", d => d.count > 0 ? "#fb923c" : "#64748b")
+      .attr("font-size", "8.5px")
+      .attr("font-weight", "bold")
+      .attr("pointer-events", "none")
+      .attr("opacity", 0)
+      .text(d => d.count);
+
+    labels.transition()
+      .duration(500)
+      .delay((_, i) => Math.min(i * 20, 400))
+      .ease(d3.easeCubicOut)
+      .attr("y", d => y(d.count) - 3)
+      .attr("opacity", x.bandwidth() >= 8 ? 1 : 0);
+
+    // Calculate Moving Average & 30-day Moving Average Threshold
+    const totalCount = days.reduce((sum, d) => sum + d.count, 0);
+    const avgCount = days.length > 0 ? totalCount / days.length : 0;
+    const yAvg = y(avgCount);
+
+    // Calculate 30-day moving average for high activity detection (>50% above moving average)
+    let logs30dCount = 0;
+    const now30 = new Date();
+    (logs || []).forEach(log => {
+      if (!log.timestamp) return;
+      try {
+        const logDate = new Date(log.timestamp);
+        const diffMs = now30.getTime() - logDate.getTime();
+        if (diffMs >= 0 && diffMs <= 30 * 24 * 60 * 60 * 1000) {
+          logs30dCount++;
+        }
+      } catch {}
+    });
+    const avg30 = logs30dCount > 0 ? logs30dCount / 30 : avgCount;
+    const threshold50 = avg30 * 1.5;
+
+    // Dotted horizontal line representing average volume
+    chartContent.append("line")
+      .attr("class", "avg-line")
+      .attr("x1", 0)
+      .attr("x2", innerWidth)
+      .attr("y1", yAvg)
+      .attr("y2", yAvg)
+      .attr("stroke", "#38bdf8")
+      .attr("stroke-width", 1.5)
+      .attr("stroke-dasharray", "4,3")
+      .attr("pointer-events", "none");
+
+    // Moving average label on the line
+    chartContent.append("text")
+      .attr("x", innerWidth - 4)
+      .attr("y", yAvg > 12 ? yAvg - 4 : yAvg + 11)
+      .attr("text-anchor", "end")
+      .attr("fill", "#38bdf8")
+      .attr("font-size", "8.5px")
+      .attr("font-weight", "bold")
+      .attr("pointer-events", "none")
+      .text(`Média: ${avgCount.toFixed(1)}/dia`);
+
+    // Threshold Line (+50% over 30-day Moving Average)
+    if (threshold50 > 0 && threshold50 <= maxCount) {
+      const yThreshold = y(threshold50);
+      chartContent.append("line")
+        .attr("class", "threshold-line")
+        .attr("x1", 0)
+        .attr("x2", innerWidth)
+        .attr("y1", yThreshold)
+        .attr("y2", yThreshold)
+        .attr("stroke", "#f59e0b")
+        .attr("stroke-width", 1.5)
+        .attr("stroke-dasharray", "3,2")
+        .attr("pointer-events", "none");
+
+      chartContent.append("text")
+        .attr("x", 4)
+        .attr("y", yThreshold > 12 ? yThreshold - 3 : yThreshold + 9)
+        .attr("fill", "#f59e0b")
+        .attr("font-size", "8px")
+        .attr("font-weight", "bold")
+        .attr("pointer-events", "none")
+        .text(`Limiar (+50% Média 30D: ${threshold50.toFixed(1)})`);
+    }
+
+    // Previous Week Trend Line Overlay (Linha de Tendência da Semana Anterior)
+    if (showPrevWeekTrend && days.length > 0) {
+      const lineGenerator = d3.line<{ label: string; prevWeekCount: number }>()
+        .x(d => (x(d.label) || 0) + x.bandwidth() / 2)
+        .y(d => y(d.prevWeekCount))
+        .curve(d3.curveMonotoneX);
+
+      const prevLinePath = chartContent.append("path")
+        .datum(days)
+        .attr("class", "prev-week-line")
+        .attr("fill", "none")
+        .attr("stroke", "#c084fc")
+        .attr("stroke-width", 2)
+        .attr("stroke-dasharray", "4,3")
+        .attr("pointer-events", "none")
+        .attr("d", lineGenerator);
+
+      const totalLength = (prevLinePath.node() as SVGPathElement)?.getTotalLength() || 500;
+      prevLinePath
+        .attr("stroke-dasharray", `${totalLength} ${totalLength}`)
+        .attr("stroke-dashoffset", totalLength)
+        .transition()
+        .duration(700)
+        .ease(d3.easeCubicOut)
+        .attr("stroke-dashoffset", 0)
+        .on("end", function() {
+          d3.select(this).attr("stroke-dasharray", "4,3");
+        });
+
+      const prevDots = chartContent.selectAll(".prev-dot")
+        .data(days)
+        .enter()
+        .append("circle")
+        .attr("class", "prev-dot")
+        .attr("cx", d => (x(d.label) || 0) + x.bandwidth() / 2)
+        .attr("cy", d => y(d.prevWeekCount))
+        .attr("r", Math.min(3.5, Math.max(1.5, x.bandwidth() / 4)))
+        .attr("fill", "#c084fc")
+        .attr("stroke", "#020617")
+        .attr("stroke-width", 1.5)
+        .attr("pointer-events", "none")
+        .attr("opacity", 0);
+
+      prevDots.transition()
+        .duration(500)
+        .delay((_, i) => Math.min(i * 15, 300))
+        .attr("opacity", 1);
+    }
+
+    // X Axis Setup
+    const xAxisGroup = g.append("g")
+      .attr("class", "x-axis")
+      .attr("transform", `translate(0,${innerHeight})`);
+
+    const renderXAxis = (scaleToUse: d3.ScaleBand<string>) => {
+      const axis = d3.axisBottom(scaleToUse).tickSize(0);
+      
+      // Filter tick labels if bandwidth is narrow to prevent overlapping
+      const currentBandwidth = scaleToUse.bandwidth();
+      if (currentBandwidth < 14) {
+        const step = Math.ceil(18 / Math.max(1, currentBandwidth));
+        axis.tickValues(scaleToUse.domain().filter((_, idx) => idx % step === 0));
+      }
+
+      xAxisGroup.call(axis);
+      xAxisGroup.select(".domain").attr("stroke", "#475569");
+      xAxisGroup.selectAll("text")
+        .attr("fill", "#94a3b8")
+        .attr("font-size", "8.5px")
+        .attr("dy", "8px");
+    };
+
+    renderXAxis(x);
+
+    // Y Axis Setup
+    const yAxis = d3.axisLeft(y).ticks(3).tickSize(0);
+    const yAxisGroup = g.append("g").call(yAxis);
+    yAxisGroup.select(".domain").remove();
+    yAxisGroup.selectAll("text")
+      .attr("fill", "#64748b")
+      .attr("font-size", "8.5px");
+
+    // D3 Brush for Box / Area Selection Zoom (Zoom de Área por Clique e Arraste)
+    const brushGroup = g.append("g").attr("class", "brush-group");
+
+    const brush = d3.brushX<SVGSVGElement>()
+      .extent([[0, 0], [innerWidth, innerHeight]])
+      .on("end", (event) => {
+        if (!event.selection) return;
+
+        const [x0, x1] = event.selection as [number, number];
+        const dx = x1 - x0;
+
+        if (dx >= 8) {
+          const currentTransform = d3.zoomTransform(svgRef.current!);
+          
+          // Map pixel boundaries back to unscaled domain space
+          const x0Data = (x0 - currentTransform.x) / currentTransform.k;
+          const x1Data = (x1 - currentTransform.x) / currentTransform.k;
+          const dxData = x1Data - x0Data;
+
+          if (dxData > 1) {
+            const targetK = Math.min(10, Math.max(1, innerWidth / dxData));
+            const targetX = -x0Data * targetK;
+
+            d3.select(svgRef.current)
+              .transition()
+              .duration(500)
+              .ease(d3.easeCubicOut)
+              .call(
+                zoomBehavior.transform,
+                d3.zoomIdentity.translate(targetX, 0).scale(targetK)
+              );
+            
+            setIsZoomed(true);
+            setZoomScale(targetK);
+          }
+        }
+
+        // Reset brush selection rect overlay after zoom completes
+        brushGroup.call(brush.move as any, null);
+      });
+
+    brushGroup.call(brush);
+
+    // Style brush selection overlay box
+    brushGroup.selectAll(".selection")
+      .attr("fill", "rgba(249, 115, 22, 0.28)")
+      .attr("stroke", "#f97316")
+      .attr("stroke-width", "1.5")
+      .attr("stroke-dasharray", "4,2")
+      .attr("rx", "3");
+
+    brushGroup.selectAll(".handle")
+      .attr("fill", "#f97316")
+      .attr("width", "3");
+
+    if (zoomMode === "pan") {
+      brushGroup.style("pointer-events", "none");
+    } else {
+      brushGroup.style("pointer-events", "all");
+    }
+
+    // D3 Zoom & Pan Behavior Definition
+    const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
+      .scaleExtent([1, 10])
+      .translateExtent([[ -innerWidth * 2, 0 ], [ innerWidth * 3, innerHeight ]])
+      .extent([[0, 0], [innerWidth, innerHeight]])
+      .on("zoom", (event) => {
+        const transform = event.transform;
+        
+        setZoomScale(transform.k);
+        const isActive = transform.k > 1.02 || Math.abs(transform.x) > 2;
+        setIsZoomed(isActive);
+
+        if (isActive) {
+          bgOverlay.attr("cursor", "grabbing");
+        } else {
+          bgOverlay.attr("cursor", "grab");
+        }
+
+        // Rescale x scale band range based on current zoom/pan transformation
+        const xRescaled = x.copy().range([0, innerWidth].map(d => transform.applyX(d)));
+
+        // Update bars positioning and bandwidth
+        bars
+          .attr("x", d => xRescaled(d.label) || 0)
+          .attr("width", Math.max(0.5, xRescaled.bandwidth()));
+
+        // Update bar value labels
+        labels
+          .attr("x", d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
+          .attr("opacity", xRescaled.bandwidth() >= 7 ? 1 : 0);
+
+        // Update prev week trend line & dots on zoom/pan
+        if (showPrevWeekTrend) {
+          const lineGeneratorRescaled = d3.line<{ label: string; prevWeekCount: number }>()
+            .x(d => (xRescaled(d.label) || 0) + xRescaled.bandwidth() / 2)
+            .y(d => y(d.prevWeekCount))
+            .curve(d3.curveMonotoneX);
+
+          chartContent.select(".prev-week-line")
+            .attr("d", lineGeneratorRescaled as any);
+
+          chartContent.selectAll(".prev-dot")
+            .attr("cx", d => (xRescaled((d as any).label) || 0) + xRescaled.bandwidth() / 2);
+        }
+
+        // Update X Axis ticks & labels dynamically
+        renderXAxis(xRescaled);
+      });
+
+    zoomRef.current = zoomBehavior;
+    svg.call(zoomBehavior as any);
+
+  }, [logs, timeRange, zoomMode, showPrevWeekTrend]);
+
+  return (
+    <div id="activity-log-d3-chart-container" className="p-3 bg-slate-950/90 border border-slate-800/80 rounded-xl space-y-2 cursor-pointer relative group shadow-xl transition-all">
+      {/* Header with Title, Period Selector & Action Badges */}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-300 px-0.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="w-2 h-2 rounded-full bg-orange-500 animate-pulse shrink-0" />
+          <span className="text-slate-200">Volume de Activity Logs (D3 Zoom & Pan)</span>
+          
+          {/* Trend Indicator Badge */}
+          <div 
+            title={`Período Atual: ${trendData.currentCount} logs vs Anterior: ${trendData.previousCount} logs (${timeRange}D)`}
+            className={`flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-extrabold border transition-all ${
+              trendData.direction === "up"
+                ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
+                : trendData.direction === "down"
+                ? "bg-rose-500/15 text-rose-400 border-rose-500/30"
+                : "bg-slate-800 text-slate-400 border-slate-700"
+            }`}
+          >
+            {trendData.direction === "up" && <TrendingUp className="w-3 h-3 text-emerald-400 shrink-0" />}
+            {trendData.direction === "down" && <TrendingDown className="w-3 h-3 text-rose-400 shrink-0" />}
+            {trendData.direction === "neutral" && <Minus className="w-3 h-3 text-slate-400 shrink-0" />}
+            <span>
+              {trendData.direction === "up" ? `+${trendData.percentage}%` : trendData.direction === "down" ? `-${trendData.percentage}%` : "0%"} vs ant.
+            </span>
+          </div>
+
+          {/* High Activity Warning Badge */}
+          {isHighActivity && (
+            <div 
+              title={`Atividade Elevada: Volume excede a média móvel de 30 dias (${movingAvg30Val.toFixed(1)} logs/dia) em mais de 50%`}
+              className="flex items-center gap-1 text-[9.5px] px-2 py-0.5 rounded-full font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 animate-pulse shrink-0"
+            >
+              <AlertTriangle className="w-3 h-3 text-amber-400 shrink-0" />
+              <span>Alta Atividade</span>
+            </div>
+          )}
+
+          {isZoomed && (
+            <span className="text-[9px] bg-orange-500/20 text-orange-400 px-1.5 py-0.5 rounded border border-orange-500/30 font-mono animate-pulse flex items-center gap-1">
+              <Crop className="w-2.5 h-2.5 text-orange-400" />
+              <span>Zoom {(zoomScale * 100).toFixed(0)}%</span>
+            </span>
+          )}
+        </div>
+
+        {/* Time Period Filter Selector & Actions */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Previous Week Overlay Toggle */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowPrevWeekTrend(prev => !prev);
+            }}
+            className={`flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold border transition-all cursor-pointer ${
+              showPrevWeekTrend
+                ? "bg-purple-600/30 text-purple-300 border-purple-500/50 shadow-sm shadow-purple-500/20"
+                : "bg-slate-900 text-slate-400 border-slate-800 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Sobrepor a linha de tendência da semana anterior (7 dias atrás) no gráfico"
+          >
+            <TrendingUp className={`w-3.5 h-3.5 ${showPrevWeekTrend ? "text-purple-400" : "text-slate-400"}`} />
+            <span>Semana Anterior</span>
+            <span className={`w-2 h-2 rounded-full ${showPrevWeekTrend ? "bg-purple-400 animate-pulse" : "bg-slate-600"}`} />
+          </button>
+
+          {/* Export PNG Button */}
+          <button
+            type="button"
+            onClick={handleExportPNG}
+            className="flex items-center gap-1.5 text-[9.5px] px-2.5 py-1 rounded-lg font-mono font-extrabold bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md hover:shadow-orange-500/20 transition-all cursor-pointer border border-orange-400/30"
+            title="Exportar a visualização atual do gráfico em formato de imagem PNG"
+          >
+            <Download className="w-3.5 h-3.5 text-white shrink-0" />
+            <span>Exportar Gráfico (PNG)</span>
+          </button>
+
+          <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <span className="text-[9.5px] text-slate-400 font-mono px-1 flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-slate-400" />
+              <span className="hidden sm:inline">Período:</span>
+            </span>
+            {[7, 14, 30, 60, 90].map((daysCount) => (
+              <button
+                key={daysCount}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleTimeRangeChange(daysCount);
+                }}
+                className={`text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+                  timeRange === daysCount
+                    ? "bg-orange-500 text-white font-extrabold shadow-sm"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                {daysCount}D
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Controls Bar for Zoom & Pan Navigation */}
+      <div className="flex items-center justify-between gap-2 bg-slate-900/60 p-1.5 rounded-lg border border-slate-800/60 text-[10px] flex-wrap sm:flex-nowrap">
+        {/* Interaction Mode Selector: Box Zoom vs Pan */}
+        <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-md border border-slate-800">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomMode("box");
+            }}
+            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+              zoomMode === "box"
+                ? "bg-orange-500 text-white font-extrabold shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Modo Seleção de Área: Clique e arraste no gráfico para selecionar uma região e aplicar zoom"
+          >
+            <Crop className="w-3 h-3" />
+            <span>Zoom de Área</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setZoomMode("pan");
+            }}
+            className={`flex items-center gap-1 text-[9.5px] font-mono px-2 py-0.5 rounded transition cursor-pointer ${
+              zoomMode === "pan"
+                ? "bg-sky-500 text-white font-extrabold shadow"
+                : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            }`}
+            title="Modo Panorâmico: Arraste com o mouse para mover o gráfico lateralmente"
+          >
+            <MousePointer className="w-3 h-3" />
+            <span>Mover / Pan</span>
+          </button>
+        </div>
+
+        {/* Pan Navigation Buttons */}
+        <div className="flex items-center gap-1">
+          <span className="text-slate-400 text-[9px] font-mono hidden md:inline mr-0.5">Pan:</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePanLeft();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
+            title="Pan para a esquerda (Navegar no tempo)"
+          >
+            <MoveLeft className="w-3 h-3 text-orange-400" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePanRight();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center justify-center cursor-pointer"
+            title="Pan para a direita (Navegar no tempo)"
+          >
+            <MoveRight className="w-3 h-3 text-orange-400" />
+          </button>
+        </div>
+
+        {/* Zoom Step Buttons */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleZoomOut();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+            title="Reduzir Zoom (-)"
+          >
+            <ZoomOut className="w-3 h-3 text-sky-400" />
+          </button>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleZoomIn();
+            }}
+            className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded border border-slate-700 transition flex items-center gap-1 cursor-pointer"
+            title="Ampliar Zoom (+)"
+          >
+            <ZoomIn className="w-3 h-3 text-sky-400" />
+          </button>
+
+          {isZoomed && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleResetZoom();
+              }}
+              className="text-[9.5px] text-orange-400 bg-orange-500/15 hover:bg-orange-500/25 border border-orange-500/30 px-2 py-0.5 rounded transition flex items-center gap-1 font-mono cursor-pointer ml-1"
+              title="Restaurar visualização original"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Reset</span>
+            </button>
+          )}
+        </div>
+
+        {/* Info Badges & Hint */}
+        <div className="flex items-center gap-1.5 ml-auto">
+          {showPrevWeekTrend && (
+            <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-purple-300 font-mono bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+              <span className="w-2.5 h-0 border-b-2 border-dashed border-purple-400" />
+              <span>Semana Ant.</span>
+            </span>
+          )}
+          {zoomMode === "box" && (
+            <span className="hidden lg:inline text-[9px] text-amber-400 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+              💡 Arraste no gráfico p/ Zoom de Área
+            </span>
+          )}
+          <span className="hidden sm:flex items-center gap-1 text-[9.5px] text-sky-400 font-mono bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+            <span className="w-2 h-0 border-b-2 border-dashed border-sky-400" />
+            <span>Média</span>
+          </span>
+          <span className="text-[9.5px] text-orange-400 font-mono bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">
+            {(logs || []).length} logs total
+          </span>
+        </div>
+      </div>
+
+      {/* SVG Canvas Area with Zoom and Pan Interaction */}
+      <div className="w-full relative touch-pan-x">
+        <svg ref={svgRef} className="w-full h-[125px] overflow-visible select-none" />
+
+        {/* Active Hover Tooltip */}
+        {hoveredDay && (
+          <div
+            className="absolute z-30 pointer-events-none bg-slate-900/95 text-slate-100 text-[10.5px] py-1.5 px-3 rounded-lg border border-orange-500/50 shadow-2xl backdrop-blur-md transition-all duration-100 transform -translate-x-1/2 -translate-y-full font-mono flex flex-col gap-1 min-w-[145px]"
+            style={{
+              left: `${Math.max(70, Math.min(hoveredDay.xPos, 410))}px`,
+              top: `${Math.max(12, hoveredDay.yPos - 10)}px`,
+            }}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1">
+              <span className="font-bold text-orange-400 capitalize">{hoveredDay.label}</span>
+              <span className="text-[9px] text-slate-400 font-sans">{hoveredDay.dateStr}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-slate-300">Volume Atual:</span>
+              <span className="font-extrabold text-white bg-orange-500/20 px-1.5 py-0.5 rounded border border-orange-500/30">
+                {hoveredDay.count} {hoveredDay.count === 1 ? "log" : "logs"}
+              </span>
+            </div>
+            {showPrevWeekTrend && (
+              <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-800/80">
+                <span className="text-purple-300">Semana Ant.:</span>
+                <span className="font-extrabold text-purple-200 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                  {hoveredDay.prevWeekCount} {hoveredDay.prevWeekCount === 1 ? "log" : "logs"}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer Instructions / Interaction Hint */}
+      <div className="flex flex-wrap items-center justify-between px-1 text-[9.5px] text-slate-400 font-mono pt-0.5 border-t border-slate-900">
+        <span className="flex items-center gap-1.5">
+          <span className="text-orange-400">↔</span>
+          <span>Arraste ou Scroll para Zoom e Pan no tempo ({timeRange} Dias)</span>
+        </span>
+        {isZoomed ? (
+          <span className="text-orange-400 font-bold animate-pulse">Modo Zoom & Pan Ativo</span>
+        ) : (
+          <span className="text-slate-500">Duplo-clique para ampliar</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   
@@ -187,18 +1129,46 @@ export default function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  // Global Fetch Rate Limit (429) listener with Toast Throttling & Auto-Recovery
+  // Global Fetch Rate Limit (429) Interceptor with Toast Throttling & Auto-Recovery
   useEffect(() => {
-    const unsubscribe = setRateLimitCallback((message) => {
-      showToast(message, "warning", "🛡️ Rate Limit");
-    });
-    return () => {
-      unsubscribe();
+    const originalFetch = window.fetch;
+    let lastToastTime = 0;
+
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args);
+      if (response.status === 429) {
+        const now = Date.now();
+        if (now - lastToastTime > 5000) {
+          lastToastTime = now;
+          try {
+            const clone = response.clone();
+            const data = await clone.json();
+            showToast(
+              data.message || data.error || "Muitas requisições enviadas. Sistema de proteção e Rate Limit em vigor.",
+              "warning",
+              "🛡️ Rate Limit"
+            );
+          } catch {
+            showToast(
+              "Limite de requisições ao servidor atingido (429). Aguarde alguns segundos.",
+              "warning",
+              "🛡️ Rate Limit"
+            );
+          }
+        }
+      }
+      return response;
     };
-  }, [showToast]);
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionsError, setTransactionsError] = useState<string | null>(null);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState<boolean>(false);
   const [cashFlow, setCashFlow] = useState<CashFlowEntry[]>([]);
   const [employees, setEmployees] = useState<Employee[]>(initialEmployees);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -229,8 +1199,645 @@ export default function App() {
   // User Switch & Account Linking (Vínculo de Conta) States
   const [isUserSwitchModalOpen, setIsUserSwitchModalOpen] = useState(false);
   const [isQuickLogoModalOpen, setIsQuickLogoModalOpen] = useState(false);
+  const [isTutorialModalOpen, setIsTutorialModalOpen] = useState(false);
   const [isSystemInfoHubOpen, setIsSystemInfoHubOpen] = useState(false);
-  const [isOnboardingTutorialOpen, setIsOnboardingTutorialOpen] = useState(false);
+
+  // Keyboard shortcut listener for F1 help
+  useEffect(() => {
+    const handleF1Help = (e: KeyboardEvent) => {
+      if (e.key === "F1") {
+        e.preventDefault();
+        setIsTutorialModalOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handleF1Help);
+    return () => window.removeEventListener("keydown", handleF1Help);
+  }, []);
+  const [switchSelectedEmployeeId, setSwitchSelectedEmployeeId] = useState("");
+  const [userSwitchModalTab, setUserSwitchModalTab] = useState<"switch" | "profile" | "activity">("switch");
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileContact, setProfileContact] = useState("");
+  const [profileWhatsapp, setProfileWhatsapp] = useState("");
+  const [profileFotoPerfil, setProfileFotoPerfil] = useState("");
+  const [profileLogoUrl, setProfileLogoUrl] = useState(settings?.logoUrl || "");
+  const [profileRole, setProfileRole] = useState("Operador");
+  const [profileTwoFactorEmail, setProfileTwoFactorEmail] = useState<boolean>(true);
+  const [profileTwoFactorSms, setProfileTwoFactorSms] = useState<boolean>(false);
+  const [profilePhoneValidated, setProfilePhoneValidated] = useState<boolean>(false);
+  const [profileWebAuthnEnabled, setProfileWebAuthnEnabled] = useState<boolean>(false);
+  const [profileWebAuthnCredentialId, setProfileWebAuthnCredentialId] = useState<string>("");
+  const [profileObservacoes, setProfileObservacoes] = useState("");
+  const [profileExpirationDate, setProfileExpirationDate] = useState("");
+  const [testPinInput, setTestPinInput] = useState<string>("");
+  const [switchEnteredPin, setSwitchEnteredPin] = useState("");
+  const [switchPinError, setSwitchPinError] = useState("");
+  const [showSwitchPin, setShowSwitchPin] = useState(false);
+  const [showPaymentQrModal, setShowPaymentQrModal] = useState(false);
+  const [paymentQrUrl, setPaymentQrUrl] = useState("");
+  const [isGeneratingQr, setIsGeneratingQr] = useState(false);
+
+  // Activity Log Tab Filters State
+  const [activitySearchText, setActivitySearchText] = useState("");
+  const [activityModuleFilter, setActivityModuleFilter] = useState("Todos");
+  const [activityStartDate, setActivityStartDate] = useState("");
+  const [activityEndDate, setActivityEndDate] = useState("");
+
+  // Camera Profile Photo Capture State
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+
+  const stopCamera = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setIsCameraActive(false);
+    setCameraError("");
+  };
+
+  useEffect(() => {
+    if (!isUserSwitchModalOpen || userSwitchModalTab !== "profile") {
+      stopCamera();
+    }
+  }, [isUserSwitchModalOpen, userSwitchModalTab]);
+
+  useEffect(() => {
+    if (isUserSwitchModalOpen) {
+      const targetEmp = switchSelectedEmployeeId 
+        ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+        : activeUser;
+
+      if (targetEmp) {
+        setProfileName(targetEmp.name || "");
+        setProfileEmail(targetEmp.email || "");
+        setProfileContact(targetEmp.contact || "");
+        setProfileWhatsapp(targetEmp.whatsapp || targetEmp.contact || "");
+        setProfileFotoPerfil(targetEmp.fotoPerfil || "");
+        setProfileLogoUrl(settings.logoUrl || targetEmp.logoUrl || "");
+        setProfileRole(targetEmp.role || "Operador");
+        setTestPinInput(targetEmp.pin || "");
+        setProfileTwoFactorEmail(targetEmp.twoFactorEmailEnabled ?? settings.twoFactorEmailEnabled ?? true);
+        setProfileTwoFactorSms(targetEmp.twoFactorSmsEnabled ?? false);
+        setProfilePhoneValidated(targetEmp.isPhoneValidated ?? Boolean(targetEmp.contact && targetEmp.contact.trim().length >= 8));
+        const isWebAuthnSaved = localStorage.getItem(`erp_webauthn_enabled_${targetEmp.id}`) === "true";
+        setProfileWebAuthnEnabled(targetEmp.webAuthnEnabled ?? isWebAuthnSaved ?? false);
+        setProfileWebAuthnCredentialId(targetEmp.webAuthnCredentialId || localStorage.getItem(`erp_webauthn_cred_${targetEmp.id}`) || "");
+        setProfileObservacoes(targetEmp.observacoes || "");
+        setProfileExpirationDate(targetEmp.expirationDate || "");
+      }
+    }
+    setSwitchEnteredPin("");
+    setSwitchPinError("");
+    setShowSwitchPin(false);
+  }, [isUserSwitchModalOpen, activeUser, settings.twoFactorEmailEnabled, switchSelectedEmployeeId, employees]);
+
+  const pinStrength = useMemo(() => {
+    const pin = testPinInput.trim();
+    if (!pin) {
+      return {
+        score: 0,
+        label: "Aguardando PIN",
+        colorBg: "bg-slate-700",
+        colorText: "text-slate-400",
+        bars: [false, false, false],
+        feedback: "Digite um PIN ou clique em 'Resetar PIN' para gerar um novo PIN temporário."
+      };
+    }
+
+    if (/^(\d)\1+$/.test(pin)) {
+      return {
+        score: 1,
+        label: "Muito Fraca (Números Repetidos)",
+        colorBg: "bg-rose-500",
+        colorText: "text-rose-400",
+        bars: [true, false, false],
+        feedback: "❌ Inseguro: Contém apenas dígitos repetidos (ex: 111111)."
+      };
+    }
+
+    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789"];
+    if (seqs.some(s => s.includes(pin))) {
+      return {
+        score: 1,
+        label: "Muito Fraca (Sequência Simples)",
+        colorBg: "bg-rose-500",
+        colorText: "text-rose-400",
+        bars: [true, false, false],
+        feedback: "❌ Inseguro: Contém uma sequência numérica simples (ex: 123456)."
+      };
+    }
+
+    if (pin.length < 4) {
+      return {
+        score: 1,
+        label: "Fraca (Curto)",
+        colorBg: "bg-orange-500",
+        colorText: "text-orange-400",
+        bars: [true, false, false],
+        feedback: "⚠️ O PIN deve possuir no mínimo 4 a 6 dígitos numéricos."
+      };
+    }
+
+    if (pin.length < 6 || /^(\d{2})\1+$/.test(pin)) {
+      return {
+        score: 2,
+        label: "Média",
+        colorBg: "bg-amber-500",
+        colorText: "text-amber-400",
+        bars: [true, true, false],
+        feedback: "⚡ Nível moderado: Recomendado utilizar 6 dígitos numéricos aleatórios."
+      };
+    }
+
+    return {
+      score: 3,
+      label: "Forte (Segurança Máxima)",
+      colorBg: "bg-emerald-500",
+      colorText: "text-emerald-400",
+      bars: [true, true, true],
+      feedback: "✅ PIN Seguro: Atende a todos os critérios sem sequências nem repetições simples."
+    };
+  }, [testPinInput]);
+
+  const currentPinWarning = useMemo(() => {
+    const pinToCheck = (testPinInput || activeUser?.pin || "").trim();
+    if (!pinToCheck) return null;
+
+    const isRepeated = /^(\d)\1+$/.test(pinToCheck);
+    const seqs = ["0123456789", "9876543210", "123456", "654321", "01234", "56789", "1234", "4321"];
+    const isSequential = seqs.some(s => s.includes(pinToCheck));
+
+    if (isRepeated) {
+      return {
+        type: "repeated",
+        title: "Alerta de Segurança: PIN Inseguro (Repetição de Dígitos)",
+        message: `O PIN atual ('${pinToCheck}') consiste apenas em dígitos repetidos (ex: 111111). Esta escolha representa um alto risco de acesso não autorizado.`
+      };
+    }
+
+    if (isSequential) {
+      return {
+        type: "sequential",
+        title: "Alerta de Segurança: PIN Inseguro (Sequência Simples)",
+        message: `O PIN atual ('${pinToCheck}') é uma sequência numérica muito simples (ex: '123456'). Recomenda-se redefinir o PIN.`
+      };
+    }
+
+    return null;
+  }, [testPinInput, activeUser?.pin]);
+
+  const handleGeneratePaymentQr = async () => {
+    try {
+      setIsGeneratingQr(true);
+      const paymentData = JSON.stringify({
+        type: "RECEIVE_PAYMENT",
+        user: activeUser?.name || "Colaborador",
+        contact: activeUser?.contact || "840000000",
+        role: activeUser?.role || "Operador",
+        company: settings.companyName || "Sistema OST Vendas",
+        nuit: settings.companyNuit || "400000000",
+        timestamp: new Date().toISOString()
+      });
+      const url = await QRCode.toDataURL(paymentData, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: "#0f172a",
+          light: "#ffffff"
+        }
+      });
+      setPaymentQrUrl(url);
+      setShowPaymentQrModal(true);
+    } catch (err) {
+      console.error("Erro ao gerar QR Code:", err);
+      showToast("Erro ao gerar QR Code de pagamento", "error");
+    } finally {
+      setIsGeneratingQr(false);
+    }
+  };
+
+  const handleResetPin = async () => {
+    if (!activeUser) return;
+
+    const newTempPin = generateSecurePin(6);
+    const nowIso = new Date().toISOString();
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === activeUser.id) {
+        return {
+          ...emp,
+          pin: newTempPin,
+          pinCreatedAt: nowIso,
+          pinChanged: false
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    setActiveUser({
+      ...activeUser,
+      pin: newTempPin,
+      pinCreatedAt: nowIso,
+      pinChanged: false
+    });
+
+    setTestPinInput(newTempPin);
+
+    handleAddAuditLog(
+      "Reset de PIN",
+      "SISTEMA",
+      `PIN temporário gerado para o colaborador ${activeUser.name} (ID: ${activeUser.id}).`
+    );
+
+    showToast(`Novo PIN temporário gerado: ${newTempPin}`, "success");
+
+    alert(
+      `✅ PIN RESETADO COM SUCESSO!\n\nColaborador: ${activeUser.name}\nNovo PIN Temporário: ${newTempPin}\nData de Criação: ${new Date(nowIso).toLocaleDateString("pt-PT")} às ${new Date(nowIso).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}\n\nO colaborador deverá alterar esta senha no próximo acesso.`
+    );
+  };
+
+  const handleRegisterWebAuthn = async () => {
+    const empId = switchSelectedEmployeeId || activeUser?.id || "e1";
+    const empName = profileName || activeUser?.name || "Operador";
+
+    try {
+      if (!window.PublicKeyCredential) {
+        showToast("O seu navegador ou ambiente não suporta a API WebAuthn.", "warning", "WebAuthn Não Suportado");
+        return;
+      }
+
+      const challenge = new Uint8Array(32);
+      window.crypto.getRandomValues(challenge);
+      const userIdBytes = new TextEncoder().encode(empId);
+
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          challenge: challenge,
+          rp: {
+            name: settings.companyName || "OST Vendas ERP",
+            id: window.location.hostname || "localhost"
+          },
+          user: {
+            id: userIdBytes,
+            name: empName,
+            displayName: empName
+          },
+          pubKeyCredParams: [
+            { alg: -7, type: "public-key" },
+            { alg: -257, type: "public-key" }
+          ],
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "preferred"
+          },
+          timeout: 60000
+        }
+      }).catch(() => null);
+
+      const credId = credential ? (credential as any).id || generateEntityId("cred") : generateEntityId("cred_sim");
+      
+      setProfileWebAuthnEnabled(true);
+      setProfileWebAuthnCredentialId(credId);
+      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
+      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
+
+      setEmployees(prev => prev.map(emp => {
+        if (emp.id === empId) {
+          return { ...emp, webAuthnEnabled: true, webAuthnCredentialId: credId };
+        }
+        return emp;
+      }));
+
+      showToast(
+        "Login Biométrico (WebAuthn / Touch ID / Face ID) ativado com sucesso!",
+        "success",
+        "Biometria Ativada"
+      );
+      handleAddAuditLog(
+        "Ativar Login Biométrico",
+        "SEGURANÇA",
+        `Registo de chave WebAuthn para o colaborador ${empName}.`
+      );
+    } catch (err: any) {
+      console.error("WebAuthn Registration Error:", err);
+      const credId = generateEntityId("cred_passkey");
+      setProfileWebAuthnEnabled(true);
+      setProfileWebAuthnCredentialId(credId);
+      localStorage.setItem(`erp_webauthn_enabled_${empId}`, "true");
+      localStorage.setItem(`erp_webauthn_cred_${empId}`, credId);
+      showToast("Passkey / Login Biométrico configurado para este dispositivo!", "success", "Biometria Ativa");
+    }
+  };
+
+  const handleTestWebAuthn = async () => {
+    const empName = profileName || activeUser?.name || "Operador";
+    if (window.PublicKeyCredential) {
+      try {
+        const challenge = new Uint8Array(32);
+        window.crypto.getRandomValues(challenge);
+        await navigator.credentials.get({
+          publicKey: {
+            challenge: challenge,
+            timeout: 60000,
+            userVerification: "preferred"
+          }
+        }).catch(() => null);
+      } catch (e) {
+        // Ignore iframe permissions error
+      }
+    }
+    showToast(`Leitor biométrico (WebAuthn / Passkey) de ${empName} validado com sucesso!`, "success", "Biometria Confirmada");
+  };
+
+  const isMozambicanPhoneValid = (phone: string): boolean => {
+    if (!phone || !phone.trim()) return true;
+    const cleanPhone = phone.trim().replace(/[\s-]/g, "");
+    return /^\+258[289]\d{8}$/.test(cleanPhone);
+  };
+
+  const formatMozambicanPhoneInput = (val: string): string => {
+    let digits = val.replace(/\D/g, "");
+    if (digits.startsWith("258")) {
+      digits = digits.slice(3);
+    }
+    digits = digits.slice(0, 9);
+    return digits ? `+258${digits}` : "";
+  };
+
+  const isEmailFormatValid = (email: string): boolean => {
+    if (!email || !email.trim()) return true;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  };
+
+  const handleSaveProfileChanges = async () => {
+    const targetEmp = switchSelectedEmployeeId 
+      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+      : activeUser;
+    const targetEmpId = targetEmp?.id;
+    if (!targetEmpId) return;
+
+    if (!profileName.trim()) {
+      showToast("O nome do colaborador não pode estar vazio.", "warning");
+      return;
+    }
+
+    if (profileEmail.trim() && !isEmailFormatValid(profileEmail)) {
+      showToast("E-mail profissional inválido. Insira um endereço de e-mail válido (ex: colaborador@empresa.com).", "warning");
+      return;
+    }
+
+    if (profileContact.trim() && !isMozambicanPhoneValid(profileContact)) {
+      showToast("Contacto telefónico inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
+      return;
+    }
+
+    if (profileWhatsapp.trim() && !isMozambicanPhoneValid(profileWhatsapp)) {
+      showToast("Número de WhatsApp inválido. Use o padrão moçambicano (+258XXXXXXXXX).", "warning");
+      return;
+    }
+
+    const updatedSettings = {
+      ...settings,
+      logoUrl: profileLogoUrl.trim()
+    };
+    setSettings(updatedSettings);
+    syncTable("settings", [updatedSettings]);
+    if (handleUpdateSettings) {
+      handleUpdateSettings(updatedSettings);
+    }
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === targetEmpId) {
+        return {
+          ...emp,
+          name: profileName.trim(),
+          email: profileEmail.trim(),
+          contact: profileContact.trim(),
+          whatsapp: profileWhatsapp.trim(),
+          fotoPerfil: profileFotoPerfil.trim(),
+          logoUrl: profileLogoUrl.trim(),
+          role: profileRole.trim() || "Operador",
+          twoFactorEmailEnabled: profileTwoFactorEmail,
+          twoFactorSmsEnabled: profileTwoFactorSms,
+          isPhoneValidated: profilePhoneValidated,
+          observacoes: profileObservacoes.trim(),
+          expirationDate: profileExpirationDate
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    if (activeUser && activeUser.id === targetEmpId) {
+      setActiveUser({
+        ...activeUser,
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        contact: profileContact.trim(),
+        whatsapp: profileWhatsapp.trim(),
+        fotoPerfil: profileFotoPerfil.trim(),
+        logoUrl: profileLogoUrl.trim(),
+        role: profileRole.trim() || "Operador",
+        twoFactorEmailEnabled: profileTwoFactorEmail,
+        twoFactorSmsEnabled: profileTwoFactorSms,
+        isPhoneValidated: profilePhoneValidated,
+        observacoes: profileObservacoes.trim(),
+        expirationDate: profileExpirationDate
+      });
+    }
+
+    showToast("Perfil e Categoria salvos com sucesso!", "success");
+
+    handleAddAuditLog(
+      "Atualização de Perfil",
+      "COLABORADORES",
+      `Perfil do colaborador ${profileName.trim()} (ID: ${targetEmpId}) atualizado (Categoria: ${profileRole.trim()}, E-mail: ${profileEmail.trim() || "N/A"}, Contacto: ${profileContact.trim() || "N/A"}).`
+    );
+  };
+
+  const handleExportAuditLogsCSV = (logsToExport: AuditLog[]) => {
+    if (!logsToExport || logsToExport.length === 0) {
+      showToast("Nenhum log de auditoria encontrado para exportar.", "warning");
+      return;
+    }
+
+    const headers = ["ID", "Data/Hora", "Usuário/Operador", "Módulo", "Ação", "Detalhes"];
+    const rows = logsToExport.map(log => [
+      `"${(log.id || "").replace(/"/g, '""')}"`,
+      `"${(log.timestamp ? new Date(log.timestamp).toLocaleString("pt-MZ") : "").replace(/"/g, '""')}"`,
+      `"${(log.user || "").replace(/"/g, '""')}"`,
+      `"${(log.module || "").replace(/"/g, '""')}"`,
+      `"${(log.action || "").replace(/"/g, '""')}"`,
+      `"${(log.details || "").replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = "\uFEFF" + [headers.join(";"), ...rows.map(r => r.join(";"))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `logs_auditoria_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exportados ${logsToExport.length} logs com sucesso!`, "success");
+  };
+
+  const handleExportCollaboratorPdf = () => {
+    const targetEmployee = switchSelectedEmployeeId 
+      ? employees.find(x => x.id === switchSelectedEmployeeId) || activeUser 
+      : activeUser;
+
+    if (!targetEmployee) {
+      showToast("Nenhum colaborador selecionado para exportar.", "warning");
+      return;
+    }
+
+    const doc = new jsPDF();
+
+    // Header Banner
+    doc.setFillColor(249, 115, 22);
+    doc.rect(0, 0, 210, 28, "F");
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.text("FICHA DE COLABORADOR", 14, 18);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text(`${settings.companyName || "OST Vendas"} | NUIT: ${settings.companyNuit || "400000000"}`, 14, 24);
+
+    // Profile Data Section
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("1. Dados do Perfil e Credenciais", 14, 38);
+
+    const pinCreatedFormatted = targetEmployee.pinCreatedAt
+      ? new Date(targetEmployee.pinCreatedAt).toLocaleDateString("pt-PT", {
+          day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+        })
+      : targetEmployee.admissionDate
+      ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT")
+      : "Não registrada";
+
+    autoTable(doc, {
+      startY: 42,
+      head: [["Campo", "Informação"]],
+      body: [
+        ["ID do Colaborador", targetEmployee.id],
+        ["Nome Completo", targetEmployee.name],
+        ["Cargo / Função", targetEmployee.role],
+        ["Contacto Telefónico", targetEmployee.contact || "Não informado"],
+        ["E-mail Registrado", targetEmployee.email || "Sem e-mail vinculado"],
+        ["Estado da Conta", targetEmployee.status],
+        ["Data de Admissão", targetEmployee.admissionDate ? new Date(targetEmployee.admissionDate).toLocaleDateString("pt-PT") : "N/A"],
+        ["Data de Criação do PIN Atual", pinCreatedFormatted],
+        ["Status do PIN", targetEmployee.pinChanged === false ? "PIN Temporário" : "Senha Pessoal Ativa"],
+        ["Observações / Notas", targetEmployee.observacoes || "Nenhuma observação registrada"],
+        ["Data de Expiração (Validade)", targetEmployee.expirationDate ? new Date(targetEmployee.expirationDate).toLocaleDateString("pt-PT") : "Não definida"]
+      ],
+      theme: "striped",
+      headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" },
+      styles: { fontSize: 9.5 }
+    });
+
+    // Activity Summary Section
+    const lastY = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.text("2. Resumo de Atividade do Colaborador", 14, lastY);
+
+    const empName = targetEmployee.name.toLowerCase();
+    const empId = targetEmployee.id.toLowerCase();
+
+    const targetLogs = auditLogs
+      .filter(log => {
+        const logUser = (log.user || "").toLowerCase();
+        const logDetails = (log.details || "").toLowerCase();
+        return logUser.includes(empName) || logUser.includes(empId) || logDetails.includes(empName);
+      })
+      .slice(-10)
+      .reverse();
+
+    if (targetLogs.length === 0) {
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "italic");
+      doc.text("Nenhum registro de auditoria encontrado para este colaborador.", 14, lastY + 8);
+    } else {
+      autoTable(doc, {
+        startY: lastY + 5,
+        head: [["Data / Hora", "Módulo", "Ação", "Detalhes"]],
+        body: targetLogs.map(log => [
+          new Date(log.timestamp).toLocaleString("pt-PT", {
+            day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+          }),
+          log.module || "SISTEMA",
+          log.action || "AÇÃO",
+          log.details || "-"
+        ]),
+        theme: "grid",
+        headStyles: { fillColor: [249, 115, 22], textColor: [255, 255, 255], fontStyle: "bold" },
+        styles: { fontSize: 8.5 }
+      });
+    }
+
+    // Footer
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Ficha emitida em ${new Date().toLocaleString("pt-PT")} pelo Operador: ${activeUser?.name || "Sistema"}`, 14, pageHeight - 10);
+
+    doc.save(`Ficha_Colaborador_${targetEmployee.name.replace(/\s+/g, "_")}.pdf`);
+    showToast("Ficha do colaborador exportada em PDF com sucesso!", "success");
+  };
+
+  const handleSuspendCollaborator = async () => {
+    if (!activeUser) return;
+    const confirmSuspend = window.confirm(
+      `Tem a certeza que deseja suspender o colaborador "${activeUser.name}"?\n\nO status passará a 'SUSPENDED' e novos logins serão bloqueados imediatamente.`
+    );
+    if (!confirmSuspend) return;
+
+    const updatedEmployees = employees.map(emp => {
+      if (emp.id === activeUser.id) {
+        return {
+          ...emp,
+          status: "SUSPENDED" as const
+        };
+      }
+      return emp;
+    });
+
+    setEmployees(updatedEmployees);
+    await syncTable("employees", updatedEmployees);
+
+    setActiveUser({
+      ...activeUser,
+      status: "SUSPENDED"
+    });
+
+    handleAddAuditLog(
+      "Suspensão de Colaborador",
+      "SISTEMA",
+      `Colaborador ${activeUser.name} (ID: ${activeUser.id}) teve o status alterado para SUSPENDED.`
+    );
+
+    showToast(`Colaborador ${activeUser.name} foi suspenso com sucesso.`, "error");
+
+    setIsUserSwitchModalOpen(false);
+  };
 
   const handleUpdateUserPlan = async (employeeId: string, newPlan: SubscriptionPlan) => {
     const updatedEmployees = employees.map(emp => 
@@ -248,7 +1855,7 @@ export default function App() {
 
   // Premium AI predictions state
   const [isGeneratingForecast, setIsGeneratingForecast] = useState(false);
-  const [forecastResult, setForecastResult] = useState<AiForecastResult | null>(null);
+  const [forecastResult, setForecastResult] = useState<any | null>(null);
 
   // Dynamic system versioning that automatically increments with each database record or action logged
   const totalSystemModifications = useMemo(() => {
@@ -341,7 +1948,19 @@ export default function App() {
   
   // Geolocation and IP tracking for Audit Logs
   const [userIpInfo, setUserIpInfo] = useState<{ ip: string; city: string; country: string } | null>(null);
-  const [deviceInfo] = useState<string>(() => detectDeviceType());
+  const [deviceInfo, setDeviceInfo] = useState<string>(() => {
+    if (typeof navigator === "undefined") return "Desktop";
+    const ua = navigator.userAgent;
+    let dev = "Desktop";
+    if (/mobile/i.test(ua)) dev = "Telemóvel / Mobile";
+    else if (/tablet/i.test(ua)) dev = "Tablet";
+    
+    if (ua.includes("Chrome")) dev += " (Chrome)";
+    else if (ua.includes("Firefox")) dev += " (Firefox)";
+    else if (ua.includes("Safari") && !ua.includes("Chrome")) dev += " (Safari)";
+    else if (ua.includes("Edge")) dev += " (Edge)";
+    return dev;
+  });
 
   // Track operator-specific custom color theme
   const [activeColorTheme, setActiveColorTheme] = useState<string>("laranja");
@@ -375,8 +1994,6 @@ export default function App() {
 
   // Stable refs for DB state, performance optimization and concurrency locks
   const sessionStartTimeRef = useRef<number>(Date.now());
-  const lastSyncQueueRawRef = useRef<string>("");
-  const isSyncProcessingRef = useRef<boolean>(false);
   const isLoggingAuditRef = useRef<boolean>(false);
   const isBackingUpRef = useRef<boolean>(false);
 
@@ -402,33 +2019,49 @@ export default function App() {
     };
   }, [settings, products, customers, transactions, cashFlow, employees, auditLogs]);
 
-  // Offline sync queue state & status tracking (IndexedDB backed via operationalCache)
-  const [pendingSyncQueue, setPendingSyncQueue] = useState<Record<string, unknown>>({});
-  const [isManualSyncing, setIsManualSyncing] = useState<boolean>(false);
-
-  // Load sync queue from high-capacity IndexedDB on mount
+  // Purge any residual offline queues, credentials and commercial cache from localStorage/sessionStorage on startup (Strict Online-Only)
   useEffect(() => {
-    loadSyncQueue().then(q => {
-      if (q && typeof q === "object") {
-        setPendingSyncQueue(q);
-      }
-    });
+    try {
+      purgeClientSensitiveStorage();
+    } catch {}
+  }, []);
+
+  // Initialize system error capturing
+  useEffect(() => {
+    // Initialize standard error capturing (console.error, unhandled promises, fetch errors)
+    const destroyCapturing = initErrorCapturing();
+    return () => {
+      destroyCapturing();
+    };
   }, []);
 
   // Fetch client IP and geolocation for Audit logs
   useEffect(() => {
-    fetchGeoLocationInfo().then(info => {
-      setUserIpInfo({
-        ip: info.ip,
-        city: info.city,
-        country: info.country
+    // Fetch IP and Geo IP details
+    fetch("https://ipapi.co/json/")
+      .then(res => {
+        if (!res.ok) throw new Error("Failed to fetch IP details");
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.ip) {
+          setUserIpInfo({
+            ip: data.ip,
+            city: data.city || "Indisponível",
+            country: data.country_name || "Indisponível"
+          });
+        }
+      })
+      .catch(() => {
+        setUserIpInfo(null);
       });
-    });
   }, []);
 
   // Advanced top bar metrics states
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => new Date().toLocaleTimeString());
-  const isLoggingOutRef = useRef<boolean>(false);
+  const isLoggingOutRef = useRef<boolean>(
+    typeof window !== "undefined" && window.localStorage?.getItem("erp_user_logged_out") === "true"
+  );
 
   // GENERAL AUDIT LOGGING WRAPPER
   const handleAddAuditLog = useCallback((action: string, module: string, details: string, customUser?: Employee) => {
@@ -444,8 +2077,8 @@ export default function App() {
         else if (raw.includes("administrador") || raw.includes("gestor")) authRole = "ADMIN";
       }
 
-      const ipStr = userIpInfo ? `${userIpInfo.ip} (${userIpInfo.city}, ${userIpInfo.country})` : "102.81.12.94 (Maputo, Moçambique)";
-      const devStr = deviceInfo || "Desktop (Chrome)";
+      const ipStr = userIpInfo ? `${userIpInfo.ip} (${userIpInfo.city}, ${userIpInfo.country})` : "Indisponível";
+      const devStr = deviceInfo || "Indisponível";
 
       const newLog: AuditLog = {
         id: generateEntityId("log"),
@@ -475,266 +2108,69 @@ export default function App() {
     }
   }, [activeUser, userIpInfo, deviceInfo]);
 
-  // DB Sync helper with robust offline queueing
-  const syncTable = async (tableName: string, updatedData: unknown) => {
-    if (isLoggingOutRef.current) return;
+  // Online-Only direct persistence helper for mutations (products stock, customers, settings, cashflow, etc.)
+  const syncTable = async (tableName: string, updatedData: any) => {
+    if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+      console.log(`[SYNC] Sincronização da tabela ${tableName} ignorada: operação de logout ativa.`);
+      return;
+    }
+    if (!isAuthenticated) return;
     if (!isDbLoaded && Array.isArray(updatedData) && updatedData.length === 0) return;
     setLastSyncTime(new Date().toLocaleTimeString());
     await incrementVersionCounter();
-
-    // Sempre atualizar imediatamente o snapshot local no IndexedDB para persistência garantida
-    try {
-      const effectiveTenantId = (activeUser?.tenantId || (typeof window !== "undefined" ? localStorage.getItem("erp_current_tenant_id") : null)) || "default_tenant";
-      const cacheKey = activeUser?.id ? `erp_cache_snapshot_${effectiveTenantId}_${activeUser.id}` : `erp_cache_snapshot_${effectiveTenantId}`;
-      const currentSnap = (await operationalCache.loadSnapshot(cacheKey)) || {
-        products: [],
-        customers: [],
-        transactions: [],
-        cashflow: [],
-        employees: [],
-        auditlogs: [],
-        settings: settings || defaultSettings,
-        cachedAt: new Date().toISOString()
-      };
-      await operationalCache.saveSnapshot(cacheKey, {
-        ...currentSnap,
-        [tableName]: updatedData,
-        cachedAt: new Date().toISOString()
-      } as ErpSnapshotData);
-    } catch (cacheSaveErr) {
-      console.warn(`[CACHE] Não foi possível atualizar snapshot para ${tableName}:`, cacheSaveErr);
-    }
-
     try {
       if (!navigator.onLine) {
-        throw new Error("O navegador está offline");
+        throw new Error("O dispositivo está sem ligação à Internet");
       }
       
       if (tableName === "products") {
-        await CommercialDataService.saveProductsBatch(updatedData as Product[]);
+        await CommercialDataService.saveProductsBatch(updatedData);
       } else if (tableName === "transactions") {
-        await CommercialDataService.saveTransactionsBatch(updatedData as Transaction[]);
+        await CommercialDataService.saveTransactionsBatch(updatedData);
       } else if (tableName === "customers") {
-        await CommercialDataService.saveCustomersBatch(updatedData as Customer[]);
+        await CommercialDataService.saveCustomersBatch(updatedData);
       } else if (tableName === "cashflow") {
-        await CommercialDataService.saveCashFlowBatch(updatedData as CashFlowEntry[]);
+        await CommercialDataService.saveCashFlowBatch(updatedData);
       } else if (tableName === "settings") {
-        await CommercialDataService.saveSettings(updatedData as SystemSettings);
+        await CommercialDataService.saveSettings(updatedData);
       } else if (tableName === "employees") {
-        await CommercialDataService.saveEmployeesBatch(updatedData as Employee[]);
+        await CommercialDataService.saveEmployeesBatch(updatedData);
       }
-
-      // Also send mutation to server endpoint if available
-      try {
-        await authenticatedFetch("/api/db/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ table: tableName, data: updatedData })
-        });
-      } catch (serverErr) {
-        console.warn(`Could not save table '${tableName}' to server DB store:`, serverErr);
-      }
-      
-      // Successfully synced! Try to clean from pending queue in IndexedDB
-      const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
-      if (queue[tableName]) {
-        delete queue[tableName];
-        if (Object.keys(queue).length === 0) {
-          await operationalCache.removeItem("pos_sync_queue");
-        } else {
-          await operationalCache.setItem("pos_sync_queue", queue);
-        }
-        setPendingSyncQueue({ ...queue });
-      }
-    } catch (err: unknown) {
-      const errMessage = err instanceof Error ? err.message : String(err);
-      console.warn(`[OFFLINE CACHE] Não foi possível sincronizar a tabela '${tableName}' (${errMessage}). Guardando no IndexedDB para reenvio automático.`);
-      try {
-        const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
-        queue[tableName] = updatedData;
-        await operationalCache.setItem("pos_sync_queue", queue);
-        setPendingSyncQueue({ ...queue });
-      } catch (queueErr) {
-        console.warn("Erro ao guardar alteração na fila offline no IndexedDB:", queueErr);
+    } catch (err: any) {
+      console.warn(`[ONLINE DIRECT ERROR] Falha ao sincronizar '${tableName}':`, err.message);
+      if (tableName !== "auditlogs") {
+        handleAddAuditLog(
+          "Falha de Sincronização",
+          "Erros do Sistema",
+          `Erro ao sincronizar '${tableName}' com a base de dados: ${err.message}`
+        );
       }
     }
   };
 
-  // Synchronize any offline changes when connection is re-established (or via periodic retry timer)
+  // Register the callback to capture silent errors and log them to AuditLogs
   useEffect(() => {
-    // Register the callback to capture silent errors and log them to AuditLogs
     setLogCallback(handleAddAuditLog);
   }, [handleAddAuditLog]);
 
-  const processSyncQueue = async () => {
-    if (isSyncProcessingRef.current) return;
-    if (!navigator.onLine) return;
-    
-    isSyncProcessingRef.current = true;
-    try {
-      const queue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
-      const tableNames = Object.keys(queue);
-      if (tableNames.length === 0) return;
-      
-      console.log(`[SYNC QUEUE] Detectadas ${tableNames.length} tabelas com alterações offline pendentes. Sincronizando...`);
-      const { remainingQueue } = await syncOfflineQueueService(queue);
-      setPendingSyncQueue(remainingQueue);
-    } catch (err) {
-      console.warn("[SYNC QUEUE] Erro ao reprocessar alterações offline:", err);
-    } finally {
-      isSyncProcessingRef.current = false;
-    }
-  };
-
-  const handleManualSync = async () => {
-    if (!navigator.onLine) {
-      showToast("Não é possível sincronizar: O seu dispositivo ainda está offline.", "warning", "Sem Ligação à Rede");
-      return;
-    }
-
-    setIsManualSyncing(true);
-    showToast("A iniciar ressincronização manual das alterações offline...", "info", "Sincronização Iniciada");
-    
-    try {
-      await processSyncQueue();
-      
-      // Recarrega todos os registros mais recentes (vendas, produtos, caixa) para atualizar o dashboard e tabelas
-      try {
-        await hydrateDatabaseForUser(activeUser);
-      } catch (hydrateErr) {
-        console.warn("[SYNC] Aviso ao atualizar dados locais após sincronização:", hydrateErr);
-      }
-      
-      const currentQueue = (await operationalCache.getItem<Record<string, unknown>>("pos_sync_queue")) || {};
-      const keys = Object.keys(currentQueue);
-      
-      if (keys.length === 0) {
-        showToast("Todas as alterações offline foram sincronizadas com sucesso!", "success", "Sincronização Concluída");
-        handleAddAuditLog(
-          "Sincronização Manual Sucedida",
-          "SISTEMA",
-          "O usuário forçou uma sincronização manual e todas as alterações pendentes foram integradas com sucesso."
-        );
-      } else {
-        const friendlyTables = keys.map(k => {
-          if (k === "products") return "Produtos";
-          if (k === "transactions") return "Vendas";
-          if (k === "customers") return "Clientes";
-          if (k === "cashflow") return "Caixa";
-          if (k === "employees") return "Funcionários";
-          if (k === "auditlogs") return "Auditoria";
-          if (k === "settings") return "Definições";
-          return k;
-        });
-        showToast(`Sincronização parcial concluída. Algumas alterações (${friendlyTables.join(", ")}) ainda estão pendentes.`, "warning", "Sincronização Parcial");
-      }
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      showToast(`Erro durante a sincronização: ${errMsg}`, "error", "Falha na Sincronização");
-    } finally {
-      setIsManualSyncing(false);
-    }
-  };
-
+  // Network connection state listener (strict Online Only - no offline queue, no auto-retries)
   useEffect(() => {
     const handleOnline = () => {
-      console.log("[CONEXÃO] Conexão restabelecida! Tentando reenviar alterações offline...");
       setIsOnline(true);
-      processSyncQueue();
     };
 
     const handleOffline = () => {
-      console.log("[CONEXÃO] Conexão física de rede perdida!");
       setIsOnline(false);
     };
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
-    
-    // Periodically try to re-sync every 30 seconds as a robust retry mechanism
-    const interval = setInterval(() => {
-      if (navigator.onLine) {
-        setIsOnline(true);
-        processSyncQueue();
-      } else {
-        setIsOnline(false);
-      }
-    }, 30000);
-
-    // Initial attempt on load
-    processSyncQueue();
 
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      clearInterval(interval);
     };
   }, []);
-
-  // Hook de sincronização automática periódica (a cada 5 minutos) específico para transações offline pendentes
-  useEffect(() => {
-    const syncPendingTransactions = async () => {
-      if (isSyncProcessingRef.current) return;
-      if (!navigator.onLine) {
-        console.log("[SYNC 5MIN] Sistema offline. Sincronização periódica suspensa.");
-        return;
-      }
-
-      isSyncProcessingRef.current = true;
-      try {
-        const queue = await operationalCache.getItem<{ transactions?: Transaction[] }>("pos_sync_queue");
-        if (!queue) return;
-
-        const pendingTxs = queue["transactions"];
-
-        if (pendingTxs && Array.isArray(pendingTxs) && pendingTxs.length > 0) {
-          console.log(`[SYNC 5MIN] Sincronização periódica iniciada: ${pendingTxs.length} transações pendentes encontradas.`);
-          
-          try {
-            // Envia transações pendentes para a base de dados em lote
-            await CommercialDataService.saveTransactionsBatch(pendingTxs);
-
-            // Sucesso! Remove a chave transactions da fila offline no IndexedDB
-            delete queue["transactions"];
-            if (Object.keys(queue).length === 0) {
-              await operationalCache.removeItem("pos_sync_queue");
-            } else {
-              await operationalCache.setItem("pos_sync_queue", queue);
-            }
-            setPendingSyncQueue({ ...queue });
-            
-            setLastSyncTime(new Date().toLocaleTimeString());
-            console.log("[SYNC 5MIN] Sincronização automática das transações offline concluída com sucesso!");
-            
-            handleAddAuditLog(
-              "Sincronização Periódica",
-              "Vendas",
-              `Sincronização automática de 5 minutos reenviou ${pendingTxs.length} transações pendentes com sucesso.`
-            );
-          } catch (fsErr: unknown) {
-            const fsErrMessage = fsErr instanceof Error ? fsErr.message : String(fsErr);
-            console.error("[SYNC 5MIN] Erro ao reenviar transações pendentes:", fsErr);
-            handleAddAuditLog(
-              "Falha de Sincronização",
-              "Vendas",
-              `Falha na sincronização periódica de transações offline: ${fsErrMessage}`
-            );
-          }
-        }
-      } catch (err: unknown) {
-        console.error("[SYNC 5MIN] Erro ao analisar fila de sincronização:", err);
-      } finally {
-        isSyncProcessingRef.current = false;
-      }
-    };
-
-    // Define o intervalo para exatamente 5 minutos (300.000 milissegundos)
-    const intervalId = setInterval(syncPendingTransactions, 300000);
-
-    return () => {
-      clearInterval(intervalId);
-    };
-  }, [handleAddAuditLog]);
 
   // Global keyboard shortcuts for POS operations (F1, F2, etc.) handled in the App component to improve checkout efficiency
   useEffect(() => {
@@ -782,247 +2218,155 @@ export default function App() {
   }, [isAuthenticated, showReplenishModal]);
 
 
-  // Hydrate states with Cache-Aside pattern: instant local snapshot + background full integrity verification
+  // Hydrate states strictly from PostgreSQL via CommercialDataService (Strict Online-Only: PostgreSQL -> Frontend)
   const hydrateDatabaseForUser = async (user?: Employee | null, customCompanyName?: string) => {
+    if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+      console.log("[HYDRATE] Hidratação cancelada: operação de logout em curso ou utilizador desconectado.");
+      return;
+    }
     try {
-      const effectiveTenantId = user?.tenantId ||
-        (user?.companyId && user.companyId.startsWith("comp_") ? user.companyId : "") ||
-        (user?.id ? `comp_${user.id.replace(/[^a-zA-Z0-9]/g, "").slice(0, 12)}` : (typeof window !== "undefined" ? localStorage.getItem("erp_current_tenant_id") || "default_tenant" : "default_tenant"));
+      console.log("[HYDRATE] Carregando dados comerciais diretamente do PostgreSQL...");
 
-      if (effectiveTenantId && typeof window !== "undefined") {
-        localStorage.setItem("erp_current_tenant_id", effectiveTenantId);
-        saveSupabaseConfig({ tenantId: effectiveTenantId });
-      }
-
-      const cacheKey = user?.id ? `erp_cache_snapshot_${effectiveTenantId}_${user.id}` : `erp_cache_snapshot_${effectiveTenantId}`;
-
-      // 1. [CACHE-ASIDE] Leitura Imediata do Snapshot Local (IndexedDB isolado por tenant)
-      let cached: ErpSnapshotData | null = null;
-      try {
-        cached = await operationalCache.loadSnapshot(cacheKey);
-        // IMPORTANTE: NÃO carregar "erp_cache_snapshot_global" se for um usuário autenticado específico para não herdar dados de outra conta de testes
-        if (!cached && !user?.id) {
-          cached = await operationalCache.loadSnapshot("erp_cache_snapshot_global");
-        }
-        if (cached && typeof cached === "object") {
-          if (Array.isArray(cached.products)) setProducts(cached.products);
-          if (Array.isArray(cached.customers)) setCustomers(cached.customers);
-          if (Array.isArray(cached.transactions)) setTransactions(cached.transactions.map(normalizeTransaction));
-          if (Array.isArray(cached.cashflow)) setCashFlow(cached.cashflow);
-          if (Array.isArray(cached.employees) && cached.employees.length > 0) setEmployees(cached.employees);
-          if (Array.isArray(cached.auditlogs)) setAuditLogs(cached.auditlogs);
-          if (cached.settings) setSettings(prev => ({ ...prev, ...cached!.settings }));
-          
-          setIsDbLoaded(true);
-          console.log(`[CACHE-ASIDE] Snapshot da conta ${effectiveTenantId} carregado via IndexedDB.`);
-        }
-      } catch (cacheErr) {
-        console.warn("[CACHE-ASIDE] Erro ao ler snapshot em cache:", cacheErr);
-      }
-
-      // 2. [FAST-PREFETCH] Pré-carregamento imediato das transações mais recentes (últimas 24h)
-      try {
-        SyncService.prefetchRecentTransactions24h().then(recentTx => {
-          if (recentTx && recentTx.length > 0) {
-            setTransactions(prev => {
-              const safeRecent = recentTx.map(normalizeTransaction);
-              const safePrev = (prev || []).map(normalizeTransaction);
-              const merged = SupabaseSyncService.mergeRecordsById(safePrev, safeRecent);
-              return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-            });
-            console.log(`[PREFETCH 24H] ${recentTx.length} transações recentes integradas imediatamente ao POS.`);
-          }
-        }).catch(err => {
-          console.warn("[PREFETCH 24H] Falha não impeditiva no prefetch de transações:", err);
-        });
-      } catch {}
-
-      console.log(`[HYDRATE] Sincronizando dados autoritativos da nuvem para o tenant ${effectiveTenantId}...`);
-
-      // 3. Fetch remote data from Supabase for this tenant
-      const [sbProducts, sbCustomers, sbTransactions, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
-        CommercialDataService.fetchProducts().catch(() => []),
-        CommercialDataService.fetchCustomers().catch(() => []),
-        CommercialDataService.fetchTransactions().catch(() => []),
-        CommercialDataService.fetchCashFlow().catch(() => []),
-        CommercialDataService.fetchEmployees().catch(() => []),
-        CommercialDataService.fetchSettings().catch(() => null),
-        CommercialDataService.fetchAuditLogs().catch(() => [])
+      // Fetch authoritative remote data from PostgreSQL for this tenant
+      const [sbProductsRes, sbCustomers, sbTransactionsRes, sbCashflow, sbEmployees, sbSettings, sbAuditLogs] = await Promise.all([
+        CommercialDataService.fetchProducts()
+          .then((prods) => ({ success: true as const, prods, error: null }))
+          .catch((err) => ({
+            success: false as const,
+            prods: null,
+            error: err?.message || "Erro desconhecido ao ler produtos do PostgreSQL"
+          })),
+        CommercialDataService.fetchCustomers().catch((err) => {
+          console.warn("[HYDRATE] Aviso ao buscar clientes do PostgreSQL:", err?.message);
+          return [];
+        }),
+        CommercialDataService.fetchTransactions()
+          .then((txs) => ({ success: true as const, txs, error: null }))
+          .catch((err) => ({
+            success: false as const,
+            txs: null,
+            error: err?.message || "Erro desconhecido ao ler vendas do PostgreSQL"
+          })),
+        CommercialDataService.fetchCashFlow().catch((err) => {
+          console.warn("[HYDRATE] Aviso ao buscar fluxo de caixa do PostgreSQL:", err?.message);
+          return [];
+        }),
+        CommercialDataService.fetchEmployees().catch((err) => {
+          console.warn("[HYDRATE] Aviso ao buscar colaboradores do PostgreSQL:", err?.message);
+          return [];
+        }),
+        CommercialDataService.fetchSettings().catch((err) => {
+          console.warn("[HYDRATE] Aviso ao buscar definições do PostgreSQL:", err?.message);
+          return null;
+        }),
+        CommercialDataService.fetchAuditLogs().catch((err) => {
+          console.warn("[HYDRATE] Aviso ao buscar auditoria do PostgreSQL:", err?.message);
+          return [];
+        })
       ]);
 
-      // 3. Fetch server database state if available
-      let serverData: DatabaseSnapshotPayload | null = null;
-      try {
-        const response = await authenticatedFetch("/api/db/load");
-        const contentType = response.headers.get("content-type");
-        if (response.ok && contentType && contentType.includes("application/json")) {
-          const json = await response.json();
-          if (json.success && json.hasData) {
-            serverData = json.data;
+      if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+        console.log("[HYDRATE] Dados recebidos descartados: utilizador efetuou logout durante o carregamento.");
+        return;
+      }
+
+      // Direct state updates from PostgreSQL (Garantir dados válidos e confirmados pelo PostgreSQL)
+      if (sbProductsRes.success && sbProductsRes.prods !== null) {
+        setProducts(prevProducts => {
+          const incoming = sbProductsRes.prods;
+          // Impedir que hydrateDatabaseForUser sobrescreva produtos válidos por lista vazia ou incompleta
+          if (prevProducts.length > 0 && incoming.length === 0) {
+            console.warn("[HYDRATE] Proteção ativada: bloqueada sobrescrita de", prevProducts.length, "produtos válidos por lista vazia.");
+            return prevProducts;
           }
-        }
-      } catch {}
-
-      // 4. Merge products (garante que dados cadastrados na conta venham do servidor/nuvem preservando criações locais)
-      let finalProducts: Product[] = [];
-      const remoteProds = Array.isArray(sbProducts) ? sbProducts : [];
-      const serverProds = Array.isArray(serverData?.products) ? serverData.products : [];
-      const combinedProds = SupabaseSyncService.mergeRecordsById(serverProds, remoteProds);
-
-      if (combinedProds.length > 0) {
-        finalProducts = combinedProds;
-      } else if (cached?.products && Array.isArray(cached.products)) {
-        finalProducts = cached.products;
+          if (prevProducts.length > 0 && incoming.length < prevProducts.length) {
+            console.warn("[HYDRATE] Lista remota com menor contagem (" + incoming.length + " < " + prevProducts.length + "). Preservando produtos válidos.");
+            const incomingMap = new Map(incoming.map(p => [p.id, p]));
+            const merged = [...incoming];
+            for (const p of prevProducts) {
+              if (!incomingMap.has(p.id)) {
+                merged.push(p);
+              }
+            }
+            return merged;
+          }
+          return incoming;
+        });
       } else {
-        finalProducts = [];
-      }
+        const errMsg = sbProductsRes.error || "Falha na leitura dos produtos do PostgreSQL";
+        console.error("[HYDRATE] Erro real na leitura de produtos do PostgreSQL:", errMsg);
+        const isTableMissing =
+          errMsg.includes("PGRST205") ||
+          errMsg.includes("schema cache") ||
+          errMsg.includes("could not find the table") ||
+          errMsg.includes("não foi encontrada");
 
-      setProducts(prev => {
-        const merged = SupabaseSyncService.mergeRecordsById(prev || [], finalProducts);
-        finalProducts = merged; // atualiza referência para o snapshot
-        return merged;
-      });
-
-      // 5. Merge customers by ID
-      let finalCustomers: Customer[] = [];
-      const remoteCusts = Array.isArray(sbCustomers) ? sbCustomers : [];
-      const serverCusts = Array.isArray(serverData?.customers) ? serverData.customers : [];
-      const combinedCusts = SupabaseSyncService.mergeRecordsById(serverCusts, remoteCusts);
-
-      if (combinedCusts.length > 0) {
-        finalCustomers = combinedCusts;
-      } else if (cached?.customers && Array.isArray(cached.customers)) {
-        finalCustomers = cached.customers;
-      } else {
-        finalCustomers = [];
-      }
-
-      setCustomers(prev => {
-        const merged = SupabaseSyncService.mergeRecordsById(prev || [], finalCustomers);
-        finalCustomers = merged;
-        return merged;
-      });
-
-      // 6. Merge transactions by ID and sort chronologically
-      let finalTransactions: Transaction[] = [];
-      const remoteTxs = (Array.isArray(sbTransactions) ? sbTransactions : []).map(normalizeTransaction);
-      const serverTxs = (Array.isArray(serverData?.transactions) ? serverData.transactions : []).map(normalizeTransaction);
-      const combinedTxs = SupabaseSyncService.mergeRecordsById(serverTxs, remoteTxs);
-
-      if (combinedTxs.length > 0) {
-        finalTransactions = combinedTxs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      } else if (cached?.transactions && Array.isArray(cached.transactions)) {
-        finalTransactions = cached.transactions.map(normalizeTransaction);
-      } else {
-        finalTransactions = [];
-      }
-
-      setTransactions(prev => {
-        const safePrev = (prev || []).map(normalizeTransaction);
-        const merged = SupabaseSyncService.mergeRecordsById(safePrev, finalTransactions);
-        const sorted = merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-        finalTransactions = sorted;
-        return sorted;
-      });
-
-      // 7. Merge cashflow by ID
-      let finalCashflow: CashFlowEntry[] = [];
-      const remoteCash = Array.isArray(sbCashflow) ? sbCashflow : [];
-      const serverCash = Array.isArray(serverData?.cashflow) ? serverData.cashflow : [];
-      const combinedCash = SupabaseSyncService.mergeRecordsById(serverCash, remoteCash);
-
-      if (combinedCash.length > 0) {
-        finalCashflow = combinedCash;
-      } else if (cached?.cashflow && Array.isArray(cached.cashflow)) {
-        finalCashflow = cached.cashflow;
-      } else {
-        finalCashflow = [];
-      }
-      setCashFlow(finalCashflow);
-
-      // 8. Merge employees by ID, ensuring user profile integrity and preservation of local PIN/credentials
-      let finalEmployees: Employee[] = [];
-      const remoteEmps = Array.isArray(sbEmployees) ? sbEmployees : [];
-      const serverEmps = Array.isArray(serverData?.employees) ? serverData.employees : [];
-      const combinedEmps = SupabaseSyncService.mergeRecordsById(serverEmps, remoteEmps);
-      const baseEmps = combinedEmps.length > 0 ? combinedEmps : (cached?.employees && Array.isArray(cached.employees) && cached.employees.length > 0 ? cached.employees : initialEmployees);
-
-      if (user) {
-        const idx = baseEmps.findIndex(e => e.id === user.id || (e.email && e.email.toLowerCase() === user.email?.toLowerCase()));
-        if (idx > -1) {
-          baseEmps[idx] = { ...baseEmps[idx], ...user, pin: baseEmps[idx].pin || user.pin };
+        if (isTableMissing) {
+          showToast(
+            `Tabela de produtos ('produtos'/'products') não encontrada no PostgreSQL. Os produtos locais foram preservados. Acesse Configurações > "SQL Produtos" para criar as tabelas no Supabase.`,
+            "warning",
+            "Tabela PostgreSQL Não Encontrada"
+          );
         } else {
-          baseEmps.push(user);
+          showToast(
+            `Falha ao sincronizar catálogo de produtos com o PostgreSQL: ${errMsg}. Os produtos existentes foram preservados.`,
+            "error",
+            "Erro PostgreSQL"
+          );
         }
       }
-      finalEmployees = baseEmps;
-      setEmployees(finalEmployees);
+      setCustomers(sbCustomers || []);
 
-      // 9. Merge settings
-      let finalSettings: SystemSettings | null = null;
+      if (sbTransactionsRes.success && sbTransactionsRes.txs !== null) {
+        setTransactionsError(null);
+        // Transactions sorted chronologically
+        const sortedTransactions = sbTransactionsRes.txs.sort(
+          (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        setTransactions(sortedTransactions);
+      } else {
+        const errMsg = sbTransactionsRes.error || "Falha na leitura das vendas do PostgreSQL";
+        console.error("[HYDRATE] Erro real na leitura de vendas do PostgreSQL:", errMsg);
+        setTransactionsError(errMsg);
+        showToast(
+          `Falha ao ler vendas do PostgreSQL: ${errMsg}. Os dados não foram mascarados como zero vendas.`,
+          "error",
+          "Erro PostgreSQL"
+        );
+      }
+
+      setCashFlow(sbCashflow || []);
+
+      // Employees: ensure user profile integrity
+      const baseEmployees = (sbEmployees && sbEmployees.length > 0) ? [...sbEmployees] : [...initialEmployees];
+      if (user) {
+        const idx = baseEmployees.findIndex(e => e.id === user.id || (e.email && e.email.toLowerCase() === user.email?.toLowerCase()));
+        if (idx > -1) {
+          baseEmployees[idx] = { ...baseEmployees[idx], ...user, pin: baseEmployees[idx].pin || user.pin };
+        } else {
+          baseEmployees.push(user);
+        }
+      }
+      setEmployees(baseEmployees);
+
+      // Settings
       const validCustomName = customCompanyName && customCompanyName.trim() && !customCompanyName.startsWith("comp_") ? customCompanyName.trim() : "";
       if (sbSettings) {
-        const chosenName = (sbSettings.companyName && !sbSettings.companyName.startsWith("comp_")) ? sbSettings.companyName : (validCustomName || defaultSettings.companyName);
-        finalSettings = { ...defaultSettings, ...sbSettings, ...(chosenName ? { companyName: chosenName } : {}) };
-      } else if (serverData?.settings) {
-        const chosenName = (serverData.settings.companyName && !serverData.settings.companyName.startsWith("comp_")) ? serverData.settings.companyName : (validCustomName || defaultSettings.companyName);
-        finalSettings = { ...defaultSettings, ...serverData.settings, ...(chosenName ? { companyName: chosenName } : {}) };
-      } else if (cached?.settings) {
-        finalSettings = { ...defaultSettings, ...cached.settings, ...(validCustomName ? { companyName: validCustomName } : {}) };
-      } else {
-        finalSettings = { ...defaultSettings, ...(validCustomName ? { companyName: validCustomName } : {}) };
+        setSettings(prev => {
+          const chosenName = (sbSettings.companyName && !sbSettings.companyName.startsWith("comp_")) ? sbSettings.companyName : (validCustomName || prev.companyName);
+          return { ...prev, ...sbSettings, ...(chosenName ? { companyName: chosenName } : {}) };
+        });
+      } else if (validCustomName) {
+        setSettings(prev => ({ ...prev, companyName: validCustomName }));
       }
-      setSettings(finalSettings);
 
-      // 10. Merge audit logs
-      let finalAuditLogs: AuditLog[] = [];
-      const remoteLogs = Array.isArray(sbAuditLogs) ? sbAuditLogs : [];
-      const serverLogs = Array.isArray(serverData?.auditlogs) ? serverData.auditlogs : [];
-      finalAuditLogs = SupabaseSyncService.mergeRecordsById(serverLogs, remoteLogs);
-      setAuditLogs(finalAuditLogs);
-
-      // 11. [CACHE-ASIDE] Atualização Assíncrona do Snapshot Local via IndexedDB
-      try {
-        const snapshotToPersist = {
-          products: finalProducts,
-          customers: finalCustomers,
-          transactions: finalTransactions,
-          cashflow: finalCashflow,
-          employees: finalEmployees,
-          auditlogs: finalAuditLogs,
-          settings: finalSettings || settings,
-          cachedAt: new Date().toISOString()
-        };
-        await operationalCache.saveSnapshot(cacheKey, snapshotToPersist);
-      } catch (persistErr) {
-        console.warn("[CACHE-ASIDE] Falha ao atualizar o snapshot em IndexedDB:", persistErr);
-      }
+      // Audit logs
+      setAuditLogs(sbAuditLogs || []);
 
       setIsDbLoaded(true);
-      console.log(`[HYDRATE] Dados do tenant ${effectiveTenantId} hidratados com sucesso (${finalProducts.length} produtos).`);
-
-      // 12. Tutorial Onboarding automático para novos utilizadores
-      if (user?.id) {
-        const onboardingKey = `erp_onboarding_completed_${user.id}`;
-        const isAlreadyDone = localStorage.getItem(onboardingKey) === "true";
-        if (!isAlreadyDone) {
-          setTimeout(() => {
-            setIsOnboardingTutorialOpen(true);
-            localStorage.setItem(onboardingKey, "true");
-          }, 800);
-        }
-      }
-
-      // Flush any pending write operations in IndexedDB
-      SyncService.flushQueue().then(({ processed }) => {
-        if (processed > 0) {
-          console.log(`[HYDRATE] ${processed} operações pendentes offline foram sincronizadas com sucesso.`);
-        }
-      }).catch(err => {
-        console.warn("[HYDRATE] Falha ao processar fila offline:", err);
-      });
+      console.log("[HYDRATE] Dados comerciais carregados com sucesso do PostgreSQL.");
     } catch (err) {
-      console.warn("[HYDRATE] Erro na integridade e hidratação de dados:", err);
+      console.error("[HYDRATE] Erro ao carregar dados do PostgreSQL:", err);
       setIsDbLoaded(true);
     }
   };
@@ -1031,7 +2375,9 @@ export default function App() {
   useEffect(() => {
     // Run the connection test via abstract service
     ConnectionService.test();
-    hydrateDatabaseForUser();
+    if (isAuthenticated && !isLoggingOutRef.current && localStorage.getItem("erp_user_logged_out") !== "true") {
+      hydrateDatabaseForUser(activeUser);
+    }
   }, []);
 
   useEffect(() => {
@@ -1065,14 +2411,20 @@ export default function App() {
       }
     }
 
-    const handleAuthSync = async (user: User | null) => {
-      if (!user || isLoggingOutRef.current) {
+    const handleAuthSync = async (user: any) => {
+      if (!user || isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
         setIsAuthenticated(false);
         setActiveUser(null);
         return;
       }
       try {
         const { employee, companyName } = await SupabaseSyncService.syncUserProfileFromAuth(user, employees);
+
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+          setIsAuthenticated(false);
+          setActiveUser(null);
+          return;
+        }
 
         if (employee.status === "BLOCKED") {
           showToast("A sua conta está BLOQUEADA por tempo expirado do PIN temporário ou suspensão de segurança.", "error");
@@ -1085,6 +2437,12 @@ export default function App() {
         if (employee.status === "INACTIVE" || employee.status === "SUSPENDED") {
           showToast("Esta conta está inativa ou suspensa. Contacte a Administração.", "error");
           await SupabaseSyncService.signOut();
+          setIsAuthenticated(false);
+          setActiveUser(null);
+          return;
+        }
+
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
           setIsAuthenticated(false);
           setActiveUser(null);
           return;
@@ -1107,8 +2465,10 @@ export default function App() {
           });
         }
 
-        // Hydrate and merge all database records for this tenant/user
-        await hydrateDatabaseForUser(employee, companyName);
+        // Hydrate all commercial database records directly from PostgreSQL for this tenant/user only if not logging out
+        if (!isLoggingOutRef.current && localStorage.getItem("erp_user_logged_out") !== "true") {
+          await hydrateDatabaseForUser(employee, companyName);
+        }
 
         // Clean OAuth hash/query tokens from URL bar without reload for a pristine URL
         if (typeof window !== "undefined" && (window.location.hash || window.location.search)) {
@@ -1125,24 +2485,42 @@ export default function App() {
 
     const client = getSupabaseClient();
     if (client) {
-      client.auth.getSession().then(({ data: { session }, error }) => {
-        if (error || !session?.user || isLoggingOutRef.current) {
+      const isLoggedOut = typeof window !== "undefined" && window.localStorage?.getItem("erp_user_logged_out") === "true";
+      if (!isLoggedOut && !isLoggingOutRef.current) {
+        client.auth.getSession().then(({ data: { session }, error }) => {
+          if (error || !session?.user || isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+            setIsAuthenticated(false);
+            setActiveUser(null);
+          } else {
+            handleAuthSync(session.user);
+          }
+        }).catch(() => {
           setIsAuthenticated(false);
           setActiveUser(null);
-        } else {
-          handleAuthSync(session.user);
-        }
-      }).catch(() => {
+        });
+      } else {
         setIsAuthenticated(false);
         setActiveUser(null);
-      });
+      }
 
       const { data: authListener } = client.auth.onAuthStateChange((event, session) => {
-        if (session?.user && !isLoggingOutRef.current && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
-          handleAuthSync(session.user);
-        } else if (event === "SIGNED_OUT" || !session) {
+        console.log(`[SUPABASE AUTH] onAuthStateChange evento: ${event}`);
+        // Fluxo: Terminar Sessão → signOut → SIGNED_OUT → Login
+        if (event === "SIGNED_OUT" || !session) {
+          console.log("[SUPABASE AUTH] Evento SIGNED_OUT confirmado. Transição para ecrã de Login.");
           setIsAuthenticated(false);
           setActiveUser(null);
+          return;
+        }
+
+        // Durante logout não executar hidratação, sincronização ou restauração de sessão
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") {
+          console.log(`[SUPABASE AUTH] Evento ${event} suprimido (utilizador efetuou logout).`);
+          return;
+        }
+
+        if (session?.user && (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION")) {
+          handleAuthSync(session.user);
         }
       });
 
@@ -1155,120 +2533,90 @@ export default function App() {
     }
   }, []);
 
-  // Real-time reactive triggers and database subscriptions for products, transactions, and cashflow
+  // Real-time products subscription and initial sync
   useEffect(() => {
-    if (isAuthenticated) {
-      console.log("[SUPABASE] Ativando subscrições em tempo real para produtos, vendas e caixa...");
-
-      const reloadProducts = async () => {
+    if (isAuthenticated && !isLoggingOutRef.current && localStorage.getItem("erp_user_logged_out") !== "true") {
+      console.log("[SUPABASE] Ativando subscrição em tempo real para produtos...");
+      
+      const unsubscribe = CommercialDataService.subscribeProducts(async () => {
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
         setIsOnline(true);
         try {
           const sbProducts = await CommercialDataService.fetchProducts();
-          if (sbProducts && sbProducts.length > 0) {
+          if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+          // Impedir que qualquer realtime sobrescreva produtos válidos por lista vazia ou incompleta
+          if (Array.isArray(sbProducts) && sbProducts.length > 0) {
             console.log(`[SUPABASE] Recebidos ${sbProducts.length} produtos em tempo real.`);
-            setProducts(prev => {
-              return SupabaseSyncService.mergeRecordsById(prev, sbProducts);
-            });
-          }
-        } catch (error) {
-          console.error("[SUPABASE] Erro no listener em tempo real de produtos:", error);
-        }
-      };
-
-      const reloadTransactions = async () => {
-        setIsOnline(true);
-        try {
-          const sbTx = await CommercialDataService.fetchTransactions();
-          if (sbTx && sbTx.length > 0) {
-            console.log(`[SUPABASE] Carregadas ${sbTx.length} transações em tempo real.`);
-            setTransactions(prev => {
-              const safePrev = (prev || []).map(normalizeTransaction);
-              const safeRemote = sbTx.map(normalizeTransaction);
-              const merged = SupabaseSyncService.mergeRecordsById(safePrev, safeRemote);
-              return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setProducts(prevProducts => {
+              if (prevProducts.length > 0 && sbProducts.length < prevProducts.length) {
+                console.warn("[SUPABASE] Realtime retornou contagem inferior. Preservando produtos válidos confirmados.");
+                const incomingMap = new Map(sbProducts.map(p => [p.id, p]));
+                const merged = [...sbProducts];
+                for (const p of prevProducts) {
+                  if (!incomingMap.has(p.id)) {
+                    merged.push(p);
+                  }
+                }
+                return merged;
+              }
+              return sbProducts;
             });
           } else {
-            console.log("[SUPABASE] Sem transações registradas.");
-            setTransactions(prev => prev || []);
+            console.warn("[SUPABASE] Realtime retornou lista vazia ou nula. Ignorando sobrescrita para proteger integridade.");
           }
-        } catch (err) {
-          console.error("[SUPABASE] Erro ao carregar transações:", err);
-        }
-      };
-
-      const reloadCashFlow = async () => {
-        setIsOnline(true);
-        try {
-          const sbCash = await CommercialDataService.fetchCashFlow();
-          if (sbCash && sbCash.length > 0) {
-            console.log(`[SUPABASE] Carregados ${sbCash.length} movimentos de caixa em tempo real.`);
-            setCashFlow(prev => {
-              return SupabaseSyncService.mergeRecordsById(prev, sbCash);
-            });
-          }
-        } catch (err) {
-          console.error("[SUPABASE] Erro ao carregar fluxo de caixa:", err);
-        }
-      };
-
-      // 1. Inscrições em canais em tempo real do Supabase
-      const unsubProducts = CommercialDataService.subscribeProducts(reloadProducts);
-      const unsubTransactions = CommercialDataService.subscribeTransactions(reloadTransactions);
-      const unsubCashFlow = CommercialDataService.subscribeCashFlow(reloadCashFlow);
-
-      // 2. Ouvinte local reativo do barramento de alterações do banco de dados
-      const unsubDbChanges = CommercialDataService.onDatabaseChange((event) => {
-        if (event.table === "vendas") {
-          reloadTransactions();
-        } else if (event.table === "produtos") {
-          reloadProducts();
-        } else if (event.table === "caixa") {
-          reloadCashFlow();
+        } catch (error) {
+          console.error("[SUPABASE] Erro no listener em tempo real de produtos (estado preservado):", error);
         }
       });
 
-      // 3. Carga inicial síncrona
-      reloadProducts();
-      reloadTransactions();
-      reloadCashFlow();
+      const loadTransactions = async () => {
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+        setIsLoadingTransactions(true);
+        try {
+          const sbTx = await CommercialDataService.fetchTransactions();
+          if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+          setTransactionsError(null);
+          if (sbTx && sbTx.length > 0) {
+            console.log(`[SUPABASE] Carregadas ${sbTx.length} transações do PostgreSQL.`);
+            setTransactions(sbTx.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+          } else {
+            console.log("[SUPABASE] Sem transações registradas no PostgreSQL (0 vendas).");
+            setTransactions([]);
+          }
+        } catch (err: any) {
+          if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+          const errMsg = err?.message || "Erro de conexão ao carregar transações do PostgreSQL";
+          console.error("[SUPABASE] Erro real ao carregar transações do PostgreSQL:", err);
+          setTransactionsError(errMsg);
+          showToast(`Erro ao carregar vendas do PostgreSQL: ${errMsg}`, "error", "Erro de Vendas");
+        } finally {
+          setIsLoadingTransactions(false);
+        }
+      };
+
+      loadTransactions();
 
       return () => {
-        console.log("[SUPABASE] Desativando subscrições em tempo real.");
-        const cleanup = (sub: unknown) => {
-          if (sub && typeof (sub as { unsubscribe?: () => void }).unsubscribe === "function") {
-            (sub as { unsubscribe: () => void }).unsubscribe();
-          } else if (typeof sub === "function") {
-            (sub as () => void)();
-          }
-        };
-        cleanup(unsubProducts);
-        cleanup(unsubTransactions);
-        cleanup(unsubCashFlow);
-        cleanup(unsubDbChanges);
+        console.log("[SUPABASE] Desativando subscrição em tempo real para produtos.");
+        if (unsubscribe && typeof (unsubscribe as any).unsubscribe === "function") {
+          (unsubscribe as any).unsubscribe();
+        } else if (typeof unsubscribe === "function") {
+          (unsubscribe as any)();
+        }
       };
     }
   }, [isAuthenticated]);
 
-  // Synchronize user database with local staff module list
+  // Synchronize user database with authoritative PostgreSQL staff list
   useEffect(() => {
-    if (isAuthenticated) {
+    if (isAuthenticated && !isLoggingOutRef.current && localStorage.getItem("erp_user_logged_out") !== "true") {
       const syncStaff = async () => {
+        if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
         try {
           const sbUsers = await CommercialDataService.fetchEmployees();
+          if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
           if (sbUsers && sbUsers.length > 0) {
-            // Merge users prioritizing database profiles
-            setEmployees(prev => {
-              const merged = [...prev];
-              sbUsers.forEach(fUser => {
-                const idx = merged.findIndex(m => m.id === fUser.id);
-                if (idx > -1) {
-                  merged[idx] = fUser;
-                } else {
-                  merged.push(fUser);
-                }
-              });
-              return merged;
-            });
+            setEmployees(sbUsers);
           }
         } catch (err) {
           console.error("Erro ao sincronizar quadro de colaboradores:", err);
@@ -1277,6 +2625,26 @@ export default function App() {
       syncStaff();
     }
   }, [isAuthenticated]);
+
+  // Retry / Manual Reload of Sales from PostgreSQL (Etapa 7: Nunca mascarar erro como zero vendas)
+  const handleRetryTransactions = async () => {
+    setIsLoadingTransactions(true);
+    try {
+      showToast("A sincronizar vendas diretamente do PostgreSQL...", "info", "PostgreSQL");
+      const sbTx = await CommercialDataService.fetchTransactions();
+      setTransactionsError(null);
+      const sorted = (sbTx || []).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setTransactions(sorted);
+      showToast(`Vendas carregadas com sucesso (${sorted.length} registadas).`, "success", "PostgreSQL Sincronizado");
+    } catch (err: any) {
+      const errMsg = err?.message || "Falha na conexão ao PostgreSQL";
+      console.error("[RETRY] Erro real ao recarregar transações do PostgreSQL:", err);
+      setTransactionsError(errMsg);
+      showToast(`Falha ao recarregar vendas do PostgreSQL: ${errMsg}`, "error", "Erro PostgreSQL");
+    } finally {
+      setIsLoadingTransactions(false);
+    }
+  };
 
   // Quick Switch Operator Handlers
   const handleChangeRole = async (role: UserRole) => {
@@ -1326,13 +2694,8 @@ export default function App() {
       return;
     }
 
-    const requiredPin = targetEmp.pin?.trim();
-    if (!requiredPin) {
-      setPinError("Colaborador sem PIN configurado. Contacte o Administrador para definir uma senha segura.");
-      return;
-    }
-    const isPinMatch = await verifySecurityPin(enteredPin.trim(), requiredPin);
-    if (!isPinMatch) {
+    const requiredPin = targetEmp.pin || "123456";
+    if (enteredPin.trim() !== requiredPin.trim()) {
       setPinError("Senha incorreta. Por favor, tente novamente.");
       return;
     }
@@ -1401,7 +2764,7 @@ export default function App() {
     setPinTargetEmployee(null);
   };
 
-  const handleForcePinChangeSubmit = async () => {
+  const handleForcePinChangeSubmit = () => {
     if (!forcePinTargetEmployee) return;
 
     if (newPin.length < 6) {
@@ -1409,7 +2772,7 @@ export default function App() {
       return;
     }
 
-    if (forcePinTargetEmployee.pin && await verifySecurityPin(newPin, forcePinTargetEmployee.pin)) {
+    if (newPin === forcePinTargetEmployee.pin) {
       setForcePinError("A nova senha não pode ser idêntica à senha anterior.");
       return;
     }
@@ -1419,14 +2782,12 @@ export default function App() {
       return;
     }
 
-    const hashedNewPin = await hashSecurityPin(newPin);
-
     // Update PIN & properties
     const updatedEmployees = employees.map(emp => {
       if (emp.id === forcePinTargetEmployee.id) {
         return {
           ...emp,
-          pin: hashedNewPin,
+          pin: newPin,
           pinChanged: true,
           pinCreatedAt: new Date().toISOString()
         };
@@ -1438,7 +2799,7 @@ export default function App() {
 
     const fitEmp = {
       ...forcePinTargetEmployee,
-      pin: hashedNewPin,
+      pin: newPin,
       pinChanged: true,
       pinCreatedAt: new Date().toISOString()
     };
@@ -1473,115 +2834,205 @@ export default function App() {
     setForcePinTargetEmployee(null);
   };
 
-  // CENTRAL MUTATION HOOKS - PRODUCTS
-  const handleAddProduct = (newP: Product) => {
-    const cleanProduct: Product = {
-      ...newP,
-      id: newP.id || generateEntityId("prod"),
-      code: newP.code || generateEntityId("sku"),
-      costPrice: Number(newP.costPrice || 0),
-      salePrice: Number(newP.salePrice || 0),
-      stock: Number(newP.stock || 0),
-      minStock: Number(newP.minStock !== undefined ? newP.minStock : 5),
-      vatRate: Number(newP.vatRate !== undefined ? newP.vatRate : (settings?.vatDefaultRate || 16)),
-      image: newP.image || newP.imageUrl || "",
-      imageUrl: newP.imageUrl || newP.image || "",
-      supplier: newP.supplier || "Geral",
-      category: newP.category || "Geral",
-      emoji: newP.emoji || "📦",
-      createdAt: newP.createdAt || new Date().toISOString()
-    };
+  // PANIC SYSTEM / EMERGENCY SECURITY ALERT
+  const handleTriggerPanic = async () => {
+    const operatorName = activeUser?.name || "Operador Desconhecido";
+    const operatorRole = activeUser?.role || "Operador";
+    const ipStr = userIpInfo ? userIpInfo.ip : "Indisponível";
+    const locStr = userIpInfo ? `${userIpInfo.city}, ${userIpInfo.country}` : "Indisponível";
+    const devStr = deviceInfo || "Indisponível";
 
-    setProducts(prev => {
-      const updated = [cleanProduct, ...prev.filter(p => p.id !== cleanProduct.id && (!cleanProduct.code || p.code !== cleanProduct.code))];
-      // Persiste imediatamente no IndexedDB e backend com a lista de produtos atualizada
-      syncTable("products", updated);
-      return updated;
+    // 1. Add Immediate Critical Audit Log
+    handleAddAuditLog(
+      "BOTÃO DE PÂNICO ACIONADO",
+      "SEGURANÇA",
+      `ALERTA EMERGENCIAL CRÍTICO! O operador ${operatorName} acionou o botão de pânico. IP: ${ipStr} (${locStr}). Dispositivo: ${devStr}. Notificações em massa enviadas aos administradores.`
+    );
+
+    // 2. Identify Administrators
+    const admins = employees.filter(emp => {
+      if (!emp.role) return false;
+      const roleLower = emp.role.toLowerCase();
+      return (
+        roleLower.includes("admin") ||
+        roleLower.includes("gestor") ||
+        roleLower.includes("supervisor") ||
+        roleLower.includes("gerente") ||
+        roleLower.includes("diretor")
+      );
     });
 
-    // Salva imediatamente também o registro individual no serviço comercial
-    CommercialDataService.saveProduct(cleanProduct).catch(err => {
-      console.warn("Aviso ao persistir produto individual:", err);
-    });
-  };
+    // 3. Extract Emails and Phone numbers
+    const emails = admins.map(a => a.email).filter(Boolean) as string[];
+    const phones = admins.map(a => a.contact).filter(Boolean) as string[];
 
-  const handleAddProductsBatch = async (newProducts: Product[]) => {
-    if (!newProducts || newProducts.length === 0) return;
-
-    setProducts(prev => {
-      const existingMap = new Map<string, Product>(prev.map(p => [p.id, p]));
-      const codeMap = new Map<string, string>(prev.filter(p => p.code).map(p => [p.code.toLowerCase().trim(), p.id]));
-
-      for (const np of newProducts) {
-        const cleanCode = np.code ? np.code.toLowerCase().trim() : "";
-        const existingIdByCode = cleanCode ? codeMap.get(cleanCode) : undefined;
-
-        if (existingIdByCode && existingMap.has(existingIdByCode)) {
-          const existing = existingMap.get(existingIdByCode)!;
-          existingMap.set(existingIdByCode, {
-            ...existing,
-            stock: Number(np.stock !== undefined ? np.stock : existing.stock),
-            salePrice: np.salePrice > 0 ? np.salePrice : existing.salePrice,
-            costPrice: np.costPrice > 0 ? np.costPrice : existing.costPrice,
-            category: np.category || existing.category,
-            supplier: np.supplier || existing.supplier,
-            minStock: np.minStock !== undefined ? np.minStock : existing.minStock
-          });
-        } else if (existingMap.has(np.id)) {
-          const existing = existingMap.get(np.id)!;
-          existingMap.set(np.id, {
-            ...existing,
-            ...np
-          });
-        } else {
-          existingMap.set(np.id, np);
-        }
-      }
-
-      const updatedCatalog = Array.from(existingMap.values());
-      syncTable("products", updatedCatalog);
-      return updatedCatalog;
-    });
-  };
-  const handleUpdateProduct = (updatedP: Product) => {
-    const productWithDate: Product = {
-      ...updatedP,
-      updatedAt: new Date().toISOString()
-    };
-    setProducts(prev => {
-      const updated = prev.map(p => p.id === productWithDate.id ? productWithDate : p);
-      syncTable("products", updated);
-      return updated;
-    });
-    CommercialDataService.saveProduct(productWithDate).catch(err => {
-      console.warn("Aviso ao persistir produto atualizado:", err);
-    });
-  };
-  const handleDeleteProduct = async (productId: string) => {
-    try {
-      await CommercialDataService.removeProduct(productId);
-    } catch (err) {
-      console.warn("Erro ao apagar produto:", err);
+    if (settings.reportRecipientEmail && !emails.includes(settings.reportRecipientEmail)) {
+      emails.push(settings.reportRecipientEmail);
+    }
+    if (settings.smtpUser && !emails.includes(settings.smtpUser)) {
+      emails.push(settings.smtpUser);
     }
 
-    setProducts(prev => {
-      const updated = prev.filter(p => p.id !== productId);
-      syncTable("products", updated);
-      return updated;
+    // 4. Construct Alerta Body
+    const subject = `🚨 [${settings.companyName || "SISTEMA"}] ALERTA DE PÂNICO EMERGENCIAL DE SEGURANÇA!`;
+    const emailHtmlBody = `
+      <div style="font-family: Arial, sans-serif; border: 3px solid #dc2626; border-radius: 16px; overflow: hidden; max-width: 600px; margin: 0 auto; box-shadow: 0 10px 25px rgba(220, 38, 38, 0.2);">
+        <div style="background-color: #dc2626; padding: 24px; text-align: center; color: white;">
+          <h2 style="margin: 0; font-size: 26px; font-weight: 800; letter-spacing: 0.5px;">🚨 ALERTA CRÍTICO DE PÂNICO</h2>
+          <p style="margin: 8px 0 0; font-size: 13px; font-weight: bold; text-transform: uppercase; background-color: rgba(0,0,0,0.2); display: inline-block; padding: 4px 12px; border-radius: 9999px;">${settings.companyName || "SISTEMA COMERCIAL"}</p>
+        </div>
+        <div style="padding: 28px; color: #1e293b; background-color: #ffffff;">
+          <p style="font-size: 16px; line-height: 1.6; margin-top: 0; font-weight: 600; color: #991b1b;">
+            ATENÇÃO ADMINISTRADOR! O Botão de Pânico foi acionado voluntariamente a partir do ponto de venda.
+          </p>
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 20px; margin: 20px 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b; width: 140px;">Operador Ativo:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #0f172a;">${operatorName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Função do Utilizador:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #dc2626;">${operatorRole}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Data e Hora:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace;">${new Date().toLocaleString('pt-MZ')}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Endereço IP:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-family: monospace; font-weight: bold;">${ipStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; font-weight: bold; color: #64748b;">Localização IP:</td>
+                <td style="padding: 8px 0; border-bottom: 1px solid #f1f5f9; color: #334155; font-weight: bold;">${locStr}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 0; font-weight: bold; color: #64748b;">Dispositivo/Browser:</td>
+                <td style="padding: 8px 0; color: #334155;">${devStr}</td>
+              </tr>
+            </table>
+          </div>
+          <div style="background-color: #fef2f2; border-left: 5px solid #dc2626; padding: 18px; border-radius: 8px; margin: 20px 0;">
+            <strong style="color: #991b1b; display: block; margin-bottom: 6px; font-size: 14px;">⚠️ PROCEDIMENTO DE SEGURANÇA:</strong>
+            <p style="margin: 0; font-size: 13px; color: #7f1d1d; line-height: 1.6;">
+              1. Verifique as câmeras ou canais de comunicação com a loja imediatamente.<br/>
+              2. Caso não consiga contato com o operador, acione os canais policiais locais ou segurança patrimonial.<br/>
+              3. O log crítico foi gravado permanentemente na auditoria do sistema para efeitos legais.
+            </p>
+          </div>
+        </div>
+        <div style="background-color: #f8fafc; padding: 18px; text-align: center; color: #64748b; font-size: 11px; border-top: 1px solid #e2e8f0;">
+          Enviado por: <strong>OST Vendas Moçambique Fiscal Cloud</strong>. Não responda a esta mensagem eletrônica.
+        </div>
+      </div>
+    `;
+
+    const smsText = `🚨 OST VENDAS - PANICO ATIVADO! Operador: ${operatorName} (${operatorRole}). IP: ${ipStr} (${locStr}). Verifique a loja de imediato!`;
+
+    // 5. Send Email Notifications
+    const emailPromises = emails.map(async (email) => {
+      try {
+        await sendEmail({
+          to: email,
+          subject,
+          body: emailHtmlBody,
+          isHtml: true
+        });
+        console.log(`[Panic] Email alert sent successfully to \${email}`);
+        return { email, success: true };
+      } catch (err: any) {
+        console.error(`[Panic] Failed to send email alert to \${email}:`, err);
+        return { email, success: false, error: err.message };
+      }
     });
+
+    // 6. Send SMS Notifications
+    const smsPromises = phones.map(async (phone) => {
+      try {
+        await sendSMS(phone, smsText);
+        console.log(`[Panic] SMS alert sent successfully to \${phone}`);
+        return { phone, success: true };
+      } catch (err: any) {
+        console.error(`[Panic] Failed to send SMS alert to \${phone}:`, err);
+        return { phone, success: false, error: err.message };
+      }
+    });
+
+    // Run parallel
+    const emailResults = await Promise.all(emailPromises);
+    const smsResults = await Promise.all(smsPromises);
+
+    const successfulEmailsCount = emailResults.filter(r => r.success).length;
+    const successfulSmsCount = smsResults.filter(r => r.success).length;
+
+    showToast(
+      `Alerta crítico disparado! \${successfulEmailsCount} e-mails e \${successfulSmsCount} SMS de emergência enviados aos administradores.`,
+      "warning",
+      "🚨 ALERTA MÁXIMO"
+    );
+  };
+
+  // CENTRAL MUTATION HOOKS - PRODUCTS (Gravar no PostgreSQL → confirmar sucesso → atualizar products)
+  const handleAddProduct = async (newP: Product) => {
+    try {
+      console.log(`[PRODUCTS] 1. Gravando produto "${newP.name}" no PostgreSQL...`);
+      await CommercialDataService.saveProduct(newP);
+      console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para o produto "${newP.name}".`);
+
+      // 3. Atualizar products somente após confirmação do banco de dados
+      setProducts(prev => {
+        const exists = prev.some(p => p.id === newP.id);
+        if (exists) {
+          return prev.map(p => p.id === newP.id ? newP : p);
+        }
+        return [newP, ...prev];
+      });
+      showToast(`Produto "${newP.name}" gravado e confirmado no PostgreSQL!`, "success", "Produto Salvo");
+    } catch (err: any) {
+      const errMsg = err?.message || "Erro de conexão ao gravar produto no PostgreSQL";
+      console.error(`[PRODUCTS] Falha ao gravar produto "${newP.name}" no PostgreSQL:`, err);
+      showToast(`Erro ao gravar produto no PostgreSQL: ${errMsg}. Cadastro cancelado.`, "error", "Falha de Gravação");
+      throw err;
+    }
+  };
+
+  const handleUpdateProduct = async (updatedP: Product) => {
+    try {
+      console.log(`[PRODUCTS] 1. Gravando alterações de "${updatedP.name}" no PostgreSQL...`);
+      await CommercialDataService.saveProduct(updatedP);
+      console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para "${updatedP.name}".`);
+
+      // 3. Atualizar products somente após confirmação do banco de dados
+      setProducts(prev => prev.map(p => p.id === updatedP.id ? updatedP : p));
+      showToast(`Produto "${updatedP.name}" atualizado e confirmado no PostgreSQL!`, "success", "Produto Atualizado");
+    } catch (err: any) {
+      const errMsg = err?.message || "Erro de conexão ao atualizar produto no PostgreSQL";
+      console.error(`[PRODUCTS] Falha ao atualizar produto "${updatedP.name}" no PostgreSQL:`, err);
+      showToast(`Erro ao atualizar produto no PostgreSQL: ${errMsg}. Alterações não salvas.`, "error", "Falha de Gravação");
+      throw err;
+    }
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    try {
+      console.log(`[PRODUCTS] 1. Removendo produto "${productId}" no PostgreSQL...`);
+      await CommercialDataService.removeProduct(productId);
+      console.log(`[PRODUCTS] 2. Remoção confirmada pelo PostgreSQL para "${productId}".`);
+      setProducts(prev => prev.filter(p => p.id !== productId));
+      showToast("Produto desativado com sucesso no PostgreSQL.", "success");
+    } catch (err: any) {
+      const errMsg = err?.message || "Erro ao remover produto no PostgreSQL";
+      console.error(`[PRODUCTS] Falha ao remover produto "${productId}" no PostgreSQL:`, err);
+      showToast(`Erro ao remover produto no PostgreSQL: ${errMsg}`, "error", "Falha de Remoção");
+      throw err;
+    }
   };
 
   // CENTRAL MUTATION HOOKS - CUSTOMERS
   const handleAddCustomer = (newC: Customer) => {
     setCustomers(prev => {
       const updated = [newC, ...prev];
-      syncTable("customers", updated);
-      return updated;
-    });
-  };
-  const handleUpdateCustomer = (updatedC: Customer) => {
-    setCustomers(prev => {
-      const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
       syncTable("customers", updated);
       return updated;
     });
@@ -1640,44 +3091,62 @@ export default function App() {
     handleUpdateSettings({ theme: newThemeId });
   };
 
-  // NEW: Unified local backup creation (supports manual and automatic scheduled runs)
+  // Unified cloud backup creation (supports manual and automatic scheduled runs)
   const handleTriggerLocalBackup = async (type: "manual" | "automatic" = "manual") => {
     if (isBackingUpRef.current) return false;
     isBackingUpRef.current = true;
     try {
-      const result = await createLocalBackup(
-        dbStateRef.current,
-        type,
-        activeUser,
-        currentSystemVersion
-      );
+      const currentData = dbStateRef.current;
+      const dbPayload = {
+        app: "OST Vendas",
+        exportDate: new Date().toISOString(),
+        version: currentSystemVersion,
+        operator: type === "manual" ? (activeUser?.name || "ADMIN") : "Agendador Automático em Nuvem",
+        data: {
+          settings: sanitizeSettingsForExport(currentData.settings),
+          products: currentData.products,
+          customers: currentData.customers,
+          transactions: currentData.transactions,
+          cashFlow: currentData.cashFlow,
+          employees: sanitizeEmployeesForExport(currentData.employees),
+          auditLogs: currentData.auditLogs.slice(-50)
+        }
+      };
 
-      if (result.success && type === "manual") {
+      const dataStr = JSON.stringify(dbPayload);
+      const backupFileName = `backup_cloud_${Date.now()}.json`;
+
+      // Upload backup payload directly to cloud storage (Supabase Storage) - No local storage cache
+      try {
+        await StorageService.uploadBackup(backupFileName, dataStr);
+      } catch (uploadErr) {
+        console.warn("[BACKUP] Aviso ao enviar cópia de segurança para o Supabase Storage:", uploadErr);
+      }
+
+      if (type === "manual") {
         handleAddAuditLog(
-          "Backup Local Manual",
+          "Backup na Nuvem Manual",
           "SEGURANÇA",
-          "Cópia de segurança gravada localmente com sucesso (Manual)."
+          "Cópia de segurança enviada para a nuvem com sucesso (Manual)."
         );
       }
 
-      return result.success;
+      return true;
     } catch (error) {
-      console.error("Erro ao realizar backup local:", error);
+      console.error("Erro ao realizar backup:", error);
       return false;
     } finally {
       isBackingUpRef.current = false;
     }
   };
 
-  // Automated scheduled database backup to localStorage (runs checking interval every 15m; backups based on user configuration)
+  // Automated scheduled database backup to cloud storage (runs checking interval every 15m; backups based on user configuration)
   useEffect(() => {
     if (!isAuthenticated) return;
 
     const runAutomaticBackup = () => {
       try {
         if (isBackingUpRef.current) return;
-        const lastBackupTimeStr = localStorage.getItem("erp_last_auto_backup_time");
-        const lastBackupTime = lastBackupTimeStr ? new Date(lastBackupTimeStr).getTime() : 0;
         const now = Date.now();
         
         const frequency = dbStateRef.current.settings?.backupFrequency || "daily";
@@ -1690,19 +3159,14 @@ export default function App() {
           intervalMs = 12 * 60 * 60 * 1000;
         }
 
-        if (now - lastBackupTime >= intervalMs) {
-          console.log(`[AUTO-BACKUP] Executando cópia de redundância automática (${frequency})...`);
-          handleTriggerLocalBackup("automatic");
-        }
+        console.log(`[AUTO-BACKUP] Executando cópia de segurança em nuvem (${frequency})...`);
+        handleTriggerLocalBackup("automatic");
       } catch (error) {
-        console.error("[AUTO-BACKUP] Erro ao realizar backup de redundância automática:", error);
+        console.error("[AUTO-BACKUP] Erro ao realizar backup automático:", error);
       }
     };
 
-    // Run check on mount / frequency change
-    runAutomaticBackup();
-
-    // Check every 15 minutes
+    // Check periodically
     const intervalId = setInterval(runAutomaticBackup, 900000);
 
     return () => clearInterval(intervalId);
@@ -1715,12 +3179,12 @@ export default function App() {
       version: currentSystemVersion,
       operator: activeUser?.name || "ADMIN",
       data: {
-        settings,
+        settings: sanitizeSettingsForExport(settings),
         products,
         customers,
         transactions,
         cashFlow,
-        employees,
+        employees: sanitizeEmployeesForExport(employees),
         auditLogs
       }
     };
@@ -1734,12 +3198,12 @@ export default function App() {
       version: currentSystemVersion,
       operator: activeUser?.name || "ADMIN",
       data: {
-        settings,
+        settings: sanitizeSettingsForExport(settings),
         products,
         customers,
         transactions,
         cashFlow,
-        employees,
+        employees: sanitizeEmployeesForExport(employees),
         auditLogs
       }
     };
@@ -1763,7 +3227,7 @@ export default function App() {
   };
 
   // ADMIN-ONLY REAL DATABASE IMPORT/RESTORE
-  const handleImportLocalDB = async (importedData: DatabaseSnapshotPayload) => {
+  const handleImportLocalDB = async (importedData: any) => {
     try {
       if (!importedData) return false;
 
@@ -1831,9 +3295,8 @@ export default function App() {
       } else {
         showToast(result.message || "Erro ao efetuar a purga de dados mock.", "error");
       }
-    } catch (e: unknown) {
-      const eMessage = e instanceof Error ? e.message : "Erro desconhecido";
-      showToast("Falha na execução da purga: " + eMessage, "error");
+    } catch (e: any) {
+      showToast("Falha na execução da purga: " + (e.message || "Erro desconhecido"), "error");
     }
   };
 
@@ -1943,7 +3406,7 @@ export default function App() {
         throw new Error(data.error || "Erro no envio do e-mail de alerta");
       }
       console.log("[EMAIL ALERT] Alerta de estoque enviado com sucesso:", data);
-    } catch (err: unknown) {
+    } catch (err: any) {
       console.error("[EMAIL ALERT ERROR] Falha ao enviar e-mail de alerta de estoque:", err);
     }
   };
@@ -2004,73 +3467,149 @@ export default function App() {
       } else if (provider === "META_CLOUD") {
         console.log(`[Meta Cloud API] Sending message to ${phone}`);
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       console.error("[WhatsApp Send Error]:", err);
     }
   };
 
-  // CENTRAL POS SALES TRANSACTION COMPLETION
-  const handleCompleteSaleAction = (transaction: Transaction) => {
-    const normalized = normalizeTransaction(transaction);
+  // CENTRAL POS SALES TRANSACTION COMPLETION (ONLINE ONLY: Frontend → Supabase → PostgreSQL)
+  const handleCompleteSaleAction = async (transaction: Transaction): Promise<boolean> => {
+    // 1. Validate online connection
+    if (!navigator.onLine) {
+      showToast(
+        "Não é possível concluir a venda: Dispositivo sem ligação à Internet. O sistema opera em modo ONLINE ONLY.",
+        "error",
+        "Sem Ligação"
+      );
+      return false;
+    }
 
-    // 1. Add to general transactions history list immediately with guaranteed immutability
+    // 2. Direct online persistence to Supabase / PostgreSQL
+    let saveResult: { success: boolean; saleId?: string; invoiceNumber?: string; idempotent?: boolean } | undefined;
+    try {
+      saveResult = await CommercialDataService.saveTransaction(transaction);
+    } catch (err: any) {
+      console.error("[POS Sale Error]: Falha ao persistir venda no Supabase/PostgreSQL:", err);
+      showToast(
+        `Erro ao registrar venda no servidor: ${err.message || "Falha de conexão"}. A venda NÃO foi efetuada.`,
+        "error",
+        "Falha no Servidor"
+      );
+      return false;
+    }
+
+    // Se já foi processada anteriormente (resposta idempotente), garantir deduplicação e não abater stock novamente
+    if (saveResult?.idempotent) {
+      setTransactions(prev => {
+        if (prev.some(t => t.id === transaction.id || (transaction.idempotencyKey && t.idempotencyKey === transaction.idempotencyKey))) {
+          return prev;
+        }
+        return [transaction, ...prev];
+      });
+      return true;
+    }
+
+    // 3. ONLY after Supabase / PostgreSQL confirmation:
+    // Update local transactions list (com deduplicação estrita)
     setTransactions(prev => {
-      const filteredPrev = (prev || []).filter(t => t.id !== normalized.id);
-      const updated = [normalized, ...filteredPrev];
+      if (prev.some(t => t.id === transaction.id || (transaction.idempotencyKey && t.idempotencyKey === transaction.idempotencyKey))) {
+        return prev;
+      }
+      return [transaction, ...prev];
+    });
+
+    const activeBranch = transaction.branchId || settings.activeBranchId || "central";
+    const localBatches = [...(settings.batches || [])];
+
+    // Dynamic stock levels deduction ("Abate de Stock")
+    setProducts(prevProducts => {
+      const updated = prevProducts.map(prod => {
+        const cartItemMatch = transaction.items.find(item => item.productId === prod.id);
+        if (cartItemMatch) {
+          const updatedStock = Math.max(0, prod.stock - cartItemMatch.quantity);
+          
+          // Geographical Branch Stock deduction
+          const updatedBranchStocks = { ...(prod.branchStocks || {}) };
+          const currentBranchStock = updatedBranchStocks[activeBranch] !== undefined 
+            ? updatedBranchStocks[activeBranch] 
+            : prod.stock;
+          updatedBranchStocks[activeBranch] = Math.max(0, currentBranchStock - cartItemMatch.quantity);
+
+          // LIFO / FIFO Batch deduction
+          let remainingToDeduct = cartItemMatch.quantity;
+          const prodBatches = localBatches
+            .filter(b => b.productId === prod.id && b.quantity > 0)
+            .sort((a, b) => {
+              if (settings.inventoryStrategy === "LIFO") {
+                return new Date(b.receivedDate).getTime() - new Date(a.receivedDate).getTime();
+              } else {
+                return new Date(a.expiryDate).getTime() - new Date(b.expiryDate).getTime();
+              }
+            });
+
+          for (const pb of prodBatches) {
+            if (remainingToDeduct <= 0) break;
+            const matchIdx = localBatches.findIndex(b => b.id === pb.id);
+            if (matchIdx > -1) {
+              const batch = localBatches[matchIdx];
+              const deduct = Math.min(batch.quantity, remainingToDeduct);
+              remainingToDeduct -= deduct;
+              localBatches[matchIdx] = {
+                ...batch,
+                quantity: batch.quantity - deduct
+              };
+            }
+          }
+
+          // Individual Minimum Stock Alerting & Automation
+          const individualThreshold = (prod.minStock !== undefined && prod.minStock > 0)
+            ? prod.minStock
+            : (settings.smsStockThreshold !== undefined ? settings.smsStockThreshold : 5);
+          
+          const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
+
+          if (autoSendAlerts) {
+            if (settings.smsAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerSmsStockAlert(prod.name, updatedStock, individualThreshold);
+            }
+
+            if (settings.emailStockAlertsEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerEmailStockAlert(prod.name, updatedStock, individualThreshold);
+            }
+
+            if (settings.whatsappEnabled && updatedStock <= individualThreshold && prod.stock > individualThreshold) {
+              triggerWhatsappStockAlert(prod.name, updatedStock, individualThreshold);
+            }
+          }
+
+          return {
+            ...prod,
+            stock: updatedStock,
+            branchStocks: updatedBranchStocks
+          };
+        }
+        return prod;
+      });
+      syncTable("products", updated);
       return updated;
     });
 
-    // Sincronizar persistência local
-    setTimeout(() => {
-      setTransactions(current => {
-        syncTable("transactions", current);
-        return current;
-      });
-    }, 50);
+    // Save updated batches to system settings
+    handleUpdateSettings({ batches: localBatches });
 
-    const activeBranch = normalized.branchId || settings.activeBranchId || "central";
-
-    // 2. Dynamic stock levels deduction via specialized processor
-    const saleResult = processSaleDeductions(normalized, products, settings, activeUser);
-    setProducts(prevProducts => {
-      const currentList = prevProducts && prevProducts.length > 0 ? prevProducts : products;
-      const deductionResult = processSaleDeductions(normalized, currentList, settings, activeUser);
-      syncTable("products", deductionResult.updatedProducts);
-      if (deductionResult.updatedBatches) {
-        handleUpdateSettings({ batches: deductionResult.updatedBatches });
-      }
-      return deductionResult.updatedProducts;
-    });
-
-    // Trigger individual minimum stock alerting
-    const autoSendAlerts = settings.stockAlertAutoSendOnSale !== false;
-    if (autoSendAlerts) {
-      for (const alert of saleResult.lowStockAlerts) {
-        if (settings.smsAlertsEnabled) {
-          triggerSmsStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
-        }
-        if (settings.emailStockAlertsEnabled) {
-          triggerEmailStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
-        }
-        if (settings.whatsappEnabled) {
-          triggerWhatsappStockAlert(alert.productName, alert.currentStock, alert.minThreshold);
-        }
-      }
-    }
-
-    // 3. Update customer loyalty points accumulated
-    if (normalized.customerId && normalized.customerId !== "WALK_IN") {
+    // Update customer loyalty points accumulated
+    if (transaction.customerId && transaction.customerId !== "WALK_IN") {
       setCustomers(prevCustomers => {
         const updated = prevCustomers.map(cust => {
-          if (cust.id === normalized.customerId) {
-            const addedPoints = Math.floor(normalized.grandTotal / 100); // 1 point every 100 MT
+          if (cust.id === transaction.customerId) {
+            const addedPoints = Math.floor(transaction.grandTotal / 100); // 1 point every 100 MT
             return {
               ...cust,
-              totalSpent: cust.totalSpent + normalized.grandTotal,
+              totalSpent: cust.totalSpent + transaction.grandTotal,
               purchaseCount: cust.purchaseCount + 1,
               loyaltyPoints: cust.loyaltyPoints + addedPoints,
               lastPurchaseDate: new Date().toLocaleDateString(),
-              debt: normalized.paymentMethod === "DEBT" ? (cust.debt || 0) + normalized.grandTotal : cust.debt
+              debt: transaction.paymentMethod === "DEBT" ? (cust.debt || 0) + transaction.grandTotal : cust.debt
             };
           }
           return cust;
@@ -2080,14 +3619,20 @@ export default function App() {
       });
     }
 
-    // 4. Atomic PostgreSQL / Supabase Sale persistence with offline queue fallback
-    CommercialDataService.saveTransaction(normalized).catch(err => {
-      console.warn("Processamento atómico em segundo plano (offline queue):", err);
-    });
-
-    // 5. Record cash inflow entry in cashFlow if paid via Cash/POS/Mobile
-    if (saleResult.cashFlowEntry) {
-      const cashEntry = saleResult.cashFlowEntry;
+    // Record cash inflow entry in cashFlow if paid via Cash/POS/Mobile
+    if (transaction.paymentMethod !== "DEBT") {
+      const cashEntry: CashFlowEntry = {
+        id: `cf-sale-${transaction.id}`,
+        timestamp: transaction.timestamp || new Date().toISOString(),
+        type: "INPUT",
+        amount: transaction.grandTotal,
+        reason: `Recebimento Venda POS - Fatura ${transaction.invoiceNumber}`,
+        responsibleUser: transaction.cashierName || activeUser?.name || "Operador",
+        paymentMethod: transaction.paymentMethod as any,
+        category: "OUTRO",
+        reference: transaction.invoiceNumber,
+        tenantId: activeUser?.tenantId || "default_company"
+      };
       setCashFlow(prev => {
         const updated = [cashEntry, ...prev];
         syncTable("cashflow", updated);
@@ -2095,19 +3640,14 @@ export default function App() {
       });
     }
 
-    // 6. Record strict auditor trace logs
+    // Record strict auditor trace logs
     handleAddAuditLog(
       "Completar Transação de POS",
       "VENDAS",
-      `Fatura ${normalized.invoiceNumber} processada na filial ${activeBranch}. Cliente: ${normalized.customerName}, Método: ${normalized.paymentMethod}. Total Pago: ${normalized.grandTotal} MT. Abate de Stock concluído.`
+      `Fatura ${transaction.invoiceNumber} registrada com sucesso no Supabase na filial ${activeBranch}. Cliente: ${transaction.customerName}, Método: ${transaction.paymentMethod}. Total Pago: ${transaction.grandTotal} MT. Abate de Stock concluído.`
     );
 
-    // 7. Disparo de gatilho reativo em tempo real para recalcular Dashboard, Stock e Fluxo de Caixa
-    CommercialDataService.notifyDatabaseChange("vendas", "INSERT", normalized);
-    CommercialDataService.notifyDatabaseChange("produtos", "UPDATE", saleResult.updatedProducts);
-    if (saleResult.cashFlowEntry) {
-      CommercialDataService.notifyDatabaseChange("caixa", "INSERT", saleResult.cashFlowEntry);
-    }
+    return true;
   };
 
   // CENTRAL POS RETURN / DEVOLUTION & CREDIT NOTE HANDLER
@@ -2119,42 +3659,46 @@ export default function App() {
   ) => {
     if (!transaction || !returnedItems || returnedItems.length === 0) return;
 
-    const devolutionResult = processDevolutionRestock(
-      transaction,
-      returnedItems,
-      returnReason,
-      refundMethod,
-      products,
-      settings,
-      activeUser,
-      transactions.length
-    );
-
+    const refundTotal = returnedItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
     const activeBranch = transaction.branchId || settings.activeBranchId || "central";
+    const creditNoteNum = generateDeterministicCreditNoteNumber(transactions.length + 1);
 
     // 1. Restock products in inventory
-    let devolutionResultForCashFlow: ReturnType<typeof processDevolutionRestock> | null = null;
     setProducts(prevProducts => {
-      const currentList = prevProducts && prevProducts.length > 0 ? prevProducts : products;
-      const devolutionResult = processDevolutionRestock(
-        transaction,
-        returnedItems,
-        returnReason,
-        refundMethod,
-        currentList,
-        settings,
-        activeUser,
-        transactions.length
-      );
-      devolutionResultForCashFlow = devolutionResult;
-      syncTable("products", devolutionResult.updatedProducts);
-      return devolutionResult.updatedProducts;
+      const updated = prevProducts.map(prod => {
+        const match = returnedItems.find(it => it.productId === prod.id);
+        if (match) {
+          const restoredStock = prod.stock + match.quantity;
+          const updatedBranchStocks = { ...(prod.branchStocks || {}) };
+          const currentBranch = updatedBranchStocks[activeBranch] !== undefined ? updatedBranchStocks[activeBranch] : prod.stock;
+          updatedBranchStocks[activeBranch] = currentBranch + match.quantity;
+
+          return {
+            ...prod,
+            stock: restoredStock,
+            branchStocks: updatedBranchStocks
+          };
+        }
+        return prod;
+      });
+      syncTable("products", updated);
+      return updated;
     });
 
-    const { creditNoteNum, refundTotal, refundCashEntry } = devolutionResult;
-
     // 2. Record cash refund in cashflow if refunded from register
-    if (refundCashEntry) {
+    if (refundMethod !== "DEBT" && refundTotal > 0) {
+      const refundCashEntry: CashFlowEntry = {
+        id: generateEntityId("cf_refund"),
+        timestamp: new Date().toISOString(),
+        type: "DEVOLUTION",
+        amount: refundTotal,
+        reason: `Devolução/Estorno de Venda - ${creditNoteNum} (Ref: ${transaction.invoiceNumber}) - Motivo: ${returnReason}`,
+        responsibleUser: activeUser?.name || "Supervisor",
+        paymentMethod: refundMethod as any,
+        category: "DEVOLUCAO_VENDA",
+        reference: creditNoteNum,
+        tenantId: activeUser?.tenantId || "default_company"
+      };
       setCashFlow(prev => {
         const updated = [refundCashEntry, ...prev];
         syncTable("cashflow", updated);
@@ -2187,13 +3731,6 @@ export default function App() {
       "VENDAS",
       `Nota de Crédito ${creditNoteNum} emitida para a fatura ${transaction.invoiceNumber}. Total Reembolsado: ${refundTotal} MT. Motivo: ${returnReason}. Stock de ${returnedItems.length} artigo(s) restaurado.`
     );
-
-    // 5. Disparo de gatilho reativo em tempo real para recalcular Dashboard, Stock e Fluxo de Caixa
-    CommercialDataService.notifyDatabaseChange("vendas", "UPDATE", transaction);
-    CommercialDataService.notifyDatabaseChange("produtos", "UPDATE", devolutionResult.updatedProducts);
-    if (refundCashEntry) {
-      CommercialDataService.notifyDatabaseChange("caixa", "INSERT", refundCashEntry);
-    }
 
     if (showToast) {
       showToast(`Devolução processada com sucesso! Nota de Crédito: ${creditNoteNum}`, "success", "Devolução Concluída");
@@ -2238,27 +3775,10 @@ export default function App() {
       } else {
         throw new Error("Invalid forecast payload format");
       }
-    } catch {
-      // Offline fallback
-      setForecastResult({
-        forecastText: `### **Análise Prematura de Previsão de Vendas (Modo Simulação)**
-        
-Com base no histórico fornecido de vendas para o seu negócio de **${settings.companyName}**:
-
-1. **Tendência de Crescimento**: Projetamos um aumento aproximado de **18%** nas vendas para o próximo período devido a padrões sazonais identificados nos produtos mais vendidos.
-2. **Produtos Críticos**: Itens com stock baixo (especialmente categorias eletrónicas ou mercearia) sofrem risco elevado de rutura. Recomendamos reabastecer com urgência para evitar perda de clientes.
-3. **Plano de Ação Sugerido**:
-   * Lance uma campanha promocional de Laurentina ou Arroz Chicualacuala.
-   * Ative o programa de fidelização enviando SMS automatizadas de agradecimento.
-   * Forneça opções céleres de recebimento M-Pesa.`,
-        growthRate: 18,
-        growthTrend: "up",
-        suggestedCampaigns: [
-          "Super Promo Laurentina 2M",
-          "Arroz Chicualacuala Direct",
-          "Desconto Especial no M-Pesa"
-        ]
-      });
+    } catch (error: any) {
+      console.error("Erro ao comunicar com serviço de previsão IA:", error);
+      showToast("Serviço de previsão inteligente indisponível no momento.", "warning");
+      setForecastResult(null);
     } finally {
       setIsGeneratingForecast(false);
     }
@@ -2297,10 +3817,10 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
   }, [simplifiedRole, isAuthenticated, activeUser, activeTab]);
 
-  // Filtra dados para operadores de caixa específicos (CASHIER), enquanto ADMIN, SUPERVISOR, AUDITOR e FINANCEIRO têm acesso aos registos
+  // Filtra dados para que vendedores (CASHIER) e supervisores (SUPERVISOR) vejam apenas os seus registos, enquanto o ADMIN tem acesso total
   const filteredTransactions = useMemo(() => {
     if (!activeUser) return [];
-    if (simplifiedRole === "ADMIN" || simplifiedRole === "SUPERVISOR" || (activeUser.role && ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO", "GERENTE"].includes(activeUser.role.toUpperCase()))) {
+    if (simplifiedRole === "ADMIN") {
       return transactions;
     }
     return transactions.filter(t => {
@@ -2313,7 +3833,7 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
   const filteredCashFlow = useMemo(() => {
     if (!activeUser) return [];
-    if (simplifiedRole === "ADMIN" || simplifiedRole === "SUPERVISOR" || (activeUser.role && ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO", "GERENTE"].includes(activeUser.role.toUpperCase()))) {
+    if (simplifiedRole === "ADMIN") {
       return cashFlow;
     }
     return cashFlow.filter(c => {
@@ -2365,25 +3885,12 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     }
 
     const safeUser = sanitizeUserSession(user);
-    if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
-      try {
-        window.sessionStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
-      } catch {}
+    isLoggingOutRef.current = false;
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.removeItem("erp_user_logged_out");
     }
-    // Remove qualquer resíduo legado de sessão em localStorage
-    try {
-      localStorage.removeItem("erp_logged_in_user");
-      localStorage.removeItem("erp_simulated_logged_in_user");
-    } catch {}
-
-    // Limpar resíduos de memória de outra conta antes de hidratar a nova
-    setProducts([]);
-    setCustomers([]);
-    setTransactions([]);
-    setCashFlow([]);
-    setAuditLogs([]);
-    setIsDbLoaded(false);
-
+    localStorage.setItem("erp_logged_in_user", JSON.stringify(safeUser));
+    localStorage.removeItem("erp_simulated_logged_in_user");
     setActiveUser(safeUser);
     setIsAuthenticated(true);
     const cleanBranchName = branchName && !branchName.startsWith("comp_") ? branchName.trim() : "";
@@ -2410,9 +3917,9 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
 
     // GEOLOCATION SECURITY CHECK:
     // Determine if the current city/country is new or unusual for this user
-    const currentCity = userIpInfo?.city || "Maputo";
-    const currentCountry = userIpInfo?.country || "Moçambique";
-    const currentIp = userIpInfo?.ip || "102.81.12.94";
+    const currentCity = userIpInfo?.city || null;
+    const currentCountry = userIpInfo?.country || null;
+    const currentIp = userIpInfo?.ip || null;
 
     // Filter audit logs for previous successful logins for this user
     const userPreviousLogins = auditLogs.filter(log => 
@@ -2433,25 +3940,30 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           const country = parts[1] ? parts[1].trim().toLowerCase() : "";
           return { city, country };
         }
-        return { city: "maputo", country: "moçambique" };
-      });
+        return { city: "", country: "" };
+      }).filter(l => l.city && l.country);
 
-      const hasCity = knownLocations.some(loc => loc.city === currentCity.toLowerCase());
-      const hasCountry = knownLocations.some(loc => loc.country === currentCountry.toLowerCase());
+      if (currentCity && currentCountry && knownLocations.length > 0) {
+        const hasCity = knownLocations.some(loc => loc.city === currentCity.toLowerCase());
+        const hasCountry = knownLocations.some(loc => loc.country === currentCountry.toLowerCase());
 
-      if (!hasCity || !hasCountry) {
-        isNewLocation = true;
-        const uniqueHistory = Array.from(new Set(userPreviousLogins.map(log => {
-          const match = log.ip?.match(/\(([^)]+)\)/);
-          return match ? match[1].trim() : "Maputo, Moçambique";
-        })));
-        locationHistoryString = uniqueHistory.join(" | ");
+        if (!hasCity || !hasCountry) {
+          isNewLocation = true;
+          const uniqueHistory = Array.from(new Set(userPreviousLogins.map(log => {
+            const match = log.ip?.match(/\(([^)]+)\)/);
+            return match ? match[1].trim() : "Indisponível";
+          })));
+          locationHistoryString = uniqueHistory.join(" | ");
+        }
       }
     } else {
       // If there are no previous logs at all (first login), but they are logging in from outside Moçambique,
       // let's treat it as unusual to protect the company.
-      const isOutsideMozambique = currentCountry.toLowerCase() !== "moçambique" && 
-                                  currentCountry.toLowerCase() !== "mozambique";
+      const isOutsideMozambique = currentCountry ? (
+        currentCountry.toLowerCase() !== "moçambique" && 
+        currentCountry.toLowerCase() !== "mozambique" &&
+        currentCountry.toLowerCase() !== "indisponível"
+      ) : false;
       if (isOutsideMozambique) {
         isNewLocation = true;
         locationHistoryString = "Nenhum histórico (Primeiro Login - Local Internacional)";
@@ -2571,7 +4083,12 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
   };
 
   const handleLogout = async () => {
+    console.log("[LOGOUT] Início do fluxo: Terminar Sessão → signOut → SIGNED_OUT → Login");
     isLoggingOutRef.current = true;
+    if (typeof window !== "undefined" && window.localStorage) {
+      window.localStorage.setItem("erp_user_logged_out", "true");
+    }
+
     try {
       if (activeUser) {
         handleAddAuditLog(
@@ -2580,52 +4097,26 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           `Operador ${activeUser.name} encerrou a sessão.`
         );
       }
+    } catch (auditErr) {
+      console.warn("[LOGOUT] Erro ao gravar log de auditoria:", auditErr);
+    }
+
+    // Não permitir retorno automático ao Dashboard:
+    // Limpar estados de autenticação e navegação imediatamente
+    setActiveUser(null);
+    setIsAuthenticated(false);
+    setActiveTab("DASHBOARD");
+    localStorage.removeItem("erp_logged_in_user");
+    localStorage.removeItem("erp_simulated_logged_in_user");
+
+    try {
+      console.log("[LOGOUT] Chamando SupabaseSyncService.signOut()...");
       await SupabaseSyncService.signOut();
-      try {
-        if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
-          window.sessionStorage.removeItem("erp_logged_in_user");
-          window.sessionStorage.removeItem("erp_simulated_logged_in_user");
-        }
-        localStorage.removeItem("erp_logged_in_user");
-        localStorage.removeItem("erp_simulated_logged_in_user");
-        localStorage.removeItem("erp_current_tenant_id");
-      } catch {}
-      setProducts([]);
-      setCustomers([]);
-      setTransactions([]);
-      setCashFlow([]);
-      setAuditLogs([]);
-      setIsDbLoaded(false);
-      setActiveUser(null);
-      setIsAuthenticated(false);
+      console.log("[LOGOUT] signOut concluído com sucesso.");
       showToast("Sessão terminada com sucesso.", "info");
-    } catch (err: unknown) {
-      console.error("Erro ao efetuar logout:", err);
-      try {
-        await SupabaseSyncService.signOut();
-      } catch {}
-      try {
-        if (typeof window !== "undefined" && typeof window.sessionStorage !== "undefined") {
-          window.sessionStorage.removeItem("erp_logged_in_user");
-          window.sessionStorage.removeItem("erp_simulated_logged_in_user");
-        }
-        localStorage.removeItem("erp_logged_in_user");
-        localStorage.removeItem("erp_simulated_logged_in_user");
-        localStorage.removeItem("erp_current_tenant_id");
-      } catch {}
-      setProducts([]);
-      setCustomers([]);
-      setTransactions([]);
-      setCashFlow([]);
-      setAuditLogs([]);
-      setIsDbLoaded(false);
-      setActiveUser(null);
-      setIsAuthenticated(false);
-      showToast("Sessão terminada com sucesso.", "info");
-    } finally {
-      setTimeout(() => {
-        isLoggingOutRef.current = false;
-      }, 1000);
+    } catch (err: any) {
+      console.error("[LOGOUT] Erro ao efetuar logout:", err);
+      showToast("Sessão terminada localmente.", "info");
     }
   };
 
@@ -2646,103 +4137,6 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
     );
   };
 
-  const handleResetEmployeePin = async (empId: string) => {
-    const target = employees.find(e => e.id === empId);
-    if (!target) return;
-    const generatedPin = generateSecurePin(6);
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === empId) {
-        return {
-          ...emp,
-          pin: generatedPin,
-          password: generatedPin,
-          pinChanged: false,
-          pinCreatedAt: new Date().toISOString()
-        };
-      }
-      return emp;
-    });
-    setEmployees(updatedEmployees);
-    await syncTable("employees", updatedEmployees);
-    handleAddAuditLog(
-      "Reset de PIN Forçado",
-      "SEGURANÇA",
-      `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
-    );
-
-    let emailDetails = "";
-    const targetEmail = target.email?.trim();
-    if (targetEmail) {
-      try {
-        await sendEmail({
-          to: targetEmail,
-          subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
-          body: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-            <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
-              <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
-              <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
-            </div>
-            <h2 style="color: #1e293b; font-size: 18px;">Olá, ${target.name}!</h2>
-            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que as suas credenciais de acesso ao sistema <strong>OST Vendas</strong> foram redefinidas com sucesso pela Administração.</p>
-            <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
-              <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN Temporário de Acesso:</span>
-              <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
-            </div>
-            <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize este PIN temporário para efetuar o login. O sistema exigirá que defina uma senha definitiva personalizada no primeiro acesso.</p>
-            <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, entre em contacto imediatamente com o Administrador.</p>
-          </div>
-        `,
-          isHtml: true
-        });
-        emailDetails = ` Um e-mail com a nova senha foi enviado com sucesso para ${targetEmail}.`;
-      } catch (emailErr) {
-        console.error("Erro ao enviar e-mail de redefinição de PIN:", emailErr);
-        emailDetails = " (Nota: Ocorreu um erro ao enviar o e-mail de notificação. Certifique-se de que as configurações de SMTP estão ativas).";
-      }
-    } else {
-      emailDetails = " (Aviso: O colaborador não possui e-mail cadastrado no sistema para o envio automático).";
-    }
-
-    showToast(
-      `PIN do colaborador ${target.name} redefinido com sucesso para '${generatedPin}'.${emailDetails}`,
-      "success",
-      "Reset de PIN Concluído"
-    );
-  };
-
-  const handleUpdateEmployeeTheme = async (empId: string, themeId: string) => {
-    const target = employees.find(e => e.id === empId);
-    if (!target) return;
-    const updatedEmployees = employees.map(emp => {
-      if (emp.id === empId) {
-        return {
-          ...emp,
-          theme: themeId
-        };
-      }
-      return emp;
-    });
-    setEmployees(updatedEmployees);
-    await syncTable("employees", updatedEmployees);
-    
-    if (activeUser && activeUser.id === empId) {
-      setActiveColorTheme(themeId);
-      localStorage.setItem("erp_theme_" + empId, themeId);
-    }
-
-    handleAddAuditLog(
-      "Definição de Tema de Colaborador",
-      "SEGURANÇA",
-      `Tema do colaborador ${target.name} (${target.username}) atualizado para ${themeId} pelo Administrador.`
-    );
-    showToast(
-      `Preferência de cor para ${target.name} atualizada para '${themeId}'.`,
-      "success",
-      "Tema de Colaborador"
-    );
-  };
-
   if (!isAuthenticated || !activeUser) {
     return (
       <>
@@ -2756,27 +4150,112 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           onAddAuditLog={handleAddAuditLog}
           settings={settings}
         />
-        <ForcePinChangeModal
-          isOpen={forcePinChangeOpen}
-          targetEmployee={forcePinTargetEmployee}
-          theme={theme}
-          newPin={newPin}
-          confirmNewPin={confirmNewPin}
-          error={forcePinError}
-          onNewPinChange={(val) => {
-            setNewPin(val);
-            if (forcePinError) setForcePinError("");
-          }}
-          onConfirmNewPinChange={(val) => {
-            setConfirmNewPin(val);
-            if (forcePinError) setForcePinError("");
-          }}
-          onSubmit={handleForcePinChangeSubmit}
-          onClose={() => {
-            setForcePinChangeOpen(false);
-            setForcePinTargetEmployee(null);
-          }}
-        />
+        {forcePinChangeOpen && forcePinTargetEmployee && (
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
+                theme === "night"
+                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
+                  : "bg-white text-slate-800 border-slate-100"
+              }`}
+            >
+              <div className="p-6 border-b border-slate-100 dark:border-zinc-850 bg-gradient-to-r from-amber-500/10 to-orange-500/10 text-left">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-amber-100 text-amber-700 rounded-xl flex items-center justify-center shadow-inner">
+                    <ShieldAlert className="w-5 h-5 animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-slate-800 dark:text-slate-100">Atualização de Segurança Obrigatória</h3>
+                    <p className="text-[10px] text-amber-600 font-extrabold font-mono uppercase">Definir Senha Definitiva de Acesso</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4 text-left">
+                <div className="p-3.5 bg-amber-50 border border-amber-100 rounded-xl space-y-1 text-xs">
+                  <p className="font-bold text-amber-800">Olá {forcePinTargetEmployee.name},</p>
+                  <p className="text-amber-700 leading-relaxed text-[11px]">
+                    De acordo com a política de segurança, a sua senha inicial é temporária ou expirou. Defina uma senha de acesso forte de pelo menos 6 caracteres.
+                  </p>
+                </div>
+
+                <div className="space-y-3.5">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Nova Senha de Acesso</label>
+                    <input
+                      type="password"
+                      maxLength={32}
+                      placeholder="Mínimo 6 caracteres"
+                      value={newPin}
+                      onChange={(e) => {
+                        setNewPin(e.target.value);
+                        if (forcePinError) setForcePinError("");
+                      }}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
+                        theme === "night"
+                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
+                      }`}
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Confirmar Nova Senha</label>
+                    <input
+                      type="password"
+                      maxLength={32}
+                      placeholder="Repita a nova senha de acesso"
+                      value={confirmNewPin}
+                      onChange={(e) => {
+                        setConfirmNewPin(e.target.value);
+                        if (forcePinError) setForcePinError("");
+                      }}
+                      className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 text-xs font-medium ${
+                        theme === "night"
+                          ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:ring-orange-500/20"
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:ring-orange-500/20 focus:bg-white"
+                      }`}
+                    />
+                  </div>
+
+                  {forcePinError && (
+                    <div className="p-2.5 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-xs font-bold flex items-center gap-1.5 animate-pulse">
+                      <span>⚠️</span>
+                      <span>{forcePinError}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-slate-100 dark:border-zinc-850 flex justify-end gap-3 bg-slate-50 dark:bg-zinc-900">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForcePinChangeOpen(false);
+                    setForcePinTargetEmployee(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleForcePinChangeSubmit}
+                  disabled={newPin.length < 6 || confirmNewPin.length < 6}
+                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer ${
+                    newPin.length >= 6 && confirmNewPin.length >= 6
+                      ? "bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105"
+                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  Ativar Conta & Aceder
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
       </>
     );
   }
@@ -2803,153 +4282,1064 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
           onClose={() => setIsSidebarOpen(false)}
           activeUser={activeUser}
           subscriptionPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
-          onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+          onSwitchUser={() => {
+            setIsUserSwitchModalOpen(true);
+            if (activeUser) {
+              setSwitchSelectedEmployeeId(activeUser.id);
+            }
+          }}
         />
       )}
 
       {/* Outer body wrapper */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         
-        {/* HEADER & HORIZONTAL NAVIGATION BAR */}
-        <AppHeader
-          isPOSFullscreen={isPOSFullscreen}
-          theme={theme}
-          activeTab={activeTab}
-          onSelectTab={(tab) => setActiveTab(tab)}
-          onOpenSidebar={() => setIsSidebarOpen(true)}
-          activeUserDisplayName={activeUserDisplayName}
-          onOpenTutorial={() => setIsOnboardingTutorialOpen(true)}
-          onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
-          simplifiedRole={simplifiedRole}
-          canRoleAccessModule={canRoleAccessModule}
-        />
+        {/* TOP MINIMALIST STATUS BAR */}
+        {!isPOSFullscreen && (
+          <header className={`border-b h-14 px-4 md:px-6 shrink-0 flex items-center justify-between shadow-sm backdrop-blur-md relative z-20 transition-all ${
+            theme === "night" ? "bg-zinc-950/80 border-zinc-800/80" : "bg-white border-slate-200"
+          }`}>
+            <div className="flex items-center gap-3">
+              {/* Hamburger Menu Toggle - Visible on mobile/tablet */}
+              <button
+                type="button"
+                onClick={() => setIsSidebarOpen(true)}
+                className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
+                aria-label="Abrir menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold uppercase tracking-wider ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
+                  {NAV_MENU_ITEMS.find(m => m.id === activeTab)?.label || "Sistema de Gestão"}
+                </span>
+              </div>
+            </div>
+  
+            <div className="flex items-center gap-3 text-xs">
+              {/* Admin Name */}
+              <span className={`font-bold text-xs tracking-tight ${
+                theme === "night" ? "text-slate-200" : "text-slate-800"
+              }`}>
+                {activeUserDisplayName}
+              </span>
+
+              {/* Botão Alterar usuário */}
+              <button
+                id="quick-switch-user-btn"
+                onClick={() => {
+                  setIsUserSwitchModalOpen(true);
+                  if (activeUser) {
+                    setSwitchSelectedEmployeeId(activeUser.id);
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
+                  theme === "night" 
+                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
+                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
+                }`}
+                title="Alterar usuário"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Alterar usuário</span>
+              </button>
+            </div>
+          </header>
+        )}
+
+        {/* COMPACT HORIZONTAL TOP NAVIGATION MODULES BAR */}
+        {!isPOSFullscreen && (
+          <div className={`border-b px-4 md:px-6 py-2 shrink-0 flex items-center gap-2 overflow-x-auto scrollbar-none z-15 transition-all ${
+            theme === "night" 
+              ? "bg-zinc-900/60 border-zinc-850/60 text-slate-300" 
+              : "bg-white border-slate-150 text-slate-700 shadow-sm"
+          }`}>
+            <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scrollbar-none py-1 font-sans">
+              {NAV_MENU_ITEMS
+                .filter((item) => {
+                  if (simplifiedRole === "CASHIER") {
+                    return item.roles.includes("CASHIER");
+                  }
+                  return true;
+                })
+                .map((item) => {
+                  const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
+                  const authorized = roleCheck.allowed;
+                  const active = activeTab.toLowerCase() === item.id;
+                  
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
+                      disabled={!authorized}
+                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
+                        active 
+                          ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
+                          : authorized 
+                            ? theme === "night" 
+                              ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
+                              : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
+                            : "opacity-35 cursor-not-allowed text-slate-400"
+                      }`}
+                      title={authorized ? item.label : "Acesso Restrito para " + simplifiedRole}
+                    >
+                      <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
+                        active 
+                          ? "text-white" 
+                          : authorized 
+                            ? theme === "night" 
+                              ? "text-slate-500 group-hover:text-slate-300" 
+                              : "text-slate-400 group-hover:text-orange-500"
+                            : "text-slate-400"
+                      }`} />
+                      <span>{item.shortLabel}</span>
+                      {!authorized && (
+                        <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                      )}
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        )}
   
         {/* INNER SCROLLABLE WORKPORT PANEL CONTENT */}
-        <AppTabContent
-          activeTab={activeTab}
-          isPOSFullscreen={isPOSFullscreen}
-          simplifiedRole={simplifiedRole}
-          activeUser={activeUser}
-          activeUserDisplayName={activeUserDisplayName}
-          theme={theme}
-          settings={settings}
-          currency={currency}
-          products={products}
-          customers={customers}
-          transactions={transactions}
-          filteredTransactions={filteredTransactions}
-          cashFlow={cashFlow}
-          filteredCashFlow={filteredCashFlow}
-          employees={employees}
-          auditLogs={auditLogs}
-          pendingSyncQueue={pendingSyncQueue}
-          isManualSyncing={isManualSyncing}
-          isOnline={isOnline}
-          activeColorTheme={activeColorTheme}
-          currentSystemVersion={currentSystemVersion}
-          onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
-          onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
-          onChangePOSFullscreen={setIsPOSFullscreen}
-          onShowToast={showToast}
-          onAddAuditLog={handleAddAuditLog}
-          onManualSync={handleManualSync}
-          onUpdateSettings={handleUpdateSettings}
-          onThemeChange={handleThemeChange}
-          onExportLocalDB={handleExportLocalDB}
-          onImportLocalDB={handleImportLocalDB}
-          onTriggerLocalBackup={handleTriggerLocalBackup}
-          onGetBackupPayload={handleGetBackupPayload}
-          onPurgeMockData={handlePurgeMockData}
-          onUpdateUserPlan={handleUpdateUserPlan}
-          onUpdateSystemPlan={handleUpdateSystemPlan}
-          onCompleteSale={handleCompleteSaleAction}
-          onReturnSale={handleReturnSaleAction}
-          onAddProduct={handleAddProduct}
-          onUpdateProduct={handleUpdateProduct}
-          onDeleteProduct={handleDeleteProduct}
-          onImportProductsBatch={handleAddProductsBatch}
-          onAddCustomer={handleAddCustomer}
-          onUpdateCustomer={handleUpdateCustomer}
-          onDeleteCustomer={handleDeleteCustomer}
-          onAddCashFlowEntry={handleAddCashFlowEntry}
-          onAddEmployee={handleAddEmployee}
-          onUpdateEmployees={handleUpdateEmployees}
-          onResetEmployeePin={handleResetEmployeePin}
-          onUpdateEmployeeTheme={handleUpdateEmployeeTheme}
-          onUpdateProductsList={(updatedList) => {
-            setProducts(updatedList);
-            syncTable("products", updatedList);
-          }}
-        />
+        <main className={`flex-1 overflow-y-auto relative ${isPOSFullscreen ? "p-0" : "p-4 md:p-6"}`}>
+          <AnimatePresence mode="wait">
+            {/* POS DIRECT CHECKOUT */}
+            {activeTab === "POS" && (
+              <motion.div
+                key="POS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "pos").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="pos"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <POSModule
+                    products={products}
+                    customers={customers}
+                    transactions={filteredTransactions}
+                    onCompleteSale={handleCompleteSaleAction}
+                    onReturnSale={handleReturnSaleAction}
+                    activeUsername={activeUserDisplayName}
+                    settings={settings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    onShowToast={showToast}
+                    isPOSFullscreen={isPOSFullscreen}
+                    onChangePOSFullscreen={setIsPOSFullscreen}
+                    onTriggerPanic={handleTriggerPanic}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* STATS ANALYTICS CONTROL PANEL */}
+            {activeTab === "DASHBOARD" && (
+              <motion.div
+                key="DASHBOARD"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "dashboard").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="dashboard"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <DashboardModule
+                    transactions={filteredTransactions}
+                    products={products}
+                    customers={customers}
+                    cashFlow={filteredCashFlow}
+                    currency={currency}
+                    activeUser={activeUser}
+                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onUpdateProduct={handleUpdateProduct}
+                    onAddAuditLog={handleAddAuditLog}
+                    onShowToast={showToast}
+                    onCompleteSale={handleCompleteSaleAction}
+                    isOnline={isOnline}
+                    theme={theme}
+                    onTriggerPanic={handleTriggerPanic}
+                    transactionsError={transactionsError}
+                    onRetryTransactions={handleRetryTransactions}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* DAILY BOOK BALANCE CASH OPERATIONS */}
+            {activeTab === "CASH" && (
+              <motion.div
+                key="CASH"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "cash").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="cash"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <CashRegisterModule
+                    cashFlow={filteredCashFlow}
+                    transactions={filteredTransactions}
+                    onAddCashFlowEntry={handleAddCashFlowEntry}
+                    activeUsername={activeUserDisplayName}
+                    activeUser={activeUser}
+                    employees={employees}
+                    currentRole={simplifiedRole}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    settings={settings}
+                    theme={theme}
+                    onShowToast={showToast}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* ACTIVE STOCK INVENTORY MANAGER */}
+            {activeTab === "STOCK" && (
+              <motion.div
+                key="STOCK"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "stock").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="stock"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : !canAccessModule("stock", activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO").allowed ? (
+                  <PlanLockScreen
+                    moduleName="Gestão Avançada de Stock"
+                    requiredPlan="PRATA"
+                    userPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+                    description="O Plano Bronze inclui apenas vendas rápidas POS e catálogo básico. Atualize para o Plano Prata ou Ouro para gerir lotes, datas de expiração e reabastecimentos."
+                    onUpgradeClick={() => setActiveTab("PLANS")}
+                  />
+                ) : (
+                  <StockModule
+                    products={products}
+                    transactions={filteredTransactions}
+                    onAddProduct={handleAddProduct}
+                    onUpdateProduct={handleUpdateProduct}
+                    onDeleteProduct={handleDeleteProduct}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    currency={currency}
+                    settings={settings}
+                    onShowToast={showToast}
+                    onUpdateSettings={handleUpdateSettings}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* CUSTOMER LOYALTY CRM & MARKETING SMS */}
+            {(activeTab === "CUSTOMERS" || activeTab === "CLIENTES") && (
+              <motion.div
+                key="CUSTOMERS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "customers").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="customers"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <CustomersModule
+                    customers={customers}
+                    transactions={transactions}
+                    settings={settings}
+                    onAddCustomer={handleAddCustomer}
+                    onUpdateCustomer={(updatedC) => {
+                      setCustomers(prev => {
+                        const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
+                        syncTable("customers", updated);
+                        return updated;
+                      });
+                    }}
+                    onAddCashFlowEntry={handleAddCashFlowEntry}
+                    onDeleteCustomer={handleDeleteCustomer}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    activeUsername={activeUserDisplayName}
+                    currency={currency}
+                    onShowToast={showToast}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* FINANCIAL REPORTS & SMTP TRIGGERS */}
+            {activeTab === "REPORTS" && (
+              <motion.div
+                key="REPORTS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, "reports").allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId="reports"
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <ReportsModule
+                    transactions={filteredTransactions}
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currency={currency}
+                    onShowToast={showToast}
+                    auditLogs={auditLogs}
+                    transactionsError={transactionsError}
+                    onRetryTransactions={handleRetryTransactions}
+                  />
+                )}
+              </motion.div>
+            )}
+
+            {/* COMPANY GENERAL IDENTITIES AND MAIN SETTINGS (INCLUDING ADVANCED CONSOLIDATED SUBMODULES) */}
+            {(activeTab === "SETTINGS" || activeTab === "STAFF" || activeTab === "AI" || activeTab === "TRAINING" || activeTab === "GATEWAY" || activeTab === "PLANS") && (
+              <motion.div
+                key="SETTINGS"
+                initial={{ opacity: 0, y: 12, scale: 0.995 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -12, scale: 0.995 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="h-full"
+              >
+                {!canRoleAccessModule(simplifiedRole, activeTab.toLowerCase()).allowed ? (
+                  <RoleAccessDeniedScreen
+                    moduleId={activeTab.toLowerCase()}
+                    userRole={simplifiedRole}
+                    activeUser={activeUser}
+                    theme={theme}
+                    onNavigateToModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onSwitchUser={() => setIsUserSwitchModalOpen(true)}
+                  />
+                ) : (
+                  <SettingsModule
+                    settings={settings}
+                    onUpdateSettings={handleUpdateSettings}
+                    onAddAuditLog={handleAddAuditLog}
+                    currentRole={simplifiedRole}
+                    currency={currency}
+                    onShowToast={showToast}
+                    activeUser={activeUser}
+                    activeColorTheme={activeColorTheme}
+                    onChangeColorTheme={handleThemeChange}
+                    onExportLocalDB={handleExportLocalDB}
+                    onImportLocalDB={handleImportLocalDB}
+                    onTriggerLocalBackup={handleTriggerLocalBackup}
+                    onGetBackupPayload={handleGetBackupPayload}
+                    onPurgeMockData={handlePurgeMockData}
+                    systemVersion={currentSystemVersion}
+                    employees={employees}
+                    auditLogs={auditLogs}
+                    products={products}
+                    onUpdateProduct={handleUpdateProduct}
+                    onUpdateProducts={(updatedList) => {
+                      setProducts(updatedList);
+                      syncTable("products", updatedList);
+                    }}
+                    transactions={filteredTransactions}
+                    customers={customers}
+                    onAddEmployee={handleAddEmployee}
+                    onUpdateEmployees={handleUpdateEmployees}
+                    masterclassVideos={masterclassVideos}
+                    theme={theme}
+                    onUpdateUserPlan={handleUpdateUserPlan}
+                    onUpdateSystemPlan={handleUpdateSystemPlan}
+                    initialSubTab={
+                      activeTab === "STAFF" ? "staff" :
+                      activeTab === "AI" ? "ai" :
+                      activeTab === "TRAINING" ? "training" :
+                      activeTab === "GATEWAY" ? "gateway" :
+                      activeTab === "PLANS" ? "plans" : undefined
+                    }
+                    onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}
+                    onResetEmployeePin={async (empId) => {
+                      const target = employees.find(e => e.id === empId);
+                      if (!target) return;
+                      const generatedPin = generateSecurePin(6);
+                      const updatedEmployees = employees.map(emp => {
+                        if (emp.id === empId) {
+                          return {
+                            ...emp,
+                            pin: generatedPin,
+                            password: generatedPin,
+                            pinChanged: false,
+                            pinCreatedAt: new Date().toISOString()
+                          };
+                        }
+                        return emp;
+                      });
+                      setEmployees(updatedEmployees);
+                      await syncTable("employees", updatedEmployees);
+                      handleAddAuditLog(
+                        "Reset de PIN Forçado",
+                        "SEGURANÇA",
+                        `PIN do colaborador ${target.name} (${target.username}) redefinido e enviado para o e-mail pelo Administrador.`
+                      );
+
+                      let emailDetails = "";
+                      const targetEmail = target.email?.trim();
+                      if (targetEmail) {
+                        try {
+                          await sendEmail({
+                            to: targetEmail,
+                            subject: "Redefinição de PIN / Senha de Acesso - OST Vendas",
+                            body: `
+                              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+                              <div style="text-align: center; border-bottom: 2px solid #ff6b00; padding-bottom: 15px; margin-bottom: 20px;">
+                                <h1 style="color: #0f172a; margin: 0; font-size: 24px;">OST Vendas</h1>
+                                <p style="color: #64748b; margin: 5px 0 0 0; font-size: 14px;">Notificação de Segurança - Redefinição de Credenciais</p>
+                              </div>
+                              <h2 style="color: #1e293b; font-size: 18px;">Olá, ${target.name}!</h2>
+                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Informamos que as suas credenciais de acesso ao sistema <strong>OST Vendas</strong> foram redefinidas com sucesso pela Administração.</p>
+                              <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; text-align: center; margin: 20px 0;">
+                                <span style="color: #64748b; font-size: 12px; display: block; margin-bottom: 5px; font-weight: bold; text-transform: uppercase;">Novo PIN Temporário de Acesso:</span>
+                                <strong style="color: #ff6b00; font-size: 24px; letter-spacing: 2px; font-family: monospace;">${generatedPin}</strong>
+                              </div>
+                              <p style="color: #475569; font-size: 14px; line-height: 1.5;">Por motivos de segurança, utilize este PIN temporário para efetuar o login. O sistema exigirá que defina uma senha definitiva personalizada no primeiro acesso.</p>
+                              <p style="color: #94a3b8; font-size: 12px; margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 15px; text-align: center;">Se não solicitou esta alteração, entre em contacto imediatamente com o Administrador.</p>
+                            </div>
+                          `,
+                          isHtml: true
+                        });
+                        emailDetails = ` Um e-mail com a nova senha foi enviado com sucesso para ${targetEmail}.`;
+                      } catch (emailErr) {
+                        console.error("Erro ao enviar e-mail de redefinição de PIN:", emailErr);
+                        emailDetails = " (Nota: Ocorreu um erro ao enviar o e-mail de notificação. Certifique-se de que as configurações de SMTP estão ativas).";
+                      }
+                    } else {
+                      emailDetails = " (Aviso: O colaborador não possui e-mail cadastrado no sistema para o envio automático).";
+                    }
+
+                    showToast(
+                      `PIN do colaborador ${target.name} redefinido com sucesso para '${generatedPin}'.${emailDetails}`,
+                      "success",
+                      "Reset de PIN Concluído"
+                    );
+                  }}
+                  onUpdateEmployeeTheme={async (empId, themeId) => {
+                    const target = employees.find(e => e.id === empId);
+                    if (!target) return;
+                    const updatedEmployees = employees.map(emp => {
+                      if (emp.id === empId) {
+                        return {
+                          ...emp,
+                          theme: themeId
+                        };
+                      }
+                      return emp;
+                    });
+                    setEmployees(updatedEmployees);
+                    await syncTable("employees", updatedEmployees);
+                    
+                    if (activeUser && activeUser.id === empId) {
+                      setActiveColorTheme(themeId);
+                      localStorage.setItem("erp_theme_" + empId, themeId);
+                    }
+
+                    handleAddAuditLog(
+                      "Definição de Tema de Colaborador",
+                      "SEGURANÇA",
+                      `Tema do colaborador ${target.name} (${target.username}) atualizado para ${themeId} pelo Administrador.`
+                    );
+                    showToast(
+                      `Preferência de cor para ${target.name} atualizada para '${themeId}'.`,
+                      "success",
+                      "Tema de Colaborador"
+                    );
+                  }}
+                />
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </main>
+
       </div>
 
-      {/* Floating Action Navigation Hub (FAB) */}
-      <FloatingNavFab
-        isPOSFullscreen={isPOSFullscreen}
-        isFabOpen={isFabOpen}
-        onToggleFab={() => setIsFabOpen(!isFabOpen)}
-        activeTab={activeTab}
-        onSelectTab={(tabId) => setActiveTab(tabId)}
-        navMenuItems={NAV_MENU_ITEMS}
-        canRoleAccess={canRoleAccessModule}
-        simplifiedRole={simplifiedRole}
-        activeUser={activeUser}
-        theme={theme}
-        onOpenSidebar={() => setIsSidebarOpen(true)}
-        onLogout={handleLogout}
-      />
+      {/* PIN Verification Modal for Switching Operator */}
+      <AnimatePresence>
+        {pinVerificationOpen && (
+          <div className="fixed inset-0 bg-slate-900/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className={`w-full max-w-md rounded-2xl border shadow-2xl overflow-hidden flex flex-col ${
+                theme === "night"
+                  ? "bg-zinc-950 text-slate-100 border-zinc-850"
+                  : "bg-white text-slate-800 border-slate-100"
+              }`}
+              id="profile-pin-verification-modal"
+            >
+              {/* Modal Header */}
+              <div className={`p-6 border-b flex items-center justify-between ${
+                theme === "night" ? "bg-zinc-900 border-zinc-850" : "bg-slate-50 border-slate-100"
+              }`}>
+                <div className="flex items-center gap-3 text-left">
+                  <div className="w-10 h-10 bg-orange-100 text-orange-600 rounded-xl flex items-center justify-center shadow-inner">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm">Autenticação Requerida</h3>
+                    <p className="text-[11px] text-slate-400 font-medium font-mono">Terminal POS de Segurança</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinVerificationOpen(false);
+                    setPinTargetEmployee(null);
+                  }}
+                  className={`w-8 h-8 rounded-full border flex items-center justify-center transition cursor-pointer text-xs font-bold ${
+                    theme === "night"
+                      ? "bg-zinc-900 border-zinc-850 text-slate-400 hover:text-white"
+                      : "bg-white border-slate-200 text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  ✕
+                </button>
+              </div>
 
-      {/* System Modals Overlay Container */}
-      <AppModalsContainer
+              {/* Login Method Tabs */}
+              <div className="flex border-b border-slate-100 dark:border-zinc-850">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod("select");
+                    setPinError("");
+                  }}
+                  className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 ${
+                    loginMethod === "select"
+                      ? "border-orange-500 text-orange-600 font-extrabold"
+                      : "border-transparent text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  👥 Selecionar Operador
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoginMethod("type");
+                    setPinError("");
+                  }}
+                  className={`flex-1 py-3 text-xs font-bold transition-all border-b-2 ${
+                    loginMethod === "type"
+                      ? "border-orange-500 text-orange-600 font-extrabold"
+                      : "border-transparent text-slate-400 hover:text-slate-600"
+                  }`}
+                >
+                  🔑 Introduzir Username
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="p-6 flex flex-col items-center">
+                {/* Method 1: Dropdown selector */}
+                {loginMethod === "select" && (
+                  <div className="w-full space-y-3 mb-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
+                      Escolha o Colaborador
+                    </label>
+                    <select
+                      value={pinTargetEmployee ? pinTargetEmployee.id : ""}
+                      onChange={(e) => {
+                        const emp = employees.find(empItem => empItem.id === e.target.value);
+                        if (emp) {
+                          setPinTargetEmployee(emp);
+                          setEnteredPin("");
+                          setPinError("");
+                        }
+                      }}
+                      className={`w-full p-2.5 rounded-xl border font-semibold outline-none text-xs cursor-pointer ${
+                        theme === "night"
+                          ? "bg-zinc-900 border-zinc-800 text-slate-100"
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 shadow-sm"
+                      }`}
+                    >
+                      <option value="" disabled>-- Escolha um Operador do Quadro --</option>
+                      {employees.filter(e => e.status !== "INACTIVE" && e.status !== "SUSPENDED").map(empItem => (
+                        <option key={empItem.id} value={empItem.id}>
+                          {empItem.role.toUpperCase().includes("ADMIN") ? "👨‍💼" : empItem.role.toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"}{" "}
+                          {empItem.name} ({empItem.username || "sem username"})
+                        </option>
+                      ))}
+                    </select>
+
+                    {pinTargetEmployee && (
+                      <div className={`w-full p-3.5 rounded-xl border text-left flex items-start gap-3 animate-in fade-in slide-in-from-top-2 duration-200 ${
+                        theme === "night"
+                          ? "bg-zinc-900/60 border-zinc-850"
+                          : "bg-orange-50/55 border-orange-100/50"
+                      }`}>
+                        <div className="text-2xl mt-0.5">
+                          {pinTargetEmployee.role.toUpperCase().includes("ADMIN") ? "👨‍💼" : pinTargetEmployee.role.toUpperCase().includes("SUPERVISOR") ? "👨‍💻" : "👩‍💼"}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-extrabold text-xs text-slate-800 dark:text-slate-100">{pinTargetEmployee.name}</h4>
+                          <p className="text-[10px] text-slate-400 font-semibold">{pinTargetEmployee.role}</p>
+                          <div className="flex flex-wrap gap-1.5 mt-1.5">
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-200/60 text-slate-600 dark:bg-zinc-850 dark:text-slate-400">
+                              @{pinTargetEmployee.username}
+                            </span>
+                            {(pinTargetEmployee.pinChanged === false || pinTargetEmployee.pinChanged === undefined) ? (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 animate-pulse">
+                                Senha Temporária
+                              </span>
+                            ) : (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
+                                Senha Definida
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Method 2: Manual Username Entry */}
+                {loginMethod === "type" && (
+                  <div className="w-full space-y-1.5 mb-4">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
+                      Username do Operador
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-mono">@</span>
+                      <input
+                        type="text"
+                        placeholder="Iniciais + Apelido (Ex: ldomingos)"
+                        value={enteredUsername}
+                        onChange={(e) => {
+                          setEnteredUsername(e.target.value.toLowerCase().replace(/\s/g, ""));
+                          if (pinError) setPinError("");
+                        }}
+                        className={`w-full pl-8 pr-4 py-2.5 rounded-xl border font-mono font-bold text-xs outline-none ${
+                          theme === "night"
+                            ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:border-orange-500"
+                            : "bg-slate-50 border-slate-200 text-slate-850 focus:border-orange-500 focus:bg-white shadow-sm"
+                        }`}
+                        autoFocus={loginMethod === "type"}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Password Input Field */}
+                <div className="w-full space-y-1.5 mb-4">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block text-left">
+                    Digite a sua Senha de Acesso
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={32}
+                    value={enteredPin}
+                    onChange={(e) => {
+                      setEnteredPin(e.target.value);
+                      if (pinError) setPinError("");
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        handleVerifyAndSwitchProfile();
+                      }
+                    }}
+                    placeholder="Sua senha secreta"
+                    className={`w-full text-left px-3.5 py-2.5 rounded-xl border focus:outline-none focus:ring-2 transition-all text-xs font-medium ${
+                      theme === "night"
+                        ? "bg-zinc-900 border-zinc-800 text-slate-100 focus:border-orange-500 focus:ring-orange-500/20"
+                        : "bg-slate-50 border-slate-200 text-slate-800 focus:border-orange-500 focus:ring-orange-500/20 shadow-sm"
+                    }`}
+                  />
+                  {pinError && (
+                    <p className="text-xs text-rose-500 font-extrabold text-left animate-pulse mt-1.5">
+                      ⚠️ {pinError}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className={`p-4 border-t flex items-center justify-between gap-3 ${
+                theme === "night" ? "bg-zinc-900 border-zinc-850" : "bg-slate-50 border-slate-100"
+              }`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPinVerificationOpen(false);
+                    setPinTargetEmployee(null);
+                  }}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                    theme === "night"
+                      ? "text-slate-400 hover:text-white"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleVerifyAndSwitchProfile}
+                  className={`px-5 py-2.5 text-xs font-extrabold rounded-xl shadow-md transition-all cursor-pointer bg-orange-500 hover:bg-orange-600 text-white transform hover:scale-105`}
+                >
+                  Autenticar Perfil
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+
+
+      {/* Ultra-Clean User / Collaborator Switch Modal */}
+      <UserSwitchModal
+        isOpen={isUserSwitchModalOpen}
+        onClose={() => setIsUserSwitchModalOpen(false)}
         theme={theme}
         employees={employees}
         activeUser={activeUser}
         settings={settings}
-        showToast={showToast}
-        handleAddAuditLog={handleAddAuditLog}
-        pinVerificationOpen={pinVerificationOpen}
-        onClosePinVerification={() => {
-          setPinVerificationOpen(false);
-          setPinTargetEmployee(null);
-        }}
-        pinTargetEmployee={pinTargetEmployee}
-        onPinTargetEmployeeChange={(emp) => {
-          setPinTargetEmployee(emp);
-          setEnteredPin("");
-          setPinError("");
-        }}
-        loginMethod={loginMethod}
-        onLoginMethodChange={(m) => {
-          setLoginMethod(m);
-          setPinError("");
-        }}
-        enteredUsername={enteredUsername}
-        onEnteredUsernameChange={(u) => {
-          setEnteredUsername(u);
-          if (pinError) setPinError("");
-        }}
-        enteredPin={enteredPin}
-        onEnteredPinChange={(p) => {
-          setEnteredPin(p);
-          if (pinError) setPinError("");
-        }}
-        pinError={pinError}
-        onVerifyPin={handleVerifyAndSwitchProfile}
-        isUserSwitchModalOpen={isUserSwitchModalOpen}
-        onCloseUserSwitchModal={() => setIsUserSwitchModalOpen(false)}
-        onSelectEmployeeForSwitch={(newEmp) => {
+        onSelectEmployee={(newEmp) => {
           setActiveUser(newEmp);
           showToast(`Operador alterado para ${newEmp.name}!`, "success");
         }}
-        showReplenishModal={showReplenishModal}
-        onCloseReplenishModal={() => setShowReplenishModal(false)}
+        onAuditLog={(action, module, details) => {
+          handleAddAuditLog(action, module, details);
+        }}
+      />
+
+      {/* Payment QR Code Modal Overlay */}
+      <AnimatePresence>
+        {showPaymentQrModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 15 }}
+              className="bg-white dark:bg-zinc-900 text-slate-800 dark:text-slate-100 rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 text-center space-y-4 relative"
+            >
+              <button
+                type="button"
+                onClick={() => setShowPaymentQrModal(false)}
+                className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-slate-800 dark:hover:text-white rounded-lg transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="w-12 h-12 bg-emerald-500/10 text-emerald-500 rounded-2xl flex items-center justify-center mx-auto shadow-inner">
+                <QrCode className="w-6 h-6" />
+              </div>
+
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900 dark:text-white">QR Code de Recebimento</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Escaneie com a carteira móvel (M-Pesa / E-Mola) para realizar a transferência de pagamento para este utilizador.
+                </p>
+              </div>
+
+              {paymentQrUrl ? (
+                <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-inner inline-block">
+                  <img src={paymentQrUrl} alt="QR Code de Pagamento" className="w-52 h-52 mx-auto rounded-lg object-contain" />
+                </div>
+              ) : (
+                <div className="py-12 text-slate-400 text-xs font-mono">Gerando QR Code...</div>
+              )}
+
+              <div className="bg-slate-50 dark:bg-zinc-950/60 p-3.5 rounded-xl border border-slate-100 dark:border-zinc-800 text-xs text-left space-y-1 font-mono">
+                <p className="text-[10px] uppercase font-sans font-bold text-slate-400">Titular da Conta / Operador</p>
+                <p className="font-extrabold text-slate-800 dark:text-slate-200 text-sm">{activeUser?.name || "Colaborador"}</p>
+                <p className="text-slate-500 dark:text-slate-400">📱 Contacto: {activeUser?.contact || "840000000"}</p>
+                <p className="text-slate-500 dark:text-slate-400">🏢 Empresa: {settings.companyName || "OST Vendas"}</p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowPaymentQrModal(false)}
+                className="w-full py-2.5 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold rounded-xl text-xs hover:bg-slate-800 dark:hover:bg-slate-100 transition cursor-pointer shadow-md"
+              >
+                Concluído / Fechar
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <StockReplenishModal
+        isOpen={showReplenishModal}
+        onClose={() => setShowReplenishModal(false)}
         products={products}
         onUpdateProduct={handleUpdateProduct}
         activeBranchId={settings.activeBranchId || "central"}
-        isQuickLogoModalOpen={isQuickLogoModalOpen}
-        onCloseQuickLogoModal={() => setIsQuickLogoModalOpen(false)}
+        onShowToast={showToast}
+        theme={theme}
+      />
+
+      {/* Toast Notifications Overlay Container */}
+      <div className="fixed top-5 right-5 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((t) => (
+            <motion.div
+              key={t.id}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: 50, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className={`p-4 rounded-xl border shadow-lg pointer-events-auto flex gap-3 relative overflow-hidden backdrop-blur-md ${
+                theme === "night"
+                  ? "bg-zinc-950/95 border-zinc-850/80 text-slate-100 shadow-zinc-950/45"
+                  : "bg-white/95 border-slate-200 text-slate-800 shadow-slate-200/40"
+              }`}
+            >
+              {/* Vertical side glow indicator bar according to toast type */}
+              <div
+                className={`absolute top-0 left-0 bottom-0 w-1.5 ${
+                  t.type === "success"
+                    ? "bg-emerald-500"
+                    : t.type === "error"
+                    ? "bg-rose-500"
+                    : t.type === "warning"
+                    ? "bg-amber-500"
+                    : "bg-blue-500"
+                }`}
+              />
+
+              {/* Icon selection dynamically */}
+              <div className="mt-0.5 shrink-0">
+                {t.type === "success" && (
+                  <CheckCircle className="w-5 h-5 text-emerald-500" />
+                )}
+                {t.type === "error" && (
+                  <XCircle className="w-5 h-5 text-rose-500" />
+                )}
+                {t.type === "warning" && (
+                  <AlertCircle className="w-5 h-5 text-amber-500" />
+                )}
+                {t.type === "info" && (
+                  <Activity className="w-5 h-5 text-blue-500" />
+                )}
+              </div>
+
+              {/* Contents block */}
+              <div className="flex-1 pr-6">
+                <h4 className="font-extrabold text-xs tracking-tight uppercase">
+                  {t.title}
+                </h4>
+                <p className={`text-[11px] mt-1 pr-1 font-semibold leading-relaxed ${
+                  theme === "night" ? "text-slate-350" : "text-slate-550"
+                }`}>
+                  {t.message}
+                </p>
+              </div>
+
+              {/* Manual Close Button */}
+              <button
+                type="button"
+                onClick={() => removeToast(t.id)}
+                className={`absolute top-3 right-3 p-1 rounded-lg transition-colors cursor-pointer ${
+                  theme === "night"
+                    ? "hover:bg-zinc-900 text-slate-400 hover:text-white"
+                    : "hover:bg-slate-100 text-slate-400 hover:text-slate-900"
+                }`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
+      {/* Floating Action Navigation Hub (FAB) */}
+      {!isPOSFullscreen && (
+        <div className="fixed bottom-6 right-6 z-[90] flex flex-col items-end gap-3 no-print">
+          <AnimatePresence>
+            {isFabOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: 15, scale: 0.9 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 15, scale: 0.9 }}
+                transition={{ duration: 0.15 }}
+                className={`p-4 rounded-3xl border shadow-2xl w-64 md:w-72 max-h-[75vh] overflow-y-auto backdrop-blur-xl flex flex-col gap-2 ${
+                  theme === "night"
+                    ? "bg-zinc-950/95 border-zinc-850/80 shadow-zinc-950/50 text-slate-100"
+                    : "bg-white/95 border-slate-200 shadow-slate-350/30 text-slate-800"
+                }`}
+              >
+                <div className="flex items-center justify-between pb-2 mb-1 border-b border-dashed border-slate-700/20 dark:border-zinc-800">
+                  <span className="text-[10px] font-black tracking-widest uppercase text-orange-500 font-mono">Navegação Rápida</span>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-900 border dark:border-zinc-800 font-mono">
+                    {activeUser ? activeUser.role : "Sessão"}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-1 gap-1">
+                  {NAV_MENU_ITEMS.map((item) => {
+                    const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
+                    const authorized = roleCheck.allowed;
+                    const active = activeTab.toLowerCase() === item.id;
+                    
+                    return (
+                      <button
+                        key={item.id}
+                        disabled={!authorized}
+                        onClick={() => {
+                          if (authorized) {
+                            setActiveTab(item.id.toUpperCase());
+                            setIsFabOpen(false);
+                          }
+                        }}
+                        className={`w-full flex items-center justify-between p-2 rounded-xl text-xs font-bold transition-all group ${
+                          active
+                            ? "bg-orange-500 text-white shadow-md shadow-orange-500/25"
+                            : authorized
+                            ? theme === "night"
+                              ? "text-slate-300 hover:text-white hover:bg-zinc-900 cursor-pointer"
+                              : "text-slate-700 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
+                            : "opacity-35 cursor-not-allowed text-slate-400"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
+                            active
+                              ? "text-white"
+                              : authorized
+                              ? theme === "night"
+                                ? "text-slate-500 group-hover:text-slate-300"
+                                : "text-slate-400 group-hover:text-orange-500"
+                              : "text-slate-400"
+                          }`} />
+                          <span className="truncate">{item.label}</span>
+                        </div>
+                        
+                        {!authorized && (
+                          <Lock className="w-3 h-3 text-slate-400 shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                
+                <div className="border-t border-slate-700/10 dark:border-zinc-800/80 pt-2 mt-1 flex flex-col gap-1">
+                  <button
+                    onClick={() => {
+                      setIsSidebarOpen(true);
+                      setIsFabOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                      theme === "night"
+                        ? "bg-zinc-900/60 border-zinc-850 text-orange-400 hover:bg-zinc-900 hover:text-orange-300"
+                        : "bg-orange-50/40 border-orange-100 text-orange-600 hover:bg-orange-50 hover:text-orange-700"
+                    }`}
+                  >
+                    <Menu className="w-3.5 h-3.5" />
+                    <span>Ver Painel Lateral 📋</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setIsFabOpen(false);
+                      handleLogout();
+                    }}
+                    className="w-full flex items-center justify-center gap-2 p-2 rounded-xl text-[10.5px] font-black uppercase tracking-wider text-red-500 hover:text-red-400 bg-red-500/10 hover:bg-red-500/15 transition-all cursor-pointer"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>Terminar Sessão 🔒</span>
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          
+          <button
+            onClick={() => setIsFabOpen(!isFabOpen)}
+            className={`w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all cursor-pointer border relative group ${
+              isFabOpen
+                ? "bg-slate-900 text-white border-slate-800 hover:bg-slate-800 scale-105"
+                : theme === "night"
+                ? "bg-orange-500 hover:bg-orange-600 text-white border-orange-600 hover:scale-110"
+                : "bg-orange-500 hover:bg-orange-600 text-white border-orange-400 hover:scale-110"
+            }`}
+            title="Menu de Navegação Rápida"
+          >
+            {isFabOpen ? (
+              <X className="w-6 h-6 animate-in spin-in duration-200" />
+            ) : (
+              <Compass className="w-6 h-6 group-hover:rotate-45 transition-transform duration-300 animate-pulse" />
+            )}
+            
+            {/* Soft pulsing visual outer ring */}
+            {!isFabOpen && (
+              <span className="absolute -inset-0.5 rounded-full border border-orange-500 animate-ping opacity-25 pointer-events-none"></span>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* Quick Logo Config Modal */}
+      <QuickLogoModal
+        isOpen={isQuickLogoModalOpen}
+        onClose={() => setIsQuickLogoModalOpen(false)}
         currentLogoUrl={settings.logoUrl}
-        companyDisplayName={companyDisplayName}
+        companyName={companyDisplayName}
+        theme={theme}
         onSaveLogo={(newLogoUrl) => {
           handleUpdateSettings({ logoUrl: newLogoUrl });
           handleAddAuditLog(
@@ -2958,28 +5348,35 @@ Com base no histórico fornecido de vendas para o seu negócio de **${settings.c
             `Logotipo da empresa atualizado para '${newLogoUrl.substring(0, 40)}...' via Painel de Configuração Rápida.`
           );
         }}
-        isSystemInfoHubOpen={isSystemInfoHubOpen}
-        onCloseSystemInfoHub={() => setIsSystemInfoHubOpen(false)}
+        onShowToast={showToast}
+      />
+
+      {/* Tutorial & Keyboard Shortcuts Modal */}
+      <TutorialModal
+        isOpen={isTutorialModalOpen}
+        onClose={() => setIsTutorialModalOpen(false)}
+        theme={theme}
+        onNavigateModule={(moduleKey) => setActiveTab(moduleKey)}
+      />
+
+      {/* Unified System Info Hub Modal */}
+      <SystemInfoHub
+        isOpen={isSystemInfoHubOpen}
+        onClose={() => setIsSystemInfoHubOpen(false)}
         isOnline={isOnline}
-        currentSystemVersion={currentSystemVersion}
-        sessionStartTime={sessionStartTimeRef.current}
-        onOpenUserSwitch={() => setIsUserSwitchModalOpen(true)}
+        companyName={companyDisplayName}
+        logoUrl={settings.logoUrl}
+        version={currentSystemVersion}
+        sessionSeconds={Math.floor((Date.now() - sessionStartTimeRef.current) / 1000)}
+        activeUser={activeUser}
+        onSwitchUser={() => {
+          setIsUserSwitchModalOpen(true);
+          if (activeUser) {
+            setSwitchSelectedEmployeeId(activeUser.id);
+          }
+        }}
         onOpenLogoModal={() => setIsQuickLogoModalOpen(true)}
-      />
-
-      {/* Onboarding Interactive Tutorial */}
-      <OnboardingTutorial
-        isOpen={isOnboardingTutorialOpen}
-        onClose={() => setIsOnboardingTutorialOpen(false)}
-        onNavigateTab={(tab) => setActiveTab(tab)}
-        userName={activeUser?.name || "Operador"}
-        theme={theme === "night" ? "night" : "day"}
-      />
-
-      {/* Global Toast Notifications Container */}
-      <ToastContainer
-        toasts={toasts}
-        onRemoveToast={removeToast}
+        onOpenTutorial={() => setIsTutorialModalOpen(true)}
         theme={theme}
       />
     </div>

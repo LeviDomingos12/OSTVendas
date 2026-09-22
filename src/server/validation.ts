@@ -73,15 +73,6 @@ export const saleProcessSchema = z.object({
   notes: z.string().max(1000).optional().nullable()
 });
 
-// 5. Movimentos de Caixa
-export const cashMovementSchema = z.object({
-  type: z.enum(["ENTRY", "EXIT", "SALE_IN", "PAYMENT_IN", "EXPENSE_OUT", "MANUAL_ENTRY", "MANUAL_EXIT"]),
-  amount: z.coerce.number().positive("Valor deve ser positivo"),
-  reason: z.string().min(1, "Motivo é obrigatório").max(300),
-  referenceId: z.string().optional().nullable(),
-  cashRegisterId: z.string().optional().nullable()
-});
-
 // 6. Logs de Auditoria
 export const auditLogSchema = z.object({
   action: z.string().min(1).max(100),
@@ -93,7 +84,7 @@ export const auditLogSchema = z.object({
 // 7. Base de Dados / Armazenamento (db/save)
 export const dbSaveSchema = z.object({
   table: z.enum(["products", "customers", "transactions", "cashflow", "employees", "auditlogs", "settings", "categories", "suppliers"]),
-  data: z.union([z.array(z.record(z.string(), z.unknown())), z.record(z.string(), z.unknown())])
+  data: z.union([z.array(z.record(z.string(), z.any())), z.record(z.string(), z.any())])
 });
 
 // 8. Envio de E-mail
@@ -131,8 +122,8 @@ export const geminiChatSchema = z.object({
 });
 
 export const geminiForecastSchema = z.object({
-  salesHistory: z.array(z.unknown()).optional().default([]),
-  inventoryStatus: z.array(z.unknown()).optional().default([]),
+  salesHistory: z.array(z.any()).optional().default([]),
+  inventoryStatus: z.array(z.any()).optional().default([]),
   businessType: z.string().max(200).optional().default("Comércio Geral")
 });
 
@@ -184,10 +175,6 @@ export const debtPaymentSchema = z.object({
   idempotencyKey: z.string().max(100).optional()
 });
 
-export const passwordResetSchema = z.object({
-  email: z.string().email("Endereço de e-mail inválido")
-});
-
 /**
  * Lista de campos proibidos enviados pelo frontend que devem ser removidos para evitar Mass Assignment e Privilege Escalation.
  */
@@ -229,10 +216,10 @@ export function sanitizeInputData<T>(data: T): T {
   }
 
   if (typeof data === "object") {
-    const copy: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    const copy: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
       // Ignorar campos proibidos
-      if ((PROHIBITED_CLIENT_FIELDS as readonly string[]).includes(key)) {
+      if (PROHIBITED_CLIENT_FIELDS.includes(key as any)) {
         continue;
       }
       copy[key] = sanitizeInputData(value);

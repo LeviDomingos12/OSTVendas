@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Upload, Image as ImageIcon, Link as LinkIcon, Check, Trash2, Building2, Sparkles, RefreshCw, AlertCircle } from "lucide-react";
+import { X, Upload, Image as ImageIcon, Link as LinkIcon, Check, Trash2, Sparkles, RefreshCw } from "lucide-react";
 
 interface QuickLogoModalProps {
   isOpen: boolean;

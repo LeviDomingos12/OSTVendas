@@ -10,8 +10,6 @@ import {
   Mail, 
   MessageSquare, 
   Sliders, 
-  Send, 
-  RefreshCw, 
   Layers, 
   FileSpreadsheet, 
   Printer, 
@@ -23,7 +21,6 @@ import {
   TrendingDown,
   Info,
   Package,
-  Clock,
   ShieldAlert,
   Volume2
 } from "lucide-react";
@@ -335,7 +332,7 @@ export default function StockThresholdsSettings({
     const payload: Partial<SystemSettings> = {
       whatsappEnabled,
       managerWhatsappPhone,
-      whatsappProvider: whatsappProvider as "DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD",
+      whatsappProvider: whatsappProvider as any,
       whatsappMessageTemplate,
       emailStockAlertsEnabled,
       alertsRecipientEmail,
@@ -598,16 +595,16 @@ export default function StockThresholdsSettings({
       ];
     });
 
-    const csvString = "\uFEFF" + [headers.join(","), ...rows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(","))].join("\n");
-    const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(","), ...rows.map(e => e.map(val => `"${val.replace(/"/g, '""')}"`).join(","))].join("\n");
+    
+    const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
+    link.setAttribute("href", encodedUri);
     link.setAttribute("download", `limiares_stock_${new Date().toISOString().split("T")[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
 
     if (onShowToast) onShowToast("Ficheiro CSV exportado!", "success");
   };
@@ -1335,7 +1332,7 @@ export default function StockThresholdsSettings({
                     <label className="block font-bold text-slate-700 mb-1">Modo de Envio WhatsApp</label>
                     <select
                       value={whatsappProvider}
-                      onChange={(e) => setWhatsappProvider(e.target.value as "DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD")}
+                      onChange={(e) => setWhatsappProvider(e.target.value as any)}
                       disabled={!canEdit || !whatsappEnabled}
                       className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
                     >
@@ -1425,7 +1422,7 @@ export default function StockThresholdsSettings({
                       <label className="block font-bold text-slate-700 mb-1">Frequência</label>
                       <select
                         value={reportFrequency}
-                        onChange={(e) => setReportFrequency(e.target.value as "daily" | "weekly")}
+                        onChange={(e) => setReportFrequency(e.target.value as any)}
                         disabled={!canEdit}
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-medium"
                       >

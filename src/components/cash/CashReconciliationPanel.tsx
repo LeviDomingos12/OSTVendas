@@ -4,11 +4,8 @@ import {
   CreditCard, 
   Landmark, 
   Banknote, 
-  CheckCircle2, 
   TrendingUp, 
-  Clock, 
-  AlertTriangle, 
-  Coins 
+  Clock
 } from "lucide-react";
 
 interface CashReconciliationPanelProps {

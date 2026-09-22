@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { 
   CreditCard, 
-  Settings2, 
   Smartphone, 
   CheckCircle2, 
   RefreshCw,
@@ -10,8 +9,7 @@ import {
   Bell,
   Send,
   AlertTriangle,
-  UserCheck,
-  PackageOpen
+  UserCheck
 } from "lucide-react";
 import { SystemSettings, UserRole, Product, Customer } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
@@ -35,7 +33,7 @@ export default function GatewayModule({
   products = [],
   customers = []
 }: GatewayModuleProps) {
-  const canEdit = currentRole === "ADMIN";
+  const canEdit = String(currentRole || "").toUpperCase().trim().includes("ADMIN") || String(currentRole || "").toUpperCase().trim().includes("SUPERVIS");
 
   const [mpesaEnabled, setMpesaEnabled] = useState(settings.mpesaEnabled || false);
   const [mpesaShortcode, setMpesaShortcode] = useState(settings.mpesaShortcode || "");
@@ -163,9 +161,8 @@ export default function GatewayModule({
         if (onShowToast) onShowToast(resData.message || "Notificação enviada com sucesso via API!", "success");
       }
       onAddAuditLog("Enviar Mensagem WhatsApp", "GATEWAY", `Notificação enviada via WhatsApp (${whatsappProvider}) para ${defaultPhone}.`);
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      if (onShowToast) onShowToast(`Erro no Gateway: ${errMsg}. Redirecionando para Link Direto...`, "warning");
+    } catch (err: any) {
+      if (onShowToast) onShowToast(`Erro no Gateway: ${err.message}. Redirecionando para Link Direto...`, "warning");
       window.open(directUrl, "_blank", "noopener,noreferrer");
     } finally {
       if (type === "test") setSendingTest(false);
@@ -229,11 +226,11 @@ export default function GatewayModule({
       if (onShowToast) {
         onShowToast("Comunicação com gateways operacionais verificada com sucesso.", "success", "Verificação Concluída");
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       setIsSimulatingPolling(false);
       setSimulatedPollingStatus(null);
       if (onShowToast) {
-        onShowToast(err instanceof Error ? err.message : "Falha na comunicação com o servidor.", "error", "Erro de Validação");
+        onShowToast(err?.message || "Falha na comunicação com o servidor.", "error", "Erro de Validação");
       }
     }
   };
@@ -454,7 +451,7 @@ export default function GatewayModule({
                 <select
                   disabled={!canEdit || !whatsappEnabled}
                   value={whatsappProvider}
-                  onChange={(e) => setWhatsappProvider(e.target.value as "DIRECT_LINK" | "EVOLUTION_API" | "TWILIO" | "META_CLOUD")}
+                  onChange={(e) => setWhatsappProvider(e.target.value as any)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs font-bold text-slate-800 disabled:opacity-60"
                 >
                   <option value="DIRECT_LINK">Link Direto (wa.me) - 100% Grátis e Ilimitado</option>

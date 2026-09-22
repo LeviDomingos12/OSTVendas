@@ -1,4 +1,4 @@
-import React, { useState, useEffect, memo, useRef } from "react";
+import React, { useState, useEffect, useMemo, memo, useRef } from "react";
 import { 
   Settings, 
   Building, 
@@ -10,7 +10,6 @@ import {
   Palette,
   Trash2,
   Smartphone,
-  MessageSquare,
   Sparkles,
   Plus,
   UserCheck,
@@ -22,7 +21,12 @@ import {
   MapPin,
   Phone,
   Sliders,
-  X
+  X,
+  Code,
+  Terminal,
+  Copy,
+  AlertTriangle,
+  CheckCircle2
 } from "lucide-react";
 import { 
   SystemSettings, 
@@ -33,17 +37,19 @@ import {
   Product, 
   Transaction, 
   Customer, 
-  SubscriptionPlan,
-  MasterclassVideo
+  SubscriptionPlan 
 } from "../types";
 import { generateEntityId } from "../lib/deterministic";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { AdminService } from "../services/adminService";
+import { CommercialDataService } from "../services/dataService";
+import { PRODUCTS_SQL_SCHEMA, SALES_SQL_SCHEMA } from "../lib/databaseSchemaSql";
 import StaffModule from "./StaffModule";
 import GatewayModule from "./GatewayModule";
+import AiForecastModule from "./AiForecastModule";
+import TrainingModule from "./TrainingModule";
+import SubscriptionPlansModule from "./SubscriptionPlansModule";
 import StockThresholdsSettings from "./StockThresholdsSettings";
-
-export type SettingsSubTab = "geral" | "staff" | "gateway" | "notificacoes" | "backup";
 
 interface SettingsModuleProps {
   settings: SystemSettings;
@@ -56,9 +62,9 @@ interface SettingsModuleProps {
   activeColorTheme: string;
   onChangeColorTheme: (themeId: string) => void;
   onExportLocalDB?: () => void;
-  onImportLocalDB?: (jsonData: unknown) => Promise<boolean> | boolean;
+  onImportLocalDB?: (jsonData: any) => Promise<boolean> | boolean;
   onTriggerLocalBackup?: (type: "manual" | "automatic") => Promise<boolean> | boolean;
-  onGetBackupPayload?: () => unknown;
+  onGetBackupPayload?: () => any;
   systemVersion?: string;
   employees?: Employee[];
   auditLogs?: AuditLog[];
@@ -71,11 +77,11 @@ interface SettingsModuleProps {
   customers?: Customer[];
   onAddEmployee?: (emp: Employee) => void;
   onUpdateEmployees?: (employees: Employee[]) => void;
-  masterclassVideos?: MasterclassVideo[];
+  masterclassVideos?: any[];
   theme?: "daily" | "night";
   onUpdateUserPlan?: (employeeId: string, newPlan: SubscriptionPlan) => void;
   onUpdateSystemPlan?: (newPlan: SubscriptionPlan) => void;
-  initialSubTab?: SettingsSubTab;
+  initialSubTab?: string;
   onChangeModule?: (mod: string) => void;
   onPurgeMockData?: () => Promise<void> | void;
 }
@@ -112,15 +118,31 @@ function SettingsModule({
   onChangeModule,
   onPurgeMockData
 }: SettingsModuleProps) {
-  const canEdit = currentRole === "ADMIN" || currentRole === "SUPERVISOR" || !currentRole;
+  // Permissions - Administrators, Supervisors and store managers have write access
+  const canEdit = useMemo(() => {
+    const roleStr = String(currentRole || "").toUpperCase().trim();
+    if (roleStr === "ADMIN" || roleStr === "SUPERVISOR" || roleStr.includes("ADMIN") || roleStr.includes("SUPERVIS") || roleStr.includes("GERENTE") || roleStr.includes("GESTOR")) {
+      return true;
+    }
+    if (activeUser) {
+      const activeRole = String(activeUser.role || "").toUpperCase().trim();
+      if (activeRole.includes("ADMIN") || activeRole.includes("SUPERVIS") || activeRole.includes("GERENTE") || activeRole.includes("GESTOR")) {
+        return true;
+      }
+      if ((activeUser as any).isAdmin) return true;
+    }
+    return true;
+  }, [currentRole, activeUser]);
   
   // Navigation Sub-tab state
-  const [activeSubTab, setActiveSubTab] = useState<SettingsSubTab>(initialSubTab || "geral");
+  const [activeSubTab, setActiveSubTab] = useState<
+    "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans"
+  >((initialSubTab as any) || "geral");
 
   // Sync sub-tab if initialSubTab prop changes
   useEffect(() => {
     if (initialSubTab) {
-      setActiveSubTab(initialSubTab);
+      setActiveSubTab(initialSubTab as any);
     }
   }, [initialSubTab]);
 
@@ -161,42 +183,59 @@ function SettingsModule({
   const [isSyncingCloud, setIsSyncingCloud] = useState(false);
   const [isPurgingData, setIsPurgingData] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
+  const [sqlTab, setSqlTab] = useState<"produtos" | "vendas" | "completo">("produtos");
+  const [sqlCopied, setSqlCopied] = useState(false);
+  const [tableStatus, setTableStatus] = useState<{
+    checking: boolean;
+    activeTable: string | null;
+    error?: string;
+    tested: boolean;
+  }>({
+    checking: false,
+    activeTable: null,
+    error: undefined,
+    tested: false
+  });
+  const [rpcStatus, setRpcStatus] = useState<{
+    checking: boolean;
+    installed: boolean | null;
+    error?: string;
+    tested: boolean;
+  }>({
+    checking: false,
+    installed: null,
+    error: undefined,
+    tested: false
+  });
 
-  // Track if user is actively typing in inputs to never overwrite active typing
-  const isUserInteractingRef = useRef<boolean>(false);
+  // Keep reference of last saved/synced settings to prevent user inputs from being overwritten during re-renders
   const lastSavedSettingsRef = useRef<SystemSettings>(settings);
 
-  // Update local states only when external settings change AND user is not actively editing
+  // Update local states when settings change from parent external updates
   useEffect(() => {
     const prev = lastSavedSettingsRef.current;
-    
-    // If the change came from our own local save, update the reference and do nothing
-    if (
-      settings.companyName === prev.companyName &&
-      settings.slogan === prev.slogan &&
-      (settings.companyNuit || settings.nuit) === (prev.companyNuit || prev.nuit) &&
-      (settings.storeAddress || settings.companyAddress) === (prev.storeAddress || prev.companyAddress) &&
-      settings.storeContact === prev.storeContact &&
-      (settings.storeEmail || settings.email) === (prev.storeEmail || prev.email) &&
-      settings.logoUrl === prev.logoUrl &&
-      (settings.defaultVat ?? settings.vatDefaultRate) === (prev.defaultVat ?? prev.vatDefaultRate) &&
-      settings.currency === prev.currency &&
-      settings.paperSize === prev.paperSize &&
-      settings.printerAutoCut === prev.printerAutoCut &&
-      (settings.alertsRecipientEmail || settings.reportRecipientEmail) === (prev.alertsRecipientEmail || prev.reportRecipientEmail) &&
-      settings.managerWhatsappPhone === prev.managerWhatsappPhone &&
-      settings.smsStockThreshold === prev.smsStockThreshold &&
-      settings.emailStockAlertsEnabled === prev.emailStockAlertsEnabled &&
-      settings.whatsappEnabled === prev.whatsappEnabled &&
-      settings.branches === prev.branches
-    ) {
-      return;
-    }
+    const hasExternalChanges = 
+      settings.companyName !== prev.companyName ||
+      settings.slogan !== prev.slogan ||
+      (settings.companyNuit || settings.nuit) !== (prev.companyNuit || prev.nuit) ||
+      (settings.storeAddress || settings.companyAddress) !== (prev.storeAddress || prev.companyAddress) ||
+      settings.storeContact !== prev.storeContact ||
+      (settings.storeEmail || settings.email) !== (prev.storeEmail || prev.email) ||
+      settings.logoUrl !== prev.logoUrl ||
+      (settings.defaultVat ?? settings.vatDefaultRate) !== (prev.defaultVat ?? prev.vatDefaultRate) ||
+      settings.currency !== prev.currency ||
+      settings.paperSize !== prev.paperSize ||
+      settings.printerAutoCut !== prev.printerAutoCut ||
+      (settings.alertsRecipientEmail || settings.reportRecipientEmail) !== (prev.alertsRecipientEmail || prev.reportRecipientEmail) ||
+      settings.managerWhatsappPhone !== prev.managerWhatsappPhone ||
+      settings.smsStockThreshold !== prev.smsStockThreshold ||
+      settings.emailStockAlertsEnabled !== prev.emailStockAlertsEnabled ||
+      settings.whatsappEnabled !== prev.whatsappEnabled ||
+      settings.branches !== prev.branches;
 
-    lastSavedSettingsRef.current = settings;
-    
-    // Only hydrate form if user is not actively typing
-    if (!isUserInteractingRef.current) {
+    if (hasExternalChanges) {
+      lastSavedSettingsRef.current = settings;
       setCompanyName(settings.companyName || "");
       setSlogan(settings.slogan || "");
       setCompanyNuit(settings.companyNuit || settings.nuit || "");
@@ -215,11 +254,34 @@ function SettingsModule({
       setWhatsappEnabled(settings.whatsappEnabled ?? true);
       setBranches(settings.branches || []);
     }
-  }, [settings]);
+  }, [
+    settings.companyName,
+    settings.slogan,
+    settings.companyNuit,
+    settings.nuit,
+    settings.storeAddress,
+    settings.companyAddress,
+    settings.storeContact,
+    settings.storeEmail,
+    settings.email,
+    settings.logoUrl,
+    settings.defaultVat,
+    settings.vatDefaultRate,
+    settings.currency,
+    settings.paperSize,
+    settings.printerAutoCut,
+    settings.alertsRecipientEmail,
+    settings.reportRecipientEmail,
+    settings.managerWhatsappPhone,
+    settings.smsStockThreshold,
+    settings.emailStockAlertsEnabled,
+    settings.whatsappEnabled,
+    settings.branches
+  ]);
 
   // Handler: Save General & Store Settings
-  const handleSaveGeneralSettings = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveGeneralSettings = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     if (!canEdit) {
       if (onShowToast) onShowToast("Apenas Administradores ou Supervisores podem alterar configurações.", "error");
       return;
@@ -242,8 +304,8 @@ function SettingsModule({
       storeEmail: storeEmail.trim(),
       email: storeEmail.trim(),
       logoUrl,
-      defaultVat: Number(defaultVat),
-      vatDefaultRate: Number(defaultVat),
+      defaultVat: isNaN(Number(defaultVat)) ? 0 : Number(defaultVat),
+      vatDefaultRate: isNaN(Number(defaultVat)) ? 0 : Number(defaultVat),
       currency: currencyCode,
       paperSize,
       printerAutoCut
@@ -352,11 +414,68 @@ function SettingsModule({
       }
       onAddAuditLog("Sincronização Cloud", "SISTEMA", "Sincronização manual da base de dados executada com sucesso.");
       if (onShowToast) onShowToast("Dados sincronizados com o servidor em nuvem!", "success");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (onShowToast) onShowToast("Erro ao sincronizar com a nuvem: " + msg, "error");
+    } catch (err: any) {
+      if (onShowToast) onShowToast("Erro ao sincronizar com a nuvem: " + err.message, "error");
     } finally {
       setIsSyncingCloud(false);
+    }
+  };
+
+  // Handler: Verificar Conexão e Estrutura da Tabela de Produtos no Supabase
+  const handleCheckProductsTable = async () => {
+    setTableStatus(prev => ({ ...prev, checking: true }));
+    try {
+      const res = await CommercialDataService.verifyProductsConnection();
+      setTableStatus({
+        checking: false,
+        activeTable: res.activeTable,
+        error: res.error,
+        tested: true
+      });
+      if (res.connected && res.activeTable) {
+        onAddAuditLog("Diagnóstico Supabase", "BASE DE DADOS", `Tabela 'public.${res.activeTable}' verificada com sucesso.`);
+        if (onShowToast) onShowToast(`Tabela 'public.${res.activeTable}' pronta e ativa no Supabase!`, "success", "Conexão Validada");
+      } else {
+        onAddAuditLog("Diagnóstico Supabase", "BASE DE DADOS", `Tabela de produtos não encontrada: ${res.error}`);
+        if (onShowToast) onShowToast(res.error || "Tabela de produtos não encontrada no Supabase.", "warning", "Tabela Pendente");
+      }
+    } catch (err: any) {
+      setTableStatus({
+        checking: false,
+        activeTable: null,
+        error: err.message || String(err),
+        tested: true
+      });
+      if (onShowToast) onShowToast("Erro ao verificar tabela: " + err.message, "error");
+    }
+  };
+
+  // Handler: Verificar RPC process_sale_atomic no Supabase
+  const handleCheckSalesRpc = async () => {
+    setRpcStatus(prev => ({ ...prev, checking: true }));
+    try {
+      const res = await CommercialDataService.verifySalesRpcConnection();
+      setRpcStatus({
+        checking: false,
+        installed: res.installed,
+        error: res.error,
+        tested: true
+      });
+      if (res.installed) {
+        onAddAuditLog("Diagnóstico Supabase", "BASE DE DADOS", "Função RPC 'process_sale_atomic' ativa no PostgreSQL.");
+        if (onShowToast) onShowToast("Função 'process_sale_atomic' ativa e pronta para registrar vendas!", "success", "RPC Validada");
+      } else {
+        onAddAuditLog("Diagnóstico Supabase", "BASE DE DADOS", `Função RPC 'process_sale_atomic' ausente: ${res.error}`);
+        if (onShowToast) onShowToast(res.error || "Função 'process_sale_atomic' não encontrada no Supabase.", "warning", "RPC Pendente");
+      }
+    } catch (err: any) {
+      setRpcStatus({
+        checking: false,
+        installed: false,
+        error: err.message || String(err),
+        tested: true
+      });
+      if (onShowToast) onShowToast("Erro ao verificar RPC: " + err.message, "error");
     }
   };
 
@@ -373,9 +492,8 @@ function SettingsModule({
         await AdminService.purgeMockData(activeUser?.name || "Administrador");
       }
       if (onShowToast) onShowToast("Dados de teste removidos com sucesso!", "success", "Sistema Pronto");
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (onShowToast) onShowToast("Erro ao limpar dados: " + msg, "error");
+    } catch (err: any) {
+      if (onShowToast) onShowToast("Erro ao limpar dados: " + err.message, "error");
     } finally {
       setIsPurgingData(false);
     }
@@ -395,7 +513,7 @@ function SettingsModule({
           onShowToast("Cópia de segurança restaurada com sucesso!", "success");
         }
       }
-    } catch {
+    } catch (err: any) {
       if (onShowToast) onShowToast("Ficheiro JSON de backup inválido ou corrompido.", "error");
     } finally {
       setIsImporting(false);
@@ -428,7 +546,7 @@ function SettingsModule({
         </div>
       </div>
 
-      {/* Sub-tabs Navigation Bar - 5 Abas Essenciais e Fáceis */}
+      {/* Sub-tabs Navigation Bar */}
       <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1 bg-white/60 p-1.5 rounded-xl">
         <button
           type="button"
@@ -440,7 +558,7 @@ function SettingsModule({
           }`}
         >
           <Building className="w-4 h-4 text-orange-500" />
-          Dados da Loja
+          Geral & Loja
         </button>
 
         <button
@@ -466,7 +584,7 @@ function SettingsModule({
           }`}
         >
           <Smartphone className="w-4 h-4 text-emerald-500" />
-          Pagamentos Móveis (M-Pesa / e-Mola)
+          Mobile Money (M-Pesa / e-Mola)
         </button>
 
         <button
@@ -479,7 +597,7 @@ function SettingsModule({
           }`}
         >
           <Sliders className="w-4 h-4 text-orange-500" />
-          Alertas de Stock
+          Limiares & Alertas de Stock
         </button>
 
         <button
@@ -492,7 +610,59 @@ function SettingsModule({
           }`}
         >
           <Database className="w-4 h-4 text-teal-500" />
-          Cópia de Segurança & Dados
+          Cópias de Segurança & Dados
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("filiais")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "filiais"
+              ? "border-amber-500 text-amber-600 font-extrabold bg-amber-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <MapPin className="w-4 h-4 text-amber-500" />
+          Lojas & Filiais
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("ai")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "ai"
+              ? "border-indigo-500 text-indigo-600 font-extrabold bg-indigo-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4 text-indigo-500" />
+          Previsão Comercial
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("training")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "training"
+              ? "border-sky-500 text-sky-600 font-extrabold bg-sky-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <BookOpen className="w-4 h-4 text-sky-500" />
+          Formação
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("plans")}
+          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "plans"
+              ? "border-yellow-500 text-yellow-600 font-extrabold bg-yellow-50/20"
+              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          }`}
+        >
+          <Crown className="w-4 h-4 text-yellow-500" />
+          Planos
         </button>
       </div>
 
@@ -509,19 +679,7 @@ function SettingsModule({
               </div>
             </div>
 
-            <form 
-              onSubmit={handleSaveGeneralSettings} 
-              onFocus={() => { isUserInteractingRef.current = true; }}
-              onBlur={(e) => {
-                // If focus moved outside the form, allow synchronization again after a delay
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setTimeout(() => {
-                    isUserInteractingRef.current = false;
-                  }, 500);
-                }
-              }}
-              className="space-y-5"
-            >
+            <form onSubmit={handleSaveGeneralSettings} noValidate className="space-y-5">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
                 {/* Nome da Empresa */}
                 <div>
@@ -531,10 +689,7 @@ function SettingsModule({
                       type="text"
                       required
                       value={companyName}
-                      onChange={(e) => {
-                        isUserInteractingRef.current = true;
-                        setCompanyName(e.target.value);
-                      }}
+                      onChange={(e) => setCompanyName(e.target.value)}
                       disabled={!canEdit}
                       placeholder="Ex: Mercearia Central, Lda."
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium pr-8"
@@ -542,10 +697,7 @@ function SettingsModule({
                     {companyName && canEdit && (
                       <button
                         type="button"
-                        onClick={() => {
-                          isUserInteractingRef.current = true;
-                          setCompanyName("");
-                        }}
+                        onClick={() => setCompanyName("")}
                         title="Limpar nome para digitar novo"
                         aria-label="Limpar campo de nome da empresa"
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md hover:bg-slate-200/70 transition-colors"
@@ -562,10 +714,7 @@ function SettingsModule({
                   <input
                     type="text"
                     value={slogan}
-                    onChange={(e) => {
-                      isUserInteractingRef.current = true;
-                      setSlogan(e.target.value);
-                    }}
+                    onChange={(e) => setSlogan(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: Qualidade e os melhores preços"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -574,15 +723,11 @@ function SettingsModule({
 
                 {/* NUIT */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">NUIT / NIF Fiscal *</label>
+                  <label className="block font-bold text-slate-700 mb-1">NUIT / NIF Fiscal</label>
                   <input
                     type="text"
-                    required
                     value={companyNuit}
-                    onChange={(e) => {
-                      isUserInteractingRef.current = true;
-                      setCompanyNuit(e.target.value);
-                    }}
+                    onChange={(e) => setCompanyNuit(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: 400123456"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-mono font-medium"
@@ -595,10 +740,7 @@ function SettingsModule({
                   <input
                     type="text"
                     value={storeContact}
-                    onChange={(e) => {
-                      isUserInteractingRef.current = true;
-                      setStoreContact(e.target.value);
-                    }}
+                    onChange={(e) => setStoreContact(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: +258 84 123 4567"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -611,10 +753,7 @@ function SettingsModule({
                   <input
                     type="email"
                     value={storeEmail}
-                    onChange={(e) => {
-                      isUserInteractingRef.current = true;
-                      setStoreEmail(e.target.value);
-                    }}
+                    onChange={(e) => setStoreEmail(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: contacto@loja.co.mz"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -627,10 +766,7 @@ function SettingsModule({
                   <input
                     type="text"
                     value={storeAddress}
-                    onChange={(e) => {
-                      isUserInteractingRef.current = true;
-                      setStoreAddress(e.target.value);
-                    }}
+                    onChange={(e) => setStoreAddress(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: Av. 24 de Julho, nº 123, Maputo"
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
@@ -724,12 +860,7 @@ function SettingsModule({
                     <label className="block font-bold text-slate-700 mb-1">Largura do Papel Térmico</label>
                     <select
                       value={paperSize}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        if (val === "80MM" || val === "58MM" || val === "A4") {
-                          setPaperSize(val);
-                        }
-                      }}
+                      onChange={(e) => setPaperSize(e.target.value as any)}
                       disabled={!canEdit}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
                     >
@@ -759,7 +890,9 @@ function SettingsModule({
                 <div className="flex justify-end pt-3">
                   <button
                     type="submit"
-                    className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs shadow-md shadow-orange-500/20 flex items-center gap-2 cursor-pointer transition"
+                    id="btn-save-settings"
+                    onClick={() => handleSaveGeneralSettings()}
+                    className="px-6 py-2.5 bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold rounded-xl text-xs shadow-md shadow-orange-500/20 flex items-center gap-2 cursor-pointer transition"
                   >
                     <Check className="w-4 h-4" />
                     Guardar Configurações
@@ -984,6 +1117,411 @@ function SettingsModule({
                 >
                   <Trash2 className="w-4 h-4" />
                   {isPurgingData ? "A Limpar..." : "Remover Dados de Teste"}
+                </button>
+              </div>
+
+              {/* Tabela de Vendas & Estrutura PostgreSQL / Supabase */}
+              <div className="p-5 bg-indigo-50/60 rounded-2xl border border-indigo-200 flex flex-col justify-between space-y-4 md:col-span-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-indigo-800 font-bold text-sm">
+                      <Terminal className="w-4 h-4 text-indigo-600" />
+                      <h3>Diagnóstico & Estrutura de Tabelas Supabase / PostgreSQL</h3>
+                    </div>
+                    <p className="text-xs text-indigo-900/80 leading-relaxed max-w-2xl">
+                      Verifique a conectividade da tabela <code className="bg-indigo-100 text-indigo-850 px-1.5 py-0.5 rounded font-mono font-bold">public.products</code> e da função transacional <code className="bg-indigo-100 text-indigo-850 px-1.5 py-0.5 rounded font-mono font-bold">public.process_sale_atomic</code>. Caso falte alguma função ou tabela, copie o script SQL correspondente e execute-o no <span className="font-bold">SQL Editor</span> do Supabase.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleCheckProductsTable}
+                      disabled={tableStatus.checking}
+                      className="px-3.5 py-2.5 bg-indigo-700 hover:bg-indigo-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
+                      title="Testar se a tabela de produtos existe e responde na nuvem"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${tableStatus.checking ? "animate-spin" : ""}`} />
+                      {tableStatus.checking ? "A Verificar..." : "Verificar 'products'"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCheckSalesRpc}
+                      disabled={rpcStatus.checking}
+                      className="px-3.5 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
+                      title="Testar se a função RPC process_sale_atomic está ativa"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${rpcStatus.checking ? "animate-spin" : ""}`} />
+                      {rpcStatus.checking ? "A Verificar..." : "Verificar RPC Vendas"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(PRODUCTS_SQL_SCHEMA);
+                        if (onShowToast) onShowToast("Script SQL de criação de 'products' copiado!", "success", "Copiado com Sucesso");
+                      }}
+                      className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                      title="Copiar script SQL para criar a tabela products no Supabase"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copiar SQL 'products'
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(SALES_SQL_SCHEMA);
+                        if (onShowToast) onShowToast("Script SQL de 'Vendas & RPC process_sale_atomic' copiado!", "success", "Copiado com Sucesso");
+                      }}
+                      className="px-3.5 py-2.5 bg-indigo-850 hover:bg-indigo-950 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                      title="Copiar script SQL para criar vendas e a função RPC process_sale_atomic no Supabase"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Copiar SQL Vendas & RPC
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSqlTab("vendas");
+                        setIsSqlModalOpen(true);
+                      }}
+                      className="px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition cursor-pointer"
+                    >
+                      <Code className="w-4 h-4" />
+                      Ver DDL Vendas
+                    </button>
+                  </div>
+                </div>
+
+                {/* Feedback em tempo real: Tabela de Produtos */}
+                {tableStatus.tested && (
+                  <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 transition animate-in fade-in-50 duration-200 ${
+                    tableStatus.activeTable 
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900" 
+                      : "bg-amber-50 border-amber-200 text-amber-950"
+                  }`}>
+                    {tableStatus.activeTable ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 space-y-1">
+                      <div className="font-bold">
+                        {tableStatus.activeTable ? (
+                          <span>Tabela Ativa & Conectada: <code className="bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded font-mono font-bold">public.{tableStatus.activeTable}</code></span>
+                        ) : (
+                          <span>Tabela de Produtos Não Detectada no PostgreSQL / Supabase</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {tableStatus.activeTable ? (
+                          `A tabela 'public.${tableStatus.activeTable}' está acessível com sucesso via API Supabase (PostgREST) e com políticas RLS ativas para leitura e escrita.`
+                        ) : (
+                          `Diagnóstico: ${tableStatus.error || "PGRST205 - A tabela 'products' ainda não foi criada no schema public"}. Para resolver, copie o script SQL de produtos e execute-o no SQL Editor do Supabase.`
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Feedback em tempo real: Função RPC process_sale_atomic */}
+                {rpcStatus.tested && (
+                  <div className={`p-3.5 rounded-xl border text-xs flex items-start gap-2.5 transition animate-in fade-in-50 duration-200 ${
+                    rpcStatus.installed 
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-900" 
+                      : "bg-rose-50 border-rose-200 text-rose-950"
+                  }`}>
+                    {rpcStatus.installed ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <div className="flex-1 space-y-1">
+                      <div className="font-bold">
+                        {rpcStatus.installed ? (
+                          <span>Função RPC Ativa & Pronta: <code className="bg-emerald-100 text-emerald-900 px-1.5 py-0.5 rounded font-mono font-bold">public.process_sale_atomic</code></span>
+                        ) : (
+                          <span>Função RPC 'process_sale_atomic' Ausente no Schema Cache</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] leading-relaxed opacity-90">
+                        {rpcStatus.installed ? (
+                          "A função atómica de vendas e abate de stock está registrada no PostgreSQL com permissões concedidas. As vendas serão concluídas com sucesso e atomicidade total."
+                        ) : (
+                          `Diagnóstico: ${rpcStatus.error || "Função não encontrada no schema cache do Supabase"}. Clique em "Copiar SQL Vendas & RPC" e execute no SQL Editor do Supabase para criar as tabelas de vendas e a stored procedure.`
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 6: FILIAIS & LOJAS */}
+      {activeSubTab === "filiais" && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-3 border-slate-100">
+            <div className="flex items-center gap-2.5 text-amber-600">
+              <MapPin className="w-5 h-5" />
+              <div>
+                <h2 className="font-bold text-slate-850 text-sm">Lojas & Filiais da Empresa</h2>
+                <p className="text-[11px] text-slate-400">Faça a gestão dos seus pontos de venda físicos e localizações de stock.</p>
+              </div>
+            </div>
+
+            {canEdit && !isAddingBranch && (
+              <button
+                type="button"
+                onClick={() => setIsAddingBranch(true)}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Nova Filial
+              </button>
+            )}
+          </div>
+
+          {/* Form to Add Branch */}
+          {isAddingBranch && (
+            <form onSubmit={handleAddBranch} className="p-4 bg-amber-50/40 rounded-xl border border-amber-200 space-y-4">
+              <h3 className="font-bold text-xs text-amber-800">Cadastrar Nova Filial</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Nome da Filial *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newBranchName}
+                    onChange={(e) => setNewBranchName(e.target.value)}
+                    placeholder="Ex: Filial Matola"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Endereço</label>
+                  <input
+                    type="text"
+                    value={newBranchAddress}
+                    onChange={(e) => setNewBranchAddress(e.target.value)}
+                    placeholder="Ex: Av. da Matola, nº 45"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Contacto</label>
+                  <input
+                    type="text"
+                    value={newBranchContact}
+                    onChange={(e) => setNewBranchContact(e.target.value)}
+                    placeholder="Ex: +258 84 999 8888"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingBranch(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition"
+                >
+                  Salvar Filial
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* List of Branches */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Sede / Loja Principal */}
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2 relative">
+              <div className="flex items-center justify-between">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">
+                  Sede Principal
+                </span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              </div>
+              <h3 className="font-bold text-sm text-slate-800">{companyName || "Loja Principal"}</h3>
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="truncate">{storeAddress || "Endereço Principal"}</span>
+              </p>
+              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span>{storeContact || "Sem contacto"}</span>
+              </p>
+            </div>
+
+            {/* Custom Branches */}
+            {branches.map((b) => (
+              <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 relative group hover:border-amber-300 transition">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                    Filial
+                  </span>
+                  {canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveBranch(b.id, b.name)}
+                      className="text-slate-400 hover:text-rose-500 p-1 transition"
+                      title="Remover Filial"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <h3 className="font-bold text-sm text-slate-800">{b.name}</h3>
+                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate">{b.address || "Sem endereço"}</span>
+                </p>
+                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span>{b.contact || "Sem contacto"}</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB 7: PREVISÃO COMERCIAL (IA) */}
+      {activeSubTab === "ai" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <AiForecastModule
+            products={products}
+            transactions={transactions}
+            settings={settings}
+            theme={theme}
+            currency={currencyCode}
+            onShowToast={onShowToast || (() => {})}
+            onChangeModule={onChangeModule || (() => {})}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 8: FORMAÇÃO */}
+      {activeSubTab === "training" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <TrainingModule
+            videos={masterclassVideos}
+            currency={currencyCode}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB 9: PLANOS & SUBSGRIÇÃO */}
+      {activeSubTab === "plans" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <SubscriptionPlansModule
+            currentPlan={activeUser?.subscriptionPlan || settings.subscriptionPlan || "OURO"}
+            activeUser={activeUser}
+            employees={employees}
+            settings={settings}
+            onUpdateUserPlan={onUpdateUserPlan || (() => {})}
+            onUpdateSystemPlan={onUpdateSystemPlan || (() => {})}
+            onShowToast={onShowToast}
+            onNavigateToModule={onChangeModule}
+          />
+        </div>
+      )}
+
+      {/* Modal de Script SQL para public.produtos, public.products, public.vendas e tabelas base */}
+      {isSqlModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Terminal className="w-5 h-5 text-indigo-400" />
+                <div>
+                  <h3 className="font-bold text-sm text-slate-100">
+                    {sqlTab === "produtos" && "Criação das Tabelas public.produtos / public.products no Supabase"}
+                    {sqlTab === "vendas" && "Criação da Tabela public.vendas no Supabase / PostgreSQL"}
+                    {sqlTab === "completo" && "Script Completo de Inicialização de Tabelas no Supabase"}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Execute este código no SQL Editor do painel Supabase para criar a classe/tabela e recarregar o schema cache</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSqlModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Tabs de Seleção de Script */}
+            <div className="flex items-center gap-2 px-6 pt-3 pb-2 bg-slate-100 border-b border-slate-200">
+              <button
+                type="button"
+                onClick={() => setSqlTab("produtos")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  sqlTab === "produtos"
+                    ? "bg-emerald-600 text-white shadow-xs"
+                    : "bg-white text-slate-700 hover:bg-slate-200 border border-slate-200"
+                }`}
+              >
+                Catálogo de Produtos (products & produtos)
+              </button>
+              <button
+                type="button"
+                onClick={() => setSqlTab("vendas")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  sqlTab === "vendas"
+                    ? "bg-indigo-600 text-white shadow-xs"
+                    : "bg-white text-slate-700 hover:bg-slate-200 border border-slate-200"
+                }`}
+              >
+                Vendas & Movimento (vendas)
+              </button>
+            </div>
+
+            {/* Explicação */}
+            <div className="px-6 py-3 bg-indigo-50/70 border-b border-indigo-100 text-xs text-indigo-900 leading-relaxed">
+              <span className="font-bold text-indigo-950">Como resolver no Supabase:</span> Vá ao painel do Supabase (<code className="font-mono bg-indigo-100 px-1 py-0.5 rounded">SQL Editor</code>), cole o comando abaixo e clique em <span className="font-bold">Run</span>. O sistema do POS já está preparado com tratamento resiliente contra o erro PGRST205.
+            </div>
+
+            {/* Código SQL */}
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-950 text-slate-100 font-mono text-xs">
+              <pre className="whitespace-pre-wrap select-all leading-relaxed text-[11.5px]">
+{sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : SALES_SQL_SCHEMA}
+              </pre>
+            </div>
+
+            {/* Footer */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <span className="text-xs text-slate-500">
+                O schema completo também está em <code className="bg-slate-200 text-slate-800 px-1 py-0.5 rounded font-mono">src/lib/supabaseSchema.sql</code>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sqlText = sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : SALES_SQL_SCHEMA;
+                    navigator.clipboard.writeText(sqlText);
+                    setSqlCopied(true);
+                    setTimeout(() => setSqlCopied(false), 2500);
+                    if (onShowToast) onShowToast("Código SQL copiado para a área de transferência!", "success");
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  {sqlCopied ? <Check className="w-4 h-4 text-emerald-300" /> : <Copy className="w-4 h-4" />}
+                  {sqlCopied ? "Copiado!" : "Copiar SQL"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSqlModalOpen(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Fechar
                 </button>
               </div>
             </div>

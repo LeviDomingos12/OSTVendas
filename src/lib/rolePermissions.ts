@@ -95,9 +95,12 @@ export const ROLE_MODULE_PERMISSIONS: Record<string, RoleModulePermission> = {
   },
 };
 
-export function normalizeRoleString(role?: string): UserRole {
-  if (!role) return "CASHIER";
-  const raw = role.toUpperCase().trim();
+/**
+ * Normaliza o perfil de acesso a partir do utilizador ativo
+ */
+export function normalizeUserRole(user?: Employee | null): UserRole {
+  if (!user || !user.role) return "CASHIER";
+  const raw = user.role.toUpperCase().trim();
   
   if (raw.includes("RH") || raw.includes("RECURSOS HUMANOS")) {
     return "RH";
@@ -119,14 +122,6 @@ export function normalizeRoleString(role?: string): UserRole {
 }
 
 /**
- * Normaliza o perfil de acesso a partir do utilizador ativo
- */
-export function normalizeUserRole(user?: Partial<Employee> | null): UserRole {
-  if (!user || !user.role) return "CASHIER";
-  return normalizeRoleString(user.role);
-}
-
-/**
  * Verifica se um determinado cargo tem permissão para aceder a um módulo
  */
 export function canRoleAccessModule(
@@ -135,7 +130,7 @@ export function canRoleAccessModule(
 ): { allowed: boolean; moduleName: string; allowedRoles: UserRole[]; description: string } {
   const normRole: UserRole = typeof role === "string" && ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"].includes(role) 
     ? (role as UserRole)
-    : normalizeRoleString(typeof role === "string" ? role : undefined);
+    : normalizeUserRole({ role } as any);
 
   const rule = ROLE_MODULE_PERMISSIONS[moduleId.toLowerCase()];
   if (!rule) {
@@ -164,7 +159,7 @@ export function canRoleAccessModule(
 export function getDefaultModuleForRole(role: UserRole | string): string {
   const normRole: UserRole = typeof role === "string" && ["ADMIN", "SUPERVISOR", "CASHIER", "AUDITOR", "RH", "FINANCEIRO"].includes(role) 
     ? (role as UserRole)
-    : normalizeRoleString(typeof role === "string" ? role : undefined);
+    : normalizeUserRole({ role } as any);
 
   switch (normRole) {
     case "CASHIER":

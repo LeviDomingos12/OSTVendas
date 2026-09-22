@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Package, 
@@ -49,14 +49,6 @@ export default function StockReplenishModal({
   const [customCostPrice, setCustomCostPrice] = useState<string>("");
   const [recentReplenishments, setRecentReplenishments] = useState<ReplenishedItem[]>([]);
 
-  // Automatically select the first or low-stock product when modal opens if none selected
-  useEffect(() => {
-    if (isOpen && products.length > 0 && !selectedProductId) {
-      const lowStockProd = products.find(p => p.stock <= (p.minStock || 0));
-      setSelectedProductId(lowStockProd ? lowStockProd.id : products[0].id);
-    }
-  }, [isOpen, products, selectedProductId]);
-
   // Find currently selected product
   const selectedProduct = useMemo(() => {
     return products.find(p => p.id === selectedProductId) || null;
@@ -71,7 +63,7 @@ export default function StockReplenishModal({
       p.code.toLowerCase().includes(q) ||
       (p.brand && p.brand.toLowerCase().includes(q)) ||
       (p.barcode && p.barcode.includes(q))
-    ).slice(0, 6);
+    ).slice(0, 5); // Limit to top 5 results for sleek UI
   }, [products, searchQuery]);
 
   // Handle quantity quick presets
@@ -82,9 +74,10 @@ export default function StockReplenishModal({
   const isNight = theme === "night";
 
   // Perform replenishment
-  const executeReplenishment = (closeAfter: boolean) => {
+  const handleConfirmReplenish = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!selectedProduct) {
-      if (onShowToast) onShowToast("Por favor, selecione um produto para dar entrada.", "warning");
+      if (onShowToast) onShowToast("Por favor, selecione um produto.", "warning");
       return;
     }
     if (replenishQty <= 0) {
@@ -135,24 +128,16 @@ export default function StockReplenishModal({
 
     if (onShowToast) {
       onShowToast(
-        `+${addedQty} un adicionadas ao stock de "${selectedProduct.name}"! Total atual: ${newStock} un.`,
+        `Reposição concluída com sucesso! Novo estoque: ${newStock} un.`,
         "success",
         selectedProduct.name
       );
     }
 
-    if (closeAfter) {
-      onClose();
-    } else {
-      setReplenishQty(10);
-      setCustomCostPrice("");
-      setSearchQuery("");
-    }
-  };
-
-  const handleConfirmReplenish = (e: React.FormEvent) => {
-    e.preventDefault();
-    executeReplenishment(true);
+    // Reset inputs but keep selected product for potential consecutive additions
+    setReplenishQty(10);
+    setCustomCostPrice("");
+    setSearchQuery("");
   };
 
   // Undo the last action
@@ -248,116 +233,77 @@ export default function StockReplenishModal({
           <div className="p-6 overflow-y-auto flex-1 grid grid-cols-1 md:grid-cols-12 gap-6 min-h-0">
             {/* Left Column: Form & Search */}
             <div className="md:col-span-7 flex flex-col gap-4 text-left">
-              {/* Product Search Input & Direct Selector */}
-              <div className="space-y-3">
+              {/* Product Search Input */}
+              <div className="relative">
+                <label className={`text-xs font-black uppercase tracking-wider block mb-1.5 ${
+                  isNight ? "text-zinc-400" : "text-slate-500"
+                }`}>
+                  Pesquisar Artigo ou Código
+                </label>
                 <div className="relative">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className={`text-xs font-black uppercase tracking-wider block ${
-                      isNight ? "text-zinc-400" : "text-slate-500"
-                    }`}>
-                      Pesquisar Artigo ou Código
-                    </label>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {products.length} artigos no catálogo
-                    </span>
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      id="replenish-search-input"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Escreva nome, código, marca..."
-                      className={`w-full pl-10 pr-4 py-2.5 rounded-xl border text-xs outline-none font-medium transition-all ${
-                        isNight 
-                          ? "bg-zinc-900 border-zinc-800 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500" 
-                          : "bg-slate-50 border-slate-200 text-slate-850 focus:bg-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
-                      }`}
-                      autoFocus
-                    />
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery("")}
-                        className="absolute right-3 top-2.5 text-[10px] text-slate-400 hover:text-slate-600 font-bold"
-                      >
-                        Limpar
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Dropdown search results */}
-                  <AnimatePresence>
-                    {filteredProducts.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: 5 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: 5 }}
-                        className={`absolute left-0 right-0 mt-1.5 rounded-2xl border shadow-xl z-50 overflow-hidden divide-y ${
-                          isNight 
-                            ? "bg-zinc-900 border-zinc-800 divide-zinc-800 text-slate-200" 
-                            : "bg-white border-slate-200 divide-slate-100 text-slate-800"
-                        }`}
-                      >
-                        {filteredProducts.map(p => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            id={`search-result-prod-${p.id}`}
-                            onClick={() => {
-                              setSelectedProductId(p.id);
-                              setSearchQuery("");
-                            }}
-                            className={`w-full text-left p-3 flex items-center justify-between text-xs transition cursor-pointer hover:bg-orange-500 hover:text-white group`}
-                          >
-                            <div className="flex flex-col">
-                              <span className="font-extrabold line-clamp-1">{p.name}</span>
-                              <span className="text-[10px] opacity-75 font-mono">Cód: {p.code} | {p.brand || "Genérico"}</span>
-                            </div>
-                            <div className="flex items-center gap-2 font-mono text-[10px] font-bold">
-                              <span className="opacity-80">Stock: {p.stock} un</span>
-                              <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-[9px] group-hover:bg-orange-600 group-hover:text-white">
-                                {p.salePrice.toLocaleString()} MT
-                              </span>
-                            </div>
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                  <input
+                    type="text"
+                    id="replenish-search-input"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Escreva nome, código, marca..."
+                    className={`w-full pl-10 pr-4 py-3 rounded-2xl border text-xs outline-none font-medium transition-all ${
+                      isNight 
+                        ? "bg-zinc-900 border-zinc-800 text-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500" 
+                        : "bg-slate-50 border-slate-200 text-slate-850 focus:bg-white focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
+                    }`}
+                    autoFocus
+                  />
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none" />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery("")}
+                      className="absolute right-3 top-3 text-[10px] text-slate-400 hover:text-slate-600 font-bold"
+                    >
+                      Limpar
+                    </button>
+                  )}
                 </div>
 
-                {/* Direct Dropdown Selection */}
-                {products.length > 0 && (
-                  <div>
-                    <label className={`text-[10px] font-bold uppercase tracking-wider block mb-1 ${
-                      isNight ? "text-zinc-500" : "text-slate-400"
-                    }`}>
-                      Ou Selecione Diretamente da Lista:
-                    </label>
-                    <select
-                      id="replenish-select-dropdown"
-                      value={selectedProductId}
-                      onChange={(e) => {
-                        setSelectedProductId(e.target.value);
-                        setSearchQuery("");
-                      }}
-                      className={`w-full p-2.5 rounded-xl border text-xs outline-none font-medium cursor-pointer transition ${
-                        isNight
-                          ? "bg-zinc-900 border-zinc-800 text-zinc-200 focus:border-orange-500"
-                          : "bg-white border-slate-200 text-slate-800 focus:border-orange-500"
+                {/* Dropdown search results */}
+                <AnimatePresence>
+                  {filteredProducts.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 5 }}
+                      className={`absolute left-0 right-0 mt-1.5 rounded-2xl border shadow-xl z-50 overflow-hidden divide-y ${
+                        isNight 
+                          ? "bg-zinc-900 border-zinc-800 divide-zinc-800 text-slate-200" 
+                          : "bg-white border-slate-200 divide-slate-100 text-slate-800"
                       }`}
                     >
-                      <option value="">-- Escolha um artigo para dar entrada --</option>
-                      {products.map(p => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.code}) — Stock: {p.stock} un
-                        </option>
+                      {filteredProducts.map(p => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          id={`search-result-prod-${p.id}`}
+                          onClick={() => {
+                            setSelectedProductId(p.id);
+                            setSearchQuery("");
+                          }}
+                          className={`w-full text-left p-3 flex items-center justify-between text-xs transition cursor-pointer hover:bg-orange-500 hover:text-white group`}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-extrabold line-clamp-1">{p.name}</span>
+                            <span className="text-[10px] opacity-75 font-mono">Cód: {p.code} | {p.brand || "Genérico"}</span>
+                          </div>
+                          <div className="flex items-center gap-2 font-mono text-[10px] font-bold">
+                            <span className="opacity-80">Stock: {p.stock}</span>
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 font-mono text-[9px] group-hover:bg-orange-600 group-hover:text-white">
+                              {p.salePrice.toLocaleString()} MT
+                            </span>
+                          </div>
+                        </button>
                       ))}
-                    </select>
-                  </div>
-                )}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {selectedProduct ? (
@@ -548,12 +494,12 @@ export default function StockReplenishModal({
                   </div>
 
                   {/* Action Buttons */}
-                  <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                  <div className="pt-2 flex gap-2">
                     <button
                       type="button"
                       id="replenish-cancel-btn"
                       onClick={() => setSelectedProductId("")}
-                      className={`py-2.5 px-3 rounded-xl border font-bold text-xs transition cursor-pointer active:scale-98 ${
+                      className={`flex-1 py-3 px-4 rounded-xl border font-extrabold text-xs transition cursor-pointer active:scale-98 ${
                         isNight 
                           ? "bg-zinc-900 border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:text-white" 
                           : "bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200 hover:text-slate-800"
@@ -562,78 +508,27 @@ export default function StockReplenishModal({
                       Trocar Artigo
                     </button>
                     <button
-                      type="button"
-                      id="replenish-continue-btn"
-                      onClick={() => executeReplenishment(false)}
-                      className={`flex-1 py-2.5 px-3 rounded-xl border font-bold text-xs transition cursor-pointer active:scale-98 flex items-center justify-center gap-1.5 ${
-                        isNight
-                          ? "bg-emerald-950/40 border-emerald-800 text-emerald-300 hover:bg-emerald-900/60"
-                          : "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
-                      }`}
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Salvar e Continuar</span>
-                    </button>
-                    <button
                       type="submit"
                       id="replenish-submit-btn"
-                      className="flex-1 py-2.5 px-3 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-orange-500/10 transition cursor-pointer active:scale-98 flex items-center justify-center gap-1.5"
+                      className="flex-2 py-3 px-4 bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-orange-500/10 transition cursor-pointer active:scale-98 flex items-center justify-center gap-2"
                     >
                       <Check className="w-4 h-4 shrink-0" />
-                      <span>Salvar e Fechar</span>
+                      <span>Confirmar Reposição</span>
                     </button>
                   </div>
                 </form>
               ) : (
-                /* No selected product state - Show quick selection list */
-                <div className="space-y-3">
-                  <div className={`p-4 rounded-2xl border text-center ${
-                    isNight ? "border-zinc-800 bg-zinc-900/40" : "border-slate-200 bg-slate-50/50"
-                  }`}>
-                    <h4 className="font-extrabold text-xs text-slate-800 dark:text-slate-200">
-                      Selecione um Artigo para dar Entrada de Stock
-                    </h4>
-                    <p className={`text-[10.5px] mt-0.5 ${isNight ? "text-zinc-500" : "text-slate-400"}`}>
-                      Escolha um produto abaixo ou pesquise na caixa acima:
-                    </p>
+                /* No selected product state */
+                <div className={`p-8 rounded-2xl border border-dashed flex flex-col items-center justify-center text-center py-16 ${
+                  isNight ? "border-zinc-800 bg-zinc-900/10" : "border-slate-200 bg-slate-50/30"
+                }`}>
+                  <div className="w-12 h-12 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mb-3">
+                    <Layers className="w-6 h-6 animate-pulse" />
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[280px] overflow-y-auto pr-1">
-                    {products.slice(0, 10).map((p) => {
-                      const isLow = p.stock <= (p.minStock || 0);
-                      return (
-                        <button
-                          key={p.id}
-                          type="button"
-                          id={`quick-select-card-${p.id}`}
-                          onClick={() => setSelectedProductId(p.id)}
-                          className={`p-3 rounded-xl border text-left flex items-center justify-between transition cursor-pointer hover:border-orange-500 group ${
-                            isNight 
-                              ? "bg-zinc-900 border-zinc-800 hover:bg-zinc-850" 
-                              : "bg-white border-slate-200 hover:bg-orange-50/40 shadow-xs"
-                          }`}
-                        >
-                          <div className="min-w-0 flex-1 pr-2">
-                            <span className="font-bold text-xs text-slate-800 dark:text-zinc-200 truncate block group-hover:text-orange-600">
-                              {p.name}
-                            </span>
-                            <span className="text-[10px] text-slate-400 font-mono">
-                              Cód: {p.code}
-                            </span>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md font-mono ${
-                              isLow 
-                                ? "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-400" 
-                                : "bg-slate-100 text-slate-650 dark:bg-zinc-800 dark:text-zinc-300"
-                            }`}>
-                              {p.stock} un
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <h4 className="font-extrabold text-xs text-slate-800 dark:text-slate-200">Pesquise e Selecione um Produto</h4>
+                  <p className={`text-[10.5px] max-w-xs mt-1 ${isNight ? "text-zinc-500" : "text-slate-400"}`}>
+                    Use a caixa de pesquisa acima para encontrar rapidamente o produto que deseja reabastecer por nome, código ou marca.
+                  </p>
                 </div>
               )}
             </div>

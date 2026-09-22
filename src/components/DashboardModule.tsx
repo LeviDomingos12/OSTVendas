@@ -1,7 +1,5 @@
-import { useMemo, useState, useEffect, memo } from "react";
+import { useMemo, useState, memo } from "react";
 import { 
-  TrendingUp, 
-  TrendingDown, 
   DollarSign, 
   ShoppingBag,
   Calendar,
@@ -9,21 +7,14 @@ import {
   Trash2,
   Percent,
   Receipt,
-  Sparkles,
-  ArrowUpRight,
   Package,
-  Clock,
   Printer,
   ChevronRight,
-  Eye,
-  CheckCircle2,
   X,
   CreditCard,
-  Banknote,
-  Smartphone,
-  Layers,
   ArrowRight,
-  RefreshCw
+  AlertTriangle,
+  RotateCcw
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -38,11 +29,10 @@ import {
   Pie, 
   Cell
 } from "recharts";
-import { Product, Customer, Transaction, CashFlowEntry, SystemSettings, Employee, ProductBatch } from "../types";
-import { normalizeTransaction, extractDateOnly } from "../lib/normalizeTransaction";
+import { Product, Customer, Transaction, CashFlowEntry, SystemSettings } from "../types";
 import { printInvoiceHTML } from "../lib/printHelper";
+import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import { ProfitMarginWidget } from "./dashboard/ProfitMarginWidget";
-import { CommercialDataService } from "../services/dataService";
 
 interface DashboardModuleProps {
   products: Product[];
@@ -50,7 +40,7 @@ interface DashboardModuleProps {
   transactions: Transaction[];
   cashFlow: CashFlowEntry[];
   currency: string;
-  activeUser?: Employee;
+  activeUser?: any;
   onChangeModule?: (mod: string) => void;
   settings?: SystemSettings;
   onUpdateSettings?: (newSettings: Partial<SystemSettings>) => void;
@@ -58,19 +48,18 @@ interface DashboardModuleProps {
   onAddAuditLog?: (action: string, module: string, description: string) => void;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning") => void;
   onCompleteSale?: (transaction: Transaction) => void;
-  pendingSyncQueue?: Record<string, unknown>;
-  isManualSyncing?: boolean;
   isOnline?: boolean;
-  onManualSync?: () => Promise<void> | void;
   theme?: string;
+  onTriggerPanic?: () => void;
+  transactionsError?: string | null;
+  onRetryTransactions?: () => void;
 }
 
 const PAYMENT_COLORS = ["#f97316", "#10b981", "#3b82f6", "#8b5cf6", "#64748b"];
 
 function DashboardModule({
-  products = [],
-  transactions = [],
-  cashFlow = [],
+  products,
+  transactions,
   currency,
   activeUser,
   onChangeModule,
@@ -78,187 +67,100 @@ function DashboardModule({
   onUpdateProduct,
   onAddAuditLog,
   onShowToast,
-  onManualSync
+  transactionsError,
+  onRetryTransactions
 }: DashboardModuleProps) {
-  // Period scope: TODAY, YESTERDAY, LAST_7, THIS_MONTH, ALL
-  const [timeScope, setTimeScope] = useState<"TODAY" | "YESTERDAY" | "LAST_7" | "THIS_MONTH" | "ALL">("TODAY");
-
-  // Dynamic refresh timestamp and state
-  const [currentDate, setCurrentDate] = useState(() => new Date());
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>(() => 
-    new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-  );
+  // Period scope: TODAY, YESTERDAY, LAST_7, THIS_MONTH
+  const [timeScope, setTimeScope] = useState<"TODAY" | "YESTERDAY" | "LAST_7" | "THIS_MONTH">("TODAY");
 
   // Selected Transaction for details modal
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
 
   // Expiry Batch Promo / Discard States
   const [promoProduct, setPromoProduct] = useState<Product | null>(null);
-  const [promoBatch, setPromoBatch] = useState<ProductBatch | null>(null);
+  const [promoBatch, setPromoBatch] = useState<any | null>(null);
   const [discountPercent, setDiscountPercent] = useState<number>(20);
   const [customPromoPrice, setCustomPromoPrice] = useState<string>("");
-  const [confirmDiscardBatch, setConfirmDiscardBatch] = useState<ProductBatch | null>(null);
+  const [isFlyerGeneratorOpen, setIsFlyerGeneratorOpen] = useState(false);
+  const [flyerProduct, setFlyerProduct] = useState<Product | null>(null);
+  const [confirmDiscardBatch, setConfirmDiscardBatch] = useState<any | null>(null);
 
-  // Auto-refresh timer to keep dashboard live and synchronized
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentDate(new Date());
-    }, 20000);
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        setCurrentDate(new Date());
-      }
-    };
-    window.addEventListener("focus", onVisibilityChange);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener("focus", onVisibilityChange);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, []);
-
-  // Gatilho reativo em tempo real para mudanças no estado de transações, fluxo de caixa e produtos
-  useEffect(() => {
-    setCurrentDate(new Date());
-    setLastRefreshedAt(
-      new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-    );
-  }, [transactions, cashFlow, products]);
-
-  // Listener reativo em tempo real para alterações diretas no banco de dados (vendas, caixa, produtos)
-  useEffect(() => {
-    const unsubscribe = CommercialDataService.onDatabaseChange((event) => {
-      if (event.table === "vendas" || event.table === "caixa" || event.table === "produtos") {
-        setCurrentDate(new Date());
-        setLastRefreshedAt(
-          new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
-        );
-      }
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
-  // Normalizar todas as transações de forma robusta e reativa
-  const safeTransactions = useMemo(() => {
-    return (transactions || []).map(normalizeTransaction);
-  }, [transactions]);
-
-  // Robust date helper that extracts YYYY-MM-DD in the user's local timezone
-  const dateSplit = (isoStr: string) => {
-    return extractDateOnly(isoStr);
-  };
-
-  const getLocalDateStr = (d: Date) => {
+  // Date helpers - timezone-safe formatting matching local user time
+  const formatLocalDate = (d: Date) => {
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
     return `${year}-${month}-${day}`;
   };
+
+  const dateSplit = (isoStr: string) => {
+    if (!isoStr) return "";
+    try {
+      const d = new Date(isoStr);
+      if (!isNaN(d.getTime())) return formatLocalDate(d);
+    } catch {
+      // fallback to substring
+    }
+    return isoStr.split("T")[0];
+  };
   
-  const todayStr = useMemo(() => getLocalDateStr(currentDate), [currentDate]);
+  const todayStr = useMemo(() => formatLocalDate(new Date()), []);
   
   const yesterdayStr = useMemo(() => {
-    const d = new Date(currentDate);
+    const d = new Date();
     d.setDate(d.getDate() - 1);
-    return getLocalDateStr(d);
-  }, [currentDate]);
+    return formatLocalDate(d);
+  }, []);
 
   const last7DaysStrings = useMemo(() => {
     const list: string[] = [];
     for (let i = 0; i < 7; i++) {
-      const d = new Date(currentDate);
+      const d = new Date();
       d.setDate(d.getDate() - i);
-      list.push(getLocalDateStr(d));
+      list.push(formatLocalDate(d));
     }
     return list;
-  }, [currentDate]);
+  }, []);
 
   const currentMonthStr = useMemo(() => todayStr.substring(0, 7), [todayStr]);
 
-  // Counts of transactions in each period for the tabs
-  const periodCounts = useMemo(() => {
-    let todayCount = 0;
-    let yesterdayCount = 0;
-    let last7Count = 0;
-    let thisMonthCount = 0;
-
-    safeTransactions.forEach(tx => {
-      const txDate = extractDateOnly(tx.timestamp);
-      if (txDate === todayStr) todayCount++;
-      if (txDate === yesterdayStr) yesterdayCount++;
-      if (last7DaysStrings.includes(txDate)) last7Count++;
-      if (txDate.startsWith(currentMonthStr)) thisMonthCount++;
-    });
-
-    return {
-      today: todayCount,
-      yesterday: yesterdayCount,
-      last7: last7Count,
-      thisMonth: thisMonthCount,
-      all: safeTransactions.length
-    };
-  }, [safeTransactions, todayStr, yesterdayStr, last7DaysStrings, currentMonthStr]);
-
-  // Manual refresh handler
-  const handleManualRefresh = async () => {
-    setIsRefreshing(true);
-    setCurrentDate(new Date());
-    if (onManualSync) {
-      try {
-        await onManualSync();
-      } catch (err) {
-        console.error("Erro ao sincronizar dashboard:", err);
-      }
-    }
-    const newStamp = new Date().toLocaleTimeString("pt-MZ", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    setLastRefreshedAt(newStamp);
-    setTimeout(() => {
-      setIsRefreshing(false);
-      onShowToast?.("Dashboard sincronizado com os dados mais recentes.", "info");
-    }, 350);
-  };
-
-  // Filter transactions based on selected scope (100% REAL DATA, ZERO MOCK)
+  // Filter transactions based on selected scope (100% REAL DATA FROM POSTGRESQL, ZERO MOCK, NO PARALLEL CACHE)
   const scopedTransactions = useMemo(() => {
-    return safeTransactions.filter(tx => {
-      if (timeScope === "ALL") return true;
-      const txDate = extractDateOnly(tx.timestamp);
+    return transactions.filter(tx => {
+      const txDate = dateSplit(tx.timestamp);
       if (timeScope === "TODAY") return txDate === todayStr;
       if (timeScope === "YESTERDAY") return txDate === yesterdayStr;
       if (timeScope === "LAST_7") return last7DaysStrings.includes(txDate);
       if (timeScope === "THIS_MONTH") return txDate.startsWith(currentMonthStr);
       return true;
     });
-  }, [safeTransactions, timeScope, todayStr, yesterdayStr, last7DaysStrings, currentMonthStr]);
+  }, [transactions, timeScope, todayStr, yesterdayStr, last7DaysStrings, currentMonthStr]);
 
   // Product cost lookup helper
   const productCostMap = useMemo(() => {
     const map = new Map<string, number>();
     products.forEach(p => {
-      map.set(p.id, p.costPrice || 0);
+      map.set(p.id, Number(p.costPrice || 0));
     });
     return map;
   }, [products]);
 
-  // Real KPI statistics
+  // Real KPI statistics directly from authoritative PostgreSQL transactions
   const stats = useMemo(() => {
     // Current period metrics
     let totalRevenue = 0;
     let totalCost = 0;
-    let txCount = scopedTransactions.length;
+    let totalQuantity = 0;
+    const txCount = scopedTransactions.length;
 
     scopedTransactions.forEach(tx => {
-      totalRevenue += Number(tx.grandTotal) || 0;
+      totalRevenue += Number(tx.grandTotal || 0);
       if (Array.isArray(tx.items)) {
-        tx.items.forEach((item) => {
+        tx.items.forEach((item: any) => {
+          const qty = Number(item.quantity || 1);
+          totalQuantity += qty;
           const unitCost = item.costPrice !== undefined ? Number(item.costPrice) : (productCostMap.get(item.productId) || 0);
-          totalCost += unitCost * (Number(item.quantity) || 1);
+          totalCost += unitCost * qty;
         });
       }
     });
@@ -268,16 +170,16 @@ function DashboardModule({
     const profitMarginPercent = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
 
     // Yesterday comparison for daily profit margin widget
-    const yesterdayTxs = safeTransactions.filter(tx => extractDateOnly(tx.timestamp) === yesterdayStr);
+    const yesterdayTxs = transactions.filter(tx => dateSplit(tx.timestamp) === yesterdayStr);
     let yRevenue = 0;
     let yCost = 0;
     yesterdayTxs.forEach(tx => {
-      yRevenue += Number(tx.grandTotal) || 0;
+      yRevenue += Number(tx.grandTotal || 0);
       if (Array.isArray(tx.items)) {
-        tx.items.forEach((item) => {
-          const itemWithCost = item as { costPrice?: number };
-          const unitCost = itemWithCost.costPrice !== undefined ? Number(itemWithCost.costPrice) : (productCostMap.get(item.productId) || 0);
-          yCost += unitCost * (Number(item.quantity) || 1);
+        tx.items.forEach((item: any) => {
+          const qty = Number(item.quantity || 1);
+          const unitCost = item.costPrice !== undefined ? Number(item.costPrice) : (productCostMap.get(item.productId) || 0);
+          yCost += unitCost * qty;
         });
       }
     });
@@ -287,31 +189,11 @@ function DashboardModule({
     const profitGrowthRate = yProfit > 0 ? ((totalProfit - yProfit) / yProfit) * 100 : (totalProfit > 0 ? 100 : 0);
     const marginPointsDiff = profitMarginPercent - yMarginPercent;
 
-    // Cash flow metrics in the scoped period
-    let scopedCashInflow = 0;
-    let scopedCashOutflow = 0;
-    (cashFlow || []).forEach(cf => {
-      if (timeScope !== "ALL") {
-        const cfDate = extractDateOnly(cf.timestamp || cf.date);
-        if (timeScope === "TODAY" && cfDate !== todayStr) return;
-        if (timeScope === "YESTERDAY" && cfDate !== yesterdayStr) return;
-        if (timeScope === "LAST_7" && !last7DaysStrings.includes(cfDate)) return;
-        if (timeScope === "THIS_MONTH" && !cfDate.startsWith(currentMonthStr)) return;
-      }
-      const amt = Math.abs(Number(cf.amount) || 0);
-      const isOut = cf.type === "OUT" || cf.type === "OUTFLOW" || (Number(cf.amount) < 0 && cf.type !== "IN");
-      if (isOut) {
-        scopedCashOutflow += amt;
-      } else {
-        scopedCashInflow += amt;
-      }
-    });
-    const netCashFlow = scopedCashInflow - scopedCashOutflow;
-
     return {
       totalRevenue,
       totalCost,
       totalProfit,
+      totalQuantity,
       txCount,
       avgTicket,
       profitMarginPercent,
@@ -320,24 +202,9 @@ function DashboardModule({
       yesterdayProfit: yProfit,
       yesterdayProfitMarginPercent: yMarginPercent,
       profitGrowthRate,
-      marginPointsDiff,
-      scopedCashInflow,
-      scopedCashOutflow,
-      netCashFlow
+      marginPointsDiff
     };
-  }, [
-    scopedTransactions,
-    safeTransactions,
-    yesterdayStr,
-    productCostMap,
-    transactions,
-    cashFlow,
-    products,
-    timeScope,
-    todayStr,
-    last7DaysStrings,
-    currentMonthStr
-  ]);
+  }, [scopedTransactions, transactions, yesterdayStr, productCostMap]);
 
   // Chart: Timeline of sales in selected scope
   const chartTimelineData = useMemo(() => {
@@ -416,57 +283,38 @@ function DashboardModule({
       }
     });
 
-    // ALL: group by month or week
-    if (timeScope === "ALL") {
-      const monthMap: Record<string, number> = {};
-      scopedTransactions.forEach(tx => {
-        const d = dateSplit(tx.timestamp);
-        const m = d.substring(0, 7);
-        if (m) {
-          monthMap[m] = (monthMap[m] || 0) + (tx.grandTotal || 0);
-        }
-      });
-      const keys = Object.keys(monthMap).sort();
-      if (keys.length === 0) return [];
-      return keys.slice(-6).map(k => {
-        const parts = k.split("-");
-        const y = parts[0] || "";
-        const m = parts[1] || "";
-        return {
-          label: `${m}/${y.slice(2)}`,
-          valor: Math.round(monthMap[k] || 0)
-        };
-      });
-    }
-
     return buckets.map(b => ({
       label: b.label,
       valor: Math.round(b.total)
     }));
   }, [scopedTransactions, timeScope, todayStr, yesterdayStr, last7DaysStrings]);
 
-  // Chart: Payment methods distribution (100% REAL)
+  // Chart: Payment methods distribution (100% REAL from PostgreSQL transactions)
   const chartPaymentMethods = useMemo(() => {
     const map: Record<string, number> = {
       "Dinheiro": 0,
       "M-Pesa": 0,
       "E-Mola": 0,
       "Cartão (POS)": 0,
+      "Transferência": 0,
       "Outro": 0
     };
 
     scopedTransactions.forEach(tx => {
       const method = (tx.paymentMethod || "").toUpperCase();
+      const amount = Number(tx.grandTotal || 0);
       if (method === "CASH" || method.includes("DINHEIRO")) {
-        map["Dinheiro"] += tx.grandTotal;
+        map["Dinheiro"] += amount;
       } else if (method.includes("MPESA") || method.includes("M-PESA")) {
-        map["M-Pesa"] += tx.grandTotal;
+        map["M-Pesa"] += amount;
       } else if (method.includes("EMOLA") || method.includes("E-MOLA")) {
-        map["E-Mola"] += tx.grandTotal;
+        map["E-Mola"] += amount;
       } else if (method.includes("CARD") || method.includes("POS") || method.includes("CARTAO") || method.includes("CARTÃO")) {
-        map["Cartão (POS)"] += tx.grandTotal;
+        map["Cartão (POS)"] += amount;
+      } else if (method.includes("TRANSFER") || method.includes("BANCO")) {
+        map["Transferência"] += amount;
       } else {
-        map["Outro"] += tx.grandTotal;
+        map["Outro"] += amount;
       }
     });
 
@@ -477,10 +325,9 @@ function DashboardModule({
 
   // Top Selling Products in period (100% REAL)
   const topProducts = useMemo(() => {
-    const source = scopedTransactions.length > 0 ? scopedTransactions : safeTransactions;
     const map: Record<string, { id: string; name: string; quantity: number; revenue: number; emoji?: string }> = {};
 
-    source.forEach(tx => {
+    scopedTransactions.forEach(tx => {
       if (Array.isArray(tx.items)) {
         tx.items.forEach(item => {
           if (!map[item.productId]) {
@@ -493,10 +340,8 @@ function DashboardModule({
               emoji: originalProduct?.emoji || "📦"
             };
           }
-          const q = Number(item.quantity) || 1;
-          const p = Number(item.price) || 0;
-          map[item.productId].quantity += q;
-          map[item.productId].revenue += p * q;
+          map[item.productId].quantity += item.quantity || 1;
+          map[item.productId].revenue += (item.price || 0) * (item.quantity || 1);
         });
       }
     });
@@ -504,19 +349,18 @@ function DashboardModule({
     return Object.values(map)
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
-  }, [scopedTransactions, safeTransactions, products]);
+  }, [scopedTransactions, products]);
 
-  // Recent Transactions (100% REAL, max 6 - prioritizes current scope, falls back to overall recent)
+  // Recent Transactions in period (100% REAL, max 6)
   const recentTransactions = useMemo(() => {
-    const sourceList = scopedTransactions.length > 0 ? scopedTransactions : safeTransactions;
-    return [...sourceList]
+    return [...scopedTransactions]
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, 6);
-  }, [scopedTransactions, safeTransactions]);
+  }, [scopedTransactions]);
 
   // Expiring Batches (within 30 days) from real products
   const expiringBatches = useMemo(() => {
-    const list: (ProductBatch & { product: Product; daysLeft: number; isExpired: boolean })[] = [];
+    const list: any[] = [];
     const now = new Date();
     const thirtyDaysAhead = new Date();
     thirtyDaysAhead.setDate(now.getDate() + 30);
@@ -577,7 +421,7 @@ function DashboardModule({
     const prod = confirmDiscardBatch.product;
     if (!prod) return;
 
-    const updatedBatches = (prod.batches || []).filter((b) => b.id !== batchId);
+    const updatedBatches = (prod.batches || []).filter((b: any) => b.id !== batchId);
     const discardedQty = confirmDiscardBatch.quantity;
     const newStock = Math.max(0, (prod.stock || 0) - discardedQty);
 
@@ -609,149 +453,96 @@ function DashboardModule({
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider font-mono">
-              Painel de Controlo Comercial • Em tempo real
+              Painel de Controlo Comercial
             </span>
           </div>
           <h1 className="text-xl font-extrabold text-slate-900 tracking-tight">
             Dashboard Executivo
           </h1>
-          <p className="text-xs text-slate-500 flex items-center gap-2">
-            <span>Visão consolidada de vendas, rentabilidade e operações.</span>
-            <span className="text-[10px] text-slate-400 font-mono bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-              Última sincronização: {lastRefreshedAt}
-            </span>
+          <p className="text-xs text-slate-500">
+            Visão consolidada de vendas, rentabilidade e operações em tempo real.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto">
-          {/* Manual Refresh Button */}
+        {/* Period Selector Tabs */}
+        <div className="bg-slate-100/80 p-1 rounded-xl flex items-center gap-1 text-xs font-bold w-full md:w-auto border border-slate-200/50">
           <button
             type="button"
-            onClick={handleManualRefresh}
-            disabled={isRefreshing}
-            className="px-3 py-1.5 rounded-xl border border-slate-200/80 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95 transition"
-            title="Recarregar dados e atualizar indicadores"
+            onClick={() => setTimeScope("TODAY")}
+            className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
+              timeScope === "TODAY"
+                ? "bg-white text-orange-600 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 text-orange-600 ${isRefreshing ? "animate-spin" : ""}`} />
-            <span>{isRefreshing ? "A atualizar..." : "Atualizar"}</span>
+            Hoje
           </button>
-
-          {/* Period Selector Tabs */}
-          <div className="bg-slate-100/80 p-1 rounded-xl flex items-center gap-1 text-xs font-bold w-full md:w-auto border border-slate-200/50 overflow-x-auto">
-            <button
-              type="button"
-              onClick={() => setTimeScope("TODAY")}
-              className={`flex-1 md:flex-initial px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                timeScope === "TODAY"
-                  ? "bg-white text-orange-600 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span>Hoje</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                timeScope === "TODAY" ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"
-              }`}>
-                {periodCounts.today}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeScope("YESTERDAY")}
-              className={`flex-1 md:flex-initial px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                timeScope === "YESTERDAY"
-                  ? "bg-white text-orange-600 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span>Ontem</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                timeScope === "YESTERDAY" ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"
-              }`}>
-                {periodCounts.yesterday}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeScope("LAST_7")}
-              className={`flex-1 md:flex-initial px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                timeScope === "LAST_7"
-                  ? "bg-white text-orange-600 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span>7 Dias</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                timeScope === "LAST_7" ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"
-              }`}>
-                {periodCounts.last7}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeScope("THIS_MONTH")}
-              className={`flex-1 md:flex-initial px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                timeScope === "THIS_MONTH"
-                  ? "bg-white text-orange-600 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span>Este Mês</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                timeScope === "THIS_MONTH" ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"
-              }`}>
-                {periodCounts.thisMonth}
-              </span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeScope("ALL")}
-              className={`flex-1 md:flex-initial px-3 py-1.5 rounded-lg cursor-pointer transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                timeScope === "ALL"
-                  ? "bg-white text-orange-600 shadow-xs"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              <span>Geral</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                timeScope === "ALL" ? "bg-orange-100 text-orange-700" : "bg-slate-200 text-slate-600"
-              }`}>
-                {periodCounts.all}
-              </span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setTimeScope("YESTERDAY")}
+            className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
+              timeScope === "YESTERDAY"
+                ? "bg-white text-orange-600 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Ontem
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimeScope("LAST_7")}
+            className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
+              timeScope === "LAST_7"
+                ? "bg-white text-orange-600 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            7 Dias
+          </button>
+          <button
+            type="button"
+            onClick={() => setTimeScope("THIS_MONTH")}
+            className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
+              timeScope === "THIS_MONTH"
+                ? "bg-white text-orange-600 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            Este Mês
+          </button>
         </div>
       </div>
 
-      {/* Helpful banner if today is empty but transactions exist in other periods */}
-      {timeScope === "TODAY" && scopedTransactions.length === 0 && transactions.length > 0 && (
-        <div className="bg-amber-50/80 border border-amber-200/80 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
-              <Sparkles className="w-4 h-4" />
+      {/* ERROR ALERT: PostgreSQL Sales Fetch Failure (Do NOT mask error as zero sales) */}
+      {transactionsError && (
+        <div id="dashboard-sales-error-banner" className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4.5 text-rose-950 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm" role="alert">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0 mt-0.5 sm:mt-0">
+              <AlertTriangle className="w-5 h-5" />
             </div>
             <div>
-              <p className="font-bold text-amber-950">Ainda não foram registradas vendas no dia de hoje.</p>
-              <p className="text-amber-800 text-[11px] mt-0.5">
-                Existem <strong>{transactions.length}</strong> {transactions.length === 1 ? "venda registrada" : "vendas registradas"} em períodos anteriores no histórico.
+              <h4 className="font-black text-sm text-rose-950 flex items-center gap-2">
+                <span>Falha na Leitura das Vendas (PostgreSQL)</span>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">
+                  Erro Crítico
+                </span>
+              </h4>
+              <p className="text-xs text-rose-800 font-medium mt-1 leading-relaxed">
+                A base de dados retornou o seguinte erro: <code className="bg-rose-100/80 px-1.5 py-0.5 rounded font-mono font-bold text-rose-900 border border-rose-200">{transactionsError}</code>. Os valores abaixo não refletem zero vendas reais; a recuperação das vendas falhou.
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto">
+          {onRetryTransactions && (
             <button
+              id="dashboard-retry-sales-btn"
               type="button"
-              onClick={() => setTimeScope("LAST_7")}
-              className="flex-1 sm:flex-initial px-3 py-1.5 bg-white border border-amber-200 text-amber-900 font-bold rounded-lg hover:bg-amber-100/50 cursor-pointer transition"
+              onClick={onRetryTransactions}
+              className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold shrink-0 flex items-center gap-2 transition cursor-pointer shadow-sm hover:shadow"
             >
-              Ver 7 Dias ({periodCounts.last7})
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Tentar Novamente</span>
             </button>
-            <button
-              type="button"
-              onClick={() => setTimeScope("ALL")}
-              className="flex-1 sm:flex-initial px-3 py-1.5 bg-orange-600 text-white font-bold rounded-lg hover:bg-orange-700 cursor-pointer transition shadow-xs"
-            >
-              Ver Geral ({periodCounts.all})
-            </button>
-          </div>
+          )}
         </div>
       )}
 
@@ -761,7 +552,7 @@ function DashboardModule({
         <div className="bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-orange-200 transition-all">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              {timeScope === "TODAY" ? "Vendas de Hoje" : timeScope === "YESTERDAY" ? "Vendas de Ontem" : timeScope === "LAST_7" ? "Vendas (7 Dias)" : timeScope === "THIS_MONTH" ? "Vendas do Mês" : "Vendas Gerais"}
+              {timeScope === "TODAY" ? "Vendas de Hoje" : timeScope === "YESTERDAY" ? "Vendas de Ontem" : timeScope === "LAST_7" ? "Vendas (7 Dias)" : "Vendas do Mês"}
             </span>
             <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
               <ShoppingBag className="w-4 h-4" />
@@ -771,8 +562,10 @@ function DashboardModule({
             <h2 className="text-xl font-bold font-mono text-slate-900">
               {stats.totalRevenue.toLocaleString()} <span className="text-xs font-medium text-slate-400">{currency}</span>
             </h2>
-            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1 font-medium">
+            <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 font-medium">
               <span>{stats.txCount} {stats.txCount === 1 ? "venda" : "vendas"}</span>
+              <span className="text-slate-300">•</span>
+              <span>{stats.totalQuantity} {stats.totalQuantity === 1 ? "artigo" : "artigos"}</span>
             </p>
           </div>
         </div>
@@ -801,7 +594,7 @@ function DashboardModule({
         <div className="bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-blue-200 transition-all">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-              Transações
+              Transações & Volume
             </span>
             <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
               <Receipt className="w-4 h-4" />
@@ -809,10 +602,10 @@ function DashboardModule({
           </div>
           <div className="mt-3">
             <h2 className="text-xl font-bold font-mono text-slate-900">
-              {stats.txCount} <span className="text-xs font-medium text-slate-400">recibos</span>
+              {stats.txCount} <span className="text-xs font-medium text-slate-400">{stats.txCount === 1 ? "recibo" : "recibos"}</span>
             </h2>
             <p className="text-[11px] text-slate-500 mt-1 font-medium">
-              Emitidos no POS
+              {stats.totalQuantity} {stats.totalQuantity === 1 ? "artigo vendido" : "artigos vendidos"}
             </p>
           </div>
         </div>
@@ -902,7 +695,7 @@ function DashboardModule({
                   <XAxis dataKey="label" stroke="#94a3b8" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#94a3b8" tick={{ fontSize: 10 }} />
                   <Tooltip 
-                    formatter={(value: unknown) => [`${Number(value || 0).toLocaleString()} ${currency}`, "Faturamento"]}
+                    formatter={(value: any) => [`${Number(value).toLocaleString()} ${currency}`, "Faturamento"]}
                     contentStyle={{ backgroundColor: "#0f172a", borderRadius: "10px", border: "none", color: "#fff", fontSize: "11px" }}
                   />
                   <Area type="monotone" dataKey="valor" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSalesClean)" />
@@ -943,7 +736,7 @@ function DashboardModule({
                           <Cell key={`cell-${index}`} fill={PAYMENT_COLORS[index % PAYMENT_COLORS.length]} />
                         ))}
                       </Pie>
-                      <Tooltip formatter={(val: unknown) => [`${Number(val || 0).toLocaleString()} ${currency}`, "Valor"]} />
+                      <Tooltip formatter={(val: any) => [`${Number(val).toLocaleString()} ${currency}`, "Valor"]} />
                     </PieChart>
                   </ResponsiveContainer>
                 </div>
@@ -1370,6 +1163,20 @@ function DashboardModule({
             </div>
           </div>
         </div>
+      )}
+
+      {/* FLYER GENERATOR */}
+      {isFlyerGeneratorOpen && flyerProduct && (
+        <PromoFlyerGenerator
+          product={flyerProduct}
+          currency={currency}
+          isOpen={isFlyerGeneratorOpen}
+          onClose={() => {
+            setIsFlyerGeneratorOpen(false);
+            setFlyerProduct(null);
+          }}
+          settings={settings}
+        />
       )}
     </div>
   );

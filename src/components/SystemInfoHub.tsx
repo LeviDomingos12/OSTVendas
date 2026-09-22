@@ -6,19 +6,12 @@ import {
   GitBranch,
   Clock,
   Calendar,
-  Users,
   Image as ImageIcon,
   BookOpen,
-  CheckCircle2,
-  Wifi,
-  WifiOff,
-  Sparkles,
   X,
-  ChevronRight,
   ShieldCheck
 } from "lucide-react";
 import { useSystemVersion } from "../lib/versionManager";
-import { AppUser } from "../types";
 
 interface SystemInfoHubProps {
   isOpen: boolean;
@@ -28,7 +21,7 @@ interface SystemInfoHubProps {
   logoUrl?: string;
   version: string;
   sessionSeconds: number;
-  activeUser?: AppUser | null;
+  activeUser?: any;
   onSwitchUser: () => void;
   onOpenLogoModal: () => void;
   onOpenTutorial: () => void;

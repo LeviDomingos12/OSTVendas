@@ -3,12 +3,11 @@
  * Camada de Serviço Unificada e Fachada de Dados Centralizada (@supabase/supabase-js).
  * 
  * Centraliza a inicialização do cliente Supabase a partir das variáveis de ambiente
- * 'VITE_SUPABASE_URL' e 'VITE_SUPABASE_ANON_KEY', operando em PostgreSQL e Row Level Security.
+ * 'VITE_SUPABASE_URL' e 'VITE_SUPABASE_ANON_KEY', eliminando quaisquer dependências diretas do Firebase.
  * 
  * Providencia serviços estruturados para:
  * - Autenticação e Sessões (AuthService)
  * - Operações Comerciais Atómicas e CRUD (CommercialDataService)
- * - Fila de Sincronização Offline Resiliente (OfflineQueueService)
  * - Diagnósticos e Medição de Latência de Rede (ConnectionService)
  * - Armazenamento de Backups em Nuvem (StorageService)
  */
@@ -18,8 +17,6 @@ import { supabase as supabaseClient, getSupabaseClient, SUPABASE_URL, SUPABASE_A
 export { supabaseClient, getSupabaseClient, SUPABASE_URL, SUPABASE_ANON_KEY };
 import {
   SupabaseSyncService,
-  getSupabaseConfig,
-  saveSupabaseConfig,
   measureSupabaseLatency,
   validateSupabaseSession,
   CloudBackupItem,
@@ -33,18 +30,9 @@ import {
   CashFlowEntry, 
   Employee, 
   AuditLog, 
-  SystemSettings,
-  CashClosure,
-  CashShift
+  SystemSettings, 
+  CashClosure 
 } from "../types";
-
-export type DatabaseChangeEvent = {
-  table: "produtos" | "vendas" | "caixa" | "clientes" | "cash_closures" | string;
-  action?: "INSERT" | "UPDATE" | "DELETE" | "BATCH" | string;
-  record?: unknown;
-};
-
-const dbChangeSubscribers = new Set<(event: DatabaseChangeEvent) => void>();
 
 /**
  * Sanitização e normalização de mensagens de erro para proteção de dados e logs amigáveis.
@@ -55,7 +43,7 @@ export function sanitizeServiceError(error: unknown): string {
   const lower = rawMsg.toLowerCase();
 
   if (lower.includes("network") || lower.includes("offline") || lower.includes("failed to fetch")) {
-    return "Sem ligação à rede no momento. As alterações foram colocadas na fila de sincronização local.";
+    return "Sem ligação ao banco de dados PostgreSQL. Operação abortada.";
   }
   if (lower.includes("permission") || lower.includes("unauthorized") || lower.includes("jwt") || lower.includes("denied")) {
     return "Acesso restrito: permissões insuficientes ou sessão expirada.";
@@ -146,7 +134,7 @@ export const AuthService = {
     return await SupabaseSyncService.signInWithEmail(email, pass);
   },
 
-  async signUpWithEmail(email: string, pass: string, name: string, branch: string, role: string, plan: string = "OURO") {
+  async signUpWithEmail(email: string, pass: string, name: string, branch: string, role: string = "Administrador", plan: string = "OURO") {
     return await SupabaseSyncService.signUpWithEmail(email, pass, name, branch, role, plan);
   },
 
@@ -162,7 +150,7 @@ export const AuthService = {
     return await SupabaseSyncService.signOut();
   },
 
-  onAuthStateChange(callback: (event: string, session: Session | null) => void) {
+  onAuthStateChange(callback: (event: string, session: any) => void) {
     return SupabaseSyncService.onAuthStateChange(callback);
   },
 
@@ -177,12 +165,9 @@ export const AuthService = {
   }
 };
 
-import { SyncService, OfflineQueueService, SyncOperationType, SyncQueueItem } from "./syncService";
-export { SyncService, OfflineQueueService };
-export type { SyncOperationType, SyncQueueItem };
-
 /**
  * Serviço Comercial Unificado (Produtos, Vendas, Clientes, Caixa, Staff, Auditoria, Definições)
+ * Modo Online Estrito: Não engole erros como [], não utiliza fila/substituto offline.
  */
 export const CommercialDataService = {
 
@@ -190,9 +175,9 @@ export const CommercialDataService = {
   async fetchProducts(): Promise<Product[]> {
     try {
       return await SupabaseSyncService.fetchProducts();
-    } catch (err) {
-      console.warn("Erro ao buscar produtos do Supabase:", err);
-      return [];
+    } catch (err: any) {
+      console.error("[CommercialDataService.fetchProducts] Erro real ao ler produtos do PostgreSQL:", err);
+      throw err;
     }
   },
 
@@ -200,35 +185,48 @@ export const CommercialDataService = {
     try {
       const ok = await SupabaseSyncService.saveProduct(product);
       if (!ok) {
-        OfflineQueueService.enqueue({ type: "PRODUCT", payload: product, timestamp: new Date().toISOString() });
+        throw new Error(`Falha ao gravar o produto "${product.name}" no PostgreSQL.`);
       }
-    } catch {
-      OfflineQueueService.enqueue({ type: "PRODUCT", payload: product, timestamp: new Date().toISOString() });
+    } catch (err: any) {
+      console.error(`[CommercialDataService.saveProduct] Erro ao gravar produto "${product.name}" no PostgreSQL:`, err);
+      throw err;
     }
   },
 
   async saveProductsBatch(products: Product[]): Promise<void> {
     try {
-      await SupabaseSyncService.syncProducts(products);
-    } catch (err) {
-      console.warn("Aviso ao sincronizar lote de produtos:", err);
+      const ok = await SupabaseSyncService.syncProducts(products);
+      if (!ok) {
+        throw new Error("Falha ao salvar lote de produtos no PostgreSQL.");
+      }
+    } catch (err: any) {
+      console.error("[CommercialDataService.saveProductsBatch] Erro ao salvar lote de produtos no PostgreSQL:", err);
+      throw err;
     }
   },
 
   async updateProduct(productId: string, updatedFields: Partial<Product>): Promise<void> {
     try {
       const full = { id: productId, ...updatedFields } as Product;
-      await SupabaseSyncService.saveProduct(full);
-    } catch (err) {
-      console.warn("Erro ao atualizar produto no Supabase:", err);
+      const ok = await SupabaseSyncService.saveProduct(full);
+      if (!ok) {
+        throw new Error(`Falha ao atualizar produto ${productId} no PostgreSQL.`);
+      }
+    } catch (err: any) {
+      console.error(`[CommercialDataService.updateProduct] Erro ao atualizar produto ${productId} no PostgreSQL:`, err);
+      throw err;
     }
   },
 
   async removeProduct(productId: string): Promise<void> {
     try {
-      await SupabaseSyncService.deleteProduct(productId);
-    } catch (err) {
-      console.warn("Erro ao remover produto no Supabase:", err);
+      const ok = await SupabaseSyncService.deleteProduct(productId);
+      if (!ok) {
+        throw new Error(`Falha ao remover produto ${productId} no PostgreSQL.`);
+      }
+    } catch (err: any) {
+      console.error(`[CommercialDataService.removeProduct] Erro ao remover produto ${productId} no PostgreSQL:`, err);
+      throw err;
     }
   },
 
@@ -242,196 +240,164 @@ export const CommercialDataService = {
     return await SupabaseSyncService.replenishStockAtomic(params);
   },
 
+  /**
+   * Diagnóstico e validação da conexão com PostgreSQL para o catálogo de produtos,
+   * identificando a tabela ativa no schema ('products' ou 'produtos') e a integridade da conexão.
+   */
+  async verifyProductsConnection(): Promise<{
+    connected: boolean;
+    activeTable: string | null;
+    error?: string;
+  }> {
+    return await SupabaseSyncService.verifyProductsTable();
+  },
+
+  /**
+   * Executa teste diagnóstico na função atómica de vendas 'public.process_sale_atomic'.
+   */
+  async verifySalesRpcConnection(): Promise<{
+    installed: boolean;
+    error?: string;
+  }> {
+    return await SupabaseSyncService.verifySalesRpc();
+  },
+
   subscribeProducts(onUpdate: () => void) {
-    return SupabaseSyncService.subscribeToTableChanges("produtos", onUpdate);
+    const sub1 = SupabaseSyncService.subscribeToTableChanges("products", onUpdate);
+    const sub2 = SupabaseSyncService.subscribeToTableChanges("produtos", onUpdate);
+    return {
+      unsubscribe: () => {
+        try { sub1?.unsubscribe?.(); } catch {}
+        try { sub2?.unsubscribe?.(); } catch {}
+      }
+    };
   },
 
   // --- CLIENTES ---
   async fetchCustomers(): Promise<Customer[]> {
-    try {
-      return await SupabaseSyncService.fetchCustomers();
-    } catch (err) {
-      console.warn("Erro ao buscar clientes:", err);
-      return [];
-    }
+    return await SupabaseSyncService.fetchCustomers();
   },
 
   async saveCustomer(customer: Customer): Promise<void> {
-    try {
-      const ok = await SupabaseSyncService.saveCustomer(customer);
-      if (!ok) {
-        OfflineQueueService.enqueue({ type: "CUSTOMER", payload: customer, timestamp: new Date().toISOString() });
-      }
-    } catch {
-      OfflineQueueService.enqueue({ type: "CUSTOMER", payload: customer, timestamp: new Date().toISOString() });
+    const ok = await SupabaseSyncService.saveCustomer(customer);
+    if (!ok) {
+      throw new Error(`Falha ao gravar cliente "${customer.name}" no PostgreSQL.`);
     }
   },
 
   async saveCustomersBatch(customers: Customer[]): Promise<void> {
-    try {
-      await SupabaseSyncService.syncCustomers(customers);
-    } catch (err) {
-      console.warn("Aviso ao salvar lote de clientes:", err);
+    const ok = await SupabaseSyncService.syncCustomers(customers);
+    if (!ok) {
+      throw new Error("Falha ao salvar lote de clientes no PostgreSQL.");
     }
   },
 
   async removeCustomer(customerId: string): Promise<void> {
-    try {
-      await SupabaseSyncService.deleteCustomer(customerId);
-    } catch (err) {
-      console.warn("Erro ao remover cliente:", err);
+    const ok = await SupabaseSyncService.deleteCustomer(customerId);
+    if (!ok) {
+      throw new Error(`Falha ao remover cliente ${customerId} no PostgreSQL.`);
     }
   },
 
-  // --- TRANSAÇÕES / VENDAS ---
+  // --- TRANSAÇÕES / VENDAS (ONLINE DIRETO, SEM FILA OU FALLBACK OFFLINE) ---
   async fetchTransactions(): Promise<Transaction[]> {
     try {
       return await SupabaseSyncService.fetchTransactions();
-    } catch (err) {
-      console.warn("Erro ao buscar vendas:", err);
-      return [];
+    } catch (err: any) {
+      console.error("[CommercialDataService.fetchTransactions] Erro real ao ler transações do PostgreSQL:", err);
+      throw err;
     }
   },
 
   async fetchRecentTransactions24h(): Promise<Transaction[]> {
     try {
-      return await SyncService.prefetchRecentTransactions24h();
-    } catch (err) {
-      console.warn("Erro ao buscar transações das últimas 24h:", err);
-      return [];
+      return await SupabaseSyncService.fetchRecentTransactions24h();
+    } catch (err: any) {
+      console.error("[CommercialDataService.fetchRecentTransactions24h] Erro real ao ler transações das últimas 24h do PostgreSQL:", err);
+      throw err;
     }
   },
 
-  async saveTransaction(transaction: Transaction): Promise<void> {
-    try {
-      const params = {
-        saleId: transaction.id,
-        invoiceNumber: transaction.invoiceNumber || transaction.id,
-        customerId: transaction.customerId,
-        customerName: transaction.customerName || "Consumidor Final",
-        sellerName: transaction.cashierName || "Operador",
-        paymentMethod: transaction.paymentMethod,
-        subtotal: transaction.subtotal || transaction.grandTotal,
-        discountTotal: transaction.discountTotal || 0,
-        vatTotal: transaction.vatTotal || 0,
-        grandTotal: transaction.grandTotal,
-        amountPaid: transaction.grandTotal,
-        changeAmount: 0,
-        items: transaction.items || [],
-        idempotencyKey: transaction.id
-      };
+  async saveTransaction(transaction: Transaction): Promise<{ success: boolean; saleId?: string; invoiceNumber?: string; idempotent?: boolean }> {
+    const params = {
+      saleId: transaction.id,
+      invoiceNumber: transaction.invoiceNumber || transaction.id,
+      customerId: transaction.customerId,
+      customerName: transaction.customerName || "Consumidor Final",
+      customerNuit: transaction.nuit,
+      userId: transaction.sellerId || "Operador",
+      userName: transaction.cashierName || "Operador",
+      sellerId: transaction.sellerId,
+      sellerName: transaction.cashierName || "Operador",
+      paymentMethod: transaction.paymentMethod,
+      subtotal: transaction.subtotal || transaction.grandTotal,
+      discountTotal: transaction.discountTotal || 0,
+      vatTotal: transaction.vatTotal || 0,
+      grandTotal: transaction.grandTotal,
+      amountPaid: transaction.grandTotal,
+      changeAmount: 0,
+      items: transaction.items || [],
+      notes: transaction.paymentDetails,
+      idempotencyKey: transaction.idempotencyKey || transaction.id
+    };
 
-      const res = await SupabaseSyncService.processSaleAtomic(params);
-      if (!res.success) {
-        OfflineQueueService.enqueue({ type: "TRANSACTION", payload: params, timestamp: new Date().toISOString() });
-      }
-    } catch {
-      OfflineQueueService.enqueue({
-        type: "TRANSACTION",
-        payload: {
-          saleId: transaction.id,
-          invoiceNumber: transaction.invoiceNumber || transaction.id,
-          customerId: transaction.customerId,
-          customerName: transaction.customerName,
-          sellerName: transaction.cashierName,
-          paymentMethod: transaction.paymentMethod,
-          subtotal: transaction.subtotal || transaction.grandTotal,
-          discountTotal: transaction.discountTotal || 0,
-          vatTotal: transaction.vatTotal || 0,
-          grandTotal: transaction.grandTotal,
-          amountPaid: transaction.grandTotal,
-          changeAmount: 0,
-          items: transaction.items || []
-        },
-        timestamp: new Date().toISOString()
-      });
+    const res = await SupabaseSyncService.processSaleAtomic(params);
+    if (!res || res.success !== true) {
+      const errorMsg = res?.error || "Falha ao gravar venda no PostgreSQL.";
+      console.error("[CommercialDataService.saveTransaction] Erro:", errorMsg);
+      throw new Error(errorMsg);
     }
+
+    return res;
   },
 
   async saveTransactionsBatch(transactions: Transaction[]): Promise<void> {
-    try {
-      await SupabaseSyncService.syncTransactions(transactions);
-      CommercialDataService.notifyDatabaseChange("vendas", "BATCH", transactions);
-    } catch (err) {
-      console.warn("Erro ao salvar lote de transações:", err);
+    const ok = await SupabaseSyncService.syncTransactions(transactions);
+    if (!ok) {
+      throw new Error("Falha ao salvar lote de transações no PostgreSQL.");
     }
-  },
-
-  subscribeTransactions(onUpdate: (payload?: Record<string, unknown>) => void) {
-    return SupabaseSyncService.subscribeToTableChanges("vendas", onUpdate);
   },
 
   // --- FLUXO DE CAIXA ---
   async fetchCashFlow(): Promise<CashFlowEntry[]> {
-    try {
-      return await SupabaseSyncService.fetchCashFlow();
-    } catch {
-      return [];
-    }
+    return await SupabaseSyncService.fetchCashFlow();
   },
 
   async saveCashFlowEntry(entry: CashFlowEntry): Promise<void> {
-    try {
-      const ok = await SupabaseSyncService.saveCashFlowEntry(entry);
-      if (!ok) {
-        OfflineQueueService.enqueue({ type: "CASHFLOW", payload: entry, timestamp: new Date().toISOString() });
-      } else {
-        CommercialDataService.notifyDatabaseChange("caixa", "INSERT", entry);
-      }
-    } catch {
-      OfflineQueueService.enqueue({ type: "CASHFLOW", payload: entry, timestamp: new Date().toISOString() });
+    const ok = await SupabaseSyncService.saveCashFlowEntry(entry);
+    if (!ok) {
+      throw new Error("Falha ao registrar movimento de caixa no PostgreSQL.");
     }
   },
 
   async saveCashFlowBatch(movements: CashFlowEntry[]): Promise<void> {
-    try {
-      await SupabaseSyncService.syncCashFlow(movements);
-      CommercialDataService.notifyDatabaseChange("caixa", "BATCH", movements);
-    } catch (err) {
-      console.warn("Erro ao salvar lote de movimentos de caixa:", err);
+    const ok = await SupabaseSyncService.syncCashFlow(movements);
+    if (!ok) {
+      throw new Error("Falha ao salvar lote de movimentos de caixa no PostgreSQL.");
     }
-  },
-
-  subscribeCashFlow(onUpdate: (payload?: Record<string, unknown>) => void) {
-    return SupabaseSyncService.subscribeToTableChanges("caixa", onUpdate);
   },
 
   // --- FECHAMENTOS DE CAIXA / BALANCETES ---
   async fetchCashClosures(): Promise<CashClosure[]> {
-    try {
-      return await SupabaseSyncService.fetchCashClosures();
-    } catch (err) {
-      console.warn("Erro ao buscar fechamentos de caixa do Supabase:", err);
-      return [];
-    }
+    return await SupabaseSyncService.fetchCashClosures();
   },
 
   async saveCashClosure(closure: CashClosure): Promise<void> {
-    try {
-      const ok = await SupabaseSyncService.saveCashClosure(closure);
-      if (!ok) {
-        OfflineQueueService.enqueue({ type: "CASH_CLOSURE", payload: closure, timestamp: new Date().toISOString() });
-      }
-    } catch {
-      OfflineQueueService.enqueue({ type: "CASH_CLOSURE", payload: closure, timestamp: new Date().toISOString() });
+    const ok = await SupabaseSyncService.saveCashClosure(closure);
+    if (!ok) {
+      throw new Error("Falha ao registrar fechamento de caixa no PostgreSQL.");
     }
   },
 
   async saveCashClosuresBatch(closures: CashClosure[]): Promise<void> {
-    try {
-      await SupabaseSyncService.syncCashClosures(closures);
-    } catch (err) {
-      console.warn("Erro ao salvar lote de fechamentos de caixa:", err);
+    const ok = await SupabaseSyncService.syncCashClosures(closures);
+    if (!ok) {
+      throw new Error("Falha ao salvar lote de fechamentos de caixa no PostgreSQL.");
     }
   },
 
   async fetchActiveCashShift() {
-    try {
-      return await SupabaseSyncService.fetchActiveCashShift();
-    } catch (err) {
-      console.warn("Erro ao buscar turno ativo do Supabase:", err);
-      return null;
-    }
+    return await SupabaseSyncService.fetchActiveCashShift();
   },
 
   async saveActiveCashShift(shiftData: {
@@ -442,11 +408,7 @@ export const CommercialDataService = {
     openingSupervisor?: string;
     openingNotes?: string;
   }): Promise<void> {
-    try {
-      await SupabaseSyncService.saveActiveCashShift(shiftData);
-    } catch (err) {
-      console.warn("Erro ao salvar turno ativo no Supabase:", err);
-    }
+    await SupabaseSyncService.saveActiveCashShift(shiftData);
   },
 
   subscribeCashClosures(onUpdate: () => void) {
@@ -455,26 +417,20 @@ export const CommercialDataService = {
 
   // --- COLABORADORES / STAFF ---
   async fetchEmployees(): Promise<Employee[]> {
-    try {
-      return await SupabaseSyncService.fetchEmployees();
-    } catch {
-      return [];
-    }
+    return await SupabaseSyncService.fetchEmployees();
   },
 
   async saveEmployee(employee: Employee): Promise<void> {
-    try {
-      await SupabaseSyncService.saveEmployee(employee);
-    } catch (err) {
-      console.warn("Erro ao salvar colaborador:", err);
+    const ok = await SupabaseSyncService.saveEmployee(employee);
+    if (!ok) {
+      throw new Error(`Falha ao salvar colaborador ${employee.name} no PostgreSQL.`);
     }
   },
 
   async saveEmployeesBatch(employees: Employee[]): Promise<void> {
-    try {
-      await SupabaseSyncService.syncEmployees(employees);
-    } catch (err) {
-      console.warn("Erro ao salvar lote de colaboradores:", err);
+    const ok = await SupabaseSyncService.syncEmployees(employees);
+    if (!ok) {
+      throw new Error("Falha ao salvar lote de colaboradores no PostgreSQL.");
     }
   },
 
@@ -492,54 +448,30 @@ export const CommercialDataService = {
 
   // --- AUDITORIA ---
   async fetchAuditLogs(): Promise<AuditLog[]> {
-    try {
-      return await SupabaseSyncService.fetchAuditLogs();
-    } catch {
-      return [];
-    }
+    return await SupabaseSyncService.fetchAuditLogs();
   },
 
   async saveAuditLog(log: AuditLog): Promise<void> {
-    try {
-      await SupabaseSyncService.saveAuditLog(log);
-    } catch (err) {
-      console.warn("Erro ao gravar log de auditoria:", err);
+    const ok = await SupabaseSyncService.saveAuditLog(log);
+    if (!ok) {
+      console.warn("Falha ao gravar log de auditoria no PostgreSQL.");
     }
   },
 
   // --- DEFINIÇÕES (SETTINGS) ---
   async fetchSettings(): Promise<SystemSettings | null> {
-    try {
-      return await SupabaseSyncService.fetchSettings();
-    } catch {
-      return null;
-    }
+    return await SupabaseSyncService.fetchSettings();
   },
 
   async saveSettings(settings: SystemSettings): Promise<void> {
-    try {
-      await SupabaseSyncService.saveSettings(settings);
-    } catch (err) {
-      console.warn("Erro ao salvar configurações:", err);
+    const ok = await SupabaseSyncService.saveSettings(settings);
+    if (!ok) {
+      throw new Error("Falha ao salvar configurações no PostgreSQL.");
     }
   },
 
-  // --- BARRAMENTO REATIVO DE MUDANÇAS DE DADOS (REAL-TIME REACTIVE EVENT BUS) ---
-  onDatabaseChange(callback: (event: DatabaseChangeEvent) => void): () => void {
-    dbChangeSubscribers.add(callback);
-    return () => {
-      dbChangeSubscribers.delete(callback);
-    };
-  },
-
-  notifyDatabaseChange(table: string, action?: string, record?: unknown): void {
-    dbChangeSubscribers.forEach(cb => {
-      try {
-        cb({ table, action, record });
-      } catch (err) {
-        console.warn(`[CommercialDataService] Erro no listener de alteração de banco (${table}):`, err);
-      }
-    });
+  async signOut(): Promise<void> {
+    return await SupabaseSyncService.signOut();
   }
 };
 

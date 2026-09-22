@@ -1,7 +1,6 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { SystemSettings, CashClosure, CashFlowEntry } from "../../types";
-import { generateUUID } from "../../lib/deterministic";
+import { SystemSettings, CashClosure } from "../../types";
 
 export const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> => {
   if (!imageUrl) return "";
@@ -21,7 +20,7 @@ export const getBase64ImageFromUrl = async (imageUrl: string): Promise<string> =
 };
 
 export const exportCashbookPdf = async (
-  entries: CashFlowEntry[],
+  entries: any[],
   startDate: string,
   endDate: string,
   activeUsername: string,
@@ -40,11 +39,11 @@ export const exportCashbookPdf = async (
   // Header Title
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(settings?.companyName || "OST VENDAS ERP", 14, 16);
+  doc.text(settings?.companyName || "Indisponível", 14, 16);
   
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
-  doc.text(`NUIT: ${settings?.companyNuit || "400293112"} | ${settings?.storeAddress || "Moçambique"}`, 14, 22);
+  doc.text(`NUIT: ${settings?.companyNuit || "Indisponível"} | ${settings?.storeAddress || settings?.companyAddress || "Indisponível"}`, 14, 22);
   doc.text(`Período de Extração: ${startDate} a ${endDate} | Emissão: ${new Date().toLocaleString("pt-MZ")}`, 14, 27);
   doc.text(`Operador Responsável: ${activeUsername}`, 14, 32);
 
@@ -52,16 +51,13 @@ export const exportCashbookPdf = async (
   doc.line(14, 35, 196, 35);
 
   const headers = [["Data/Hora", "Tipo", "Operador", "Descrição / Referência", "Valor"]];
-  const dataRows = entries.map(item => {
-    const isInput = item.type === "INPUT" || item.type === "REINFORCEMENT" || item.type === "SOBRA";
-    return [
-      new Date(item.timestamp).toLocaleString("pt-MZ"),
-      item.type || "MOVIMENTO",
-      item.responsibleUser || activeUsername,
-      item.reason || "Sem descrição",
-      `${isInput ? "+" : "-"}${Number(item.amount || 0).toLocaleString()} ${currency}`
-    ];
-  });
+  const dataRows = entries.map(item => [
+    new Date(item.timestamp).toLocaleString("pt-MZ"),
+    item.type || "MOVIMENTO",
+    item.responsibleUser || activeUsername,
+    item.reason || "Sem descrição",
+    `${item.isInput ? "+" : "-"}${Number(item.amount || 0).toLocaleString()} ${currency}`
+  ]);
 
   autoTable(doc, {
     startY: 38,
@@ -92,12 +88,12 @@ export const exportSingleClosurePdf = async (
 
   doc.setFontSize(16);
   doc.setFont("helvetica", "bold");
-  doc.text(settings?.companyName || "OST COMÉRCIO GERAL", 14, 16);
+  doc.text(settings?.companyName || "Indisponível", 14, 16);
   
   doc.setFontSize(8.5);
   doc.setFont("helvetica", "normal");
-  doc.text(`NUIT: ${settings?.companyNuit || "400293112"} | ${settings?.storeAddress || "Maputo, Moçambique"}`, 14, 22);
-  doc.text(`Certificação Fiscal: ${settings?.fiscalCertificationNumber || "OST/CERT/00249/2026"}`, 14, 27);
+  doc.text(`NUIT: ${settings?.companyNuit || "Indisponível"} | ${settings?.storeAddress || settings?.companyAddress || "Indisponível"}`, 14, 22);
+  doc.text(`Certificação Fiscal: ${settings?.fiscalCertificationNumber || "Indisponível"}`, 14, 27);
 
   doc.setDrawColor(220, 220, 220);
   doc.line(14, 30, 196, 30);
@@ -146,7 +142,7 @@ export const exportSingleClosurePdf = async (
     headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: "bold" }
   });
 
-  const finalY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || 180;
+  const finalY = (doc as any).lastAutoTable?.finalY || 180;
   
   if (closure.closingNotes) {
     doc.setFontSize(8.5);
@@ -168,7 +164,7 @@ export const exportSingleClosurePdf = async (
   doc.setFontSize(7.5);
   doc.text("Documento gerado eletronicamente pelo Sistema de Gestão Comercial OST Vendas.", 14, signY + 20);
 
-  doc.save(`Auto_Fecho_Caixa_${closure.id || generateUUID()}.pdf`);
+  doc.save(`Auto_Fecho_Caixa_${closure.id || Date.now()}.pdf`);
 };
 
 export const printThermalSlip = (
@@ -202,9 +198,9 @@ export const printThermalSlip = (
       </head>
       <body>
         <div class="text-center">
-          <div class="title">${settings?.companyName || "OST COMÉRCIO CENTRAL"}</div>
-          <div>NUIT: ${settings?.companyNuit || "400293112"}</div>
-          <div>${settings?.storeAddress || "Maputo, Moçambique"}</div>
+          <div class="title">${settings?.companyName || "Indisponível"}</div>
+          <div>NUIT: ${settings?.companyNuit || "Indisponível"}</div>
+          <div>${settings?.storeAddress || settings?.companyAddress || "Indisponível"}</div>
           <div class="line"></div>
           <div class="bold">TALÃO DE FECHO DE CAIXA</div>
           <div>ID: ${closure.id || "N/A"}</div>

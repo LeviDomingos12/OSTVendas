@@ -36,24 +36,8 @@ aiRouter.post("/forecast", async (req: Request, res: Response) => {
     const ai = getAiClient(req);
 
     if (!ai) {
-      return res.json({
-        forecastText: `### **Análise de Previsão de Vendas (Modo Simulação & Análise Local)**
-        
-Com base no histórico fornecido de vendas para o seu negócio de **${businessType || "Comércio Geral"}**:
-
-1. **Tendência de Crescimento**: Projetamos um aumento aproximado de **14%** nas vendas para o próximo período devido a padrões sazonais identificados nos produtos mais vendidos.
-2. **Produtos Críticos**: Itens com stock baixo sofrem risco elevado de rutura. Recomendamos reabastecer com urgência.
-3. **Plano de Ação Sugerido**:
-   * Lance uma campanha promocional direcionada para itens parados.
-   * Ative o programa de fidelização com o envio de SMS para clientes inativos.
-   * Centralize os recebimentos via M-Pesa Paga Fácil e E-Mola para agilizar o fluxo de caixa.`,
-        growthRate: 14,
-        growthTrend: "up",
-        suggestedCampaigns: [
-          "Super Semana de Descontos",
-          "Fidelização M-Pesa Promocional",
-          "Clientes VIP Stock-Out Clearance"
-        ]
+      return res.status(503).json({
+        error: "Serviço de Inteligência Artificial indisponível ou chave de API não configurada."
       });
     }
 
@@ -125,8 +109,8 @@ aiRouter.post("/marketing/sms", async (req: Request, res: Response) => {
     const ai = getAiClient(req);
 
     if (!ai) {
-      return res.json({
-        smsText: `🔥 Super Promoção OST! ${productName || "Produto"} por apenas ${promoPrice || 0} MT (Antes: ${originalPrice || 0} MT). Aproveite hoje mesmo! Visite a nossa loja ou peça via M-Pesa. Válido até durar o stock.`
+      return res.status(503).json({
+        error: "Serviço de Inteligência Artificial indisponível ou chave de API não configurada."
       });
     }
 
@@ -172,12 +156,8 @@ aiRouter.post("/marketing/slogan", async (req: Request, res: Response) => {
     const ai = getAiClient(req);
 
     if (!ai) {
-      return res.json({
-        slogans: [
-          `${businessName || "OST Vendas"} - Qualidade e confiança ao melhor preço!`,
-          `O seu parceiro de confiança para as melhores compras em Moçambique.`,
-          `Mais valor para o seu dia a dia.`
-        ]
+      return res.status(503).json({
+        error: "Serviço de Inteligência Artificial indisponível ou chave de API não configurada."
       });
     }
 
@@ -225,15 +205,8 @@ aiRouter.post("/chat", async (req: Request, res: Response) => {
     const ai = getAiClient(req);
 
     if (!ai) {
-      return res.json({
-        answer: `### 🤖 Assistente OST Vendas (Modo Offline / Regras Comerciais)
-
-Recebi a sua pergunta sobre: **"${prompt}"**.
-
-Como especialista de gestão do OST Vendas:
-- **Fluxo de Caixa**: Mantenha sempre os fechos de caixa registados diariamente.
-- **Stock**: Realize contagens de inventário regulares e controle as datas de validade dos lotes.
-- **Vendas**: Utilize a leitura rápida de código de barras ou atalhos de teclado (F2, F3) para agilizar o atendimento no POS.`
+      return res.status(503).json({
+        error: "Serviço de Inteligência Artificial indisponível ou chave de API não configurada."
       });
     }
 
@@ -249,63 +222,6 @@ Contexto adicional do negócio atual: ${JSON.stringify(context || {})}`;
     res.json({ answer: response.text || "Sem resposta gerada." });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : "Erro no assistente de IA.";
-    res.status(500).json({ error: errorMsg });
-  }
-});
-
-// 5. AI Logo Generator Route
-aiRouter.post("/generate-logo", async (req: Request, res: Response) => {
-  try {
-    const { prompt } = req.body;
-    if (!prompt) {
-      return res.status(400).json({ error: "O prompt é obrigatório para gerar o logotipo." });
-    }
-
-    const ai = getAiClient(req);
-    if (!ai) {
-      return res.json({
-        success: true,
-        fallback: true,
-        message: "Chave GEMINI_API_KEY não configurada. Ativando gerador offline de logotipos."
-      });
-    }
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-image",
-      contents: {
-        parts: [
-          {
-            text: `A professional, clean, minimalist business logo icon, centered, solid white or elegant background, vector art, suitable for a retail POS company logo. Concept details: ${prompt}`,
-          },
-        ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio: "1:1"
-        }
-      }
-    });
-
-    let base64Data = "";
-    if (response.candidates?.[0]?.content?.parts) {
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          base64Data = part.inlineData.data;
-          break;
-        }
-      }
-    }
-
-    if (!base64Data) {
-      throw new Error("O modelo não retornou dados de imagem.");
-    }
-
-    res.json({
-      success: true,
-      imageUrl: `data:image/png;base64,${base64Data}`
-    });
-  } catch (error: unknown) {
-    const errorMsg = error instanceof Error ? error.message : "Erro desconhecido na geração de logotipo.";
     res.status(500).json({ error: errorMsg });
   }
 });

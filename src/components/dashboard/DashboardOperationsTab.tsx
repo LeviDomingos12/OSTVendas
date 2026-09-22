@@ -805,7 +805,7 @@ export const DashboardOperationsTab: React.FC<DashboardOperationsTabProps> = ({
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Categoria</label>
                   <select
                     value={newReminderCategory}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewReminderCategory(e.target.value)}
+                    onChange={(e: any) => setNewReminderCategory(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none font-semibold text-slate-700 cursor-pointer"
                   >
                     <option value="geral">Geral</option>
@@ -846,7 +846,7 @@ export const DashboardOperationsTab: React.FC<DashboardOperationsTabProps> = ({
                     <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Frequência</label>
                     <select
                       value={newRecurFrequency}
-                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewRecurFrequency(e.target.value)}
+                      onChange={(e: any) => setNewRecurFrequency(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-indigo-500 outline-none font-semibold text-slate-700 cursor-pointer"
                     >
                       <option value="daily">Diária</option>
@@ -858,7 +858,7 @@ export const DashboardOperationsTab: React.FC<DashboardOperationsTabProps> = ({
                     <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Categoria</label>
                     <select
                       value={newRecurCategory}
-                      onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setNewRecurCategory(e.target.value)}
+                      onChange={(e: any) => setNewRecurCategory(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-lg p-1.5 text-xs focus:ring-1 focus:ring-indigo-500 outline-none font-semibold text-slate-700 cursor-pointer"
                     >
                       <option value="geral">Geral</option>

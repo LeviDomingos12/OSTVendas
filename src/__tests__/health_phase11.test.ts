@@ -76,16 +76,16 @@ export function formatSessionDuration(totalSeconds: number): string {
   return `${minutes.toString().padStart(2, "0")}m ${seconds.toString().padStart(2, "0")}s`;
 }
 
-export function sanitizeProductionExport<T extends Record<string, unknown>>(data: T): Partial<T> {
-  const sanitized: Record<string, unknown> = { ...data };
+export function sanitizeProductionExport<T extends Record<string, any>>(data: T): Partial<T> {
+  const sanitized = { ...data };
   
   // Remove or mask sensitive internal fields
-  if ("password" in sanitized) delete sanitized.password;
-  if ("rawPin" in sanitized) delete sanitized.rawPin;
-  if ("geminiApiKey" in sanitized) sanitized.geminiApiKey = "********";
-  if ("jwtSecret" in sanitized) sanitized.jwtSecret = "********";
+  if ("password" in sanitized) delete (sanitized as any).password;
+  if ("rawPin" in sanitized) delete (sanitized as any).rawPin;
+  if ("geminiApiKey" in sanitized) (sanitized as any).geminiApiKey = "********";
+  if ("jwtSecret" in sanitized) (sanitized as any).jwtSecret = "********";
 
-  return sanitized as Partial<T>;
+  return sanitized;
 }
 
 // ==========================================
@@ -142,7 +142,7 @@ describe("Phase 11: Prontidão de Produção, System Info Hub e Health Checks", 
       const clean = sanitizeProductionExport(rawConfig);
       expect(clean.geminiApiKey).toBe("********");
       expect(clean.jwtSecret).toBe("********");
-      expect((clean as Record<string, unknown>).password).toBeUndefined();
+      expect((clean as any).password).toBeUndefined();
       expect(clean.companyName).toBe("Loja Teste");
     });
   });

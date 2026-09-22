@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { History, Download, Printer, ShieldCheck, Search, FileText, AlertCircle, CheckCircle } from "lucide-react";
+import { History, Download, Printer, Search } from "lucide-react";
 import { CashClosure, SystemSettings } from "../../types";
 import { exportSingleClosurePdf, printThermalSlip } from "./cashPdfService";
 

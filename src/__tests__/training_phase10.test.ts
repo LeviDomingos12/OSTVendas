@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { MasterclassVideo, Employee } from "../types";
-import { generateCertificateCode, generateUUID } from "../lib/deterministic";
 
 // ==========================================
 // Phase 10: Training, Masterclasses & Certification
@@ -98,10 +97,10 @@ export function generateCertificationData(
 } {
   const issueDate = new Date().toISOString().split("T")[0];
   const validUntil = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]; // 1 ano
-  const verificationCode = generateCertificateCode();
+  const verificationCode = `CERT-OST-${Math.random().toString(36).substring(2, 8).toUpperCase()}-${new Date().getFullYear()}`;
 
   return {
-    certificateId: `CRT_${generateUUID().slice(0, 8).toUpperCase()}`,
+    certificateId: `CRT_${Date.now()}`,
     candidateName: candidate.name,
     candidateRole: candidate.role,
     courseTitle,

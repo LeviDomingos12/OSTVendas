@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   company_id TEXT REFERENCES public.companies(id) ON DELETE SET NULL,
   email TEXT,
   full_name TEXT,
-  role TEXT,
+  role TEXT DEFAULT 'ADMIN',
   avatar_url TEXT,
   phone TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -86,17 +86,18 @@ CREATE TABLE IF NOT EXISTS public.produtos (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Compatibilidade e resiliência: garantir coluna 'price' (alias para 'sale_price')
-DO $$ 
-BEGIN 
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_schema = 'public' AND table_name = 'produtos' AND column_name = 'price'
-  ) THEN 
-    ALTER TABLE public.produtos ADD COLUMN price NUMERIC(14,2) GENERATED ALWAYS AS (sale_price) STORED; 
-  END IF; 
-EXCEPTION WHEN OTHERS THEN NULL; 
-END $$;
+-- COMPATIBILIDADE: View para 'products' (inglês) sobre 'produtos'
+CREATE OR REPLACE VIEW public.products AS 
+  SELECT 
+    id, tenant_id, name, code, barcode, category, 
+    category_id, supplier, supplier_id, 
+    cost_price AS cost, sale_price AS price, 
+    cost_price, sale_price, stock, min_stock, 
+    vat_rate, unit, image_url, is_active, created_at, updated_at 
+  FROM public.produtos;
+
+GRANT ALL ON public.produtos TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.products TO postgres, authenticated, anon, service_role;
 
 -- MOVIMENTOS DE STOCK (Kardex / Rastreabilidade)
 CREATE TABLE IF NOT EXISTS public.stock_movements (
@@ -163,6 +164,7 @@ CREATE TABLE IF NOT EXISTS public.debt_payments (
 CREATE TABLE IF NOT EXISTS public.vendas (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
   tenant_id TEXT NOT NULL,
+  idempotency_key TEXT,
   invoice_number TEXT NOT NULL,
   customer_id TEXT,
   customer_name TEXT DEFAULT 'Consumidor Final',
@@ -184,6 +186,10 @@ CREATE TABLE IF NOT EXISTS public.vendas (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   timestamp TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.vendas ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vendas_tenant_idempotency ON public.vendas (tenant_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_vendas_tenant_invoice ON public.vendas (tenant_id, invoice_number);
 
 -- ITENS DA VENDA
 CREATE TABLE IF NOT EXISTS public.venda_itens (
@@ -259,7 +265,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
   status TEXT NOT NULL DEFAULT 'CLOSED',
   opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   opened_at TIMESTAMPTZ DEFAULT NOW(),
-  opened_by TEXT NOT NULL,
+  opened_by TEXT NOT NULL DEFAULT 'Admin',
   opening_supervisor TEXT,
   opening_notes TEXT,
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -338,17 +344,6 @@ CREATE TABLE IF NOT EXISTS public.recovery_requests (
   resolved_at TIMESTAMPTZ
 );
 
--- CHAVES DE IDEMPOTÊNCIA PERSISTENTES (PREVENÇÃO DE DUPLICIDADE EM VENDAS/PAGAMENTOS)
-CREATE TABLE IF NOT EXISTS public.idempotency_keys (
-  key TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL,
-  resource_type TEXT NOT NULL,
-  resource_id TEXT NOT NULL,
-  response_payload JSONB NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '7 days')
-);
-
 -- ============================================================================
 -- 3. INDEXES FOR PERFORMANCE
 -- ============================================================================
@@ -424,20 +419,14 @@ BEGIN
   )
   ON CONFLICT (id) DO NOTHING;
 
-  -- 2. Criar perfil vinculado à empresa (ADMIN atribuído somente durante o provisionamento controlado do proprietário inicial)
+  -- 2. Criar perfil vinculado à empresa
   INSERT INTO public.profiles (id, company_id, email, full_name, role, avatar_url, created_at, updated_at)
   VALUES (
     new.id,
     v_company_id,
     new.email,
     v_user_name,
-    CASE 
-      WHEN new.raw_app_meta_data->>'role' IS NOT NULL AND (new.raw_app_meta_data->>'role') <> '' 
-        THEN new.raw_app_meta_data->>'role'
-      WHEN EXISTS (SELECT 1 FROM public.companies c WHERE c.id = v_company_id AND c.owner_uid = new.id::text)
-        THEN 'ADMIN' -- Provisionamento controlado do proprietário inicial
-      ELSE NULL -- Rejeitar role padrão não provisionado
-    END,
+    COALESCE(new.raw_user_meta_data->>'role', 'ADMIN'),
     COALESCE(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', ''),
     NOW(),
     NOW()
@@ -518,29 +507,10 @@ ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
 
--- COMPANIES: Políticas granulares com isolamento estrito de tenant
+-- COMPANIES: Apenas membros da mesma empresa autenticada ou o proprietário com tenant ativo
 DROP POLICY IF EXISTS "Companies Isolation" ON public.companies;
-DROP POLICY IF EXISTS "Companies Select" ON public.companies;
-DROP POLICY IF EXISTS "Companies Insert" ON public.companies;
-DROP POLICY IF EXISTS "Companies Update" ON public.companies;
-DROP POLICY IF EXISTS "Companies Delete" ON public.companies;
-
-CREATE POLICY "Companies Select" ON public.companies
-  FOR SELECT TO authenticated
-  USING (
-    public.get_my_company_id() IS NOT NULL AND 
-    (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
-  );
-
-CREATE POLICY "Companies Insert" ON public.companies
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    owner_uid = auth.uid()::text OR 
-    (public.get_my_company_id() IS NOT NULL AND id = public.get_my_company_id())
-  );
-
-CREATE POLICY "Companies Update" ON public.companies
-  FOR UPDATE TO authenticated
+CREATE POLICY "Companies Isolation" ON public.companies
+  FOR ALL TO authenticated
   USING (
     public.get_my_company_id() IS NOT NULL AND 
     (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
@@ -550,119 +520,31 @@ CREATE POLICY "Companies Update" ON public.companies
     (id = public.get_my_company_id() OR owner_uid = auth.uid()::text)
   );
 
--- PROFILES: Políticas granulares e seguras contra Escalada de Privilégios e Manipulação de Tenant
+-- PROFILES: Cada utilizador acede ao seu próprio perfil ou aos da sua empresa vinculada
 DROP POLICY IF EXISTS "Profiles Isolation" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Select" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Insert" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Update" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Update Self" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Update Admin" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Delete" ON public.profiles;
-DROP POLICY IF EXISTS "Profiles Delete Admin" ON public.profiles;
-
--- Leitura: Utilizador lê o seu próprio perfil ou os perfis da mesma empresa
-CREATE POLICY "Profiles Select" ON public.profiles
-  FOR SELECT TO authenticated
+CREATE POLICY "Profiles Isolation" ON public.profiles
+  FOR ALL TO authenticated
   USING (
+    id = auth.uid() OR 
+    (public.get_my_company_id() IS NOT NULL AND company_id = public.get_my_company_id())
+  )
+  WITH CHECK (
     id = auth.uid() OR 
     (public.get_my_company_id() IS NOT NULL AND company_id = public.get_my_company_id())
   );
 
--- Inserção: Criado pelo próprio utilizador (via trigger OAuth/Signup com validação estrita) ou por Admin da empresa
-CREATE POLICY "Profiles Insert" ON public.profiles
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    (id = auth.uid() AND (role IS NULL OR role NOT IN ('ADMIN', 'OWNER', 'SUPER_ADMIN') OR EXISTS (SELECT 1 FROM public.companies WHERE id = company_id AND owner_uid = auth.uid()::text))) OR 
-    (public.get_my_company_id() IS NOT NULL AND company_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'OWNER'))
-  );
-
--- Atualização Própria: Utilizador comum só pode alterar dados pessoais (full_name, avatar_url, phone), NUNCA role ou company_id
-CREATE POLICY "Profiles Update Self" ON public.profiles
-  FOR UPDATE TO authenticated
-  USING (id = auth.uid())
-  WITH CHECK (
-    id = auth.uid() AND
-    company_id IS NOT DISTINCT FROM (SELECT p.company_id FROM public.profiles p WHERE p.id = auth.uid()) AND
-    (public.get_my_role() IN ('ADMIN', 'OWNER') OR role IS NOT DISTINCT FROM (SELECT p.role FROM public.profiles p WHERE p.id = auth.uid()))
-  );
-
--- Atualização Administrativa: Apenas Administrador da empresa pode atualizar membros da sua empresa
-CREATE POLICY "Profiles Update Admin" ON public.profiles
-  FOR UPDATE TO authenticated
-  USING (
-    public.get_my_company_id() IS NOT NULL AND 
-    company_id = public.get_my_company_id() AND 
-    public.get_my_role() IN ('ADMIN', 'OWNER')
-  )
-  WITH CHECK (
-    public.get_my_company_id() IS NOT NULL AND 
-    company_id = public.get_my_company_id() AND 
-    public.get_my_role() IN ('ADMIN', 'OWNER')
-  );
-
--- Eliminação: Apenas Administrador da empresa pode remover perfis de outros colaboradores (nunca o próprio proprietário)
-CREATE POLICY "Profiles Delete Admin" ON public.profiles
-  FOR DELETE TO authenticated
-  USING (
-    id <> auth.uid() AND
-    public.get_my_company_id() IS NOT NULL AND 
-    company_id = public.get_my_company_id() AND 
-    public.get_my_role() IN ('ADMIN', 'OWNER')
-  );
-
--- Trigger de Segurança: Bloqueio estrito de escalada de privilégios e evasão de tenant a nível de banco
-CREATE OR REPLACE FUNCTION public.check_profile_security_guard()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-BEGIN
-  -- Se a operação for acionada por um utilizador autenticado regular
-  IF auth.uid() IS NOT NULL THEN
-    -- Impedir alteração de company_id para prevenir tenant-hopping
-    IF OLD.company_id IS NOT NULL AND NEW.company_id <> OLD.company_id THEN
-      RAISE EXCEPTION 'Manipulação de Tenant Bloqueada: Não é permitido transferir contas entre empresas.';
-    END IF;
-
-    -- Impedir utilizador comum de auto-promover para ADMIN ou outro cargo superior
-    IF auth.uid() = OLD.id AND NEW.role <> OLD.role AND public.get_my_role() NOT IN ('ADMIN', 'OWNER') THEN
-      RAISE EXCEPTION 'Escalada de Privilégios Bloqueada: Não possui permissão para alterar o seu próprio papel de acesso.';
-    END IF;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trg_profiles_security_guard ON public.profiles;
-CREATE TRIGGER trg_profiles_security_guard
-  BEFORE UPDATE ON public.profiles
-  FOR EACH ROW
-  EXECUTE FUNCTION public.check_profile_security_guard();
-
--- Helper para verificar papel do utilizador corrente de forma autoritativa (Profiles ou app_metadata, nunca user_metadata)
+-- Helper para verificar papel do utilizador corrente no JWT/Metadados
 CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS TEXT
-LANGUAGE plpgsql
+LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-DECLARE
-  v_role TEXT;
-BEGIN
-  -- 1. Consultar tabela profiles de forma autoritativa
-  SELECT role INTO v_role FROM public.profiles WHERE id = auth.uid();
-  IF v_role IS NOT NULL AND v_role <> '' THEN
-    RETURN v_role;
-  END IF;
-
-  -- 2. Fallback para app_metadata (gerido exclusivamente pelo servidor / admin)
-  v_role := (current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'role');
-  IF v_role IS NOT NULL AND v_role <> '' THEN
-    RETURN v_role;
-  END IF;
-
-  RETURN 'GUEST';
-END;
+  SELECT COALESCE(
+    (current_setting('request.jwt.claims', true)::jsonb -> 'user_metadata' ->> 'role'),
+    (current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'role'),
+    'GUEST'
+  );
 $$;
 
 -- PRODUTOS: Leitura para todos do tenant; Escrita e Atualização para Vendedores/Supervisores/Admin; Eliminação estrita para ADMIN
@@ -911,50 +793,28 @@ CREATE POLICY "Debt Payments Insert" ON public.debt_payments
 DROP POLICY IF EXISTS "Categories Tenant Isolation" ON public.categories;
 DROP POLICY IF EXISTS "Categories Select" ON public.categories;
 DROP POLICY IF EXISTS "Categories Modify" ON public.categories;
-DROP POLICY IF EXISTS "Categories Insert" ON public.categories;
-DROP POLICY IF EXISTS "Categories Update" ON public.categories;
-DROP POLICY IF EXISTS "Categories Delete" ON public.categories;
 
 CREATE POLICY "Categories Select" ON public.categories
   FOR SELECT TO authenticated
   USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
-CREATE POLICY "Categories Insert" ON public.categories
-  FOR INSERT TO authenticated
-  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
-
-CREATE POLICY "Categories Update" ON public.categories
-  FOR UPDATE TO authenticated
+CREATE POLICY "Categories Modify" ON public.categories
+  FOR ALL TO authenticated
   USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'))
   WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
-
-CREATE POLICY "Categories Delete" ON public.categories
-  FOR DELETE TO authenticated
-  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
 
 DROP POLICY IF EXISTS "Suppliers Tenant Isolation" ON public.suppliers;
 DROP POLICY IF EXISTS "Suppliers Select" ON public.suppliers;
 DROP POLICY IF EXISTS "Suppliers Modify" ON public.suppliers;
-DROP POLICY IF EXISTS "Suppliers Insert" ON public.suppliers;
-DROP POLICY IF EXISTS "Suppliers Update" ON public.suppliers;
-DROP POLICY IF EXISTS "Suppliers Delete" ON public.suppliers;
 
 CREATE POLICY "Suppliers Select" ON public.suppliers
   FOR SELECT TO authenticated
   USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id());
 
-CREATE POLICY "Suppliers Insert" ON public.suppliers
-  FOR INSERT TO authenticated
-  WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
-
-CREATE POLICY "Suppliers Update" ON public.suppliers
-  FOR UPDATE TO authenticated
+CREATE POLICY "Suppliers Modify" ON public.suppliers
+  FOR ALL TO authenticated
   USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'))
   WITH CHECK (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
-
-CREATE POLICY "Suppliers Delete" ON public.suppliers
-  FOR DELETE TO authenticated
-  USING (public.get_my_company_id() IS NOT NULL AND tenant_id = public.get_my_company_id() AND public.get_my_role() IN ('ADMIN', 'SUPERVISOR', 'STOCK_MANAGER'));
 
 -- RECOVERY REQUESTS:
 DROP POLICY IF EXISTS "Recovery Requests Tenant Isolation" ON public.recovery_requests;
@@ -973,26 +833,31 @@ CREATE POLICY "Recovery Requests Insert" ON public.recovery_requests
 -- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC) - HARDENED
 -- ============================================================================
 
--- RPC 1: PROCESS SALE ATOMIC (Idempotent, Transactional, Authoritative Financial Calculation & Tenant-Hardened)
+-- Drop legacy overloads of process_sale_atomic to ensure a single official contract
+DROP FUNCTION IF EXISTS public.process_sale_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, JSONB, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.process_sale_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, JSONB, TEXT);
+DROP FUNCTION IF EXISTS public.process_sale_atomic(TEXT, TEXT, TEXT, JSONB, TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, TEXT);
+
+-- RPC 1: PROCESS SALE ATOMIC (Single Official Contract: Idempotent, Stock-Validated, Multi-Tenant)
 CREATE OR REPLACE FUNCTION public.process_sale_atomic(
-  p_tenant_id TEXT,
   p_sale_id TEXT,
-  p_invoice_number TEXT,
-  p_customer_id TEXT,
-  p_customer_name TEXT,
-  p_customer_nuit TEXT,
-  p_seller_id TEXT,
-  p_seller_name TEXT,
-  p_payment_method TEXT,
-  p_subtotal NUMERIC,
-  p_discount_total NUMERIC,
-  p_vat_total NUMERIC,
-  p_grand_total NUMERIC,
-  p_amount_paid NUMERIC,
-  p_change_amount NUMERIC,
+  p_company_id TEXT,
+  p_user_id TEXT,
   p_items JSONB,
-  p_notes TEXT DEFAULT NULL,
-  p_idempotency_key TEXT DEFAULT NULL
+  p_payment_method TEXT,
+  p_total NUMERIC,
+  p_idempotency_key TEXT DEFAULT NULL,
+  p_invoice_number TEXT DEFAULT NULL,
+  p_customer_id TEXT DEFAULT NULL,
+  p_customer_name TEXT DEFAULT 'Consumidor Final',
+  p_customer_nuit TEXT DEFAULT NULL,
+  p_user_name TEXT DEFAULT 'Operador',
+  p_subtotal NUMERIC DEFAULT NULL,
+  p_discount_total NUMERIC DEFAULT 0.00,
+  p_vat_total NUMERIC DEFAULT 0.00,
+  p_amount_paid NUMERIC DEFAULT NULL,
+  p_change_amount NUMERIC DEFAULT 0.00,
+  p_notes TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1001,109 +866,90 @@ SET search_path = public
 AS $$
 DECLARE
   v_tenant_id TEXT;
+  v_invoice_number TEXT;
+  v_subtotal NUMERIC;
+  v_total NUMERIC;
+  v_amount_paid NUMERIC;
+  v_user_name TEXT;
+  v_idempotency_key TEXT;
   v_item JSONB;
   v_prod_id TEXT;
   v_prod_name TEXT;
   v_qty NUMERIC;
   v_unit_price NUMERIC;
   v_cost_price NUMERIC;
-  v_official_sale_price NUMERIC;
-  v_official_cost_price NUMERIC;
-  v_prod_vat_rate NUMERIC;
   v_curr_stock NUMERIC;
   v_new_stock NUMERIC;
-  v_item_discount NUMERIC;
-  v_item_subtotal NUMERIC;
-  v_item_net NUMERIC;
-  v_item_vat NUMERIC;
-  v_item_total NUMERIC;
-  
-  -- Valores financeiros autoritativos calculados exclusivamente no PostgreSQL
-  v_calc_subtotal NUMERIC(14,2) := 0.00;
-  v_calc_cost_total NUMERIC(14,2) := 0.00;
-  v_calc_vat_total NUMERIC(14,2) := 0.00;
-  v_calc_item_discount_total NUMERIC(14,2) := 0.00;
-  v_calc_total_discount NUMERIC(14,2) := 0.00;
-  v_calc_grand_total NUMERIC(14,2) := 0.00;
-  v_calc_amount_paid NUMERIC(14,2) := 0.00;
-  v_calc_change NUMERIC(14,2) := 0.00;
-  v_remaining_debt NUMERIC(14,2) := 0.00;
+  v_total_item NUMERIC;
   v_is_credit BOOLEAN;
-  v_authoritative_items JSONB := '[]'::JSONB;
-
-  v_cached_response JSONB;
-  v_final_response JSONB;
+  v_remaining_debt NUMERIC;
+  v_existing_sale_id TEXT;
+  v_existing_invoice_number TEXT;
+  v_existing_total NUMERIC;
 BEGIN
-  -- 0. SEGURANÇA ESTATUTÁRIA: Determinar e validar autoritativamente o tenant da sessão.
-  -- NUNCA aceitar chamadas anónimas/não autenticadas que passem p_tenant_id arbitrário.
+  -- 0. Determinar e validar autoritativamente a empresa/tenant da sessão
   IF auth.uid() IS NOT NULL THEN
-    v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Utilizador autenticado sem empresa/tenant associado.');
-    END IF;
-    -- Se fornecido p_tenant_id pelo cliente, verificar estritamente que não há spoofing de tenant
-    IF p_tenant_id IS NOT NULL AND p_tenant_id <> '' AND p_tenant_id <> v_tenant_id THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Violação de segurança: Tentativa de operação em tenant diferente do autorizado.');
-    END IF;
-  ELSIF current_user IN ('service_role', 'postgres', 'supabase_admin') 
-     OR (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role' THEN
-    v_tenant_id := p_tenant_id;
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não fornecido pela chamada autorizada de backend.');
-    END IF;
+    v_tenant_id := COALESCE(public.get_my_company_id(), p_company_id);
   ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Operação atómica requer utilizador autenticado ou token service_role.');
+    v_tenant_id := p_company_id;
   END IF;
 
-  -- 0.1 Verificação de Idempotência Persistente via Chave de Idempotência
-  IF p_idempotency_key IS NOT NULL AND p_idempotency_key <> '' THEN
-    SELECT response_payload INTO v_cached_response
-    FROM public.idempotency_keys
-    WHERE key = p_idempotency_key AND tenant_id = v_tenant_id;
-
-    IF FOUND THEN
-      RETURN v_cached_response;
-    END IF;
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de empresa (p_company_id) não autorizado ou utilizador sem empresa.');
   END IF;
 
-  -- 0.2 Verificação de Idempotência por ID de Venda Existente
-  IF EXISTS (SELECT 1 FROM public.vendas WHERE id = p_sale_id AND tenant_id = v_tenant_id) THEN
-    SELECT jsonb_build_object(
+  -- 0.1 Normalização de campos derivados
+  v_total := COALESCE(p_total, 0.00);
+  v_subtotal := COALESCE(p_subtotal, v_total);
+  v_amount_paid := COALESCE(p_amount_paid, v_total);
+  v_invoice_number := COALESCE(NULLIF(p_invoice_number, ''), p_sale_id);
+  v_user_name := COALESCE(NULLIF(p_user_name, ''), 'Operador');
+  v_idempotency_key := COALESCE(NULLIF(p_idempotency_key, ''), p_sale_id);
+
+  -- 0.2 Validação de valores monetários
+  IF v_subtotal < 0 OR p_discount_total < 0 OR p_vat_total < 0 OR v_total < 0 OR v_amount_paid < 0 OR p_change_amount < 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Valores monetários inválidos ou negativos.');
+  END IF;
+
+  -- 0.3 Verificação de Idempotência: Se a venda já foi registada para este tenant, devolver com sucesso os dados existentes
+  -- NUNCA atualizar silenciosamente uma venda já concluída nem recriar itens/movimentos.
+  SELECT id, invoice_number, grand_total INTO v_existing_sale_id, v_existing_invoice_number, v_existing_total
+  FROM public.vendas 
+  WHERE tenant_id = v_tenant_id 
+    AND (
+      id = p_sale_id 
+      OR (v_idempotency_key IS NOT NULL AND (id = v_idempotency_key OR idempotency_key = v_idempotency_key))
+    )
+  LIMIT 1;
+
+  IF v_existing_sale_id IS NOT NULL THEN
+    RETURN jsonb_build_object(
       'success', true,
-      'sale_id', id,
-      'invoice_number', invoice_number,
-      'subtotal', subtotal,
-      'discount_total', discount_total,
-      'vat_total', vat_total,
-      'grand_total', grand_total,
-      'amount_paid', amount_paid,
-      'change_amount', change_amount,
-      'message', 'Venda já processada anteriormente (idempotente).'
-    ) INTO v_final_response
-    FROM public.vendas
-    WHERE id = p_sale_id AND tenant_id = v_tenant_id;
-
-    RETURN v_final_response;
+      'sale_id', v_existing_sale_id,
+      'invoice_number', v_existing_invoice_number,
+      'grand_total', v_existing_total,
+      'idempotent', true,
+      'message', 'Venda já processada anteriormente (idempotente). Nenhuma alteração efetuada.'
+    );
   END IF;
 
-  -- 0.3 Validação de cliente (se fornecido, deve pertencer ao mesmo tenant)
-  IF p_customer_id IS NOT NULL AND p_customer_id <> '' AND p_customer_id <> 'WALK_IN' THEN
+  -- 0.4 Validação de cliente (se fornecido, deve pertencer ao mesmo tenant)
+  IF p_customer_id IS NOT NULL AND p_customer_id <> '' THEN
     IF NOT EXISTS (SELECT 1 FROM public.clientes WHERE id = p_customer_id AND tenant_id = v_tenant_id) THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Cliente especificado não existe ou pertence a outra organização.');
+      RETURN jsonb_build_object('success', false, 'error', 'Cliente especificado não existe ou pertence a outra empresa.');
     END IF;
   END IF;
 
-  -- 0.4 Validação e Pré-Cálculo Autoritativo de Itens e Stock
+  -- 0.5 Validação de itens e integridade de stock (Passo atómico de pré-validação)
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'A venda deve conter pelo menos um artigo.');
   END IF;
 
-  -- FASE 1: VALIDAÇÃO, BLOQUEIO DE REGISTOS E CÁLCULO FINANCEIRO AUTORITATIVO NO POSTGRESQL
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
     v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
     v_qty := COALESCE((v_item->>'quantity')::NUMERIC, (v_item->>'quantidade')::NUMERIC, 0.00);
-    v_item_discount := GREATEST(0.00, COALESCE((v_item->>'discountAmount')::NUMERIC, (v_item->>'discount')::NUMERIC, 0.00));
+    v_unit_price := COALESCE((v_item->>'salePrice')::NUMERIC, (v_item->>'unitPrice')::NUMERIC, (v_item->>'price')::NUMERIC, -1.00);
 
     IF v_prod_id IS NULL OR v_prod_id = '' THEN
       RETURN jsonb_build_object('success', false, 'error', 'Identificador de produto não especificado num dos itens.');
@@ -1113,113 +959,66 @@ BEGIN
       RETURN jsonb_build_object('success', false, 'error', 'Quantidade inválida para o artigo.');
     END IF;
 
-    -- BLOQUEIO EXCLUSIVO E CONSULTA DE PREÇO AUTORITATIVO (USANDO sale_price, NUNCA price INEXISTENTE)
-    SELECT name, stock, sale_price, cost_price, COALESCE(vat_rate, 16.00)
-    INTO v_prod_name, v_curr_stock, v_official_sale_price, v_official_cost_price, v_prod_vat_rate
-    FROM public.produtos
-    WHERE id = v_prod_id AND tenant_id = v_tenant_id AND is_active = TRUE
+    IF v_unit_price < 0 THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Preço unitário inválido para o artigo.');
+    END IF;
+
+    -- Bloquear e validar produto no inventário do tenant
+    SELECT stock, name INTO v_curr_stock, v_prod_name 
+    FROM public.produtos 
+    WHERE id = v_prod_id AND tenant_id = v_tenant_id AND is_active = TRUE 
     FOR UPDATE;
 
     IF NOT FOUND THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Artigo (' || v_prod_id || ') não existe, está desativado ou pertence a outra organização.');
+      RETURN jsonb_build_object('success', false, 'error', 'Artigo (' || v_prod_id || ') não existe, está desativado ou não pertence à sua empresa.');
     END IF;
 
     IF v_curr_stock < v_qty THEN
       RETURN jsonb_build_object('success', false, 'error', 'Stock insuficiente para o artigo "' || v_prod_name || '". Stock atual: ' || v_curr_stock || ', Solicitado: ' || v_qty);
     END IF;
-
-    -- Preços Oficiais de Catálogo e Custo (Autoritativos do PostgreSQL, imunes a adulteração de cliente)
-    v_unit_price := v_official_sale_price;
-    v_cost_price := v_official_cost_price;
-
-    v_item_subtotal := ROUND(v_qty * v_unit_price, 2);
-    v_item_discount := LEAST(v_item_discount, v_item_subtotal);
-    v_item_net := v_item_subtotal - v_item_discount;
-
-    -- Cálculo de IVA Autoritativo por Artigo (16% padrão de Moçambique ou taxa cadastrada no produto)
-    IF COALESCE(p_vat_total, -1.00) = 0.00 OR v_prod_vat_rate <= 0 THEN
-      v_item_vat := 0.00;
-    ELSE
-      v_item_vat := ROUND(v_item_net * (v_prod_vat_rate / 100.0), 2);
-    END IF;
-
-    v_item_total := ROUND(v_item_net + v_item_vat, 2);
-
-    -- Acumular totais financeiros calculados
-    v_calc_subtotal := v_calc_subtotal + v_item_subtotal;
-    v_calc_cost_total := v_calc_cost_total + ROUND(v_qty * v_cost_price, 2);
-    v_calc_item_discount_total := v_calc_item_discount_total + v_item_discount;
-    v_calc_vat_total := v_calc_vat_total + v_item_vat;
-
-    -- Construir lista autoritativa de itens para persistência
-    v_authoritative_items := v_authoritative_items || jsonb_build_object(
-      'productId', v_prod_id,
-      'productName', v_prod_name,
-      'quantity', v_qty,
-      'price', v_unit_price,
-      'salePrice', v_unit_price,
-      'unitPrice', v_unit_price,
-      'costPrice', v_cost_price,
-      'vatRate', v_prod_vat_rate,
-      'vatAmount', v_item_vat,
-      'discountAmount', v_item_discount,
-      'subtotal', v_item_subtotal,
-      'totalPrice', v_item_total
-    );
   END LOOP;
 
-  -- FASE 2: CONSOLIDAÇÃO FINANCEIRA AUTORITATIVA
-  -- Desconto total: validar se o cliente solicitou desconto global superior aos descontos por item
-  v_calc_total_discount := GREATEST(v_calc_item_discount_total, GREATEST(0.00, LEAST(COALESCE(p_discount_total, 0.00), v_calc_subtotal)));
-  v_calc_grand_total := GREATEST(0.00, ROUND(v_calc_subtotal - v_calc_total_discount + v_calc_vat_total, 2));
-
-  v_is_credit := p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT');
-  IF v_is_credit THEN
-    v_calc_amount_paid := LEAST(GREATEST(0.00, COALESCE(p_amount_paid, 0.00)), v_calc_grand_total);
-    v_calc_change := 0.00;
-    v_remaining_debt := GREATEST(0.00, v_calc_grand_total - v_calc_amount_paid);
-  ELSE
-    v_calc_amount_paid := GREATEST(0.00, COALESCE(p_amount_paid, v_calc_grand_total));
-    v_calc_change := GREATEST(0.00, v_calc_amount_paid - v_calc_grand_total);
-    v_remaining_debt := 0.00;
-  END IF;
-
-  -- FASE 3: INSERIR REGISTO MESTRE COM VALORES AUTORITATIVOS
+  -- 1. Inserir registo mestre de venda com proteção contra duplicação concorrente
   INSERT INTO public.vendas (
-    id, tenant_id, invoice_number, customer_id, customer_name, customer_nuit,
+    id, tenant_id, idempotency_key, invoice_number, customer_id, customer_name, customer_nuit,
     seller_id, seller_name, operator_name, payment_method, payment_status,
     subtotal, discount_total, vat_total, grand_total, amount_paid, change_amount,
     status, items, notes, timestamp, created_at
   ) VALUES (
-    p_sale_id, v_tenant_id, p_invoice_number, p_customer_id, p_customer_name, p_customer_nuit,
-    p_seller_id, p_seller_name, p_seller_name, p_payment_method,
-    CASE WHEN v_is_credit AND v_remaining_debt > 0 THEN 'PENDING_DEBT' ELSE 'PAID' END,
-    v_calc_subtotal, v_calc_total_discount, v_calc_vat_total, v_calc_grand_total, v_calc_amount_paid, v_calc_change,
-    'COMPLETED', v_authoritative_items, p_notes, NOW(), NOW()
+    p_sale_id, v_tenant_id, v_idempotency_key, v_invoice_number, p_customer_id, p_customer_name, p_customer_nuit,
+    p_user_id, v_user_name, v_user_name, p_payment_method,
+    CASE WHEN p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT') THEN 'PENDING_DEBT' ELSE 'PAID' END,
+    v_subtotal, p_discount_total, p_vat_total, v_total, v_amount_paid, p_change_amount,
+    'COMPLETED', p_items, p_notes, NOW(), NOW()
   )
-  ON CONFLICT (id) DO UPDATE SET
-    subtotal = EXCLUDED.subtotal,
-    discount_total = EXCLUDED.discount_total,
-    vat_total = EXCLUDED.vat_total,
-    grand_total = EXCLUDED.grand_total,
-    amount_paid = EXCLUDED.amount_paid,
-    change_amount = EXCLUDED.change_amount,
-    payment_status = EXCLUDED.payment_status,
-    items = EXCLUDED.items;
+  ON CONFLICT (id) DO NOTHING;
 
-  -- FASE 4: INSERIR ITENS INDIVIDUAIS, ATUALIZAR STOCK E REGISTAR KARDEX
-  FOR v_item IN SELECT * FROM jsonb_array_elements(v_authoritative_items)
+  -- Se não inseriu devido a colisão de id concorrente, retornar dados existentes sem atualizar silenciosamente
+  IF NOT FOUND THEN
+    SELECT id, invoice_number, grand_total INTO v_existing_sale_id, v_existing_invoice_number, v_existing_total
+    FROM public.vendas 
+    WHERE tenant_id = v_tenant_id AND id = p_sale_id
+    LIMIT 1;
+
+    RETURN jsonb_build_object(
+      'success', true,
+      'sale_id', COALESCE(v_existing_sale_id, p_sale_id),
+      'invoice_number', COALESCE(v_existing_invoice_number, v_invoice_number),
+      'grand_total', COALESCE(v_existing_total, v_total),
+      'idempotent', true,
+      'message', 'Venda já processada anteriormente (idempotente). Nenhuma alteração efetuada.'
+    );
+  END IF;
+
+  -- 2. Iterar sobre os itens: inserir itens individuais e decrementar o stock atomicamente
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
-    v_prod_id := v_item->>'productId';
-    v_prod_name := v_item->>'productName';
-    v_qty := (v_item->>'quantity')::NUMERIC;
-    v_unit_price := (v_item->>'unitPrice')::NUMERIC;
-    v_cost_price := (v_item->>'costPrice')::NUMERIC;
-    v_item_total := (v_item->>'totalPrice')::NUMERIC;
-
-    -- Obter stock atualizado para movimentação no Kardex
-    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id FOR UPDATE;
-    v_new_stock := GREATEST(0.00, v_curr_stock - v_qty);
+    v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
+    v_prod_name := COALESCE(v_item->>'name', v_item->>'productName', v_item->>'nome', 'Artigo');
+    v_qty := COALESCE((v_item->>'quantity')::NUMERIC, (v_item->>'quantidade')::NUMERIC, 1.00);
+    v_unit_price := COALESCE((v_item->>'salePrice')::NUMERIC, (v_item->>'unitPrice')::NUMERIC, (v_item->>'price')::NUMERIC, 0.00);
+    v_cost_price := COALESCE((v_item->>'costPrice')::NUMERIC, (v_item->>'cost')::NUMERIC, 0.00);
+    v_total_item := COALESCE((v_item->>'totalPrice')::NUMERIC, (v_item->>'total')::NUMERIC, v_qty * v_unit_price);
 
     -- Inserir item da venda
     INSERT INTO public.venda_itens (
@@ -1227,10 +1026,13 @@ BEGIN
       unit_price, quantity, cost_price, total_price, created_at
     ) VALUES (
       uuid_generate_v4()::TEXT, v_tenant_id, p_sale_id, v_prod_id, v_prod_name,
-      v_unit_price, v_qty, v_cost_price, v_item_total, NOW()
+      v_unit_price, v_qty, v_cost_price, v_total_item, NOW()
     );
 
-    -- Decrementar stock com garantia de não negatividade
+    -- Buscar e atualizar stock do produto pertencente ao mesmo tenant
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id FOR UPDATE;
+    v_new_stock := GREATEST(0.00, v_curr_stock - v_qty);
+
     UPDATE public.produtos 
     SET stock = v_new_stock, updated_at = NOW() 
     WHERE id = v_prod_id AND tenant_id = v_tenant_id;
@@ -1238,82 +1040,60 @@ BEGIN
     -- Registar movimento no Kardex
     INSERT INTO public.stock_movements (
       id, tenant_id, product_id, type, quantity,
-      previous_stock, new_stock, cost_price, reason, reference_id, user_name, timestamp
+      previous_stock, new_stock, cost_price, reason, reference_id, user_id, user_name, timestamp
     ) VALUES (
       uuid_generate_v4()::TEXT, v_tenant_id, v_prod_id, 'EXIT_SALE', v_qty,
-      v_curr_stock, v_new_stock, v_cost_price, 'Venda ' || p_invoice_number, p_sale_id, p_seller_name, NOW()
+      v_curr_stock, v_new_stock, v_cost_price, 'Venda ' || v_invoice_number, p_sale_id, p_user_id, v_user_name, NOW()
     );
   END LOOP;
 
-  -- FASE 5: GESTÃO AUTORITATIVA DE DÍVIDAS
-  IF v_is_credit AND p_customer_id IS NOT NULL AND p_customer_id <> '' AND p_customer_id <> 'WALK_IN' THEN
+  -- 3. Gestão de Dívida se a venda foi a prazo
+  v_is_credit := p_payment_method IN ('A Prazo / Dívida', 'Crédito', 'CREDITO', 'DEBT');
+  IF v_is_credit AND p_customer_id IS NOT NULL AND p_customer_id <> '' THEN
+    v_remaining_debt := GREATEST(0.00, v_total - v_amount_paid);
+    
     INSERT INTO public.customer_debts (
       id, tenant_id, customer_id, sale_id, total_amount, paid_amount,
       remaining_balance, due_date, status, created_at
     ) VALUES (
-      uuid_generate_v4()::TEXT, v_tenant_id, p_customer_id, p_sale_id, v_calc_grand_total, v_calc_amount_paid,
+      uuid_generate_v4()::TEXT, v_tenant_id, p_customer_id, p_sale_id, v_total, v_amount_paid,
       v_remaining_debt, NOW() + INTERVAL '30 days',
       CASE WHEN v_remaining_debt <= 0 THEN 'SETTLED' ELSE 'PENDING' END,
       NOW()
     );
 
-    -- Atualizar saldo devedor do cliente
+    -- Atualizar saldo em aberto do cliente
     UPDATE public.clientes 
     SET balance = balance + v_remaining_debt, updated_at = NOW()
     WHERE id = p_customer_id AND tenant_id = v_tenant_id;
   END IF;
 
-  -- FASE 6: REGISTO NO FLUXO DE CAIXA SE PAGO EM NUMERÁRIO
-  IF p_payment_method IN ('Dinheiro', 'Cash', 'Numerário', 'CASH') AND (v_calc_amount_paid - v_calc_change) > 0 THEN
+  -- 4. Registar entrada no fluxo de caixa se pago em dinheiro
+  IF (UPPER(p_payment_method) IN ('DINHEIRO', 'CASH', 'NUMERÁRIO', 'NUMERARIO') OR UPPER(p_payment_method) LIKE '%DINHEIRO%' OR UPPER(p_payment_method) LIKE '%CASH%') AND v_amount_paid > 0 THEN
     INSERT INTO public.caixa (
       id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
     ) VALUES (
-      uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', (v_calc_amount_paid - v_calc_change), 'Recebimento Venda ' || p_invoice_number, p_seller_name, p_sale_id, NOW()
+      uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', v_amount_paid, 'Recebimento Venda ' || v_invoice_number, v_user_name, p_sale_id, NOW()
     );
   END IF;
 
-  -- FASE 7: AUDITORIA OFICIAL DENTRO DA TRANSAÇÃO ATÓMICA
+  -- 5. Registar auditoria de venda concluída atomicamente
   INSERT INTO public.audit_logs (
-    id, tenant_id, action, module, details, user_name, user_role, ip_address, timestamp, created_at
+    id, tenant_id, user_id, user_name, action, module, details, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT,
-    v_tenant_id,
-    'VENDA_PROCESSADA',
-    'POS',
-    'Fatura ' || p_invoice_number || ' emitida no valor autoritativo de ' || v_calc_grand_total || ' MT. Pagamento: ' || p_payment_method || '. Vendedor: ' || p_seller_name,
-    p_seller_name,
-    'OPERATOR',
-    '127.0.0.1',
-    NOW(),
+    uuid_generate_v4()::TEXT, v_tenant_id, p_user_id, v_user_name,
+    'VENDA_CONCLUIDA', 'POS',
+    'Venda ' || v_invoice_number || ' no valor de ' || v_total || ' MT concluída com sucesso via ' || p_payment_method || '.',
     NOW()
   );
 
-  -- RESPOSTA FINAL AUTORITATIVA
-  v_final_response := jsonb_build_object(
+  RETURN jsonb_build_object(
     'success', true,
     'sale_id', p_sale_id,
-    'invoice_number', p_invoice_number,
-    'subtotal', v_calc_subtotal,
-    'discount_total', v_calc_total_discount,
-    'vat_total', v_calc_vat_total,
-    'grand_total', v_calc_grand_total,
-    'amount_paid', v_calc_amount_paid,
-    'change_amount', v_calc_change,
-    'remaining_debt', v_remaining_debt,
-    'items', v_authoritative_items,
-    'message', 'Venda autoritativa e inventário processados com sucesso no PostgreSQL.'
+    'invoice_number', v_invoice_number,
+    'grand_total', v_total,
+    'message', 'Venda e movimentações de inventário processadas com sucesso.'
   );
-
-  -- Armazenar Chave de Idempotência Persistente
-  IF p_idempotency_key IS NOT NULL AND p_idempotency_key <> '' THEN
-    INSERT INTO public.idempotency_keys (
-      key, tenant_id, resource_type, resource_id, response_payload, created_at
-    ) VALUES (
-      p_idempotency_key, v_tenant_id, 'SALE', p_sale_id, v_final_response, NOW()
-    ) ON CONFLICT (key) DO NOTHING;
-  END IF;
-
-  RETURN v_final_response;
 EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object(
     'success', false,
@@ -1329,7 +1109,8 @@ CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
   p_quantity NUMERIC,
   p_cost_price NUMERIC DEFAULT NULL,
   p_reason TEXT DEFAULT 'Reabastecimento de Stock',
-  p_user_name TEXT DEFAULT 'Sistema'
+  p_user_name TEXT DEFAULT 'Sistema',
+  p_received_by TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1342,25 +1123,16 @@ DECLARE
   v_new_stock NUMERIC;
   v_curr_cost NUMERIC;
   v_new_cost NUMERIC;
+  v_operator TEXT;
 BEGIN
-  -- SEGURANÇA ESTATUTÁRIA: Determinar e validar autoritativamente o tenant da sessão.
-  -- NUNCA aceitar chamadas anónimas/não autenticadas que passem p_tenant_id arbitrário.
   IF auth.uid() IS NOT NULL THEN
     v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Utilizador autenticado sem empresa/tenant associado.');
-    END IF;
-    IF p_tenant_id IS NOT NULL AND p_tenant_id <> '' AND p_tenant_id <> v_tenant_id THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Violação de segurança: Tentativa de operação em tenant diferente do autorizado.');
-    END IF;
-  ELSIF current_user IN ('service_role', 'postgres', 'supabase_admin') 
-     OR (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role' THEN
-    v_tenant_id := p_tenant_id;
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não fornecido pela chamada autorizada de backend.');
-    END IF;
   ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Operação atómica requer utilizador autenticado ou token service_role.');
+    v_tenant_id := p_tenant_id;
+  END IF;
+
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado ou utilizador sem empresa.');
   END IF;
 
   IF p_quantity <= 0 THEN
@@ -1370,6 +1142,8 @@ BEGIN
   IF p_cost_price IS NOT NULL AND p_cost_price < 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'Preço de custo não pode ser negativo.');
   END IF;
+
+  v_operator := COALESCE(p_received_by, p_user_name, 'Sistema');
 
   SELECT stock, cost_price INTO v_curr_stock, v_curr_cost 
   FROM public.produtos 
@@ -1391,7 +1165,7 @@ BEGIN
     previous_stock, new_stock, cost_price, reason, user_name, timestamp
   ) VALUES (
     uuid_generate_v4()::TEXT, v_tenant_id, p_product_id, 'ENTRY', p_quantity,
-    v_curr_stock, v_new_stock, v_new_cost, p_reason, p_user_name, NOW()
+    v_curr_stock, v_new_stock, v_new_cost, p_reason, v_operator, NOW()
   );
 
   RETURN jsonb_build_object(
@@ -1410,7 +1184,10 @@ CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
   p_customer_id TEXT,
   p_amount NUMERIC,
   p_payment_method TEXT,
-  p_received_by TEXT DEFAULT 'Operador'
+  p_notes TEXT DEFAULT NULL,
+  p_user_name TEXT DEFAULT 'Operador',
+  p_received_by TEXT DEFAULT NULL,
+  p_idempotency_key TEXT DEFAULT NULL
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1422,29 +1199,40 @@ DECLARE
   v_remaining NUMERIC;
   v_new_remaining NUMERIC;
   v_debt_customer_id TEXT;
+  v_operator TEXT;
 BEGIN
-  -- SEGURANÇA ESTATUTÁRIA: Determinar e validar autoritativamente o tenant da sessão.
-  -- NUNCA aceitar chamadas anónimas/não autenticadas que passem p_tenant_id arbitrário.
   IF auth.uid() IS NOT NULL THEN
     v_tenant_id := public.get_my_company_id();
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Utilizador autenticado sem empresa/tenant associado.');
-    END IF;
-    IF p_tenant_id IS NOT NULL AND p_tenant_id <> '' AND p_tenant_id <> v_tenant_id THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Violação de segurança: Tentativa de operação em tenant diferente do autorizado.');
-    END IF;
-  ELSIF current_user IN ('service_role', 'postgres', 'supabase_admin') 
-     OR (NULLIF(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role') = 'service_role' THEN
-    v_tenant_id := p_tenant_id;
-    IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não fornecido pela chamada autorizada de backend.');
-    END IF;
   ELSE
-    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Operação atómica requer utilizador autenticado ou token service_role.');
+    v_tenant_id := p_tenant_id;
+  END IF;
+
+  IF v_tenant_id IS NULL OR v_tenant_id = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Identificador de tenant não autorizado ou utilizador sem empresa.');
   END IF;
 
   IF p_amount <= 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'O valor do pagamento de dívida deve ser superior a zero.');
+  END IF;
+
+  v_operator := COALESCE(p_received_by, p_user_name, 'Operador');
+
+  -- 0. Verificação de idempotência se chave fornecida
+  IF p_idempotency_key IS NOT NULL AND p_idempotency_key <> '' THEN
+    IF EXISTS (
+      SELECT 1 FROM public.debt_payments 
+      WHERE tenant_id = v_tenant_id 
+        AND (id = p_idempotency_key OR notes LIKE '%[idemp:' || p_idempotency_key || ']%')
+    ) THEN
+      SELECT remaining_balance INTO v_new_remaining FROM public.customer_debts WHERE id = p_debt_id AND tenant_id = v_tenant_id;
+      RETURN jsonb_build_object(
+        'success', true,
+        'debt_id', p_debt_id,
+        'amount_paid', p_amount,
+        'remaining_balance', COALESCE(v_new_remaining, 0.00),
+        'message', 'Pagamento já processado anteriormente (idempotente).'
+      );
+    END IF;
   END IF;
 
   -- 1. Validar que a dívida pertence ao tenant
@@ -1481,9 +1269,9 @@ BEGIN
   WHERE id = p_debt_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.debt_payments (
-    id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, timestamp
+    id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, notes, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, v_tenant_id, p_debt_id, v_debt_customer_id, p_amount, p_payment_method, p_received_by, NOW()
+    COALESCE(p_idempotency_key, uuid_generate_v4()::TEXT), v_tenant_id, p_debt_id, v_debt_customer_id, p_amount, p_payment_method, v_operator, p_notes, NOW()
   );
 
   UPDATE public.clientes 
@@ -1493,7 +1281,7 @@ BEGIN
   INSERT INTO public.caixa (
     id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
   ) VALUES (
-    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || v_debt_customer_id || ')', p_received_by, p_debt_id, NOW()
+    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || v_debt_customer_id || ')', v_operator, p_debt_id, NOW()
   );
 
   RETURN jsonb_build_object(
@@ -1501,6 +1289,35 @@ BEGIN
     'debt_id', p_debt_id,
     'amount_paid', p_amount,
     'remaining_balance', v_new_remaining
+  );
+END;
+$$;
+
+-- Sobrecarga para retrocompatibilidade com chamadas de 6 parâmetros
+CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
+  p_tenant_id TEXT,
+  p_debt_id TEXT,
+  p_customer_id TEXT,
+  p_amount NUMERIC,
+  p_payment_method TEXT,
+  p_received_by TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN public.settle_debt_payment_atomic(
+    p_tenant_id := p_tenant_id,
+    p_debt_id := p_debt_id,
+    p_customer_id := p_customer_id,
+    p_amount := p_amount,
+    p_payment_method := p_payment_method,
+    p_notes := NULL,
+    p_user_name := p_received_by,
+    p_received_by := p_received_by,
+    p_idempotency_key := NULL
   );
 END;
 $$;

@@ -8,31 +8,23 @@ import {
   Smartphone, 
   Award, 
   AlertCircle, 
-  Mail, 
   Sparkles, 
   Send,
   CheckCircle2,
-  PhoneCall,
   DollarSign,
   ShoppingBag,
   Receipt,
-  Calendar,
   Printer,
   Eye,
   X,
-  FileText,
-  ChevronRight,
-  UserCheck,
   Target,
   MessageSquare,
   Filter,
   Gift,
-  Zap,
-  Copy,
   Check
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
-import { Customer, UserRole, Transaction, SystemSettings, CashFlowEntry } from "../types";
+import { Customer, UserRole, Transaction, SystemSettings } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 import { useConfirm } from "../hooks/useConfirm";
 import { printInvoiceHTML } from "../lib/printHelper";
@@ -44,7 +36,7 @@ interface CustomersModuleProps {
   settings?: SystemSettings;
   onAddCustomer: (c: Customer) => void;
   onUpdateCustomer?: (c: Customer) => void;
-  onAddCashFlowEntry?: (entry: CashFlowEntry) => void;
+  onAddCashFlowEntry?: (entry: any) => void;
   onDeleteCustomer: (cId: string) => void;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currentRole: UserRole;
@@ -207,8 +199,8 @@ function CustomersModule({
       id: generateEntityId("cust"),
       name,
       phone,
-      email: email || "consumidor@geral.com",
-      address: address || "Não Informado, Maputo",
+      email: email || "",
+      address: address || "Indisponível",
       nuit: "",
       totalSpent: 0,
       purchaseCount: 0,
@@ -330,12 +322,12 @@ function CustomersModule({
               <p>Confirmamos a receção do pagamento no valor de <strong>${amountToPay.toLocaleString()} MT</strong> via ${paymentMethodStr}.</p>
               <p>A sua dívida pendente foi atualizada para: <strong>${remainingBalance.toLocaleString()} MT</strong>.</p>
               <p>Operador: ${operatorName}</p>
-              <p style="margin-top: 30px; font-size: 12px; color: #64748b; text-align: center;">Obrigado pela sua preferência!<br><em>OST Vendas - Sistema de Faturação</em></p>
+              <p style="margin-top: 30px; font-size: 12px; color: #64748b; text-align: center;">Obrigado pela sua preferência!<br><em>${settings?.companyName || "Indisponível"} - Sistema de Faturação</em></p>
             </div>
           `;
           await sendEmail({
             to: settleDebtCustomer.email,
-            subject: `Recibo ${receiptNumber} - OST Vendas`,
+            subject: `Recibo ${receiptNumber} - ${settings?.companyName || "Indisponível"}`,
             body: htmlReceipt,
             isHtml: true
           });
@@ -348,7 +340,7 @@ function CustomersModule({
       if (settleDebtCustomer.phone) {
         try {
           const { sendSMS } = await import("../lib/sms");
-          const smsMsg = `OST Vendas (Recibo: ${receiptNumber}): Pagamento de ${amountToPay} MT efetuado via ${paymentMethodStr}. Divida atual: ${remainingBalance} MT. Obrigado!`;
+          const smsMsg = `${settings?.companyName || "Sistema"} (Recibo: ${receiptNumber}): Pagamento de ${amountToPay} MT efetuado via ${paymentMethodStr}. Divida atual: ${remainingBalance} MT. Obrigado!`;
           await sendSMS(settleDebtCustomer.phone, smsMsg);
         } catch (e) {
           console.error("Failed to send SMS receipt:", e);
@@ -363,7 +355,7 @@ function CustomersModule({
         doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(4, 120, 87);
-        doc.text("OST VENDAS - COMPROVATIVO DE LIQUIDACAO", 14, 20);
+        doc.text(`${(settings?.companyName || "SISTEMA").toUpperCase()} - COMPROVATIVO DE LIQUIDACAO`, 14, 20);
         
         doc.setFontSize(12);
         doc.setTextColor(0, 0, 0);
@@ -446,14 +438,14 @@ function CustomersModule({
 
   // Helper parser for dynamic SMS tags
   const parseSmsTemplate = (template: string, cust?: Customer | null): string => {
-    const companyNameStr = settings?.companyName || "OST COMÉRCIO CENTRAL";
+    const companyNameStr = settings?.companyName || "Indisponível";
     if (!cust) {
       return template
-        .replace(/{NOME}/g, "João Macamo")
-        .replace(/{PONTOS}/g, "45")
-        .replace(/{VALOR_RESGATE}/g, "4.500 MT")
+        .replace(/{NOME}/g, "Cliente Exemplo")
+        .replace(/{PONTOS}/g, "0")
+        .replace(/{VALOR_RESGATE}/g, "0 MT")
         .replace(/{EMPRESA}/g, companyNameStr)
-        .replace(/{TELEFONE}/g, "+258 84 123 4567");
+        .replace(/{TELEFONE}/g, settings?.storeContact || "Indisponível");
     }
 
     const pts = cust.loyaltyPoints || 0;
@@ -574,11 +566,10 @@ function CustomersModule({
           "SMS Disparados com Sucesso"
         );
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       setSmsDispatchStatus("idle");
-      const errTxt = err instanceof Error ? err.message : "Falha ao despachar a campanha de SMS.";
       if (onShowToast) {
-        onShowToast(errTxt, "error", "Falha de Envio");
+        onShowToast(err.message || "Falha ao despachar a campanha de SMS.", "error", "Falha de Envio");
       }
     }
   };
@@ -675,7 +666,7 @@ function CustomersModule({
 
             <select
               value={campaignTarget}
-              onChange={(e) => setCampaignTarget(e.target.value as typeof campaignTarget)}
+              onChange={(e) => setCampaignTarget(e.target.value as any)}
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-semibold text-white outline-none focus:border-lime-500 transition"
             >
               <option value="LOYALTY_REDEEMABLE">🌟 Clientes com Saldo de Pontos Resgatáveis (&gt; 0 Pts) - ({customers.filter(c => (c.loyaltyPoints || 0) > 0).length})</option>
@@ -879,7 +870,7 @@ function CustomersModule({
               <div className="bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-850 flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
-                  <span className="text-[10px] font-bold text-slate-300 font-mono">OST SMS Gateway</span>
+                  <span className="text-[10px] font-bold text-slate-300 font-mono">SMS Gateway</span>
                 </div>
                 <span className="text-[9px] text-slate-500 font-mono">
                   {previewCustomer ? previewCustomer.phone : "+258 84 000 0000"}
@@ -1312,7 +1303,7 @@ function CustomersModule({
         <div className="bg-white p-6 rounded-2xl max-w-lg mx-auto border border-slate-200 shadow-md space-y-5 animate-in fade-in duration-200">
           <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
             <Users className="w-5 h-5 text-orange-500" />
-            <h3 className="font-bold text-slate-900 text-sm">Registrar Cliente no OST Vendas</h3>
+            <h3 className="font-bold text-slate-900 text-sm">Registrar Cliente</h3>
           </div>
 
           <form onSubmit={handleSubmitCustomer} className="space-y-4 text-xs">
@@ -1349,7 +1340,7 @@ function CustomersModule({
               <label className="text-[10px] font-bold text-slate-505 uppercase">E-mail de Notificação</label>
               <input
                 type="email"
-                placeholder="Ex: carlostembe@gmail.com"
+                placeholder="Ex: cliente@empresa.co.mz"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500"

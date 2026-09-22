@@ -1,17 +1,11 @@
 import React, { useState, useMemo } from "react";
 import { 
   Search, 
-  Calendar, 
   Trash2, 
   Edit3, 
   Check, 
   X, 
-  Layers, 
-  AlertTriangle,
-  Info,
-  SlidersHorizontal,
-  ChevronDown,
-  Clock
+  Info
 } from "lucide-react";
 import { Product, SystemSettings, ProductBatch } from "../types";
 
