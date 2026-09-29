@@ -58,12 +58,14 @@ import {
 } from "recharts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { Product, UserRole, Transaction, SystemSettings, StockTransfer } from "../types";
+import { Product, UserRole, Transaction, SystemSettings, StockTransfer, SupplierOrder, ReceiptStatus } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
 import BatchManager from "./BatchManager";
 import { useConfirm } from "../hooks/useConfirm";
 import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import StockThresholdsSettings from "./StockThresholdsSettings";
+import { BulkMarkupModal } from "./stock/BulkMarkupModal";
+import { CommercialDataService } from "../services/dataService";
 import { 
   generateEntityId, 
   generateProductCode, 
@@ -92,6 +94,7 @@ interface StockModuleProps {
   transactions?: Transaction[];
   onAddProduct: (p: Product) => void | Promise<void>;
   onUpdateProduct: (p: Product) => void | Promise<void>;
+  onUpdateProductsBatch?: (products: Product[]) => Promise<void>;
   onDeleteProduct: (pId: string) => void | Promise<void>;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currentRole: UserRole;
@@ -106,6 +109,7 @@ function StockModule({
   transactions = [],
   onAddProduct,
   onUpdateProduct,
+  onUpdateProductsBatch,
   onDeleteProduct,
   onAddAuditLog,
   currentRole,
@@ -216,6 +220,16 @@ function StockModule({
   const [selectedSupplierFilter, setSelectedSupplierFilter] = useState("Todos");
   const [selectedPaymentStatusFilter, setSelectedPaymentStatusFilter] = useState("Todos");
   const [selectedOrderStatusFilter, setSelectedOrderStatusFilter] = useState("Todos");
+  const [selectedReceiptStatusFilter, setSelectedReceiptStatusFilter] = useState("Todos");
+
+  // Delivery confirmation modal state ("Confirmar Entrega" workflow)
+  const [deliveryConfirmOrder, setDeliveryConfirmOrder] = useState<SupplierOrder | null>(null);
+  const [deliveryQty, setDeliveryQty] = useState<number>(0);
+  const [deliveryCost, setDeliveryCost] = useState<number>(0);
+  const [deliveryDate, setDeliveryDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [deliveryNotes, setDeliveryNotes] = useState<string>("");
+  const [updateProductCostPrice, setUpdateProductCostPrice] = useState<boolean>(false);
+  const [isProcessingDelivery, setIsProcessingDelivery] = useState<boolean>(false);
 
   // Handler to open and pre-fill "Solicitar Stock" directly for a product
   const handleRequestStockFromSupplier = (product: Product) => {
@@ -602,6 +616,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
       unitCost: orderUnitCost || chosenProduct.costPrice,
       totalValue: (orderQtyRequested * (orderUnitCost || chosenProduct.costPrice)),
       status: "Pendente" as const,
+      receiptStatus: "Aguardando Envio" as const,
       paymentStatus: orderPaymentStatus,
       paymentDueDate: orderPaymentStatus === "Pago" ? "" : (orderPaymentDueDate || calcDefaultDueDate()),
       requestDate: new Date().toISOString().split("T")[0]
@@ -665,32 +680,144 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     return dueDateStr < todayStr;
   };
 
+  const handleOpenDeliveryConfirmModal = (order: SupplierOrder) => {
+    setDeliveryConfirmOrder(order);
+    setDeliveryQty(order.quantityRequested);
+    setDeliveryCost(order.unitCost);
+    setDeliveryDate(new Date().toISOString().split("T")[0]);
+    setDeliveryNotes(order.deliveryNotes || "");
+    setUpdateProductCostPrice(false);
+  };
+
+  const handleConfirmPhysicalDelivery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deliveryConfirmOrder) return;
+
+    if (deliveryQty <= 0) {
+      onShowToast?.("A quantidade entregue deve ser superior a zero.", "error");
+      return;
+    }
+
+    setIsProcessingDelivery(true);
+    try {
+      const productToUpdate = products.find((p: any) => p.id === deliveryConfirmOrder.productId);
+      const oldStock = productToUpdate ? productToUpdate.stock : 0;
+      const newStock = oldStock + deliveryQty;
+
+      if (productToUpdate) {
+        const updatedProduct: Product = {
+          ...productToUpdate,
+          stock: newStock,
+          costPrice: updateProductCostPrice && deliveryCost > 0 ? deliveryCost : productToUpdate.costPrice
+        };
+        await onUpdateProduct(updatedProduct);
+      } else {
+        onShowToast?.("Aviso: Produto original não encontrado para incremento direto.", "warning");
+      }
+
+      const currentOrders = settings?.supplierOrders || [];
+      const updatedOrders = currentOrders.map((o: any) => {
+        if (o.id === deliveryConfirmOrder.id) {
+          return {
+            ...o,
+            status: "Recebido" as const,
+            receiptStatus: "Entregue" as const,
+            receivedDate: deliveryDate || new Date().toISOString().split("T")[0],
+            receivedQuantity: deliveryQty,
+            unitCost: deliveryCost > 0 ? deliveryCost : o.unitCost,
+            totalValue: deliveryQty * (deliveryCost > 0 ? deliveryCost : o.unitCost),
+            deliveryNotes: deliveryNotes.trim() || undefined,
+            deliveryConfirmedDate: new Date().toISOString()
+          };
+        }
+        return o;
+      });
+
+      onUpdateSettings?.({ supplierOrders: updatedOrders });
+      onAddAuditLog(
+        "Confirmação de Entrega",
+        "STOCK",
+        `Entrega física confirmada da ordem ${deliveryConfirmOrder.id}. Produto: "${deliveryConfirmOrder.productName}" (+${deliveryQty} un). Fornecedor: ${deliveryConfirmOrder.supplierName}. Stock anterior: ${oldStock} -> Novo stock final: ${newStock}.${deliveryNotes ? ` Observações: ${deliveryNotes}` : ""}`
+      );
+
+      onShowToast?.(`Entrega física confirmada com sucesso! +${deliveryQty} un adicionadas ao stock final de "${deliveryConfirmOrder.productName}".`, "success", "Stock Atualizado");
+      setDeliveryConfirmOrder(null);
+    } catch (err) {
+      console.error("Erro ao confirmar entrega:", err);
+      onShowToast?.("Erro ao confirmar entrega física. Tente novamente.", "error");
+    } finally {
+      setIsProcessingDelivery(false);
+    }
+  };
+
+  const handleUpdateOrderReceiptStatus = async (orderId: string, newReceiptStatus: ReceiptStatus) => {
+    const currentOrders = settings?.supplierOrders || [];
+    const order = currentOrders.find((o: any) => o.id === orderId);
+    if (!order) return;
+
+    if (newReceiptStatus === "Entregue") {
+      // Physical delivery confirmation is required before adding to stock
+      handleOpenDeliveryConfirmModal(order);
+      return;
+    }
+
+    if (newReceiptStatus === "Cancelado") {
+      const ok = await confirm({
+        title: "Cancelar Ordem",
+        message: `Deseja realmente cancelar a ordem de compra de "${order.productName}"?`
+      });
+      if (!ok) return;
+
+      const updated = currentOrders.map((o: any) => 
+        o.id === orderId ? { ...o, status: "Cancelado" as const, receiptStatus: "Cancelado" as const } : o
+      );
+      onUpdateSettings?.({ supplierOrders: updated });
+      onShowToast?.("Ordem cancelada.", "info");
+      onAddAuditLog("Cancelar Ordem", "STOCK", `Ordem ${orderId} (${order.productName}) cancelada.`);
+      return;
+    }
+
+    // For "Aguardando Envio" or "Em Trânsito", update status without altering stock!
+    const updated = currentOrders.map((o: any) => 
+      o.id === orderId ? { ...o, receiptStatus: newReceiptStatus } : o
+    );
+    onUpdateSettings?.({ supplierOrders: updated });
+    onShowToast?.(`Status de Recebimento atualizado para "${newReceiptStatus}". O stock final permanece intacto até confirmação da entrega física.`, "success");
+    onAddAuditLog("Status de Recebimento", "STOCK", `Status de recebimento da ordem ${orderId} alterado para "${newReceiptStatus}".`);
+  };
+
   const handleUpdateOrderStatus = async (orderId: string, newStatus: "Pendente" | "Recebido" | "Cancelado") => {
     const currentOrders = settings?.supplierOrders || [];
     const order = currentOrders.find((o: any) => o.id === orderId);
     if (!order) return;
 
     if (newStatus === "Recebido" && order.status !== "Recebido") {
+      // Require physical delivery confirmation flow to prevent automatic/unverified stock additions
+      handleOpenDeliveryConfirmModal(order);
+      return;
+    }
+
+    if (newStatus === "Cancelado") {
       const ok = await confirm({
-        title: "Confirmar Recebimento",
-        message: `Deseja confirmar o recebimento de ${order.quantityRequested} unidades de "${order.productName}"? O estoque atual do produto será incrementado automaticamente.`
+        title: "Cancelar Solicitação de Stock",
+        message: `Deseja cancelar o pedido de "${order.productName}"?`
       });
       if (!ok) return;
 
-      const productToUpdate = products.find((p: any) => p.id === order.productId);
-      if (productToUpdate) {
-        onUpdateProduct({
-          ...productToUpdate,
-          stock: productToUpdate.stock + order.quantityRequested
-        });
-      } else {
-        onShowToast?.("Produto não encontrado para atualização de estoque.", "error");
-      }
+      const updated = currentOrders.map((o: any) => 
+        o.id === orderId 
+          ? { ...o, status: "Cancelado" as const, receiptStatus: "Cancelado" as const }
+          : o
+      );
+      onUpdateSettings?.({ supplierOrders: updated });
+      onShowToast?.(`Estado da solicitação alterado para "Cancelado".`, "info");
+      onAddAuditLog("Cancelar Solicitação de Stock", "STOCK", `Solicitação de stock ${orderId} (${order.productName}) cancelada.`);
+      return;
     }
 
     const updated = currentOrders.map((o: any) => 
       o.id === orderId 
-        ? { ...o, status: newStatus, receivedDate: newStatus === "Recebido" ? new Date().toISOString().split("T")[0] : undefined }
+        ? { ...o, status: newStatus }
         : o
     );
 
@@ -1000,6 +1127,22 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
 
   // Selection states
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
+  const [showBulkMarkupModal, setShowBulkMarkupModal] = useState<boolean>(false);
+
+  const handleApplyBulkMarkup = async (updatedBatch: Product[], summaryText: string) => {
+    if (onUpdateProductsBatch) {
+      await onUpdateProductsBatch(updatedBatch);
+    } else {
+      await CommercialDataService.saveProductsBatch(updatedBatch);
+      for (const p of updatedBatch) {
+        await onUpdateProduct(p);
+      }
+    }
+    setSelectedProductIds([]);
+    if (onShowToast) {
+      onShowToast(summaryText, "success", "Preços Atualizados em Lote");
+    }
+  };
 
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
@@ -1152,8 +1295,16 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
   // Main stats calculations
   const stats = useMemo(() => {
     const total = products.length;
-    const totalCost = products.reduce((acc, p) => acc + (p.costPrice * p.stock), 0);
-    const totalSale = products.reduce((acc, p) => acc + (p.salePrice * p.stock), 0);
+    const totalCost = products.reduce((acc, p) => {
+      const c = Number(p.costPrice || 0);
+      const s = Number(p.stock || 0);
+      return acc + (isNaN(c) || isNaN(s) ? 0 : c * s);
+    }, 0);
+    const totalSale = products.reduce((acc, p) => {
+      const sp = Number(p.salePrice || 0);
+      const s = Number(p.stock || 0);
+      return acc + (isNaN(sp) || isNaN(s) ? 0 : sp * s);
+    }, 0);
     const potentialProfit = totalSale - totalCost;
     const lowStock = products.filter(p => p.stock > 0 && p.stock <= p.minStock).length;
     const outOfStock = products.filter(p => p.stock <= 0).length;
@@ -1652,38 +1803,65 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     }
   };
 
-  // Automated replenishment order handler
+  // Automated replenishment order handler - Creates orders with "Status de Recebimento: Aguardando Envio" WITHOUT adding to final stock
   const handleConfirmReplenishOrder = (criticalAlertProducts: Product[]) => {
     setIsConfirmingReplenish(true);
     setTimeout(() => {
-      criticalAlertProducts.forEach(p => {
-        const replenishmentQty = p.minStock * 2;
-        const updatedProduct: Product = {
-          ...p,
-          stock: p.stock + replenishmentQty
+      const calcDefaultDueDate = () => {
+        const d = new Date();
+        d.setDate(d.getDate() + 15);
+        return d.toISOString().split("T")[0];
+      };
+
+      const currentOrders = settings?.supplierOrders || [];
+      const newOrders: SupplierOrder[] = criticalAlertProducts.map(p => {
+        const replenishQty = Math.max(1, p.minStock * 2);
+        const supplierMatch = registeredSuppliers.find(
+          s => s.name.toLowerCase() === (p.supplier || "").toLowerCase() || s.id === p.supplier
+        ) || registeredSuppliers[0] || { id: "supp-general", name: p.supplier || "Fornecedor Geral" };
+
+        const cost = p.costPrice || 0;
+        return {
+          id: generateEntityId("order"),
+          supplierId: supplierMatch.id,
+          supplierName: supplierMatch.name,
+          productId: p.id,
+          productName: p.name,
+          quantityRequested: replenishQty,
+          unitCost: cost,
+          totalValue: replenishQty * cost,
+          status: "Pendente" as const,
+          receiptStatus: "Aguardando Envio" as const,
+          paymentStatus: "Pendente" as const,
+          paymentDueDate: calcDefaultDueDate(),
+          requestDate: new Date().toISOString().split("T")[0],
+          isReplenishmentOrder: true
         };
-        onUpdateProduct(updatedProduct);
       });
+
+      // Crucial: Stock is NOT modified automatically! Products remain at their current stock levels.
+      const updatedOrders = [...newOrders, ...currentOrders];
+      onUpdateSettings?.({ supplierOrders: updatedOrders });
 
       onAddAuditLog(
         "Ordem de Reposição Gerada",
         "STOCK",
-        `Gerada ordem de compra e reposição automática para ${criticalAlertProducts.length} itens com stock crítico (abaixo de 20% do mínimo). Adicionados lotes de reposição ao stock físico.`
+        `Gerada ordem de reposição para ${criticalAlertProducts.length} itens. Foram criados pedidos de compra com Status de Recebimento 'Aguardando Envio'. O stock final NÃO foi modificado e aguarda confirmação de entrega física.`
       );
 
       if (onShowToast) {
-        onShowToast(`Ordem de reposição enviada! +${criticalAlertProducts.length} produtos atualizados no stock.`, "success", "Sucesso");
+        onShowToast(`Ordem de reposição gerada com sucesso! ${criticalAlertProducts.length} pedidos emitidos com Status de Recebimento 'Aguardando Envio'. O stock só será atualizado após clicar em 'Confirmar Entrega'.`, "success", "Ordem de Reposição");
       }
 
-      setReplenishSuccessMsg(`Ordem de reposição processada com sucesso! ${criticalAlertProducts.length} produtos foram reabastecidos e os fornecedores notificados.`);
+      setReplenishSuccessMsg(`Ordem de reposição emitida com sucesso para ${criticalAlertProducts.length} produtos! O Status de Recebimento foi definido como 'Aguardando Envio'. O stock final NÃO foi alterado e só receberá as mercadorias quando a entrega física for confirmada pelo botão 'Confirmar Entrega'.`);
       setIsConfirmingReplenish(false);
       setIsReplenishmentModalOpen(false);
 
-      // Clear success message after 5 seconds
+      // Clear success message after 7 seconds
       setTimeout(() => {
         setReplenishSuccessMsg("");
-      }, 5000);
-    }, 1500);
+      }, 7000);
+    }, 1200);
   };
 
   // Recharts aggregation data
@@ -2017,14 +2195,14 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     <div className="space-y-6">
       
       {/* Dynamic Module Navtabs (List View vs Graphs/Analytics) */}
-      <div className="flex border-b border-slate-200/50 pb-px mb-4">
+      <div className="flex border-b border-slate-200/80 pb-px mb-4 overflow-x-auto scrollbar-none gap-1">
         <button
           type="button"
           onClick={() => setActiveModuleTab("list")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "list"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <List className="w-4 h-4" />
@@ -2033,10 +2211,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("charts")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "charts"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <BarChart3 className="w-4 h-4" />
@@ -2045,10 +2223,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("reports")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "reports"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" />
@@ -2057,10 +2235,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("batches")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "batches"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <Layers className="w-4 h-4" />
@@ -2069,10 +2247,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("branches")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "branches"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <MapPin className="w-4 h-4" />
@@ -2081,10 +2259,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("suppliers")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "suppliers"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <Truck className="w-4 h-4" />
@@ -2093,10 +2271,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         <button
           type="button"
           onClick={() => setActiveModuleTab("thresholds")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-3.5 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer shrink-0 ${
             activeModuleTab === "thresholds"
-              ? "border-orange-500 text-orange-500 dark:text-amber-400 dark:border-amber-400"
-              : "border-transparent text-slate-400 hover:text-slate-200 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:text-blue-400 dark:border-blue-400"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <Sliders className="w-4 h-4" />
@@ -2343,6 +2521,15 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                   </span>
                 </div>
               </div>
+
+              {/* Strict stock integrity notice */}
+              <div className="bg-amber-50 border border-amber-250 p-3.5 rounded-xl text-amber-900 text-[11px] leading-relaxed dark:bg-amber-950/25 dark:border-amber-900/50 dark:text-amber-300 flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-bold">Controle e Segurança de Entrada de Stock:</strong>
+                  Ao emitir esta ordem, as solicitações serão registradas com Status de Recebimento <strong>"Aguardando Envio"</strong>. Os produtos <strong>NÃO</strong> serão adicionados automaticamente ao stock final. A entrada no stock só será concluída quando o fornecedor realizar a entrega física e você clicar no botão <strong>"Confirmar Entrega"</strong>.
+                </div>
+              </div>
             </div>
 
             {/* Modal Actions */}
@@ -2360,10 +2547,88 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                 disabled={isConfirmingReplenish}
                 className="bg-orange-500 hover:bg-orange-600 text-white font-extrabold py-2 px-5 rounded-xl text-xs cursor-pointer transition shadow-md shadow-orange-500/10 disabled:opacity-50"
               >
-                {isConfirmingReplenish ? "Enviando Pedido de Compra..." : "Confirmar Ordem & Enviar ao Fornecedor"}
+                {isConfirmingReplenish ? "Emitindo Pedidos de Reposição..." : "Emitir Ordem de Reposição (Aguardando Envio)"}
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* PENDING ORDERS & REPLENISHMENTS BANNER (Aguardando Entrega Física) */}
+      {supplierOrders.some((o: any) => o.status === "Pendente" && o.receiptStatus !== "Entregue") && (
+        <div className="bg-gradient-to-r from-sky-50 via-sky-50/80 to-blue-50/60 border border-sky-200 rounded-2xl p-4.5 shadow-sm space-y-3 animate-in fade-in duration-300 dark:bg-zinc-900/60 dark:border-sky-950/50">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center shrink-0 dark:bg-sky-950/40 dark:text-sky-400">
+                <Truck className="w-5 h-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-extrabold text-sky-950 text-xs dark:text-sky-300">
+                    STATUS DE RECEBIMENTO: Encomendas e Ordens de Reposição Aguardando Entrega
+                  </h4>
+                  <span className="bg-sky-200 text-sky-900 text-[10px] font-black px-2 py-0.5 rounded-full dark:bg-sky-900 dark:text-sky-200">
+                    {supplierOrders.filter((o: any) => o.status === "Pendente" && o.receiptStatus !== "Entregue").length} aguardando
+                  </span>
+                </div>
+                <p className="text-[10.5px] text-sky-850 mt-1 leading-relaxed dark:text-sky-400/90">
+                  Os produtos encomendados aos fornecedores <strong>não entram no stock final</strong> até a mercadoria ser recebida fisicamente. Quando os produtos chegarem, clique em <strong>Confirmar Entrega</strong> para dar entrada no stock.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveModuleTab("suppliers");
+                setSupplierSubTab("orders");
+              }}
+              className="bg-sky-600 hover:bg-sky-700 text-white font-extrabold py-2 px-4 rounded-xl text-xs cursor-pointer transition whitespace-nowrap shadow-md shadow-sky-600/10 active:scale-95 flex items-center gap-1.5"
+            >
+              <ShoppingCart className="w-3.5 h-3.5" />
+              Painel de Fornecedores & Encomendas
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 pt-1">
+            {supplierOrders
+              .filter((o: any) => o.status === "Pendente" && o.receiptStatus !== "Entregue")
+              .slice(0, 4)
+              .map((order: any) => (
+                <div key={order.id} className="bg-white border border-sky-150 p-3 rounded-xl shadow-xs flex flex-col justify-between gap-2.5 dark:bg-zinc-950 dark:border-sky-900/40">
+                  <div>
+                    <div className="flex items-start justify-between gap-1.5">
+                      <span className="font-extrabold text-[11px] text-slate-800 truncate dark:text-zinc-100" title={order.productName}>
+                        {order.productName}
+                      </span>
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 ${
+                        order.receiptStatus === "Em Trânsito"
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300"
+                          : "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+                      }`}>
+                        {order.receiptStatus || "Aguardando Envio"}
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] text-slate-500 font-mono block mt-1">
+                      Fornecedor: <strong>{order.supplierName}</strong>
+                    </span>
+                    <span className="text-[10px] text-slate-700 font-mono font-bold block mt-0.5 dark:text-zinc-300">
+                      Qtd: {order.quantityRequested} un • {(order.totalValue).toLocaleString()} MT
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDeliveryConfirmModal(order)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-extrabold py-1.5 px-2.5 rounded-lg transition flex items-center justify-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                    title="Confirmar entrega física e lançar produtos no stock final"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    <span>Confirmar Entrega</span>
+                  </button>
+                </div>
+              ))}
           </div>
         </div>
       )}
@@ -2500,6 +2765,17 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                 <Upload className="w-4 h-4 shrink-0" />
                 Importar Planilha
               </button>
+
+              {canMutate && (
+                <button
+                  onClick={() => setShowBulkMarkupModal(true)}
+                  className="flex-1 md:flex-initial bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 py-2 px-3.5 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/15 cursor-pointer transition"
+                  title="Calcular preços e aplicar percentual de markup em lote a todo o inventário"
+                >
+                  <Percent className="w-4 h-4 shrink-0" />
+                  Reajuste de Preços (Markup)
+                </button>
+              )}
 
               {canMutate ? (
                 <button
@@ -2713,6 +2989,16 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                   </button>
                   {canMutate && (
                     <button
+                      onClick={() => setShowBulkMarkupModal(true)}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs py-1.5 px-3 rounded-lg border border-amber-200 flex items-center gap-1.5 cursor-pointer dark:bg-amber-950/30 dark:border-amber-900/50 dark:text-amber-300"
+                      title="Calcular e aplicar markup aos produtos selecionados"
+                    >
+                      <Percent className="w-3.5 h-3.5" />
+                      Reajustar Preços (% Markup)
+                    </button>
+                  )}
+                  {canMutate && (
+                    <button
                       onClick={handleBulkDelete}
                       className="bg-red-50 hover:bg-red-100 text-red-700 font-bold text-xs py-1.5 px-3 rounded-lg border border-red-200 flex items-center gap-1.5 cursor-pointer dark:bg-red-950/20 dark:border-red-900/50 dark:text-red-400"
                     >
@@ -2788,8 +3074,11 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                       const isLowStock = p.stock > 0 && p.stock <= p.minStock;
                       
                       // Margin profit calculation
-                      const profitAmt = p.salePrice - p.costPrice;
-                      const profitPct = p.costPrice > 0 ? Math.round((profitAmt / p.costPrice) * 100) : 0;
+                      const safeCost = isNaN(Number(p.costPrice)) ? 0 : Number(p.costPrice);
+                      const safeSale = isNaN(Number(p.salePrice)) ? 0 : Number(p.salePrice);
+                      const safeStock = isNaN(Number(p.stock)) ? 0 : Number(p.stock);
+                      const profitAmt = safeSale - safeCost;
+                      const profitPct = safeCost > 0 ? Math.round((profitAmt / safeCost) * 100) : 0;
 
                       // Stock ratio for progress bar
                       const ratio = Math.min(100, (p.stock / Math.max(p.minStock * 3, p.stock || 1)) * 100);
@@ -2900,8 +3189,8 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
 
                           {/* Pricing details */}
                           <td className="p-3 text-right">
-                            <div className="font-mono text-slate-600 dark:text-zinc-450 text-[10px]">C: {p.costPrice.toLocaleString()} MT</div>
-                            <div className="font-mono font-bold text-slate-800 dark:text-zinc-200">V: {p.salePrice.toLocaleString()} MT</div>
+                            <div className="font-mono text-slate-600 dark:text-zinc-450 text-[10px]">C: {safeCost.toLocaleString()} MT</div>
+                            <div className="font-mono font-bold text-slate-800 dark:text-zinc-200">V: {safeSale.toLocaleString()} MT</div>
                             <div className="text-[9px] text-emerald-600 font-bold bg-emerald-50 px-1 rounded-full inline-block mt-0.5 dark:bg-emerald-950/20 dark:text-emerald-400">
                               Lucro: {profitAmt.toLocaleString()} MT ({profitPct}%)
                             </div>
@@ -2917,7 +3206,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                                   ? "text-amber-700 bg-amber-50 px-1 rounded" 
                                   : "text-slate-800 dark:text-zinc-200"
                               }`}>
-                                {p.stock} un
+                                {safeStock} un
                               </span>
                               
                               <span className={`px-1.5 py-0.5 text-[9px] font-bold rounded-full ${
@@ -2943,8 +3232,8 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
 
                           {/* Total Financial Value in stock */}
                           <td className="p-3 text-right font-mono">
-                            <div className="font-bold text-slate-700 dark:text-zinc-200">{(p.stock * p.salePrice).toLocaleString()} MT</div>
-                            <div className="text-[9px] text-slate-400">Custo: {(p.stock * p.costPrice).toLocaleString()} MT</div>
+                            <div className="font-bold text-slate-700 dark:text-zinc-200">{(safeStock * safeSale).toLocaleString()} MT</div>
+                            <div className="text-[9px] text-slate-400">Custo: {(safeStock * safeCost).toLocaleString()} MT</div>
                           </td>
 
                           {/* Custom context-dropdown actions menu */}
@@ -4817,7 +5106,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                   </div>
 
                   {/* Filters Row */}
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     <div className="relative sm:col-span-1">
                       <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
                         <Search className="w-3.5 h-3.5" />
@@ -4859,6 +5148,20 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
 
                     <div>
                       <select
+                        value={selectedReceiptStatusFilter}
+                        onChange={(e) => setSelectedReceiptStatusFilter(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
+                      >
+                        <option value="Todos">Status Recebimento (Todos)</option>
+                        <option value="Aguardando Envio">Aguardando Envio 📦</option>
+                        <option value="Em Trânsito">Em Trânsito 🚚</option>
+                        <option value="Entregue">Entregue / No Stock ✅</option>
+                        <option value="Cancelado">Cancelado ❌</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <select
                         value={selectedPaymentStatusFilter}
                         onChange={(e) => setSelectedPaymentStatusFilter(e.target.value)}
                         className="w-full bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs outline-none cursor-pointer text-slate-700 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-100"
@@ -4880,6 +5183,7 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                           <th className="p-3.5 text-center">QUANTIDADE</th>
                           <th className="p-3.5 text-right">VALOR TOTAL</th>
                           <th className="p-3.5 text-center">ESTADO PAGTO</th>
+                          <th className="p-3.5 text-center">STATUS DE RECEBIMENTO</th>
                           <th className="p-3.5 text-center">ESTADO PEDIDO</th>
                           <th className="p-3.5 text-center">AÇÕES</th>
                         </tr>
@@ -4891,10 +5195,11 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                             const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
                             const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
                             const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
-                            return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
+                            const matchesReceipt = selectedReceiptStatusFilter === "Todos" || (order.receiptStatus || "Aguardando Envio") === selectedReceiptStatusFilter;
+                            return matchesQuery && matchesSupplier && matchesStatus && matchesPayment && matchesReceipt;
                           }).length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="p-8 text-center text-slate-400 italic">Nenhum registro de pedido encontrado.</td>
+                            <td colSpan={7} className="p-8 text-center text-slate-400 italic">Nenhum registro de pedido encontrado.</td>
                           </tr>
                         ) : (
                           supplierOrders
@@ -4903,7 +5208,8 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                               const matchesSupplier = selectedSupplierFilter === "Todos" || order.supplierId === selectedSupplierFilter;
                               const matchesStatus = selectedOrderStatusFilter === "Todos" || order.status === selectedOrderStatusFilter;
                               const matchesPayment = selectedPaymentStatusFilter === "Todos" || order.paymentStatus === selectedPaymentStatusFilter;
-                              return matchesQuery && matchesSupplier && matchesStatus && matchesPayment;
+                              const matchesReceipt = selectedReceiptStatusFilter === "Todos" || (order.receiptStatus || "Aguardando Envio") === selectedReceiptStatusFilter;
+                              return matchesQuery && matchesSupplier && matchesStatus && matchesPayment && matchesReceipt;
                             })
                             .map((order) => {
                               const isOverdue = isPaymentOverdue(order);
@@ -4924,6 +5230,11 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                                     <span className="text-[10px] text-slate-400 font-mono flex flex-wrap items-center gap-1 mt-0.5">
                                       <Truck className="w-3 h-3 text-slate-400" />
                                       Fornecedor: {order.supplierName} • Solic.: {order.requestDate}
+                                      {order.isReplenishmentOrder && (
+                                        <span className="bg-purple-150 text-purple-750 px-1.5 py-0.2 rounded text-[8.5px] font-bold dark:bg-purple-950/40 dark:text-purple-300">
+                                          Ordem Reposição
+                                        </span>
+                                      )}
                                       {order.paymentStatus !== "Pago" && (
                                         isOverdue ? (
                                           <span className="text-red-600 dark:text-red-400 font-bold ml-1 flex items-center gap-1 animate-pulse">
@@ -4960,6 +5271,34 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                                     <option value="Crédito">Crédito 🔴</option>
                                     <option value="Pendente">Pendente 🟡</option>
                                   </select>
+                                </td>
+
+                                {/* Status de Recebimento */}
+                                <td className="p-3.5 text-center">
+                                  {order.status === "Cancelado" || order.receiptStatus === "Cancelado" ? (
+                                    <span className="px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase bg-slate-100 text-slate-600 dark:bg-zinc-850 dark:text-zinc-400">
+                                      Cancelado
+                                    </span>
+                                  ) : order.receiptStatus === "Entregue" || order.status === "Recebido" ? (
+                                    <span className="px-2.5 py-1 rounded-full text-[9px] font-extrabold uppercase bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400 inline-flex items-center gap-1">
+                                      <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                      Entregue {order.receivedDate ? `(${order.receivedDate})` : ""}
+                                    </span>
+                                  ) : (
+                                    <select
+                                      value={order.receiptStatus || "Aguardando Envio"}
+                                      onChange={(e) => handleUpdateOrderReceiptStatus(order.id, e.target.value as any)}
+                                      className={`px-2 py-1 rounded-full text-[9px] font-bold border outline-none text-center cursor-pointer ${
+                                        order.receiptStatus === "Em Trânsito"
+                                          ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/30"
+                                          : "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30"
+                                      }`}
+                                    >
+                                      <option value="Aguardando Envio">Aguardando Envio 📦</option>
+                                      <option value="Em Trânsito">Em Trânsito 🚚</option>
+                                      <option value="Entregue">Confirmar Entrega... ✅</option>
+                                    </select>
+                                  )}
                                 </td>
 
                                 {/* Order Status Badge */}
@@ -5009,15 +5348,19 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                                       <FileText className="w-3 h-3" />
                                       <span>PDF (Logo)</span>
                                     </button>
-                                    {order.status === "Pendente" ? (
+                                    {order.status === "Pendente" && order.receiptStatus !== "Entregue" ? (
                                       <>
                                         <button
-                                          onClick={() => handleUpdateOrderStatus(order.id, "Recebido")}
-                                          className="px-2 py-1 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition font-bold text-[9px] cursor-pointer"
+                                          type="button"
+                                          onClick={() => handleOpenDeliveryConfirmModal(order)}
+                                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition font-bold text-[9.5px] flex items-center gap-1 cursor-pointer shadow-xs active:scale-95"
+                                          title="Confirmar a entrega física deste pedido e lançar os produtos no stock final"
                                         >
-                                          Receber
+                                          <CheckCircle className="w-3 h-3" />
+                                          <span>Confirmar Entrega</span>
                                         </button>
                                         <button
+                                          type="button"
                                           onClick={() => handleUpdateOrderStatus(order.id, "Cancelado")}
                                           className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300 transition font-bold text-[9px] cursor-pointer dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
                                         >
@@ -5025,8 +5368,9 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                                         </button>
                                       </>
                                     ) : (
-                                      <span className="text-[10px] text-slate-400 italic">
-                                        {order.status === "Recebido" ? `Recebido em ${order.receivedDate}` : "Pedido Cancelado"}
+                                      <span className="text-[10px] text-emerald-700 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                        <CheckCircle className="w-3 h-3" />
+                                        {order.status === "Recebido" ? `Recebido em ${order.receivedDate || "Data confirmada"}` : "Pedido Cancelado"}
                                       </span>
                                     )}
                                   </div>
@@ -6044,6 +6388,183 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
         </div>
       )}
 
+      {/* MODAL: CONFIRMAR ENTREGA FÍSICA & ATUALIZAR STOCK */}
+      {deliveryConfirmOrder && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 dark:bg-zinc-900 dark:border-zinc-800">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-900 via-teal-950 to-slate-900 text-white p-5 flex justify-between items-center">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
+                  <Truck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm flex items-center gap-1.5">
+                    Confirmar Entrega Física da Ordem
+                  </h3>
+                  <p className="text-[10px] text-emerald-200 mt-0.5">
+                    Ref: <span className="font-mono font-bold text-white">{deliveryConfirmOrder.id}</span> • Fornecedor: {deliveryConfirmOrder.supplierName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeliveryConfirmOrder(null)}
+                className="p-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Form */}
+            <form onSubmit={handleConfirmPhysicalDelivery} className="p-5 space-y-4 text-xs">
+              {/* Product and Stock Info Banner */}
+              {(() => {
+                const product = products.find(p => p.id === deliveryConfirmOrder.productId);
+                const currentStock = product ? product.stock : 0;
+                const projectedStock = currentStock + (deliveryQty || 0);
+
+                return (
+                  <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-xl space-y-2 dark:bg-zinc-950 dark:border-zinc-800">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[9.5px] uppercase font-bold text-slate-400 font-mono block">Item a Receber</span>
+                        <strong className="text-sm font-extrabold text-slate-800 dark:text-zinc-100">{deliveryConfirmOrder.productName}</strong>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-500">
+                        Pedido em: {deliveryConfirmOrder.requestDate}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-200/60 dark:border-zinc-800 text-center font-mono">
+                      <div className="bg-white p-2 rounded-lg border border-slate-150 dark:bg-zinc-900 dark:border-zinc-800">
+                        <span className="text-[9px] text-slate-400 block font-sans">Stock Atual</span>
+                        <span className="font-bold text-slate-700 dark:text-zinc-200">{currentStock} un</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-lg border border-slate-150 dark:bg-zinc-900 dark:border-zinc-800">
+                        <span className="text-[9px] text-slate-400 block font-sans">Solicitado</span>
+                        <span className="font-bold text-orange-600">{deliveryConfirmOrder.quantityRequested} un</span>
+                      </div>
+                      <div className="bg-emerald-50 p-2 rounded-lg border border-emerald-200 dark:bg-emerald-950/30 dark:border-emerald-900/50">
+                        <span className="text-[9px] text-emerald-700 block font-sans font-bold">Stock Final Previsto</span>
+                        <span className="font-black text-emerald-700 dark:text-emerald-400">{projectedStock} un</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Quantities & Costs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 uppercase dark:text-zinc-300">
+                    Quantidade Entregue (un) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    value={deliveryQty || ""}
+                    onChange={(e) => setDeliveryQty(Math.max(1, Number(e.target.value)))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none focus:border-emerald-500 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100"
+                    placeholder="Quantidade"
+                  />
+                  <p className="text-[9px] text-slate-400">Quantidade física contada e conferida na recepção.</p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 uppercase dark:text-zinc-300">
+                    Preço de Custo Efetivo (MT) *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={deliveryCost || ""}
+                    onChange={(e) => setDeliveryCost(Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-bold text-xs outline-none focus:border-emerald-500 dark:bg-zinc-950 dark:border-zinc-850 dark:text-zinc-100"
+                    placeholder="Custo unitário"
+                  />
+                  <p className="text-[9px] text-slate-400">Total: {((deliveryQty || 0) * (deliveryCost || 0)).toLocaleString()} MT</p>
+                </div>
+              </div>
+
+              {/* Cost Price Update Checkbox */}
+              <label className="flex items-center gap-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100/70 transition dark:bg-zinc-950 dark:border-zinc-800">
+                <input
+                  type="checkbox"
+                  checked={updateProductCostPrice}
+                  onChange={(e) => setUpdateProductCostPrice(e.target.checked)}
+                  className="w-4 h-4 rounded text-emerald-600 accent-emerald-600 cursor-pointer"
+                />
+                <span className="text-[11px] font-bold text-slate-700 dark:text-zinc-200">
+                  Atualizar preço de custo no cadastro do produto para <strong>{deliveryCost.toLocaleString()} MT</strong>
+                </span>
+              </label>
+
+              {/* Delivery Date & Notes */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 uppercase dark:text-zinc-300">
+                    Data da Entrega Física
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={deliveryDate}
+                    onChange={(e) => setDeliveryDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 font-bold text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850 text-slate-800 dark:text-zinc-100"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-600 uppercase dark:text-zinc-300">
+                    Nº Guia / Fatura de Entrega
+                  </label>
+                  <input
+                    type="text"
+                    value={deliveryNotes}
+                    onChange={(e) => setDeliveryNotes(e.target.value)}
+                    placeholder="Ex: Guia #9823 / Lote A"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2 text-xs outline-none dark:bg-zinc-950 dark:border-zinc-850 text-slate-800 dark:text-zinc-100"
+                  />
+                </div>
+              </div>
+
+              {/* Assurance Banner */}
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-[10.5px] text-emerald-900 leading-relaxed dark:bg-emerald-950/20 dark:border-emerald-800/40 dark:text-emerald-300 flex items-start gap-2">
+                <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Garantia de Integridade de Stock:</strong>
+                  Ao clicar em <em>Confirmar Entrega</em>, o Status de Recebimento passará para <strong>"Entregue"</strong> e o stock final receberá exatamente <strong>+{deliveryQty} unidades</strong>.
+                </div>
+              </div>
+
+              {/* Modal Buttons */}
+              <div className="flex gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setDeliveryConfirmOrder(null)}
+                  disabled={isProcessingDelivery}
+                  className="w-1/3 py-2.5 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50 dark:bg-zinc-900 dark:border-zinc-800 dark:text-zinc-300 disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isProcessingDelivery || deliveryQty <= 0}
+                  className="w-2/3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-xl text-xs cursor-pointer transition shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 disabled:opacity-50 active:scale-95"
+                >
+                  <CheckCircle className="w-4 h-4" />
+                  <span>{isProcessingDelivery ? "Creditando no Stock..." : "Confirmar Entrega & Entrar no Stock"}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* SUB-TAB: THRESHOLDS & ALERTS */}
       {activeModuleTab === "thresholds" && (
         <div className="animate-in fade-in-50 duration-150">
@@ -6074,6 +6595,18 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
             if (onShowToast) onShowToast(msg, type === "success" ? "success" : type === "error" ? "error" : "info");
           }}
           settings={settings}
+        />
+      )}
+
+      {showBulkMarkupModal && (
+        <BulkMarkupModal
+          isOpen={showBulkMarkupModal}
+          onClose={() => setShowBulkMarkupModal(false)}
+          products={products}
+          selectedProductIds={selectedProductIds}
+          currency={currency}
+          onApplyBulkUpdate={handleApplyBulkMarkup}
+          onAddAuditLog={onAddAuditLog}
         />
       )}
 

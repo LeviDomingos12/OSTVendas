@@ -1,0 +1,12 @@
+{
+  "smtpHost": "smtp.gmail.com",
+  "smtpPort": 465,
+  "smtpUser": "comercial@gmail.com",
+  "smtpPassword": "initial_secure_password_999",
+  "smtpSecure": true,
+  "smtpEnabled": true,
+  "smtpSenderName": "OST Vendas - Faturação Oficial",
+  "smtpFromEmail": "faturacao@empresa.co.mz",
+  "smtpSource": "database",
+  "updated_at": "2026-09-29T11:53:26.513Z"
+}

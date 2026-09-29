@@ -1,9 +1,19 @@
 export const generateInvoiceEmailHtml = (transaction: any, companyName: string = "Indisponível") => {
-  const invoiceNumber = transaction.invoiceNumber;
+  const invoiceNumber = transaction.invoiceNumber || transaction.id;
   const customerName = transaction.customerName || "Consumidor Geral";
-  const date = new Date(transaction.timestamp).toLocaleString();
-  const total = transaction.grandTotal.toLocaleString();
-  const items = transaction.items || [];
+  const date = transaction.timestamp ? new Date(transaction.timestamp).toLocaleString("pt-MZ") : new Date().toLocaleString("pt-MZ");
+  
+  const formatVal = (val: any) => {
+    const num = Number(val);
+    const safeNum = isNaN(num) || !isFinite(num) ? 0 : num;
+    return new Intl.NumberFormat('pt-MZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(safeNum);
+  };
+
+  const total = formatVal(transaction.grandTotal);
+  const subtotal = formatVal(transaction.subtotal ?? transaction.grandTotal);
+  const discount = formatVal(transaction.discountTotal ?? transaction.discount ?? 0);
+  const vatTotal = formatVal(transaction.vatTotal ?? 0);
+  const items = Array.isArray(transaction.items) ? transaction.items : [];
 
   return `
     <!DOCTYPE html>
@@ -12,7 +22,7 @@ export const generateInvoiceEmailHtml = (transaction: any, companyName: string =
       <meta charset="utf-8">
       <style>
         body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 20px; }
-        .container { max-w-4xl; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
         .header { text-align: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 20px; }
         .header h1 { margin: 0; color: #0f172a; font-size: 24px; }
         .header p { margin: 5px 0 0 0; color: #64748b; font-size: 14px; }
@@ -43,7 +53,7 @@ export const generateInvoiceEmailHtml = (transaction: any, companyName: string =
             <tr><td class="label">Fatura:</td><td>${invoiceNumber}</td></tr>
             <tr><td class="label">Data:</td><td>${date}</td></tr>
             <tr><td class="label">Cliente:</td><td>${customerName}</td></tr>
-            <tr><td class="label">Método Pag.:</td><td>${transaction.paymentMethod}</td></tr>
+            <tr><td class="label">Método Pag.:</td><td>${transaction.paymentMethod || "OUTRO"}</td></tr>
           </table>
         </div>
 
@@ -57,14 +67,18 @@ export const generateInvoiceEmailHtml = (transaction: any, companyName: string =
             </tr>
           </thead>
           <tbody>
-            ${items.map((item: any) => `
+            ${items.map((item: any) => {
+              const qty = Number(item.quantity ?? 1);
+              const price = Number(item.price ?? item.salePrice ?? 0);
+              const sub = Number(item.subtotal ?? (price * qty));
+              return `
               <tr>
-                <td>${item.name}</td>
-                <td class="text-right">${item.quantity}</td>
-                <td class="text-right">${item.price.toLocaleString()} MT</td>
-                <td class="text-right">${(item.quantity * item.price).toLocaleString()} MT</td>
+                <td>${item.productName || item.name || "Artigo"}</td>
+                <td class="text-right">${isNaN(qty) ? 1 : qty}</td>
+                <td class="text-right">${formatVal(price)} MT</td>
+                <td class="text-right">${formatVal(sub)} MT</td>
               </tr>
-            `).join('')}
+            `;}).join('')}
             ${items.length === 0 ? `
               <tr>
                 <td colspan="4" style="text-align: center; color: #64748b; font-style: italic;">Resumo geral sem itens discriminados.</td>
@@ -77,15 +91,15 @@ export const generateInvoiceEmailHtml = (transaction: any, companyName: string =
           <table>
             <tr>
               <td>Subtotal</td>
-              <td style="text-align: right">${transaction.subtotal.toLocaleString()} MT</td>
+              <td style="text-align: right">${subtotal} MT</td>
             </tr>
             <tr>
               <td>Desconto</td>
-              <td style="text-align: right">-${transaction.discount.toLocaleString()} MT</td>
+              <td style="text-align: right">-${discount} MT</td>
             </tr>
             <tr>
               <td>IVA (16%)</td>
-              <td style="text-align: right">+${transaction.vatTotal.toLocaleString()} MT</td>
+              <td style="text-align: right">+${vatTotal} MT</td>
             </tr>
             <tr>
               <td class="total-row">Total Geral</td>

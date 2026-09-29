@@ -26,7 +26,8 @@ import {
   Terminal,
   Copy,
   AlertTriangle,
-  CheckCircle2
+  CheckCircle2,
+  Mail
 } from "lucide-react";
 import { 
   SystemSettings, 
@@ -43,9 +44,11 @@ import { generateEntityId } from "../lib/deterministic";
 import { SYSTEM_THEMES } from "../lib/themes";
 import { AdminService } from "../services/adminService";
 import { CommercialDataService } from "../services/dataService";
-import { PRODUCTS_SQL_SCHEMA, SALES_SQL_SCHEMA } from "../lib/databaseSchemaSql";
+import { PRODUCTS_SQL_SCHEMA, SALES_SQL_SCHEMA, FULL_DATABASE_SCHEMA_SQL } from "../lib/databaseSchemaSql";
 import StaffModule from "./StaffModule";
 import GatewayModule from "./GatewayModule";
+import SmtpConfigModule from "./SmtpConfigModule";
+import PostgresConfigModule from "./PostgresConfigModule";
 import AiForecastModule from "./AiForecastModule";
 import TrainingModule from "./TrainingModule";
 import SubscriptionPlansModule from "./SubscriptionPlansModule";
@@ -136,7 +139,7 @@ function SettingsModule({
   
   // Navigation Sub-tab state
   const [activeSubTab, setActiveSubTab] = useState<
-    "geral" | "staff" | "gateway" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans"
+    "geral" | "staff" | "gateway" | "smtp" | "postgresql" | "notificacoes" | "backup" | "filiais" | "ai" | "training" | "plans"
   >((initialSubTab as any) || "geral");
 
   // Sync sub-tab if initialSubTab prop changes
@@ -522,24 +525,24 @@ function SettingsModule({
   };
 
   return (
-    <div className="space-y-6 pb-12 font-sans">
+    <div id="settings-tab-container" data-module="settings" className="settings-tab-container space-y-6 pb-12 font-sans text-black">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs">
         <div className="flex items-center gap-3">
-          <div className="p-3 bg-orange-500/10 text-orange-600 rounded-xl">
-            <Settings className="w-6 h-6" />
+          <div className="p-2.5 bg-orange-50 text-orange-600 rounded-xl">
+            <Settings className="w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-850">Configurações do Sistema</h1>
-            <p className="text-xs text-slate-400">
-              Parametrizações essenciais de loja, faturação, pagamentos, recibos e cópias de segurança.
+            <h1 className="text-lg font-bold text-black">Definições do Sistema</h1>
+            <p className="text-xs text-black">
+              Parametrizações de loja, faturação, pagamentos, recibos e cópias de segurança.
             </p>
           </div>
         </div>
 
         {/* Quick System Status Badge */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-black border border-emerald-200 text-xs font-bold">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             <span>Sistema Ativo {systemVersion ? `v${systemVersion}` : ""}</span>
           </div>
@@ -547,121 +550,147 @@ function SettingsModule({
       </div>
 
       {/* Sub-tabs Navigation Bar */}
-      <div className="flex border-b border-slate-200 gap-1 overflow-x-auto scrollbar-none py-1 bg-white/60 p-1.5 rounded-xl">
+      <div className="flex border-b border-slate-200/80 gap-1 overflow-x-auto scrollbar-none py-1 bg-white/80 p-1.5 rounded-xl">
         <button
           type="button"
           onClick={() => setActiveSubTab("geral")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "geral"
-              ? "border-orange-500 text-orange-600 font-extrabold bg-orange-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <Building className="w-4 h-4 text-orange-500" />
+          <Building className="w-4 h-4 text-orange-600" />
           Geral & Loja
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("staff")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "staff"
-              ? "border-purple-500 text-purple-600 font-extrabold bg-purple-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <UserCheck className="w-4 h-4 text-purple-500" />
+          <UserCheck className="w-4 h-4 text-orange-600" />
           Colaboradores & PINs
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("gateway")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "gateway"
-              ? "border-emerald-500 text-emerald-600 font-extrabold bg-emerald-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <Smartphone className="w-4 h-4 text-emerald-500" />
+          <Smartphone className="w-4 h-4 text-orange-600" />
           Mobile Money (M-Pesa / e-Mola)
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveSubTab("notificacoes")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
-            activeSubTab === "notificacoes"
-              ? "border-orange-500 text-orange-600 font-extrabold bg-orange-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+          onClick={() => setActiveSubTab("smtp")}
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "smtp"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <Sliders className="w-4 h-4 text-orange-500" />
+          <Mail className="w-4 h-4 text-orange-600" />
+          Servidor SMTP & E-mail
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("postgresql")}
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "postgresql"
+              ? "border-indigo-600 text-black bg-indigo-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
+          }`}
+        >
+          <Database className="w-4 h-4 text-indigo-700" />
+          PostgreSQL
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab("notificacoes")}
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+            activeSubTab === "notificacoes"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
+          }`}
+        >
+          <Sliders className="w-4 h-4 text-orange-600" />
           Limiares & Alertas de Stock
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("backup")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "backup"
-              ? "border-teal-500 text-teal-600 font-extrabold bg-teal-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <Database className="w-4 h-4 text-teal-500" />
+          <Database className="w-4 h-4 text-orange-600" />
           Cópias de Segurança & Dados
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("filiais")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "filiais"
-              ? "border-amber-500 text-amber-600 font-extrabold bg-amber-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <MapPin className="w-4 h-4 text-amber-500" />
+          <MapPin className="w-4 h-4 text-orange-600" />
           Lojas & Filiais
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("ai")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "ai"
-              ? "border-indigo-500 text-indigo-600 font-extrabold bg-indigo-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <TrendingUp className="w-4 h-4 text-indigo-500" />
+          <TrendingUp className="w-4 h-4 text-orange-600" />
           Previsão Comercial
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("training")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "training"
-              ? "border-sky-500 text-sky-600 font-extrabold bg-sky-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <BookOpen className="w-4 h-4 text-sky-500" />
+          <BookOpen className="w-4 h-4 text-orange-600" />
           Formação
         </button>
 
         <button
           type="button"
           onClick={() => setActiveSubTab("plans")}
-          className={`px-4 py-2.5 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
+          className={`px-3.5 py-2 font-bold text-xs transition-all border-b-2 cursor-pointer flex items-center gap-2 shrink-0 ${
             activeSubTab === "plans"
-              ? "border-yellow-500 text-yellow-600 font-extrabold bg-yellow-50/20"
-              : "border-transparent text-slate-500 hover:text-slate-850 hover:border-slate-300"
+              ? "border-orange-500 text-black bg-orange-50/70 shadow-2xs"
+              : "border-transparent text-black font-semibold hover:bg-slate-100/80"
           }`}
         >
-          <Crown className="w-4 h-4 text-yellow-500" />
+          <Crown className="w-4 h-4 text-orange-600" />
           Planos
         </button>
       </div>
@@ -672,10 +701,10 @@ function SettingsModule({
           {/* Identidade da Empresa e Faturação Form */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
             <div className="flex items-center gap-2.5 text-orange-600 border-b pb-3 border-slate-100">
-              <Building className="w-5 h-5" />
+              <Building className="w-5 h-5 text-orange-600" />
               <div>
-                <h2 className="font-bold text-slate-850 text-sm">Identidade Comercial & Dados Fiscais</h2>
-                <p className="text-[11px] text-slate-400">Informações que constam nos recibos de venda, relatórios e documentos emitidos.</p>
+                <h2 className="font-bold text-black text-sm">Identidade Comercial & Dados Fiscais</h2>
+                <p className="text-[11px] text-black">Informações que constam nos recibos de venda, relatórios e documentos emitidos.</p>
               </div>
             </div>
 
@@ -683,7 +712,7 @@ function SettingsModule({
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
                 {/* Nome da Empresa */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Nome da Empresa / Loja *</label>
+                  <label className="block font-bold text-black mb-1">Nome da Empresa / Loja *</label>
                   <div className="relative">
                     <input
                       type="text"
@@ -692,7 +721,7 @@ function SettingsModule({
                       onChange={(e) => setCompanyName(e.target.value)}
                       disabled={!canEdit}
                       placeholder="Ex: Mercearia Central, Lda."
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium pr-8"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black pr-8"
                     />
                     {companyName && canEdit && (
                       <button
@@ -700,7 +729,7 @@ function SettingsModule({
                         onClick={() => setCompanyName("")}
                         title="Limpar nome para digitar novo"
                         aria-label="Limpar campo de nome da empresa"
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md hover:bg-slate-200/70 transition-colors"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-black p-0.5 rounded-md hover:bg-slate-200/70 transition-colors"
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>
@@ -710,66 +739,66 @@ function SettingsModule({
 
                 {/* Slogan */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Slogan / Subtítulo</label>
+                  <label className="block font-bold text-black mb-1">Slogan / Subtítulo</label>
                   <input
                     type="text"
                     value={slogan}
                     onChange={(e) => setSlogan(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: Qualidade e os melhores preços"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
 
                 {/* NUIT */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">NUIT / NIF Fiscal</label>
+                  <label className="block font-bold text-black mb-1">NUIT / NIF Fiscal</label>
                   <input
                     type="text"
                     value={companyNuit}
                     onChange={(e) => setCompanyNuit(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: 400123456"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-mono font-medium"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-mono font-medium text-black"
                   />
                 </div>
 
                 {/* Contacto Telefónico */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Telefone de Contacto</label>
+                  <label className="block font-bold text-black mb-1">Telefone de Contacto</label>
                   <input
                     type="text"
                     value={storeContact}
                     onChange={(e) => setStoreContact(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: +258 84 123 4567"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
 
                 {/* Email Comercial */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Email da Loja</label>
+                  <label className="block font-bold text-black mb-1">Email da Loja</label>
                   <input
                     type="email"
                     value={storeEmail}
                     onChange={(e) => setStoreEmail(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: contacto@loja.co.mz"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
 
                 {/* Endereço Físico */}
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Endereço da Loja</label>
+                  <label className="block font-bold text-black mb-1">Endereço da Loja</label>
                   <input
                     type="text"
                     value={storeAddress}
                     onChange={(e) => setStoreAddress(e.target.value)}
                     disabled={!canEdit}
                     placeholder="Ex: Av. 24 de Julho, nº 123, Maputo"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
               </div>
@@ -785,14 +814,14 @@ function SettingsModule({
                     )}
                   </div>
                   <div>
-                    <h3 className="font-bold text-xs text-slate-800">Logótipo da Empresa</h3>
-                    <p className="text-[11px] text-slate-400">Aparece no cabeçalho do POS e no topo dos talões de venda.</p>
+                    <h3 className="font-bold text-xs text-black">Logótipo da Empresa</h3>
+                    <p className="text-[11px] text-black">Aparece no cabeçalho do POS e no topo dos talões de venda.</p>
                   </div>
                 </div>
 
                 {canEdit && (
                   <div className="flex items-center gap-2">
-                    <label className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition">
+                    <label className="px-3.5 py-2 bg-white hover:bg-slate-100 text-black border border-slate-200 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-sm transition">
                       <Upload className="w-3.5 h-3.5" />
                       Carregar Imagem
                       <input type="file" accept="image/*" onChange={handleLogoFileUpload} className="hidden" />
@@ -816,13 +845,13 @@ function SettingsModule({
 
               {/* Impostos e Parâmetros de Venda */}
               <div className="pt-2 border-t border-slate-100">
-                <h3 className="font-bold text-xs text-slate-700 mb-3 flex items-center gap-1.5">
+                <h3 className="font-bold text-xs text-black mb-3 flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-orange-500" />
                   Taxas & Faturação Padrão
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Taxa de IVA Padrão (%)</label>
+                    <label className="block font-bold text-black mb-1">Taxa de IVA Padrão (%)</label>
                     <input
                       type="number"
                       min="0"
@@ -831,19 +860,19 @@ function SettingsModule({
                       value={defaultVat}
                       onChange={(e) => setDefaultVat(Number(e.target.value))}
                       disabled={!canEdit}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold text-black"
                     />
                   </div>
 
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Símbolo da Moeda</label>
+                    <label className="block font-bold text-black mb-1">Símbolo da Moeda</label>
                     <input
                       type="text"
                       value={currencyCode}
                       onChange={(e) => setCurrencyCode(e.target.value)}
                       disabled={!canEdit}
                       placeholder="MT"
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-bold text-black"
                     />
                   </div>
                 </div>
@@ -851,18 +880,18 @@ function SettingsModule({
 
               {/* Talão Térmico e Impressão */}
               <div className="pt-2 border-t border-slate-100">
-                <h3 className="font-bold text-xs text-slate-700 mb-3 flex items-center gap-1.5">
+                <h3 className="font-bold text-xs text-black mb-3 flex items-center gap-1.5">
                   <Printer className="w-3.5 h-3.5 text-orange-500" />
                   Formato de Impressão de Talões
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   <div>
-                    <label className="block font-bold text-slate-700 mb-1">Largura do Papel Térmico</label>
+                    <label className="block font-bold text-black mb-1">Largura do Papel Térmico</label>
                     <select
                       value={paperSize}
                       onChange={(e) => setPaperSize(e.target.value as any)}
                       disabled={!canEdit}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium"
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-orange-500 focus:outline-none font-medium text-black"
                     >
                       <option value="80MM">80mm (Padrão para Impressoras Térmicas POS)</option>
                       <option value="58MM">58mm (Térmica Compacta / Portátil)</option>
@@ -879,7 +908,7 @@ function SettingsModule({
                         disabled={!canEdit}
                         className="w-4 h-4 rounded text-orange-500 focus:ring-orange-400"
                       />
-                      <span className="font-bold text-slate-700 text-xs">Corte Automático de Papel (Auto-cut)</span>
+                      <span className="font-bold text-black text-xs">Corte Automático de Papel (Auto-cut)</span>
                     </label>
                   </div>
                 </div>
@@ -905,10 +934,10 @@ function SettingsModule({
           {/* Personalização Visual do ERP */}
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center gap-2.5 text-orange-600">
-              <Palette className="w-5 h-5" />
+              <Palette className="w-5 h-5 text-orange-600" />
               <div>
-                <h3 className="font-bold text-slate-850 text-sm">Personalização de Cores & Temas</h3>
-                <p className="text-[11px] text-slate-400">Escolha o tema visual que melhor combina com o seu ambiente de trabalho.</p>
+                <h3 className="font-bold text-black text-sm">Personalização de Cores & Temas</h3>
+                <p className="text-[11px] text-black">Escolha o tema visual que melhor combina com o seu ambiente de trabalho.</p>
               </div>
             </div>
 
@@ -935,7 +964,7 @@ function SettingsModule({
                       <div className="w-2.5 h-2.5 rounded-full border border-white shadow-sm -ml-2" style={{ backgroundColor: themeItem.accentBg }} />
                     </div>
 
-                    <div className="text-[11px] font-bold text-slate-800 truncate">
+                    <div className="text-[11px] font-bold text-black truncate">
                       {themeItem.name}
                     </div>
 
@@ -984,6 +1013,34 @@ function SettingsModule({
         </div>
       )}
 
+      {/* SUB-TAB: SERVIDOR SMTP & E-MAIL (BANCO DE DADOS) */}
+      {activeSubTab === "smtp" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <SmtpConfigModule
+            settings={settings}
+            onUpdateSettings={onUpdateSettings}
+            onAddAuditLog={onAddAuditLog}
+            onShowToast={onShowToast}
+            activeUser={activeUser}
+            currentRole={currentRole}
+          />
+        </div>
+      )}
+
+      {/* SUB-TAB: BASE DE DADOS POSTGRESQL & TABELAS DDL */}
+      {activeSubTab === "postgresql" && (
+        <div className="animate-in fade-in-50 duration-150">
+          <PostgresConfigModule
+            settings={settings}
+            onUpdateSettings={onUpdateSettings}
+            onAddAuditLog={onAddAuditLog}
+            onShowToast={onShowToast}
+            activeUser={activeUser}
+            currentRole={currentRole}
+          />
+        </div>
+      )}
+
       {/* SUB-TAB 4: ALERTAS & LIMIARES DE STOCK */}
       {activeSubTab === "notificacoes" && (
         <div className="animate-in fade-in-50 duration-150">
@@ -1005,11 +1062,11 @@ function SettingsModule({
       {activeSubTab === "backup" && (
         <div className="space-y-6 animate-in fade-in-50 duration-150">
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-            <div className="flex items-center gap-2.5 text-teal-600 border-b pb-3 border-slate-100">
-              <Database className="w-5 h-5" />
+            <div className="flex items-center gap-2.5 text-orange-600 border-b pb-3 border-slate-100">
+              <Database className="w-5 h-5 text-orange-600" />
               <div>
-                <h2 className="font-bold text-slate-850 text-sm">Gestão de Dados & Cópias de Segurança (Backup)</h2>
-                <p className="text-[11px] text-slate-400">Exporte, restaure e mantenha os dados da sua loja em total segurança.</p>
+                <h2 className="font-bold text-black text-sm">Gestão de Dados & Cópias de Segurança (Backup)</h2>
+                <p className="text-[11px] text-black">Exporte, restaure e mantenha os dados da sua loja em total segurança.</p>
               </div>
             </div>
 
@@ -1017,11 +1074,11 @@ function SettingsModule({
               {/* Descarregar Cópia de Segurança */}
               <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-teal-700 font-bold text-sm">
-                    <Download className="w-4 h-4" />
+                  <div className="flex items-center gap-2 text-black font-bold text-sm">
+                    <Download className="w-4 h-4 text-orange-600" />
                     <h3>Exportar Backup Local (JSON)</h3>
                   </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="text-xs text-black leading-relaxed">
                     Descarregue todos os produtos ({products.length}), clientes ({customers.length}), vendas ({transactions.length}) e definições para o seu computador.
                   </p>
                 </div>
@@ -1052,16 +1109,16 @@ function SettingsModule({
               {/* Restaurar Cópia de Segurança */}
               <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-blue-700 font-bold text-sm">
-                    <Upload className="w-4 h-4" />
+                  <div className="flex items-center gap-2 text-black font-bold text-sm">
+                    <Upload className="w-4 h-4 text-orange-600" />
                     <h3>Restaurar Backup (JSON)</h3>
                   </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="text-xs text-black leading-relaxed">
                     Carregue um ficheiro de backup previamente exportado para recuperar dados de vendas e catálogo de produtos.
                   </p>
                 </div>
 
-                <label className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer">
+                <label className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer">
                   <Upload className="w-4 h-4" />
                   {isImporting ? "A Restaurar..." : "Selecionar Ficheiro JSON"}
                   <input
@@ -1077,11 +1134,11 @@ function SettingsModule({
               {/* Sincronização em Nuvem Supabase */}
               <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-4">
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
-                    <Cloud className="w-4 h-4" />
+                  <div className="flex items-center gap-2 text-black font-bold text-sm">
+                    <Cloud className="w-4 h-4 text-orange-600" />
                     <h3>Sincronização em Nuvem</h3>
                   </div>
-                  <p className="text-xs text-slate-500 leading-relaxed">
+                  <p className="text-xs text-black leading-relaxed">
                     Força a sincronização imediata de todos os registos pendentes com a base de dados relacional central.
                   </p>
                 </div>
@@ -1090,7 +1147,7 @@ function SettingsModule({
                   type="button"
                   onClick={handleForceCloudSync}
                   disabled={isSyncingCloud}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
+                  className="w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition cursor-pointer disabled:opacity-50"
                 >
                   <RefreshCw className={`w-4 h-4 ${isSyncingCloud ? "animate-spin" : ""}`} />
                   {isSyncingCloud ? "A Sincronizar..." : "Forçar Sincronização Agora"}
@@ -1100,11 +1157,11 @@ function SettingsModule({
               {/* Limpeza de Dados de Demonstração (Purge) */}
               <div className="p-5 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col justify-between space-y-4">
                 <div className="space-y-1.5">
-                  <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
-                    <Trash2 className="w-4 h-4" />
+                  <div className="flex items-center gap-2 text-black font-bold text-sm">
+                    <Trash2 className="w-4 h-4 text-rose-600" />
                     <h3>Limpar Dados de Demonstração</h3>
                   </div>
-                  <p className="text-xs text-rose-600/90 leading-relaxed">
+                  <p className="text-xs text-black leading-relaxed">
                     Remove produtos e vendas fictícias de teste para deixar o seu ponto de venda 100% pronto para uso comercial.
                   </p>
                 </div>
@@ -1262,11 +1319,11 @@ function SettingsModule({
       {activeSubTab === "filiais" && (
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6 animate-in fade-in-50 duration-150">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-3 border-slate-100">
-            <div className="flex items-center gap-2.5 text-amber-600">
-              <MapPin className="w-5 h-5" />
+            <div className="flex items-center gap-2.5 text-orange-600">
+              <MapPin className="w-5 h-5 text-orange-600" />
               <div>
-                <h2 className="font-bold text-slate-850 text-sm">Lojas & Filiais da Empresa</h2>
-                <p className="text-[11px] text-slate-400">Faça a gestão dos seus pontos de venda físicos e localizações de stock.</p>
+                <h2 className="font-bold text-black text-sm">Lojas & Filiais da Empresa</h2>
+                <p className="text-[11px] text-black">Faça a gestão dos seus pontos de venda físicos e localizações de stock.</p>
               </div>
             </div>
 
@@ -1274,7 +1331,7 @@ function SettingsModule({
               <button
                 type="button"
                 onClick={() => setIsAddingBranch(true)}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+                className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Nova Filial
@@ -1284,38 +1341,38 @@ function SettingsModule({
 
           {/* Form to Add Branch */}
           {isAddingBranch && (
-            <form onSubmit={handleAddBranch} className="p-4 bg-amber-50/40 rounded-xl border border-amber-200 space-y-4">
-              <h3 className="font-bold text-xs text-amber-800">Cadastrar Nova Filial</h3>
+            <form onSubmit={handleAddBranch} className="p-4 bg-orange-50/40 rounded-xl border border-orange-200 space-y-4">
+              <h3 className="font-bold text-xs text-black">Cadastrar Nova Filial</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Nome da Filial *</label>
+                  <label className="block font-bold text-black mb-1">Nome da Filial *</label>
                   <input
                     type="text"
                     required
                     value={newBranchName}
                     onChange={(e) => setNewBranchName(e.target.value)}
                     placeholder="Ex: Filial Matola"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Endereço</label>
+                  <label className="block font-bold text-black mb-1">Endereço</label>
                   <input
                     type="text"
                     value={newBranchAddress}
                     onChange={(e) => setNewBranchAddress(e.target.value)}
                     placeholder="Ex: Av. da Matola, nº 45"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Contacto</label>
+                  <label className="block font-bold text-black mb-1">Contacto</label>
                   <input
                     type="text"
                     value={newBranchContact}
                     onChange={(e) => setNewBranchContact(e.target.value)}
                     placeholder="Ex: +258 84 999 8888"
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-amber-500 focus:outline-none font-medium"
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:border-orange-500 focus:outline-none font-medium text-black"
                   />
                 </div>
               </div>
@@ -1323,13 +1380,13 @@ function SettingsModule({
                 <button
                   type="button"
                   onClick={() => setIsAddingBranch(false)}
-                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-black font-bold rounded-xl text-xs transition cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition"
+                  className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs transition cursor-pointer"
                 >
                   Salvar Filial
                 </button>
@@ -1347,12 +1404,12 @@ function SettingsModule({
                 </span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
               </div>
-              <h3 className="font-bold text-sm text-slate-800">{companyName || "Loja Principal"}</h3>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+              <h3 className="font-bold text-sm text-black">{companyName || "Loja Principal"}</h3>
+              <p className="text-xs text-black flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <span className="truncate">{storeAddress || "Endereço Principal"}</span>
               </p>
-              <p className="text-xs text-slate-500 flex items-center gap-1.5">
+              <p className="text-xs text-black flex items-center gap-1.5">
                 <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <span>{storeContact || "Sem contacto"}</span>
               </p>
@@ -1360,9 +1417,9 @@ function SettingsModule({
 
             {/* Custom Branches */}
             {branches.map((b) => (
-              <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 relative group hover:border-amber-300 transition">
+              <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-white space-y-2 relative group hover:border-orange-300 transition">
                 <div className="flex items-center justify-between">
-                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px] font-bold">
+                  <span className="px-2 py-0.5 rounded-full bg-slate-100 text-black text-[10px] font-bold">
                     Filial
                   </span>
                   {canEdit && (
@@ -1376,12 +1433,12 @@ function SettingsModule({
                     </button>
                   )}
                 </div>
-                <h3 className="font-bold text-sm text-slate-800">{b.name}</h3>
-                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <h3 className="font-bold text-sm text-black">{b.name}</h3>
+                <p className="text-xs text-black flex items-center gap-1.5">
                   <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span className="truncate">{b.address || "Sem endereço"}</span>
                 </p>
-                <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                <p className="text-xs text-black flex items-center gap-1.5">
                   <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                   <span>{b.contact || "Sem contacto"}</span>
                 </p>
@@ -1482,6 +1539,17 @@ function SettingsModule({
               >
                 Vendas & Movimento (vendas)
               </button>
+              <button
+                type="button"
+                onClick={() => setSqlTab("completo")}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  sqlTab === "completo"
+                    ? "bg-purple-600 text-white shadow-xs"
+                    : "bg-white text-slate-700 hover:bg-slate-200 border border-slate-200"
+                }`}
+              >
+                Schema Completo ERP (Tudo em 1)
+              </button>
             </div>
 
             {/* Explicação */}
@@ -1492,7 +1560,7 @@ function SettingsModule({
             {/* Código SQL */}
             <div className="p-6 overflow-y-auto flex-1 bg-slate-950 text-slate-100 font-mono text-xs">
               <pre className="whitespace-pre-wrap select-all leading-relaxed text-[11.5px]">
-{sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : SALES_SQL_SCHEMA}
+{sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : sqlTab === "vendas" ? SALES_SQL_SCHEMA : FULL_DATABASE_SCHEMA_SQL}
               </pre>
             </div>
 
@@ -1505,7 +1573,7 @@ function SettingsModule({
                 <button
                   type="button"
                   onClick={() => {
-                    const sqlText = sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : SALES_SQL_SCHEMA;
+                    const sqlText = sqlTab === "produtos" ? PRODUCTS_SQL_SCHEMA : sqlTab === "vendas" ? SALES_SQL_SCHEMA : FULL_DATABASE_SCHEMA_SQL;
                     navigator.clipboard.writeText(sqlText);
                     setSqlCopied(true);
                     setTimeout(() => setSqlCopied(false), 2500);

@@ -1,132 +1,90 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;650;700&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@500;650;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Base resets & scrollbars */
+/* Base resets & typography */
 body {
   font-family: var(--font-sans);
   background-color: #f8fafc;
-  color: #1e293b;
-  scrollbar-color: #cbd5e1 #f1f5f9;
+  color: #0f172a;
+  scrollbar-color: #cbd5e1 #f8fafc;
   scrollbar-width: thin;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body.dark {
-  background-color: #09090b !important; /* zinc-950 */
-  color: #e4e4e7 !important; /* zinc-200 */
+  background-color: #09090b !important;
+  color: #f4f4f5 !important;
   scrollbar-color: #3f3f46 #09090b;
 }
 
 h1, h2, h3, h4, th {
-  font-family: "Space Grotesk", var(--font-sans);
+  font-family: var(--font-sans);
+  letter-spacing: -0.015em;
 }
 
-/* Beautiful and highly visible modern scrollbar styling */
+/* Clean, unobtrusive scrollbar styling */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
 }
 ::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.4);
-  border-radius: 9999px;
-}
-.dark ::-webkit-scrollbar-track {
-  background: rgba(9, 9, 11, 0.4);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
-  border: 2.5px solid transparent;
-  background-clip: padding-box;
   border-radius: 9999px;
-  transition: background-color 0.2s ease;
-}
-.dark ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border: 2.5px solid transparent;
-  background-clip: padding-box;
-  border-radius: 9999px;
+  transition: background-color 0.15s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
-  border: 1.5px solid transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3f3f46;
 }
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
-  border: 1.5px solid transparent;
 }
 
-/* Scrollbar thin classes helper */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border: 1px solid transparent;
-}
-.dark .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #3f3f46;
-  border: 1px solid transparent;
-}
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-.dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
-}
-
-/* Custom Scrollbar Helper class used throughout the modules */
+/* Custom Scrollbar utility */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(249, 115, 22, 0.5) rgba(241, 245, 249, 0.4);
+  scrollbar-color: #cbd5e1 transparent;
   -webkit-overflow-scrolling: touch;
 }
 .dark .custom-scrollbar {
-  scrollbar-color: rgba(245, 158, 11, 0.5) rgba(9, 9, 11, 0.4);
+  scrollbar-color: #3f3f46 transparent;
 }
 .custom-scrollbar::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(241, 245, 249, 0.5);
-  border-radius: 9999px;
-}
-.dark .custom-scrollbar::-webkit-scrollbar-track {
-  background: rgba(24, 24, 27, 0.6);
+  background: transparent;
 }
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(203, 213, 225, 0.85);
+  background: #cbd5e1;
   border-radius: 9999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  transition: background-color 0.2s ease;
 }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(63, 63, 70, 0.85);
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(249, 115, 22, 0.95); /* Vibrant orange on hover */
-}
-.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.95); /* Amber on hover */
+  background: #3f3f46;
 }
 
-/* Hide scrollbar utility class */
+/* Hide scrollbar utility */
 .scrollbar-none {
-  -ms-overflow-style: none;  /* IE and Edge */
-  scrollbar-width: none;  /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 .scrollbar-none::-webkit-scrollbar {
-  display: none; /* Chrome, Safari and Opera */
+  display: none;
 }
 
-/* Responsive Layout Adjustments & Fluid Canvas */
+/* Responsive utilities */
 @media (max-width: 640px) {
   .responsive-padding {
     padding-left: 0.75rem !important;
@@ -137,208 +95,278 @@ h1, h2, h3, h4, th {
     margin: 0.5rem !important;
     width: calc(100% - 1rem) !important;
   }
-  table.responsive-table th, table.responsive-table td {
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
-    font-size: 0.7rem !important;
-  }
 }
 
-/* Ensure smooth kinetic scrolling on all overflow views on mobile and tablet devices */
 .overflow-y-auto, .overflow-x-auto, .overflow-auto, aside, main {
   -webkit-overflow-scrolling: touch !important;
 }
 
-/* Smooth scale animation on hover for D3 activity log chart container */
-#activity-log-d3-chart-container {
-  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.35s ease, border-color 0.35s ease;
-  will-change: transform;
-}
-
-#activity-log-d3-chart-container:hover {
-  transform: scale(1.02);
-  border-color: rgba(249, 115, 22, 0.45) !important;
-  box-shadow: 0 12px 28px -6px rgba(249, 115, 22, 0.15), 0 8px 16px -6px rgba(0, 0, 0, 0.6);
-}
-
-/* Global Component Styling Overrides mapped to Elegant Dark theme */
-
-/* Main canvas background mappings */
-.dark .bg-slate-50, .dark [class*="bg-slate-100"], .dark [class*="bg-slate-50"] {
+/* Professional Dark Mode Overrides */
+.dark .bg-slate-50, .dark [class*="bg-slate-50"] {
   background-color: #09090b !important;
 }
 
-/* Card overrides */
 .dark .bg-white, .dark [class*="bg-white"] {
-  background-color: #18181b !important; /* zinc-900 */
+  background-color: #18181b !important;
 }
 
-/* Border overrides */
-.dark .border-slate-200, .dark .border-slate-100, .dark [class*="border-slate-300"], .dark [class*="border-slate-200"], .dark [class*="border-slate-100"] {
-  border-color: #27272a !important; /* zinc-800 */
+.dark .border-slate-200, .dark .border-slate-100, .dark [class*="border-slate-200"] {
+  border-color: #27272a !important;
 }
 
-/* Side navigation background overrides to zinc-900 */
 .dark aside {
   background-color: #18181b !important;
   border-color: #27272a !important;
 }
 
-/* Headers */
 .dark header {
-  background-color: rgba(9, 9, 11, 0.75) !important;
-  backdrop-filter: blur(12px);
+  background-color: rgba(9, 9, 11, 0.9) !important;
   border-color: #27272a !important;
 }
 
-/* Input, Selector and Form fields */
 .dark input, .dark select, .dark textarea {
   background-color: #09090b !important;
   border-color: #27272a !important;
-  color: #f4f4f5 !important;
+  color: #ffffff !important;
 }
 .dark input::placeholder, .dark textarea::placeholder {
   color: #71717a !important;
 }
 .dark input:focus, .dark select:focus, .dark textarea:focus {
-  border-color: #f59e0b !important; /* amber-500 */
-  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2) !important;
+  border-color: #f97316 !important;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.25) !important;
 }
 
-/* Table overrides */
 .dark th {
   background-color: #09090b !important;
-  color: #a1a1aa !important;
+  color: #ffffff !important;
   border-color: #27272a !important;
 }
 
 .dark td {
-  border-color: #181c24 !important;
-  color: #e4e4e7 !important;
+  border-color: #27272a !important;
+  color: #ffffff !important;
 }
 
 .dark tr:hover td {
-  background-color: rgba(39, 39, 42, 0.3) !important;
+  background-color: rgba(39, 39, 42, 0.5) !important;
 }
 
-/* Zebra strips */
-.dark .even\:bg-slate-50\/50:nth-child(even), .dark .even\:bg-slate-50:nth-child(even), .dark .odd\:bg-slate-50\/50:nth-child(odd) {
-  background-color: rgba(24, 24, 27, 0.4) !important;
+/* Regra de Contraste do Sistema: Fundo escuro -> Texto estritamente Branco (#ffffff) */
+.dark .text-slate-900,
+.dark .text-slate-850,
+.dark .text-slate-800,
+.dark .text-slate-700,
+.dark .text-slate-650,
+.dark .text-slate-600,
+.dark .text-slate-500,
+.dark .text-slate-400,
+.dark .text-zinc-400,
+.dark .text-zinc-500,
+.dark .text-zinc-600,
+.dark .text-zinc-700,
+.dark .text-zinc-800,
+.dark .text-zinc-900 {
+  color: #ffffff !important;
 }
 
-/* Typography Overrides */
-.dark .text-slate-800, .dark .text-slate-900, .dark .text-slate-750, .dark .text-slate-850, .dark .text-slate-700 {
-  color: #f4f4f5 !important; /* zinc-100 */
+/* Regra de Contraste do Sistema: Fundo claro -> Texto estritamente Preto (#000000) */
+body:not(.dark) .text-slate-900,
+body:not(.dark) .text-slate-850,
+body:not(.dark) .text-slate-800,
+body:not(.dark) .text-slate-700,
+body:not(.dark) .text-slate-650,
+body:not(.dark) .text-slate-600,
+body:not(.dark) .text-slate-500,
+body:not(.dark) .text-zinc-900,
+body:not(.dark) .text-zinc-800,
+body:not(.dark) .text-zinc-700,
+body:not(.dark) .text-zinc-600 {
+  color: #000000 !important;
 }
 
-.dark .text-slate-600, .dark .text-slate-650 {
-  color: #d4d4d8 !important; /* zinc-300 */
+/* ==========================================================
+   ABA DE DEFINIÇÕES (SETTINGS) - TODAS AS LETRAS PRETAS (#000000)
+   ========================================================== */
+#settings-tab-container,
+.settings-tab-container,
+[data-module="settings"],
+[data-tab="SETTINGS"],
+[data-tab="settings"] {
+  color: #000000 !important;
 }
 
-.dark .text-slate-500, .dark .text-slate-400 {
-  color: #a1a1aa !important; /* zinc-400 */
+#settings-tab-container h1,
+#settings-tab-container h2,
+#settings-tab-container h3,
+#settings-tab-container h4,
+#settings-tab-container h5,
+#settings-tab-container h6,
+#settings-tab-container p,
+#settings-tab-container label,
+#settings-tab-container li,
+#settings-tab-container th,
+#settings-tab-container td,
+#settings-tab-container b,
+#settings-tab-container strong,
+#settings-tab-container input,
+#settings-tab-container select,
+#settings-tab-container textarea,
+.settings-tab-container h1,
+.settings-tab-container h2,
+.settings-tab-container h3,
+.settings-tab-container h4,
+.settings-tab-container h5,
+.settings-tab-container h6,
+.settings-tab-container p,
+.settings-tab-container label,
+.settings-tab-container li,
+.settings-tab-container th,
+.settings-tab-container td,
+.settings-tab-container b,
+.settings-tab-container strong,
+.settings-tab-container input,
+.settings-tab-container select,
+.settings-tab-container textarea,
+[data-module="settings"] h1,
+[data-module="settings"] h2,
+[data-module="settings"] h3,
+[data-module="settings"] h4,
+[data-module="settings"] h5,
+[data-module="settings"] h6,
+[data-module="settings"] p,
+[data-module="settings"] label,
+[data-module="settings"] li,
+[data-module="settings"] th,
+[data-module="settings"] td,
+[data-module="settings"] b,
+[data-module="settings"] strong,
+[data-module="settings"] input,
+[data-module="settings"] select,
+[data-module="settings"] textarea {
+  color: #000000 !important;
 }
 
-/* Accent mappings: orange-500 and orange-600 tags transition gracefully to amber-500 */
-.dark .bg-orange-500, .dark .hover\:bg-orange-600:hover, .dark .bg-orange-600 {
-  background-color: #f59e0b !important; /* amber-500 */
-  color: #09090b !important;
-  font-weight: 700 !important;
-}
-.dark .bg-orange-500:hover {
-  background-color: #d97706 !important; /* amber-600 */
+/* Sub-abas e botões neutros na aba de definições com letras pretas */
+#settings-tab-container button,
+.settings-tab-container button,
+[data-module="settings"] button {
+  color: #000000;
 }
 
-.dark .text-orange-500, .dark .text-orange-600 {
-  color: #fbbf24 !important; /* amber-450 */
+/* Manter botões com fundo sólido colorido (como botão Laranja de Salvar) com texto branco contrastante */
+#settings-tab-container button.bg-orange-500,
+#settings-tab-container button.bg-orange-600,
+#settings-tab-container button[class*="bg-orange"],
+#settings-tab-container button.bg-teal-600,
+#settings-tab-container button.bg-blue-600,
+#settings-tab-container button.bg-indigo-600,
+#settings-tab-container button.bg-indigo-700,
+#settings-tab-container button.bg-indigo-850,
+#settings-tab-container button.bg-rose-600,
+#settings-tab-container button.bg-emerald-600,
+#settings-tab-container button.bg-slate-800,
+#settings-tab-container button.bg-slate-900,
+#settings-tab-container button.bg-amber-500,
+#settings-tab-container button.bg-amber-600,
+.settings-tab-container button.bg-orange-500,
+.settings-tab-container button.bg-orange-600,
+[data-module="settings"] button.bg-orange-500,
+[data-module="settings"] button.bg-orange-600 {
+  color: #ffffff !important;
 }
 
-.dark .bg-orange-50, .dark .bg-orange-100 {
-  background-color: rgba(245, 158, 11, 0.1) !important;
-  color: #fbbf24 !important;
+/* Fundo claro para campos de formulário e cartões na aba de definições para garantir legibilidade das letras pretas */
+#settings-tab-container input,
+#settings-tab-container select,
+#settings-tab-container textarea,
+.settings-tab-container input,
+.settings-tab-container select,
+.settings-tab-container textarea,
+[data-module="settings"] input,
+[data-module="settings"] select,
+[data-module="settings"] textarea {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
 }
 
-/* Alert Boxes & highlights */
-.dark .bg-red-50, .dark .bg-red-50\/50 {
-  background-color: rgba(239, 68, 68, 0.08) !important;
-}
-.dark .bg-emerald-50, .dark .bg-emerald-50\/50 {
-  background-color: rgba(16, 185, 129, 0.08) !important;
-}
-.dark .bg-blue-50, .dark .bg-blue-50\/50 {
-  background-color: rgba(59, 130, 246, 0.08) !important;
+#settings-tab-container input::placeholder,
+#settings-tab-container textarea::placeholder,
+.settings-tab-container input::placeholder,
+.settings-tab-container textarea::placeholder,
+[data-module="settings"] input::placeholder,
+[data-module="settings"] textarea::placeholder {
+  color: #64748b !important;
 }
 
-/* Modals, popups & dropdowns */
-.dark .modal-content, .dark .shadow-2xl, .dark .shadow-xl {
-  background-color: #18181b !important;
-  border: 1px solid #27272a !important;
+/* Assegurar que mesmo em modo escuro os textos da aba de definições respeitem a instrução do usuário */
+.dark #settings-tab-container,
+.dark .settings-tab-container,
+.dark [data-module="settings"] {
+  color: #000000 !important;
 }
 
-/* Cart highlights, POS details layout */
-.dark .divide-y > * + * {
-  border-color: #27272a !important;
+.dark #settings-tab-container h1,
+.dark #settings-tab-container h2,
+.dark #settings-tab-container h3,
+.dark #settings-tab-container h4,
+.dark #settings-tab-container h5,
+.dark #settings-tab-container h6,
+.dark #settings-tab-container p,
+.dark #settings-tab-container label,
+.dark #settings-tab-container li,
+.dark #settings-tab-container th,
+.dark #settings-tab-container td,
+.dark #settings-tab-container b,
+.dark #settings-tab-container strong,
+.dark #settings-tab-container input,
+.dark #settings-tab-container select,
+.dark #settings-tab-container textarea,
+.dark .settings-tab-container h1,
+.dark .settings-tab-container h2,
+.dark .settings-tab-container h3,
+.dark .settings-tab-container h4,
+.dark .settings-tab-container p,
+.dark .settings-tab-container label,
+.dark .settings-tab-container input,
+.dark .settings-tab-container select,
+.dark .settings-tab-container textarea,
+.dark [data-module="settings"] h1,
+.dark [data-module="settings"] h2,
+.dark [data-module="settings"] h3,
+.dark [data-module="settings"] h4,
+.dark [data-module="settings"] p,
+.dark [data-module="settings"] label,
+.dark [data-module="settings"] input,
+.dark [data-module="settings"] select,
+.dark [data-module="settings"] textarea {
+  color: #000000 !important;
 }
 
-/* Charts Tooltips customized for dark mode */
-.dark .recharts-default-tooltip {
-  background-color: #18181b !important;
-  border: 1px solid #27272a !important;
-}
-.dark .recharts-tooltip-label {
-  color: #f4f4f5 !important;
-}
-
-/* Vibrant, Modern & Colorful Theme Customizations (Orange & White focus) */
-.modern-gradient {
-  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+.dark #settings-tab-container .bg-white,
+.dark #settings-tab-container [class*="bg-white"],
+.dark #settings-tab-container .bg-slate-50,
+.dark #settings-tab-container [class*="bg-slate-50"],
+.dark .settings-tab-container .bg-white,
+.dark .settings-tab-container [class*="bg-white"],
+.dark [data-module="settings"] .bg-white,
+.dark [data-module="settings"] [class*="bg-white"] {
+  background-color: #ffffff !important;
 }
 
-.modern-shadow {
-  box-shadow: 0 10px 35px -10px rgba(249, 115, 22, 0.12) !important;
+/* Botões do padrão do sistema OST (Laranja) com texto branco */
+.bg-orange-500, .bg-orange-600 {
+  color: #ffffff !important;
 }
 
-.modern-card {
-  background-color: #ffffff;
-  border: 1px solid #f1f5f9;
-  border-radius: 1.5rem; /* rounded-3xl */
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 20px -6px rgba(249, 115, 22, 0.04);
+.dark .bg-orange-500, .dark .bg-orange-600 {
+  background-color: #f97316 !important;
+  color: #ffffff !important;
 }
-
-.modern-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 18px 40px -12px rgba(249, 115, 22, 0.12);
-  border-color: rgba(249, 115, 22, 0.18);
-}
-
-.dark .modern-card {
-  background-color: #18181b !important;
-  border-color: #27272a !important;
-}
-
-.dark .modern-card:hover {
-  box-shadow: 0 20px 45px -15px rgba(245, 158, 11, 0.1) !important;
-  border-color: rgba(245, 158, 11, 0.25) !important;
-}
-
-.vibrant-badge {
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.08) 0%, rgba(245, 158, 11, 0.04) 100%);
-  border: 1px solid rgba(249, 115, 22, 0.15);
-  color: #ea580c;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* Pulse animation helper */
-@keyframes softPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.85; transform: scale(1.02); }
-}
-
-.animate-soft-pulse {
-  animation: softPulse 3s infinite ease-in-out;
+.dark .bg-orange-500:hover, .dark .bg-orange-600:hover {
+  background-color: #ea580c !important;
+  color: #ffffff !important;
 }
 
 /* ==========================================================
@@ -359,12 +387,10 @@ h1, h2, h3, h4, th {
     print-color-adjust: exact !important;
   }
 
-  /* Hide navigation, overlays, and non-printable elements */
   .no-print, nav, header, sidebar, .modal-backdrop {
     display: none !important;
   }
 
-  /* 80mm Thermal Receipt Layout Container */
   .thermal-receipt-80mm, #pos-completed-receipt {
     width: 76mm !important;
     max-width: 80mm !important;
@@ -392,7 +418,6 @@ h1, h2, h3, h4, th {
     visibility: visible !important;
   }
 
-  /* Header & Store Info */
   .thermal-receipt-header {
     text-align: center !important;
     margin-bottom: 6px !important;
@@ -445,6 +470,3 @@ h1, h2, h3, h4, th {
     border-top: 1px dashed #000000 !important;
   }
 }
-
-
-

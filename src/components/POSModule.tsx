@@ -61,6 +61,7 @@ interface POSModuleProps {
   ) => void;
   onAddAuditLog: (action: string, module: string, details: string) => void;
   currency: string;
+  onAddCustomer?: (customer: Customer) => void;
   onShowToast?: (message: string, type: "success" | "error" | "info" | "warning", title?: string) => void;
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
@@ -98,6 +99,7 @@ function POSModule({
   onReturnSale,
   onAddAuditLog,
   currency,
+  onAddCustomer,
   onShowToast,
   isPOSFullscreen = false,
   onChangePOSFullscreen,
@@ -347,6 +349,8 @@ function POSModule({
   const [quickCustomerModalOpen, setQuickCustomerModalOpen] = useState(false);
   const [quickCustName, setQuickCustName] = useState("");
   const [quickCustPhone, setQuickCustPhone] = useState("");
+  const [quickCustEmail, setQuickCustEmail] = useState("");
+  const [quickCustNuit, setQuickCustNuit] = useState("");
   const [pendingReceiptAction, setPendingReceiptAction] = useState<"email" | "sms" | "whatsapp" | null>(null);
 
   // 16. Past sales modal trigger
@@ -2074,11 +2078,11 @@ function POSModule({
     if (!quickCustName) return;
     const newCust: Customer = {
       id: generateEntityId("cust"),
-      name: quickCustName,
+      name: quickCustName.trim(),
       phone: quickCustPhone.trim() || "Indisponível",
-      email: "",
+      email: quickCustEmail.trim() || "",
       address: "Indisponível",
-      nuit: "",
+      nuit: quickCustNuit.trim() || "",
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
@@ -2088,6 +2092,11 @@ function POSModule({
     };
     setLocalCustomers(prev => [...prev, newCust]);
     setSelectedCustomerId(newCust.id);
+    
+    // Dispara a gravação no banco de dados e sincronização central
+    if (onAddCustomer) {
+      onAddCustomer(newCust);
+    }
     
     // If we have an active completed transaction, update its customer details so digital communication works seamlessly
     if (completedTx) {
@@ -2106,7 +2115,9 @@ function POSModule({
     setQuickCustomerModalOpen(false);
     setQuickCustName("");
     setQuickCustPhone("");
-    if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e selecionado!`, "success");
+    setQuickCustEmail("");
+    setQuickCustNuit("");
+    if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e armazenado com sucesso!`, "success");
   };
 
   return (
@@ -2121,7 +2132,7 @@ function POSModule({
             {/* Primary Barcode & Search Input */}
             <div className="relative flex-1">
               <div className="absolute left-3.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-400 pointer-events-none">
-                <Barcode className="w-4 h-4 text-orange-500" />
+                <Barcode className="w-4 h-4 text-blue-600" />
                 <Search className="w-3.5 h-3.5" />
               </div>
               <input
@@ -2163,14 +2174,14 @@ function POSModule({
                     }
                   }
                 }}
-                className={`w-full bg-white border rounded-xl pl-14 pr-24 py-3 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-orange-500/25 focus:border-orange-500 outline-none transition shadow-inner placeholder:text-slate-400 ${
-                  isMinimized ? "border-orange-300 ring-1 ring-orange-400/20" : "border-slate-200"
+                className={`w-full bg-white border rounded-xl pl-14 pr-24 py-3 text-sm font-semibold text-slate-800 focus:ring-2 focus:ring-blue-500/25 focus:border-blue-600 outline-none transition shadow-inner placeholder:text-slate-400 ${
+                  isMinimized ? "border-blue-300 ring-1 ring-blue-400/20" : "border-slate-200"
                 }`}
               />
               <button
                 type="button"
                 onClick={() => setScannerModalOpen(true)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
                 title="Abrir Leitor de Código de Barras (Câmara/Simulador)"
               >
                 <Scan className="w-3.5 h-3.5" />
@@ -2221,8 +2232,8 @@ function POSModule({
               onClick={handleToggleMinimized}
               className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm shrink-0 transition-all ${
                 isMinimized
-                  ? "bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/20"
-                  : "bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-orange-600"
+                  ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20"
+                  : "bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 hover:text-blue-600"
               }`}
               title={isMinimized ? "Restaurar interface normal (Sair do Modo Minimizado - F10/F11)" : "Modo Minimizado: Ocultar elementos secundários para foco total na venda (F10/F11)"}
             >
@@ -2233,7 +2244,7 @@ function POSModule({
                 </>
               ) : (
                 <>
-                  <Maximize2 className="w-3.5 h-3.5 text-orange-500" />
+                  <Maximize2 className="w-3.5 h-3.5 text-blue-600" />
                   <span>Minimizar</span>
                 </>
               )}
@@ -2299,16 +2310,16 @@ function POSModule({
                           ? "border-amber-300 bg-amber-50/40 cursor-not-allowed opacity-90"
                           : "border-slate-200 bg-slate-100/70 cursor-not-allowed opacity-60" 
                         : inCartQty > 0
-                          ? "border-orange-300 bg-orange-50/20 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
-                          : "border-slate-200 hover:border-orange-400 hover:shadow-md cursor-pointer active:scale-[0.98]"
+                          ? "border-blue-300 bg-blue-50/20 hover:border-blue-400 hover:shadow-xs cursor-pointer active:scale-[0.98]"
+                          : "border-slate-200 hover:border-blue-400 hover:shadow-xs cursor-pointer active:scale-[0.98]"
                     }`}
                   >
                     {/* Status & Barcode badge */}
                     <div className="flex items-start justify-between w-full">
                       <div className="relative">
-                        <span className="text-2xl p-1 bg-slate-50 group-hover:bg-orange-50 rounded-lg transition inline-block">{p.emoji || "📦"}</span>
+                        <span className="text-2xl p-1 bg-slate-50 group-hover:bg-blue-50 rounded-lg transition inline-block">{p.emoji || "📦"}</span>
                         {inCartQty > 0 && (
-                          <span className="absolute -top-1.5 -right-2 bg-orange-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-sm">
+                          <span className="absolute -top-1.5 -right-2 bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full shadow-xs">
                             {inCartQty}
                           </span>
                         )}
@@ -2321,7 +2332,7 @@ function POSModule({
                             0 disp. (🛒 {inCartQty})
                           </span>
                         ) : inCartQty > 0 ? (
-                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1">
+                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1">
                             <span>{liveRemainingStock} un disp.</span>
                           </span>
                         ) : isLowStock ? (
@@ -2344,7 +2355,7 @@ function POSModule({
                       <div className="flex items-center justify-between mt-0.5">
                         <p className="text-[9.5px] text-slate-400 font-mono">{p.category}</p>
                         {inCartQty > 0 && (
-                          <span className="text-[9px] font-bold text-orange-600 font-mono">
+                          <span className="text-[9px] font-bold text-blue-600 font-mono">
                             🛒 {inCartQty} {p.weightBased ? "kg" : "un"}
                           </span>
                         )}
@@ -2359,7 +2370,7 @@ function POSModule({
                       ) : isCartExhausted ? (
                         <span className="text-[9.5px] font-bold text-amber-700">Máx. no Carrinho</span>
                       ) : (
-                        <span className="text-[10px] font-bold text-orange-600 group-hover:translate-x-0.5 transition">
+                        <span className="text-[10px] font-bold text-blue-600 group-hover:translate-x-0.5 transition">
                           {inCartQty > 0 ? `+ Adicionar (${liveRemainingStock})` : "+ Adicionar"}
                         </span>
                       )}
@@ -3296,6 +3307,28 @@ function POSModule({
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-semibold text-slate-600 block mb-1">E-mail (Opcional)</label>
+                  <input
+                    type="email"
+                    placeholder="cliente@email.com"
+                    value={quickCustEmail}
+                    onChange={(e) => setQuickCustEmail(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-600 block mb-1">NUIT (Opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 123456789"
+                    value={quickCustNuit}
+                    onChange={(e) => setQuickCustNuit(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono text-xs"
+                  />
+                </div>
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 pt-2">
@@ -3448,7 +3481,7 @@ function POSModule({
                       <div className="flex-1 pr-2">
                         <span className="font-bold text-slate-800 block truncate">{it.productName}</span>
                         <span className="text-[10px] text-slate-400 font-mono">
-                          Preço: {it.price.toLocaleString()} MT • Faturado: {it.quantity} un
+                          Preço: {(Number(it.price ?? (it as any).salePrice) || 0).toLocaleString()} MT • Faturado: {it.quantity} un
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
@@ -3760,21 +3793,26 @@ function POSModule({
                   <span className="col-span-2 text-center">QTD</span>
                   <span className="col-span-4 text-right">VALOR</span>
                 </div>
-                 {completedTx.items.map((item, i) => (
-                   <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
-                     <span className="col-span-6 truncate">{item.productName}</span>
-                     <span className="col-span-2 text-center">{item.quantity}</span>
-                     <span className="col-span-4 text-right">{(item.price * item.quantity).toLocaleString()} MT</span>
-                   </div>
-                 ))}
+                 {completedTx.items.map((item, i) => {
+                   const itemPrice = Number(item.price ?? (item as any).salePrice ?? 0);
+                   const itemQty = Number(item.quantity || 1);
+                   const lineVal = Number((item as any).subtotal ?? (itemPrice * itemQty));
+                   return (
+                     <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
+                       <span className="col-span-6 truncate">{item.productName}</span>
+                       <span className="col-span-2 text-center">{isNaN(itemQty) ? 1 : itemQty}</span>
+                       <span className="col-span-4 text-right">{(isNaN(lineVal) ? 0 : lineVal).toLocaleString()} MT</span>
+                     </div>
+                   );
+                 })}
               </div>
 
               <div className="space-y-1 text-slate-600 text-right">
-                <p>SUBTOTAL: {completedTx.subtotal.toLocaleString()} MT</p>
-                {completedTx.discountTotal > 0 && <p className="text-red-650 font-bold">DESC. GER: -{completedTx.discountTotal.toLocaleString()} MT</p>}
-                <p>TOTAL IVA COBRADO: {completedTx.vatTotal.toLocaleString()} MT</p>
+                <p>SUBTOTAL: {(Number(completedTx.subtotal) || 0).toLocaleString()} MT</p>
+                {Number(completedTx.discountTotal || 0) > 0 && <p className="text-red-650 font-bold">DESC. GER: -{(Number(completedTx.discountTotal) || 0).toLocaleString()} MT</p>}
+                <p>TOTAL IVA COBRADO: {(Number(completedTx.vatTotal) || 0).toLocaleString()} MT</p>
                 <p className="text-slate-900 font-bold text-xs border-t border-dashed border-slate-300 pt-1">
-                  TOTAL PAGO: {completedTx.grandTotal.toLocaleString()} MT
+                  TOTAL PAGO: {(Number(completedTx.grandTotal) || 0).toLocaleString()} MT
                 </p>
                 <p className="text-[10px] text-slate-500 font-medium italic mt-1">Método: {completedTx.paymentMethod}</p>
                 {completedTx.paymentDetails && (

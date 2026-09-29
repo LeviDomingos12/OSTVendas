@@ -21,7 +21,8 @@ import {
   AlertTriangle, 
   Flame,
   RotateCcw,
-  Package
+  Package,
+  Users
 } from "lucide-react";
 import {
   BarChart,
@@ -32,7 +33,7 @@ import {
   Tooltip as RechartsTooltip,
   ResponsiveContainer
 } from "recharts";
-import { Transaction, SystemSettings, AuditLog } from "../types";
+import { Transaction, SystemSettings, AuditLog, Product, Employee } from "../types";
 import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
 import { generateInvoiceEmailHtml } from "../lib/emailTemplate";
@@ -44,7 +45,7 @@ interface ReportTransactionRowProps {
   currency: string;
   onOpenEmail: (t: Transaction) => void;
   onOpenPrint: (t: Transaction) => void;
-  formatMZ: (val: number) => string;
+  formatMZ: (val: any) => string;
 }
 
 const ReportTransactionRow = React.memo(({
@@ -95,7 +96,7 @@ ReportTransactionRow.displayName = "ReportTransactionRow";
 
 interface ReportVatRowProps {
   transaction: Transaction;
-  formatMZ: (val: number) => string;
+  formatMZ: (val: any) => string;
 }
 
 const ReportVatRow = React.memo(({
@@ -189,6 +190,8 @@ interface ReportsModuleProps {
   auditLogs?: AuditLog[];
   transactionsError?: string | null;
   onRetryTransactions?: () => void;
+  products?: Product[];
+  employees?: Employee[];
 }
 
 function ReportsModule({
@@ -200,7 +203,9 @@ function ReportsModule({
   onShowToast,
   auditLogs = [],
   transactionsError,
-  onRetryTransactions
+  onRetryTransactions,
+  products = [],
+  employees = []
 }: ReportsModuleProps) {
   
   // Local states
@@ -274,34 +279,50 @@ function ReportsModule({
     const productSales: { [productName: string]: { qty: number; revenue: number } } = {};
 
     monthlyTx.forEach(t => {
-      totalSales += t.grandTotal;
-      totalVat += t.vatTotal;
-      totalDiscount += t.discountTotal;
-      t.items.forEach(item => {
-        const name = item.productName || "Produto Geral";
-        if (!productSales[name]) {
-          productSales[name] = { qty: 0, revenue: 0 };
-        }
-        productSales[name].qty += item.quantity;
-        productSales[name].revenue += (item.price * item.quantity);
-        totalItemsCount += item.quantity;
-      });
+      const g = Number(t.grandTotal || 0);
+      const v = Number(t.vatTotal || 0);
+      const d = Number(t.discountTotal || 0);
+      totalSales += isNaN(g) ? 0 : g;
+      totalVat += isNaN(v) ? 0 : v;
+      totalDiscount += isNaN(d) ? 0 : d;
+
+      if (Array.isArray(t.items)) {
+        t.items.forEach(item => {
+          const name = item.productName || (item as any).name || "Produto Geral";
+          if (!productSales[name]) {
+            productSales[name] = { qty: 0, revenue: 0 };
+          }
+          const itemQty = Number(item.quantity || 1);
+          const itemPrice = Number(item.price ?? (item as any).salePrice ?? (item as any).unitPrice ?? 0);
+          const itemSubtotal = Number((item as any).subtotal ?? (itemPrice * itemQty));
+          const safeQty = isNaN(itemQty) ? 1 : itemQty;
+          const safeRev = isNaN(itemSubtotal) ? (isNaN(itemPrice) ? 0 : itemPrice * safeQty) : itemSubtotal;
+
+          productSales[name].qty += safeQty;
+          productSales[name].revenue += safeRev;
+          totalItemsCount += safeQty;
+        });
+      }
     });
 
     const averageTicket = monthlyTx.length ? Math.round(totalSales / monthlyTx.length) : 0;
 
     const topProducts = Object.entries(productSales)
-      .map(([name, data]) => ({ name, qty: data.qty, revenue: data.revenue }))
+      .map(([name, data]) => ({
+        name,
+        qty: data.qty,
+        revenue: isNaN(data.revenue) ? 0 : data.revenue
+      }))
       .sort((a, b) => b.qty - a.qty)
       .slice(0, 5); // top 5
 
     return {
       monthlyTx,
-      totalSales,
-      totalVat,
-      totalDiscount,
-      totalItemsCount,
-      averageTicket,
+      totalSales: isNaN(totalSales) ? 0 : totalSales,
+      totalVat: isNaN(totalVat) ? 0 : totalVat,
+      totalDiscount: isNaN(totalDiscount) ? 0 : totalDiscount,
+      totalItemsCount: isNaN(totalItemsCount) ? 0 : totalItemsCount,
+      averageTicket: isNaN(averageTicket) ? 0 : averageTicket,
       topProducts,
       monthName: getMonthNamePT(currentMonth),
       year: currentYear
@@ -339,13 +360,20 @@ function ReportsModule({
     const paymentBreakdown: Record<string, { count: number; total: number }> = {};
 
     filteredTransactions.forEach(t => {
-      salesTotal += Number(t.grandTotal || 0);
-      vatTotal += Number(t.vatTotal || 0);
-      discountTotal += Number(t.discountTotal || 0);
-      subtotalTotal += Number(t.subtotal || 0);
+      const g = Number(t.grandTotal || 0);
+      const v = Number(t.vatTotal || 0);
+      const d = Number(t.discountTotal || 0);
+      const s = Number(t.subtotal ?? t.grandTotal ?? 0);
+
+      salesTotal += isNaN(g) ? 0 : g;
+      vatTotal += isNaN(v) ? 0 : v;
+      discountTotal += isNaN(d) ? 0 : d;
+      subtotalTotal += isNaN(s) ? (isNaN(g) ? 0 : g) : s;
+
       if (Array.isArray(t.items)) {
         t.items.forEach(item => {
-          totalQuantity += Number(item.quantity || 1);
+          const q = Number(item.quantity || 1);
+          totalQuantity += isNaN(q) ? 1 : q;
         });
       }
 
@@ -361,18 +389,18 @@ function ReportsModule({
         paymentBreakdown[normKey] = { count: 0, total: 0 };
       }
       paymentBreakdown[normKey].count += 1;
-      paymentBreakdown[normKey].total += Number(t.grandTotal || 0);
+      paymentBreakdown[normKey].total += isNaN(g) ? 0 : g;
     });
 
     const profitTotal = Math.round(salesTotal * 0.32); // margin estimate
 
     return {
-      salesTotal,
-      vatTotal,
-      discountTotal,
-      profitTotal,
-      subtotalTotal,
-      totalQuantity,
+      salesTotal: isNaN(salesTotal) ? 0 : salesTotal,
+      vatTotal: isNaN(vatTotal) ? 0 : vatTotal,
+      discountTotal: isNaN(discountTotal) ? 0 : discountTotal,
+      profitTotal: isNaN(profitTotal) ? 0 : profitTotal,
+      subtotalTotal: isNaN(subtotalTotal) ? 0 : subtotalTotal,
+      totalQuantity: isNaN(totalQuantity) ? 0 : totalQuantity,
       paymentBreakdown
     };
   }, [filteredTransactions]);
@@ -385,23 +413,30 @@ function ReportsModule({
     let totalTransactions = filteredTransactions.length;
 
     filteredTransactions.forEach(t => {
-      if (t.vatTotal > 0) {
-        taxableSalesSubtotal += t.subtotal;
-        realVatCollected += t.vatTotal;
+      const v = Number(t.vatTotal || 0);
+      const s = Number(t.subtotal ?? t.grandTotal ?? 0);
+      const safeVat = isNaN(v) ? 0 : v;
+      const safeSub = isNaN(s) ? 0 : s;
+
+      if (safeVat > 0) {
+        taxableSalesSubtotal += safeSub;
+        realVatCollected += safeVat;
       } else {
-        exemptSalesSubtotal += t.subtotal;
+        exemptSalesSubtotal += safeSub;
       }
     });
 
-    const simulatedVatCollected = Math.round(taxableSalesSubtotal * (simulatedIvaRate / 100));
-    const netVatPayable = realVatCollected - manualIvaDeduction;
+    const safeSimulatedRate = Number(simulatedIvaRate) || 0;
+    const safeManualDeduction = Number(manualIvaDeduction) || 0;
+    const simulatedVatCollected = Math.round(taxableSalesSubtotal * (safeSimulatedRate / 100));
+    const netVatPayable = realVatCollected - safeManualDeduction;
 
     return {
-      taxableSalesSubtotal,
-      exemptSalesSubtotal,
-      realVatCollected,
-      simulatedVatCollected,
-      netVatPayable,
+      taxableSalesSubtotal: isNaN(taxableSalesSubtotal) ? 0 : taxableSalesSubtotal,
+      exemptSalesSubtotal: isNaN(exemptSalesSubtotal) ? 0 : exemptSalesSubtotal,
+      realVatCollected: isNaN(realVatCollected) ? 0 : realVatCollected,
+      simulatedVatCollected: isNaN(simulatedVatCollected) ? 0 : simulatedVatCollected,
+      netVatPayable: isNaN(netVatPayable) ? 0 : netVatPayable,
       totalTransactions
     };
   }, [filteredTransactions, simulatedIvaRate, manualIvaDeduction]);
@@ -520,11 +555,13 @@ function ReportsModule({
     }
   }, [activityGrouping, activityAnalytics]);
 
-  const formatMZ = useCallback((val: number) => {
+  const formatMZ = useCallback((val: any) => {
+    const num = Number(val);
+    const safeNum = isNaN(num) || !isFinite(num) ? 0 : num;
     return new Intl.NumberFormat('pt-MZ', { 
       minimumFractionDigits: 2, 
       maximumFractionDigits: 2 
-    }).format(val) + " MT";
+    }).format(safeNum) + " MT";
   }, []);
 
   // Handle saving configurations
@@ -622,12 +659,17 @@ function ReportsModule({
       doc.text(`Cliente: ${showEmailModal.customerName || "Consumidor Geral"}`, 14, 36);
       doc.text(`Data: ${new Date(showEmailModal.timestamp).toLocaleString()}`, 14, 42);
       
-      const tableBody = showEmailModal.items.map(item => [
-        item.productName,
-        item.quantity.toString(),
-        `${item.price.toLocaleString()} MT`,
-        `${item.subtotal.toLocaleString()} MT`
-      ]);
+      const tableBody = showEmailModal.items.map(item => {
+        const q = Number(item.quantity || 1);
+        const p = Number(item.price ?? (item as any).salePrice ?? 0);
+        const sub = Number(item.subtotal ?? (p * q));
+        return [
+          item.productName || "Artigo",
+          (isNaN(q) ? 1 : q).toString(),
+          formatMZ(p),
+          formatMZ(sub)
+        ];
+      });
       
       autoTable(doc, {
         startY: 50,
@@ -639,9 +681,9 @@ function ReportsModule({
       
       const finalY = (doc as any).lastAutoTable.finalY || 50;
       doc.setFont("helvetica", "bold");
-      doc.text(`Subtotal: ${showEmailModal.subtotal.toLocaleString()} MT`, 14, finalY + 10);
-      doc.text(`IVA (16%): ${showEmailModal.vatTotal.toLocaleString()} MT`, 14, finalY + 16);
-      doc.text(`Total Pago: ${showEmailModal.grandTotal.toLocaleString()} MT`, 14, finalY + 22);
+      doc.text(`Subtotal: ${formatMZ(showEmailModal.subtotal)}`, 14, finalY + 10);
+      doc.text(`IVA (16%): ${formatMZ(showEmailModal.vatTotal)}`, 14, finalY + 16);
+      doc.text(`Total Pago: ${formatMZ(showEmailModal.grandTotal)}`, 14, finalY + 22);
 
       const pdfBase64DataUri = doc.output('datauristring');
       const base64Content = pdfBase64DataUri.split(',')[1];
@@ -1293,6 +1335,410 @@ function ReportsModule({
     }, 1200);
   };
 
+  // Consolidated PDF Report: Transactions, Category Sales Summary & Collaborator Performance
+  const handleExportConsolidatedTransactionsPDF = async () => {
+    setIsExporting(true);
+    setExportMessage("");
+    if (onShowToast) {
+      onShowToast("A compilar Relatório Consolidado de Transações em PDF...", "info", "Aguarde");
+    }
+
+    setTimeout(async () => {
+      try {
+        const { jsPDF } = await import("jspdf");
+        const { default: autoTable } = await import("jspdf-autotable");
+        const doc = new jsPDF({
+          orientation: "portrait",
+          unit: "mm",
+          format: "a4"
+        });
+
+        const primaryRgb: [number, number, number] = [37, 99, 235]; // Professional Blue #2563eb
+        const darkSlateRgb: [number, number, number] = [30, 41, 59];
+
+        // 1. Top accent line
+        doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
+        doc.rect(0, 0, 210, 8, "F");
+
+        // 2. Company Logo
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 12, 30, 30);
+        }
+
+        // 3. Corporate Header
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text(settings.companyName || "OST Vendas", 14, 20);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`NUIT: ${settings.companyNuit || "Indisponível"} | Endereço: ${settings.storeAddress || settings.companyAddress || "Moçambique"}`, 14, 26);
+        doc.text(`Contacto: ${settings.storeContact || "Indisponível"} | E-mail: ${settings.smtpUser || settings.reportRecipientEmail || "comercial@empresa.co.mz"}`, 14, 31);
+
+        // Divider
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.4);
+        doc.line(14, 36, 196, 36);
+
+        // 4. Document Title & Metadata
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("RELATÓRIO CONSOLIDADO DE TRANSAÇÕES E GESTÃO COMERCIAL", 14, 44);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Período Selecionado: ${startDate} até ${endDate}`, 14, 50);
+        doc.text(`Documento emitido em: ${new Date().toLocaleString("pt-MZ")} | Total de Vendas: ${filteredTransactions.length}`, 14, 55);
+
+        // 5. Key Financial KPIs (6 Box Matrix)
+        const renderKpiCard = (x: number, y: number, w: number, h: number, title: string, value: string, color: [number, number, number]) => {
+          doc.setFillColor(248, 250, 252);
+          doc.rect(x, y, w, h, "F");
+          doc.setDrawColor(226, 232, 240);
+          doc.rect(x, y, w, h, "S");
+          doc.setFontSize(7);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(100, 116, 139);
+          doc.text(title, x + 4, y + 5);
+          doc.setFontSize(9.5);
+          doc.setTextColor(color[0], color[1], color[2]);
+          doc.text(value, x + 4, y + 12);
+        };
+
+        // Row 1
+        renderKpiCard(14, 60, 57, 16, "FATURAÇÃO TOTAL BRUTA", formatMZ(financialTotals.salesTotal), primaryRgb);
+        renderKpiCard(76, 60, 57, 16, "IMPOSTO IVA (16%)", formatMZ(financialTotals.vatTotal), [71, 85, 105]);
+        renderKpiCard(138, 60, 58, 16, "LUCRO ESTIMADO (MARGEM)", `+${formatMZ(financialTotals.profitTotal)}`, [16, 185, 129]);
+
+        // Row 2
+        const avgTicket = filteredTransactions.length ? Math.round(financialTotals.salesTotal / filteredTransactions.length) : 0;
+        renderKpiCard(14, 80, 57, 16, "DESCONTOS CONCEDIDOS", `-${formatMZ(financialTotals.discountTotal)}`, [239, 68, 68]);
+        renderKpiCard(76, 80, 57, 16, "ARTIGOS VENDIDOS", `${financialTotals.totalQuantity.toLocaleString()} unidades`, [15, 23, 42]);
+        renderKpiCard(138, 80, 58, 16, "TICKET MÉDIO POR VENDA", formatMZ(avgTicket), [15, 23, 42]);
+
+        let currentY = 104;
+
+        // ==========================================
+        // 6. SECTION 1: VENDAS POR CATEGORIA DE PRODUTO
+        // ==========================================
+        doc.setFontSize(10.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("1. RESUMO DE VENDAS POR CATEGORIA DE PRODUTO", 14, currentY);
+
+        const categoryMap = new Map<string, { category: string; count: number; qty: number; total: number }>();
+        const productCategoryLookup = new Map<string, string>();
+        const productNameCategoryLookup = new Map<string, string>();
+
+        (products || []).forEach(p => {
+          if (p.id) productCategoryLookup.set(p.id, p.category || "Geral");
+          if (p.name) productNameCategoryLookup.set(p.name.toLowerCase().trim(), p.category || "Geral");
+        });
+
+        let totalCategoryRevenue = 0;
+        let totalCategoryUnits = 0;
+
+        filteredTransactions.forEach(t => {
+          if (Array.isArray(t.items)) {
+            t.items.forEach(it => {
+              let cat = (it as any).category;
+              if (!cat && it.productId) cat = productCategoryLookup.get(it.productId);
+              if (!cat && it.productName) cat = productNameCategoryLookup.get(it.productName.toLowerCase().trim());
+              if (!cat) cat = "Produtos Gerais";
+
+              const sub = Number(it.subtotal ?? (Number(it.price || 0) * Number(it.quantity || 1)));
+              const qty = Number(it.quantity || 1);
+
+              if (!categoryMap.has(cat)) {
+                categoryMap.set(cat, { category: cat, count: 0, qty: 0, total: 0 });
+              }
+              const c = categoryMap.get(cat)!;
+              c.count += 1;
+              c.qty += qty;
+              c.total += sub;
+              totalCategoryRevenue += sub;
+              totalCategoryUnits += qty;
+            });
+          }
+        });
+
+        const categoryList = Array.from(categoryMap.values()).sort((a, b) => b.total - a.total);
+
+        const catHead = [["CATEGORIA DE PRODUTO", "QTD VENDIDA", "FATURAÇÃO (MT)", "PARTICIPAÇÃO", "TICKET MÉDIO/ITEM"]];
+        const catBody = categoryList.map(c => {
+          const share = totalCategoryRevenue > 0 ? ((c.total / totalCategoryRevenue) * 100).toFixed(1) + "%" : "0.0%";
+          const avgPrice = c.qty > 0 ? Math.round(c.total / c.qty) : 0;
+          return [
+            c.category,
+            `${c.qty.toLocaleString()} un.`,
+            formatMZ(c.total),
+            share,
+            formatMZ(avgPrice)
+          ];
+        });
+
+        if (categoryList.length > 0) {
+          catBody.push([
+            "TOTAL GERAL POR CATEGORIAS",
+            `${totalCategoryUnits.toLocaleString()} un.`,
+            formatMZ(totalCategoryRevenue),
+            "100%",
+            formatMZ(totalCategoryUnits > 0 ? Math.round(totalCategoryRevenue / totalCategoryUnits) : 0)
+          ]);
+        } else {
+          catBody.push(["Nenhum item vendido no período", "0 un.", "0,00 MT", "0%", "0,00 MT"]);
+        }
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: catHead,
+          body: catBody,
+          theme: "striped",
+          styles: { fontSize: 8, cellPadding: 2.6 },
+          headStyles: { fillColor: primaryRgb, textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            0: { fontStyle: "bold" },
+            1: { halign: "right" },
+            2: { halign: "right", fontStyle: "bold" },
+            3: { halign: "right" },
+            4: { halign: "right" }
+          },
+          didParseCell: (data) => {
+            if (data.row.index === catBody.length - 1 && categoryList.length > 0) {
+              data.cell.styles.fontStyle = "bold";
+              data.cell.styles.fillColor = [241, 245, 249];
+            }
+          }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+
+        // Check if page break is needed for Section 2
+        if (currentY > 225) {
+          doc.addPage();
+          doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
+          doc.rect(0, 0, 210, 8, "F");
+          currentY = 20;
+        }
+
+        // ==========================================
+        // 7. SECTION 2: PERFORMANCE DOS COLABORADORES
+        // ==========================================
+        doc.setFontSize(10.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("2. PERFORMANCE E DESEMPENHO DOS COLABORADORES", 14, currentY);
+
+        const employeeInfoMap = new Map<string, { role: string; name: string }>();
+        (employees || []).forEach(emp => {
+          const roleLabel = emp.role === "ADMIN" ? "Administrador" :
+                            emp.role === "SUPERVISOR" ? "Supervisor" :
+                            emp.role === "CASHIER" ? "Operador de Caixa" :
+                            emp.role === "RH" ? "Recursos Humanos" :
+                            emp.role === "FINANCEIRO" ? "Gestor Financeiro" :
+                            emp.role === "AUDITOR" ? "Auditor Fiscal" : (emp.role || "Colaborador");
+          if (emp.name) employeeInfoMap.set(emp.name.toLowerCase().trim(), { role: roleLabel, name: emp.name });
+          if (emp.username) employeeInfoMap.set(emp.username.toLowerCase().trim(), { role: roleLabel, name: emp.name });
+          if (emp.id) employeeInfoMap.set(emp.id, { role: roleLabel, name: emp.name });
+        });
+
+        const collaboratorMap = new Map<string, { name: string; role: string; count: number; total: number; qty: number }>();
+        let totalCollaboratorSales = 0;
+        let totalCollaboratorTxCount = 0;
+
+        filteredTransactions.forEach(t => {
+          const rawName = (t.cashierName || (t as any).sellerName || (t as any).userName || "Operador Geral").trim();
+          const empInfo = employeeInfoMap.get(rawName.toLowerCase()) || (t.userId ? employeeInfoMap.get(t.userId) : null);
+          const displayName = empInfo?.name || rawName;
+          const role = empInfo?.role || "Operador de Caixa";
+
+          const gTotal = Number(t.grandTotal || 0);
+          let txQty = 0;
+          if (Array.isArray(t.items)) {
+            t.items.forEach(it => { txQty += Number(it.quantity || 1); });
+          }
+
+          if (!collaboratorMap.has(displayName)) {
+            collaboratorMap.set(displayName, { name: displayName, role, count: 0, total: 0, qty: 0 });
+          }
+          const c = collaboratorMap.get(displayName)!;
+          c.count += 1;
+          c.total += gTotal;
+          c.qty += txQty;
+          totalCollaboratorSales += gTotal;
+          totalCollaboratorTxCount += 1;
+        });
+
+        const collaboratorList = Array.from(collaboratorMap.values()).sort((a, b) => b.total - a.total);
+
+        const collabHead = [["COLABORADOR", "FUNÇÃO / CARGO", "TRANSAÇÕES", "FATURAÇÃO TOTAL (MT)", "TICKET MÉDIO", "PARTICIPAÇÃO"]];
+        const collabBody = collaboratorList.map((collab, idx) => {
+          const share = totalCollaboratorSales > 0 ? ((collab.total / totalCollaboratorSales) * 100).toFixed(1) + "%" : "0.0%";
+          const avgTicket = collab.count > 0 ? Math.round(collab.total / collab.count) : 0;
+          const medal = idx === 0 && collaboratorList.length > 1 ? " [Destaque]" : "";
+          return [
+            `${collab.name}${medal}`,
+            collab.role,
+            `${collab.count} vendas`,
+            formatMZ(collab.total),
+            formatMZ(avgTicket),
+            share
+          ];
+        });
+
+        if (collaboratorList.length > 0) {
+          collabBody.push([
+            "TOTAL DA EQUIPA",
+            "-",
+            `${totalCollaboratorTxCount} vendas`,
+            formatMZ(totalCollaboratorSales),
+            formatMZ(totalCollaboratorTxCount > 0 ? Math.round(totalCollaboratorSales / totalCollaboratorTxCount) : 0),
+            "100%"
+          ]);
+        } else {
+          collabBody.push(["Nenhum colaborador registrado com vendas", "-", "0 vendas", "0,00 MT", "0,00 MT", "0%"]);
+        }
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: collabHead,
+          body: collabBody,
+          theme: "striped",
+          styles: { fontSize: 8, cellPadding: 2.6 },
+          headStyles: { fillColor: darkSlateRgb, textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            0: { fontStyle: "bold" },
+            1: { textColor: [71, 85, 105] },
+            2: { halign: "right" },
+            3: { halign: "right", fontStyle: "bold" },
+            4: { halign: "right" },
+            5: { halign: "right" }
+          },
+          didParseCell: (data) => {
+            if (data.row.index === collabBody.length - 1 && collaboratorList.length > 0) {
+              data.cell.styles.fontStyle = "bold";
+              data.cell.styles.fillColor = [241, 245, 249];
+            }
+          }
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 10;
+
+        // Check if page break is needed for Section 3
+        if (currentY > 215) {
+          doc.addPage();
+          doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
+          doc.rect(0, 0, 210, 8, "F");
+          currentY = 20;
+        }
+
+        // ==========================================
+        // 8. SECTION 3: EXTRATO CONSOLIDADO DE TRANSAÇÕES
+        // ==========================================
+        doc.setFontSize(10.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(15, 23, 42);
+        doc.text("3. EXTRATO CONSOLIDADO DE TRANSAÇÕES", 14, currentY);
+
+        const txHead = [["FATURA", "DATA/HORA", "CLIENTE", "OPERADOR", "PAGAMENTO", "SUBTOTAL", "DESC.", "IVA", "TOTAL MT"]];
+        const txBody = filteredTransactions.map(t => [
+          t.invoiceNumber,
+          new Date(t.timestamp).toLocaleDateString("pt-MZ") + " " + new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          t.customerName || "Consumidor Geral",
+          t.cashierName || "-",
+          t.paymentMethod === "CASH" ? "Dinheiro" : (t.paymentMethod as string) || "-",
+          formatMZ(t.subtotal),
+          t.discountTotal > 0 ? `-${formatMZ(t.discountTotal)}` : "0,00 MT",
+          formatMZ(t.vatTotal),
+          formatMZ(t.grandTotal)
+        ]);
+
+        if (filteredTransactions.length === 0) {
+          txBody.push(["-", "-", "Nenhuma transação encontrada no período", "-", "-", "0,00 MT", "0,00 MT", "0,00 MT", "0,00 MT"]);
+        }
+
+        autoTable(doc, {
+          startY: currentY + 3,
+          head: txHead,
+          body: txBody,
+          theme: "striped",
+          styles: { fontSize: 7, cellPadding: 2.2 },
+          headStyles: { fillColor: darkSlateRgb, textColor: [255, 255, 255], fontStyle: "bold" },
+          columnStyles: {
+            0: { fontStyle: "bold" },
+            5: { halign: "right" },
+            6: { halign: "right", textColor: [220, 38, 38] },
+            7: { halign: "right" },
+            8: { halign: "right", fontStyle: "bold" }
+          },
+          didDrawPage: (data) => {
+            doc.setFontSize(7.5);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(148, 163, 184);
+            doc.text(`Página ${data.pageNumber}`, 14, 288);
+            doc.text("OST Vendas - Sistema de Gestão Comercial e POS Integrado", 110, 288);
+          }
+        });
+
+        const txFinalY = (doc as any).lastAutoTable.finalY || 220;
+
+        // 9. Signatures Block
+        const renderSignatures = (targetDoc: typeof doc, startY: number) => {
+          targetDoc.setDrawColor(203, 213, 225);
+          targetDoc.line(20, startY + 16, 95, startY + 16);
+          targetDoc.line(115, startY + 16, 190, startY + 16);
+
+          targetDoc.setFont("helvetica", "bold");
+          targetDoc.setFontSize(8);
+          targetDoc.setTextColor(71, 85, 105);
+          targetDoc.text("Responsável Comercial / Caixa Central", 28, startY + 20);
+          targetDoc.text("Diretoria Geral / Administração", 126, startY + 20);
+
+          targetDoc.setFont("helvetica", "normal");
+          targetDoc.setFontSize(7);
+          targetDoc.setTextColor(148, 163, 184);
+          targetDoc.text("Relatório oficial consolidado emitido para controlo comercial, auditoria de vendas e avaliação de produtividade.", 14, startY + 28);
+        };
+
+        if (txFinalY + 35 > 280) {
+          doc.addPage();
+          doc.setFillColor(primaryRgb[0], primaryRgb[1], primaryRgb[2]);
+          doc.rect(0, 0, 210, 8, "F");
+          renderSignatures(doc, 15);
+        } else {
+          renderSignatures(doc, txFinalY);
+        }
+
+        const fileName = `Relatorio_Consolidado_Transacoes_${startDate}_a_${endDate}.pdf`;
+        doc.save(fileName);
+        setExportMessage(`Relatório Consolidado de Transações (PDF) gerado e transferido com sucesso!`);
+        onAddAuditLog(
+          "Exportar Relatório Consolidado PDF",
+          "RELATÓRIOS",
+          `Exportou Relatório Consolidado de Transações (${startDate} até ${endDate}) com ${filteredTransactions.length} vendas, resumo por categorias e performance de colaboradores.`
+        );
+
+        if (onShowToast) {
+          onShowToast("Relatório Consolidado em PDF gerado com sucesso!", "success", "PDF Exportado");
+        }
+      } catch (err: any) {
+        console.error("Erro ao gerar Relatório Consolidado em PDF:", err);
+        setExportMessage(`Erro ao gerar PDF: ${err.message || err}`);
+        if (onShowToast) {
+          onShowToast(`Erro ao gerar PDF: ${err.message || err}`, "error", "Falha de Exportação");
+        }
+      } finally {
+        setIsExporting(false);
+      }
+    }, 800);
+  };
+
   const handleExportDailyFinancialSummaryPDF = async () => {
     setIsExporting(true);
     setExportMessage("");
@@ -1329,10 +1775,14 @@ function ReportsModule({
         let dailySubtotalTotal = 0;
 
         dailyTransactions.forEach(t => {
-          dailySalesTotal += t.grandTotal;
-          dailyVatTotal += t.vatTotal;
-          dailyDiscountTotal += t.discountTotal;
-          dailySubtotalTotal += t.subtotal;
+          const g = Number(t.grandTotal || 0);
+          const v = Number(t.vatTotal || 0);
+          const d = Number(t.discountTotal || 0);
+          const s = Number(t.subtotal ?? t.grandTotal ?? 0);
+          dailySalesTotal += isNaN(g) ? 0 : g;
+          dailyVatTotal += isNaN(v) ? 0 : v;
+          dailyDiscountTotal += isNaN(d) ? 0 : d;
+          dailySubtotalTotal += isNaN(s) ? 0 : s;
         });
 
         const dailyAvgTicket = dailyTransactions.length ? Math.round(dailySalesTotal / dailyTransactions.length) : 0;
@@ -1491,12 +1941,13 @@ function ReportsModule({
           if (!paymentBreakdown[method]) {
             paymentBreakdown[method] = { count: 0, total: 0 };
           }
+          const g = Number(t.grandTotal || 0);
           paymentBreakdown[method].count += 1;
-          paymentBreakdown[method].total += t.grandTotal;
+          paymentBreakdown[method].total += isNaN(g) ? 0 : g;
         });
 
-        const totalTransactions = dailyTransactions.length || 1;
-        const totalRevenue = dailySalesTotal || 1;
+        const totalTransactions = Math.max(1, dailyTransactions.length);
+        const totalRevenue = Math.max(1, dailySalesTotal);
 
         const paymentRows = Object.entries(paymentBreakdown).map(([method, data]) => {
           // Translate payment methods beautifully
@@ -1758,12 +2209,13 @@ function ReportsModule({
           if (!paymentBreakdown[method]) {
             paymentBreakdown[method] = { count: 0, total: 0 };
           }
+          const g = Number(t.grandTotal || 0);
           paymentBreakdown[method].count += 1;
-          paymentBreakdown[method].total += t.grandTotal;
+          paymentBreakdown[method].total += isNaN(g) ? 0 : g;
         });
 
-        const totalTransactions = filteredTransactions.length || 1;
-        const totalRevenue = financialTotals.salesTotal || 1;
+        const totalTransactions = Math.max(1, filteredTransactions.length);
+        const totalRevenue = Math.max(1, financialTotals.salesTotal);
 
         const paymentRows = Object.entries(paymentBreakdown).map(([method, data]) => [
           method,
@@ -1798,18 +2250,23 @@ function ReportsModule({
         filteredTransactions.forEach(t => {
           if (t.items && Array.isArray(t.items)) {
             t.items.forEach(item => {
-              const prodName = item.productName || "Produto Sem Nome";
+              const prodName = item.productName || (item as any).name || "Produto Sem Nome";
               if (!productSales[prodName]) {
                 productSales[prodName] = { qty: 0, total: 0 };
               }
-              productSales[prodName].qty += item.quantity || 0;
-              productSales[prodName].total += item.subtotal || 0;
+              const q = Number(item.quantity || 1);
+              const p = Number(item.price ?? (item as any).salePrice ?? 0);
+              const sub = Number((item as any).subtotal ?? (p * q));
+              const safeQ = isNaN(q) ? 1 : q;
+              const safeSub = isNaN(sub) ? (isNaN(p) ? 0 : p * safeQ) : sub;
+              productSales[prodName].qty += safeQ;
+              productSales[prodName].total += safeSub;
             });
           }
         });
 
         const topProducts = Object.entries(productSales)
-          .map(([name, data]) => ({ name, qty: data.qty, total: data.total }))
+          .map(([name, data]) => ({ name, qty: data.qty, total: isNaN(data.total) ? 0 : data.total }))
           .sort((a, b) => b.total - a.total)
           .slice(0, 5);
 
@@ -2272,16 +2729,16 @@ function ReportsModule({
       )}
 
       {/* Subtab Navigation inside ReportsModule */}
-      <div className="flex border-b border-slate-200 gap-2 bg-white p-2.5 rounded-2xl border flex-wrap items-center justify-between shadow-sm">
+      <div className="flex border-b border-slate-200/80 gap-2 bg-white dark:bg-zinc-900 p-2.5 rounded-2xl border border-slate-200/80 dark:border-zinc-800 flex-wrap items-center justify-between shadow-xs">
         <div className="flex items-center gap-1.5 flex-wrap flex-1">
           <button
             id="btn-subtab-reports-general"
             type="button"
             onClick={() => setActiveSubTab("general")}
-            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+            className={`px-4 py-2 font-semibold text-xs transition-all rounded-lg cursor-pointer flex items-center justify-center gap-2 ${
               activeSubTab === "general"
-                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                ? "bg-orange-500 text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-zinc-800"
             }`}
           >
             <FileText className="w-4 h-4" />
@@ -2291,10 +2748,10 @@ function ReportsModule({
             id="btn-subtab-reports-iva"
             type="button"
             onClick={() => setActiveSubTab("iva")}
-            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+            className={`px-4 py-2 font-semibold text-xs transition-all rounded-lg cursor-pointer flex items-center justify-center gap-2 ${
               activeSubTab === "iva"
-                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                ? "bg-orange-500 text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-zinc-800"
             }`}
           >
             <Percent className="w-4 h-4" />
@@ -2304,31 +2761,48 @@ function ReportsModule({
             id="btn-subtab-reports-activity"
             type="button"
             onClick={() => setActiveSubTab("activity")}
-            className={`px-5 py-2.5 font-bold text-xs transition-all rounded-xl cursor-pointer flex items-center justify-center gap-2 ${
+            className={`px-4 py-2 font-semibold text-xs transition-all rounded-lg cursor-pointer flex items-center justify-center gap-2 ${
               activeSubTab === "activity"
-                ? "bg-slate-900 text-white shadow-md shadow-slate-900/10"
-                : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
+                ? "bg-orange-500 text-white shadow-xs"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-zinc-800"
             }`}
           >
-            <Activity className="w-4 h-4 text-orange-500 animate-pulse" />
-            Atividade & Auditoria (Gráfico)
+            <Activity className={`w-4 h-4 ${activeSubTab === "activity" ? "text-white" : "text-orange-600 dark:text-orange-400"}`} />
+            Atividade & Auditoria
           </button>
         </div>
 
-        {/* Master PDF Export Button with Logo */}
-        <button
-          type="button"
-          id="btn-export-current-view-pdf"
-          onClick={handleExportCurrentViewPDF}
-          disabled={isExporting}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-extrabold text-xs cursor-pointer bg-gradient-to-r from-orange-500 via-amber-500 to-orange-600 hover:from-orange-600 hover:to-amber-600 text-white shadow-md shadow-orange-500/20 transition-all ${
-            isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-95 hover:scale-[1.02]"
-          }`}
-          title="Exportar a vista atual como relatório PDF formatado com o logotipo da empresa"
-        >
-          <Printer className="w-4 h-4 text-amber-100 shrink-0" />
-          <span>{isExporting ? "Compilando PDF..." : "Exportar Vista Atual em PDF (com Logotipo)"}</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Button: Consolidated Transactions PDF Report */}
+          <button
+            type="button"
+            id="btn-export-consolidated-pdf"
+            onClick={handleExportConsolidatedTransactionsPDF}
+            disabled={isExporting}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-xs cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-xs transition-all ${
+              isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-98"
+            }`}
+            title="Gerar relatório em PDF consolidado de transações, incluindo vendas por categoria de produto e performance dos colaboradores"
+          >
+            <FileText className="w-4 h-4 shrink-0 text-white" />
+            <span>{isExporting ? "A processar..." : "PDF Consolidado de Transações"}</span>
+          </button>
+
+          {/* Master PDF Export Button */}
+          <button
+            type="button"
+            id="btn-export-current-view-pdf"
+            onClick={handleExportCurrentViewPDF}
+            disabled={isExporting}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-semibold text-xs cursor-pointer bg-slate-900 hover:bg-slate-800 text-white shadow-xs transition-all ${
+              isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-98"
+            }`}
+            title="Exportar a vista atual como relatório PDF formatado com o logotipo da empresa"
+          >
+            <Printer className="w-4 h-4 shrink-0 text-slate-300" />
+            <span>{isExporting ? "A processar PDF..." : "Exportar Relatório em PDF"}</span>
+          </button>
+        </div>
       </div>
 
       {activeSubTab === "general" && (
@@ -2479,13 +2953,28 @@ function ReportsModule({
               </p>
             )}
 
+            {/* Main User Action: PDF Consolidado de Transações */}
+            <button
+              type="button"
+              id="btn-export-consolidated-full-pdf"
+              onClick={handleExportConsolidatedTransactionsPDF}
+              disabled={isExporting}
+              className={`w-full py-3.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md shadow-orange-500/20 hover:shadow-orange-500/30 transition-all duration-200 ${
+                isExporting ? "opacity-50 cursor-not-allowed" : "active:scale-[0.98]"
+              }`}
+              title="Gera relatório em PDF consolidado de transações, incluindo vendas por categoria de produto e performance dos colaboradores"
+            >
+              <FileText className="w-4.5 h-4.5 text-white shrink-0" />
+              <span>{isExporting ? "A compilar PDF consolidado..." : "Gerar PDF Consolidado (Transações, Categorias & Colaboradores)"}</span>
+            </button>
+
             <button
               type="button"
               id="btn-generate-monthly-summary"
               onClick={() => setShowMonthlySummaryModal(true)}
-              className="w-full py-3.5 rounded-xl font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-600 hover:to-amber-700 text-white shadow-md shadow-orange-500/20 hover:shadow-orange-500/35 transition-all duration-250 active:scale-[0.98]"
+              className="w-full py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition-all duration-200 active:scale-[0.98]"
             >
-              <Activity className="w-4.5 h-4.5 text-white shrink-0" />
+              <Activity className="w-4 h-4 text-white shrink-0" />
               Visualizar Resumo Mensal ({monthlyStats.monthName})
             </button>
 
@@ -2767,6 +3256,17 @@ function ReportsModule({
             >
               <FileText className="w-3.5 h-3.5 text-slate-400 shrink-0" />
               Exportar PDF
+            </button>
+            <button
+              type="button"
+              id="btn-table-export-consolidated-pdf"
+              onClick={handleExportConsolidatedTransactionsPDF}
+              disabled={isExporting}
+              className="border border-orange-200 hover:bg-orange-50 text-orange-700 font-bold py-1.5 px-3 rounded-lg text-xs flex items-center gap-1.5 cursor-pointer bg-orange-50/50 transition shadow-xs"
+              title="Exportar Relatório em PDF Consolidado (inclui vendas por categoria e performance de colaboradores)"
+            >
+              <FileText className="w-3.5 h-3.5 text-orange-600 shrink-0" />
+              PDF Consolidado
             </button>
           </div>
         </div>
@@ -3393,7 +3893,7 @@ function ReportsModule({
                 <p className="text-xs text-slate-600 font-semibold mb-1">Fatura Selecionada:</p>
                 <div className="flex justify-between items-center font-mono">
                   <span className="font-bold text-slate-900">{showEmailModal.invoiceNumber}</span>
-                  <span className="font-bold text-emerald-600">{showEmailModal.grandTotal.toLocaleString()} {currency}</span>
+                  <span className="font-bold text-emerald-600">{formatMZ(showEmailModal.grandTotal)}</span>
                 </div>
               </div>
               
@@ -3522,21 +4022,26 @@ function ReportsModule({
                   <span className="col-span-2 text-center">QTD</span>
                   <span className="col-span-4 text-right">VALOR</span>
                 </div>
-                {showPrintModal.items.map((item, i) => (
-                  <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
-                    <span className="col-span-6 truncate">{item.productName}</span>
-                    <span className="col-span-2 text-center">{item.quantity}</span>
-                    <span className="col-span-4 text-right">{(item.price * item.quantity).toLocaleString()} {currency}</span>
-                  </div>
-                ))}
+                {showPrintModal.items.map((item, i) => {
+                  const q = Number(item.quantity || 1);
+                  const p = Number(item.price ?? (item as any).salePrice ?? 0);
+                  const lineVal = Number((item as any).subtotal ?? (p * q));
+                  return (
+                    <div key={`${item.productId}-${i}`} className="grid grid-cols-12 gap-1 py-0.5 text-slate-600">
+                      <span className="col-span-6 truncate">{item.productName}</span>
+                      <span className="col-span-2 text-center">{isNaN(q) ? 1 : q}</span>
+                      <span className="col-span-4 text-right">{formatMZ(lineVal)}</span>
+                    </div>
+                  );
+                })}
               </div>
 
               <div className="space-y-1 text-slate-600 text-right">
-                <p>SUBTOTAL: {showPrintModal.subtotal.toLocaleString()} {currency}</p>
-                {showPrintModal.discountTotal > 0 && <p className="text-red-650 font-bold">DESC. GER: -{showPrintModal.discountTotal.toLocaleString()} {currency}</p>}
-                <p>TOTAL IVA COBRADO: {showPrintModal.vatTotal.toLocaleString()} {currency}</p>
+                <p>SUBTOTAL: {formatMZ(showPrintModal.subtotal)}</p>
+                {Number(showPrintModal.discountTotal || 0) > 0 && <p className="text-red-650 font-bold">DESC. GER: -{formatMZ(showPrintModal.discountTotal)}</p>}
+                <p>TOTAL IVA COBRADO: {formatMZ(showPrintModal.vatTotal)}</p>
                 <p className="text-slate-900 font-bold text-xs border-t border-dashed border-slate-300 pt-1">
-                  TOTAL PAGO: {showPrintModal.grandTotal.toLocaleString()} {currency}
+                  TOTAL PAGO: {formatMZ(showPrintModal.grandTotal)}
                 </p>
                 <p className="text-[10px] text-slate-500 font-medium italic mt-1">Método: {showPrintModal.paymentMethod}</p>
                 {showPrintModal.paymentDetails && (

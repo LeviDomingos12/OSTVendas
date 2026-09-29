@@ -16,6 +16,21 @@ import { aiRouter } from "./src/server/aiRouter";
 import { communicationRouter } from "./src/server/communicationRouter";
 import { securityRouter } from "./src/server/securityRouter";
 import { backupRouter } from "./src/server/backupRouter";
+import { 
+  getActiveSmtpConfig, 
+  saveActiveSmtpConfig, 
+  createActiveSmtpTransporter, 
+  verifySmtpConnection, 
+  sendTestEmail 
+} from "./src/server/smtpService";
+import {
+  getActivePostgresConfig,
+  savePostgresConfig,
+  testPostgresConnection,
+  runPostgresSchemaSql,
+  createPgPool,
+  SQL_SCRIPTS
+} from "./src/server/postgresService";
 import {
   dbSaveSchema,
   sanitizeInputData,
@@ -1361,23 +1376,272 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // GET: Retrieve SMTP settings from .env (Sanitized - Never expose plain password)
-  app.get("/api/email/smtp-env", (req, res) => {
+  // GET: Obter configurações SMTP do Banco de Dados (Substitui .env)
+  app.get("/api/settings/smtp", (req, res) => {
     try {
+      const config = getActiveSmtpConfig();
       res.json({
-        smtpHost: process.env.SMTP_HOST || "",
-        smtpPort: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
-        smtpUser: process.env.SMTP_USER || "",
-        hasPassword: Boolean(process.env.SMTP_PASS || process.env.SMTP_PASSWORD),
-        smtpSecure: process.env.SMTP_SECURE === "true",
-        configured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER)
+        success: true,
+        source: config.source, // "database" | "env" | "none"
+        isDatabaseConfigured: config.source === "database",
+        smtpHost: config.host || "",
+        smtpPort: config.port || 587,
+        smtpUser: config.user || "",
+        hasPassword: Boolean(config.pass),
+        smtpSecure: config.secure,
+        smtpEnabled: config.enabled,
+        smtpSenderName: config.senderName || "",
+        smtpFromEmail: config.fromEmail || "",
+        configured: Boolean(config.host && config.user),
+        lastTestedAt: config.lastTestedAt
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
-  // POST: Send general email via Custom SMTP or .env fallback
+  // POST: Gravar configurações SMTP no Banco de Dados (Substitui .env)
+  app.post("/api/settings/smtp", async (req, res) => {
+    try {
+      const { 
+        smtpHost, 
+        smtpPort, 
+        smtpUser, 
+        smtpPassword, 
+        smtpSecure, 
+        smtpEnabled, 
+        smtpSenderName, 
+        smtpFromEmail,
+        smtpLastTestedAt 
+      } = req.body;
+
+      const saved = saveActiveSmtpConfig({
+        smtpHost,
+        smtpPort,
+        smtpUser,
+        smtpPassword,
+        smtpSecure,
+        smtpEnabled,
+        smtpSenderName,
+        smtpFromEmail,
+        smtpLastTestedAt
+      });
+
+      // Tenta persistir no Cloud SQL / PostgreSQL se ativo
+      if (isCloudSqlAvailable && drizzleDb) {
+        try {
+          await drizzleDb.update(settingsTable)
+            .set({
+              smtpHost: saved.host,
+              smtpPort: saved.port,
+              smtpUser: saved.user,
+              smtpPassword: saved.pass,
+              smtpSecure: saved.secure,
+              smtpEnabled: saved.enabled,
+              smtpSenderName: saved.senderName,
+              smtpFromEmail: saved.fromEmail,
+              updatedAt: new Date()
+            })
+            .where(eq(settingsTable.id, "config"));
+        } catch (dbErr) {
+          console.warn("[SMTP DB] Notificação de sincronização Drizzle:", dbErr);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: "Credenciais SMTP gravadas com sucesso no banco de dados!",
+        config: {
+          source: saved.source,
+          smtpHost: saved.host,
+          smtpPort: saved.port,
+          smtpUser: saved.user,
+          hasPassword: Boolean(saved.pass),
+          smtpSecure: saved.secure,
+          smtpEnabled: saved.enabled,
+          smtpSenderName: saved.senderName,
+          smtpFromEmail: saved.fromEmail,
+          configured: Boolean(saved.host && saved.user)
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message || "Erro ao gravar credenciais SMTP no banco de dados." });
+    }
+  });
+
+  // GET: Obter Definições Gerais e Identidade da Empresa (PostgreSQL / Local)
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+      let stored: any = {};
+      if (fs.existsSync(SETTINGS_FILE)) {
+        try {
+          stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+        } catch {}
+      }
+
+      // Se houver conexão PostgreSQL ativa, consulta a tabela public.settings
+      try {
+        const pgConfig = getActivePostgresConfig();
+        if (pgConfig.source !== "none") {
+          const pool = createPgPool(pgConfig);
+          const client = await pool.connect();
+          try {
+            const result = await client.query("SELECT * FROM public.settings WHERE id = 'config' LIMIT 1;");
+            if (result.rows.length > 0) {
+              const row = result.rows[0];
+              const merged = {
+                ...stored,
+                companyName: row.company_name,
+                companyAddress: row.company_address,
+                companyNuit: row.company_nuit,
+                companyPhone: row.company_phone,
+                companyEmail: row.company_email,
+                currency: row.currency || "MT",
+                defaultVat: row.vat_percentage || 16,
+                vatDefaultRate: row.vat_percentage || 16,
+                ...(row.val_json || {})
+              };
+              return res.json({ success: true, settings: merged, source: "postgresql" });
+            }
+          } finally {
+            client.release();
+            pool.end().catch(() => {});
+          }
+        }
+      } catch (pgErr: any) {
+        console.warn("[SETTINGS] Aviso ao ler do PostgreSQL:", pgErr.message);
+      }
+
+      res.json({ success: true, settings: stored, source: "local_store" });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: Gravar Definições Gerais e Identidade da Empresa (Nome, NUIT, Endereço, etc.)
+  app.post("/api/settings", async (req, res) => {
+    try {
+      const updatedData = req.body || {};
+      const SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+      let stored: any = {};
+      if (fs.existsSync(SETTINGS_FILE)) {
+        try {
+          stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+        } catch {
+          stored = {};
+        }
+      }
+
+      const merged = {
+        ...stored,
+        ...updatedData,
+        updated_at: new Date().toISOString()
+      };
+
+      if (!fs.existsSync(DB_DIR)) {
+        fs.mkdirSync(DB_DIR, { recursive: true });
+      }
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+
+      // Se houver conexão com o PostgreSQL, sincroniza com public.settings e public.companies
+      let pgSynced = false;
+      try {
+        const pgConfig = getActivePostgresConfig();
+        if (pgConfig.source !== "none") {
+          const pool = createPgPool(pgConfig);
+          const client = await pool.connect();
+          try {
+            // Cria tabela caso ainda não exista
+            await client.query(SQL_SCRIPTS.settings);
+            
+            const companyName = merged.companyName || "OST Comércio Geral, Lda";
+            const companyAddress = merged.companyAddress || merged.storeAddress || "";
+            const companyNuit = merged.companyNuit || merged.nuit || "";
+            const companyPhone = merged.companyPhone || merged.storeContact || "";
+            const companyEmail = merged.companyEmail || merged.email || merged.storeEmail || "";
+            const currency = merged.currency || "MT";
+            const vat = merged.defaultVat ?? merged.vatDefaultRate ?? 16;
+            const logoUrl = merged.logoUrl || "";
+
+            await client.query(`
+              INSERT INTO public.settings (
+                id, tenant_id, company_name, company_address, company_nuit, company_phone, company_email,
+                currency, vat_percentage, logo_url, val_json, updated_at
+              ) VALUES (
+                'config', 'ost-tenant-001', $1, $2, $3, $4, $5, $6, $7, $8, $9, NOW()
+              )
+              ON CONFLICT (id) DO UPDATE SET
+                company_name = EXCLUDED.company_name,
+                company_address = EXCLUDED.company_address,
+                company_nuit = EXCLUDED.company_nuit,
+                company_phone = EXCLUDED.company_phone,
+                company_email = EXCLUDED.company_email,
+                currency = EXCLUDED.currency,
+                vat_percentage = EXCLUDED.vat_percentage,
+                logo_url = EXCLUDED.logo_url,
+                val_json = EXCLUDED.val_json,
+                updated_at = NOW();
+            `, [companyName, companyAddress, companyNuit, companyPhone, companyEmail, currency, vat, logoUrl, JSON.stringify(merged)]);
+
+            await client.query(`
+              INSERT INTO public.companies (
+                id, name, owner_uid, tax_id, email, phone, address, currency, logo_url, updated_at
+              ) VALUES (
+                'ost-tenant-001', $1, 'system', $2, $3, $4, $5, $6, $7, NOW()
+              )
+              ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                tax_id = EXCLUDED.tax_id,
+                email = EXCLUDED.email,
+                phone = EXCLUDED.phone,
+                address = EXCLUDED.address,
+                currency = EXCLUDED.currency,
+                logo_url = EXCLUDED.logo_url,
+                updated_at = NOW();
+            `, [companyName, companyNuit, companyEmail, companyPhone, companyAddress, currency, logoUrl]);
+
+            pgSynced = true;
+          } finally {
+            client.release();
+            pool.end().catch(() => {});
+          }
+        }
+      } catch (pgErr: any) {
+        console.warn("[SETTINGS] Aviso ao sincronizar com PostgreSQL:", pgErr.message);
+      }
+
+      res.json({
+        success: true,
+        message: "Dados da empresa e definições gravados com sucesso!",
+        pgSynced,
+        settings: merged
+      });
+    } catch (err: any) {
+      console.error("[SETTINGS] Erro ao gravar dados da empresa:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET: Retrieve SMTP settings from .env (Mantido para compatibilidade retroativa)
+  app.get("/api/email/smtp-env", (req, res) => {
+    try {
+      const config = getActiveSmtpConfig();
+      res.json({
+        smtpHost: config.host || process.env.SMTP_HOST || "",
+        smtpPort: config.port || (process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587),
+        smtpUser: config.user || process.env.SMTP_USER || "",
+        hasPassword: Boolean(config.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD),
+        smtpSecure: config.secure ?? (process.env.SMTP_SECURE === "true"),
+        configured: Boolean(config.host && config.user),
+        source: config.source
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST: Send general email via Custom SMTP or Database / .env fallback
   app.post("/api/email/send", async (req, res) => {
     try {
       const { to, subject, body } = req.body;
@@ -1402,48 +1666,42 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   // POST: Testing Custom SMTP connection and dispatch immediately
   app.post("/api/email/test-smtp", async (req, res) => {
     try {
-      const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, recipient, subject, body } = req.body;
-      if (!smtpHost || !smtpPort || !recipient) {
-        return res.status(400).json({ error: "Parâmetros smtpHost, smtpPort e destinatário são obrigatórios." });
+      const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, senderName, fromEmail, recipient } = req.body;
+      const active = getActiveSmtpConfig();
+      
+      const targetRecipient = recipient || active.fromEmail || active.user;
+      if (!targetRecipient) {
+        return res.status(400).json({ error: "Destinatário é obrigatório para testar o envio de e-mail." });
       }
 
-      console.log(`[SMTP TEST] Testing SMTP connection to ${smtpHost}:${smtpPort} for ${recipient}...`);
-      
-      const transporter = nodemailer.createTransport({
+      const customConfig = (smtpHost && smtpPort) ? {
         host: smtpHost,
         port: Number(smtpPort),
+        user: smtpUser,
+        pass: smtpPassword || active.pass,
         secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465,
-        auth: smtpUser ? {
-          user: smtpUser,
-          pass: smtpPassword,
-        } : undefined,
-        tls: {
-          rejectUnauthorized: false
-        }
+        senderName,
+        fromEmail
+      } : undefined;
+
+      const result = await sendTestEmail({
+        recipient: targetRecipient,
+        customConfig
       });
 
-      const mailOptions = {
-        from: smtpUser || "noreply@ostvendas.com",
-        to: recipient,
-        subject: subject || "Teste de Conexão SMTP - OST Vendas",
-        html: body || `
-          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
-            <h2 style="color: #f97316; text-align: center;">Teste de SMTP com Sucesso!</h2>
-            <p>Se você recebeu este e-mail, seu servidor SMTP personalizado está devidamente configurado e funcional.</p>
-            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
-            <p style="font-size: 12px; color: #64748b; text-align: center;">Configurações Utilizadas: Host: ${smtpHost} | Porta: ${smtpPort} | Usuário: ${smtpUser || "Nenhum"}</p>
-          </div>
-        `
-      };
-
-      await transporter.sendMail(mailOptions);
-      res.json({
-        success: true,
-        message: `Conexão SMTP estabelecida e e-mail enviado com sucesso para ${recipient}!`
+      // Atualiza timestamp do último teste no banco local
+      saveActiveSmtpConfig({
+        smtpLastTestedAt: new Date().toISOString()
       });
+
+      res.json(result);
     } catch (err: any) {
       console.error("[SMTP TEST ERROR]", err);
-      res.status(500).json({ error: err.message || "Erro desconhecido ao conectar ao servidor SMTP." });
+      const isAuthError = err?.message?.includes("535") || err?.message?.includes("Username and Password not accepted");
+      const errorMsg = isAuthError 
+        ? "Falha de autenticação (535): Verifique o utilizador e utilize uma 'Palavra-passe de Aplicação' de 16 dígitos se usar Gmail com 2FA."
+        : (err.message || "Erro desconhecido ao conectar ao servidor SMTP.");
+      res.status(500).json({ error: errorMsg });
     }
   });
 
@@ -1451,34 +1709,25 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   app.post("/api/email/verify-smtp", async (req, res) => {
     try {
       const { smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure } = req.body;
-      if (!smtpHost || !smtpPort) {
-        return res.status(400).json({ error: "Parâmetros smtpHost e smtpPort são obrigatórios." });
-      }
+      const active = getActiveSmtpConfig();
 
-      console.log(`[SMTP VERIFY] Checking connection to ${smtpHost}:${smtpPort}...`);
-
-      const transporter = nodemailer.createTransport({
+      const customConfig = (smtpHost && smtpPort) ? {
         host: smtpHost,
         port: Number(smtpPort),
-        secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465,
-        auth: smtpUser ? {
-          user: smtpUser,
-          pass: smtpPassword,
-        } : undefined,
-        tls: {
-          rejectUnauthorized: false
-        },
-        connectionTimeout: 8000
-      });
+        user: smtpUser,
+        pass: smtpPassword || active.pass,
+        secure: smtpSecure === true || smtpSecure === "true" || Number(smtpPort) === 465
+      } : undefined;
 
-      await transporter.verify();
-      res.json({
-        success: true,
-        message: "O servidor SMTP está respondendo corretamente!"
-      });
+      const result = await verifySmtpConnection(customConfig);
+      res.json(result);
     } catch (err: any) {
       console.error("[SMTP VERIFY ERROR]", err);
-      res.status(500).json({ error: err.message || "Não foi possível conectar ao servidor SMTP." });
+      const isAuthError = err?.message?.includes("535") || err?.message?.includes("Username and Password not accepted");
+      const errorMsg = isAuthError 
+        ? "Falha de autenticação (535): Servidor recusou as credenciais. No Gmail ou Outlook, utilize uma 'Palavra-passe de Aplicação'."
+        : (err.message || "Não foi possível conectar ao servidor SMTP.");
+      res.status(500).json({ error: errorMsg });
     }
   });
 
@@ -2354,6 +2603,233 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // --- CLIENTES - ARMAZENAMENTO E PERSISTÊNCIA MULTICAMADA ---
+  const CUSTOMERS_FILE = path.join(DB_DIR, "customers.json");
+
+  const getStoredCustomers = (): any[] => {
+    try {
+      if (fs.existsSync(CUSTOMERS_FILE)) {
+        const raw = fs.readFileSync(CUSTOMERS_FILE, "utf-8");
+        const list = JSON.parse(raw);
+        return Array.isArray(list) ? list : [];
+      }
+    } catch (e) {
+      console.warn("[CUSTOMERS_STORE] Erro ao ler customers.json:", e);
+    }
+    return [];
+  };
+
+  const saveStoredCustomers = (customersList: any[]) => {
+    try {
+      if (!fs.existsSync(DB_DIR)) {
+        fs.mkdirSync(DB_DIR, { recursive: true });
+      }
+      fs.writeFileSync(CUSTOMERS_FILE, JSON.stringify(customersList, null, 2), "utf-8");
+      return true;
+    } catch (e) {
+      console.error("[CUSTOMERS_STORE] Erro ao gravar customers.json:", e);
+      return false;
+    }
+  };
+
+  // GET: /api/customers - Recupera clientes armazenados localmente e no PostgreSQL
+  app.get("/api/customers", async (req, res) => {
+    try {
+      const customers = getStoredCustomers();
+      res.json({ success: true, data: customers, count: customers.length });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: /api/customers - Gravação e sincronização em lote de clientes
+  app.post("/api/customers", async (req, res) => {
+    try {
+      const { customers } = req.body;
+      if (!Array.isArray(customers)) {
+        return res.status(400).json({ success: false, error: "Array de clientes esperado." });
+      }
+
+      // Merge inteligente com existentes preservando histórico
+      const existing = getStoredCustomers();
+      const map = new Map<string, any>();
+      existing.forEach(c => { if (c?.id) map.set(c.id, c); });
+      customers.forEach(c => { if (c?.id) map.set(c.id, { ...(map.get(c.id) || {}), ...c }); });
+      const merged = Array.from(map.values());
+
+      saveStoredCustomers(merged);
+
+      // Atualiza também no Cloud SQL relacional se disponível
+      if (isCloudSqlAvailable()) {
+        try {
+          for (const c of customers) {
+            if (c.id && c.name) {
+              await drizzleDb.insert(customersTable).values({
+                id: c.id,
+                tenantId: c.tenantId || "ost-tenant-001",
+                name: c.name,
+                email: c.email || "",
+                phone: c.phone || "",
+                address: c.address || ""
+              }).onConflictDoUpdate({
+                target: customersTable.id,
+                set: {
+                  name: c.name,
+                  email: c.email || "",
+                  phone: c.phone || "",
+                  address: c.address || ""
+                }
+              });
+            }
+          }
+        } catch (dbErr: any) {
+          console.warn("[CUSTOMERS_STORE] Aviso ao gravar em Cloud SQL:", dbErr.message);
+        }
+      }
+
+      res.json({ success: true, message: "Clientes armazenados com sucesso.", count: merged.length });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: /api/customers/single - Gravação ou atualização individual de cliente
+  app.post("/api/customers/single", async (req, res) => {
+    try {
+      const customer = req.body;
+      if (!customer?.id || !customer?.name) {
+        return res.status(400).json({ success: false, error: "ID e Nome do cliente são obrigatórios." });
+      }
+
+      const existing = getStoredCustomers();
+      const idx = existing.findIndex(c => c.id === customer.id);
+      if (idx >= 0) {
+        existing[idx] = { ...existing[idx], ...customer };
+      } else {
+        existing.unshift(customer);
+      }
+      saveStoredCustomers(existing);
+
+      if (isCloudSqlAvailable()) {
+        try {
+          await drizzleDb.insert(customersTable).values({
+            id: customer.id,
+            tenantId: customer.tenantId || "ost-tenant-001",
+            name: customer.name,
+            email: customer.email || "",
+            phone: customer.phone || "",
+            address: customer.address || ""
+          }).onConflictDoUpdate({
+            target: customersTable.id,
+            set: {
+              name: customer.name,
+              email: customer.email || "",
+              phone: customer.phone || "",
+              address: customer.address || ""
+            }
+          });
+        } catch (dbErr: any) {
+          console.warn("[CUSTOMERS_STORE] Aviso ao gravar cliente individual no Cloud SQL:", dbErr.message);
+        }
+      }
+
+      res.json({ success: true, message: `Cliente '${customer.name}' armazenado com sucesso.`, customer });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE: /api/customers/:id - Remoção de cliente
+  app.delete("/api/customers/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const existing = getStoredCustomers();
+      const filtered = existing.filter(c => c.id !== id);
+      saveStoredCustomers(filtered);
+
+      if (isCloudSqlAvailable()) {
+        try {
+          await drizzleDb.delete(customersTable).where(eq(customersTable.id, id));
+        } catch (dbErr: any) {
+          console.warn("[CUSTOMERS_STORE] Aviso ao deletar cliente no Cloud SQL:", dbErr.message);
+        }
+      }
+
+      res.json({ success: true, message: "Cliente removido com sucesso." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // --- POSTGRESQL CREDENCIAIS, CONECTIVIDADE E EXECUÇÃO DDL DE ESQUEMAS ---
+
+  // GET: Obter configuração ativa do PostgreSQL
+  app.get("/api/database/config", (req, res) => {
+    try {
+      const config = getActivePostgresConfig();
+      const safeConfig = {
+        ...config,
+        password: config.password ? "********" : ""
+      };
+      res.json({ success: true, config: safeConfig });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: Salvar credenciais do PostgreSQL no banco de dados local (settings.json)
+  app.post("/api/database/config", requireAdmin, async (req, res) => {
+    try {
+      const ok = savePostgresConfig(req.body);
+      if (!ok) {
+        return res.status(500).json({ success: false, error: "Falha ao gravar credenciais do PostgreSQL." });
+      }
+      res.json({ success: true, message: "Credenciais do PostgreSQL salvas com sucesso no banco de dados." });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: Testar conectividade com o PostgreSQL e validar tabelas
+  app.post("/api/database/test-connection", async (req, res) => {
+    try {
+      const result = await testPostgresConnection(req.body);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({
+        success: false,
+        connected: false,
+        latencyMs: 0,
+        source: "unknown",
+        tables: [],
+        allRequiredTablesExist: false,
+        message: `Falha ao testar conexão: ${err.message}`,
+        error: err.message
+      });
+    }
+  });
+
+  // POST: Executar scripts SQL para criar tabelas essenciais (produtos, clientes, vendas)
+  app.post("/api/database/run-schema-sql", requireAdmin, async (req, res) => {
+    try {
+      const target = req.body?.target || "all";
+      const result = await runPostgresSchemaSql(target, req.body?.config);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message, logs: [`Erro: ${err.message}`] });
+    }
+  });
+
+  // GET: Obter scripts SQL brutos para consulta e cópia manual
+  app.get("/api/database/sql-scripts", (req, res) => {
+    try {
+      const allScript = Object.values(SQL_SCRIPTS).join("\n\n");
+      res.json({ success: true, scripts: { ...SQL_SCRIPTS, all: allScript } });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
     }
   });
 

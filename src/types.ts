@@ -38,6 +38,9 @@ export interface Product extends MultiTenantMetadata {
   vatRate: number; // e.g. 16 for Moçambique
   stock: number;
   minStock: number;
+  price?: number;
+  sale_price?: number;
+  cost_price?: number;
   expiryDate?: string;
   image?: string;
   emoji?: string;
@@ -69,12 +72,14 @@ export interface Customer extends MultiTenantMetadata {
   purchaseCount: number;
   lastPurchaseDate?: string;
   debt: number;
+  balance?: number;
   creditLimit?: number;
   loyaltyPoints: number;
   creditBlocked?: boolean;
   preferredPaymentMethod?: string;
   oneClickCheckoutEnabled?: boolean;
   settlements?: { id: string, date: string, amount: number, method: string }[];
+  notes?: string;
 }
 
 export interface Transaction extends MultiTenantMetadata {
@@ -237,6 +242,10 @@ export interface SystemSettings extends MultiTenantMetadata {
   smtpUser?: string;
   smtpPassword?: string;
   smtpSecure?: boolean;
+  smtpSenderName?: string;
+  smtpFromEmail?: string;
+  smtpSource?: "database" | "env" | "none";
+  smtpLastTestedAt?: string;
   emailStockAlertsEnabled?: boolean;
   isSmtpVerified?: boolean;
   slogan?: string;
@@ -325,6 +334,8 @@ export interface Supplier {
   status: "Ativo" | "Inativo";
 }
 
+export type ReceiptStatus = "Aguardando Envio" | "Em Trânsito" | "Entregue" | "Cancelado";
+
 export interface SupplierOrder {
   id: string;
   supplierId: string;
@@ -335,9 +346,16 @@ export interface SupplierOrder {
   unitCost: number;
   totalValue: number;
   status: "Pendente" | "Recebido" | "Cancelado";
+  receiptStatus?: "Aguardando Envio" | "Em Trânsito" | "Entregue" | "Cancelado";
   paymentStatus: "Pago" | "Crédito" | "Pendente";
+  paymentDueDate?: string;
   requestDate: string;
   receivedDate?: string;
+  receivedQuantity?: number;
+  deliveryConfirmedDate?: string;
+  deliveryConfirmedBy?: string;
+  deliveryNotes?: string;
+  isReplenishmentOrder?: boolean;
 }
 
 export interface Branch {

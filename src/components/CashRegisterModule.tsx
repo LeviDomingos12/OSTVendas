@@ -528,22 +528,17 @@ function CashRegisterModule({
   return (
     <div className="space-y-5">
       {/* Top Header Bar & Module Navigation */}
-      <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-white dark:bg-zinc-900 p-4 sm:p-5 rounded-2xl border border-slate-200/80 dark:border-zinc-800 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-2xl bg-orange-500 text-white flex items-center justify-center shadow-md shadow-orange-500/20 font-bold">
-            <PiggyBank className="w-6 h-6" />
+          <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 flex items-center justify-center font-bold shrink-0">
+            <PiggyBank className="w-5 h-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base sm:text-lg font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Gestão Profissional de Caixa & Turnos (ERP/POS)
-              </h2>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-extrabold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
-                v{settings?.systemVersion || "2.1.0"}
-              </span>
-            </div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+              Controlo de Caixa & Turnos
+            </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Operador Ativo: <span className="font-bold text-slate-700 dark:text-slate-200">{activeUsername}</span> • Moeda: <span className="font-bold text-orange-600">{currency}</span>
+              Operador: <span className="font-semibold text-slate-700 dark:text-slate-200">{activeUsername}</span> · Moeda: <span className="font-semibold text-blue-600 dark:text-blue-400">{currency}</span>
             </p>
           </div>
         </div>
@@ -553,9 +548,9 @@ function CashRegisterModule({
           <button
             type="button"
             onClick={() => setActiveTab("dashboard")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
               activeTab === "dashboard"
-                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
@@ -566,9 +561,9 @@ function CashRegisterModule({
           <button
             type="button"
             onClick={() => setActiveTab("cashbook")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
               activeTab === "cashbook"
-                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
@@ -579,9 +574,9 @@ function CashRegisterModule({
           <button
             type="button"
             onClick={() => setActiveTab("closures")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
               activeTab === "closures"
-                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >
@@ -592,9 +587,9 @@ function CashRegisterModule({
           <button
             type="button"
             onClick={() => setActiveTab("analytics")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
               activeTab === "analytics"
-                ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white shadow-sm"
+                ? "bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-xs"
                 : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             }`}
           >

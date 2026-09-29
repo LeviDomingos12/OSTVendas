@@ -14,7 +14,8 @@ import {
   CreditCard,
   ArrowRight,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  PiggyBank
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -55,7 +56,7 @@ interface DashboardModuleProps {
   onRetryTransactions?: () => void;
 }
 
-const PAYMENT_COLORS = ["#f97316", "#10b981", "#3b82f6", "#8b5cf6", "#64748b"];
+const PAYMENT_COLORS = ["#2563eb", "#10b981", "#6366f1", "#0284c7", "#64748b"];
 
 function DashboardModule({
   products,
@@ -465,13 +466,13 @@ function DashboardModule({
         </div>
 
         {/* Period Selector Tabs */}
-        <div className="bg-slate-100/80 p-1 rounded-xl flex items-center gap-1 text-xs font-bold w-full md:w-auto border border-slate-200/50">
+        <div className="bg-slate-100 p-1 rounded-xl flex items-center gap-1 text-xs font-semibold w-full md:w-auto border border-slate-200/60">
           <button
             type="button"
             onClick={() => setTimeScope("TODAY")}
             className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
               timeScope === "TODAY"
-                ? "bg-white text-orange-600 shadow-xs"
+                ? "bg-white text-blue-600 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -482,7 +483,7 @@ function DashboardModule({
             onClick={() => setTimeScope("YESTERDAY")}
             className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
               timeScope === "YESTERDAY"
-                ? "bg-white text-orange-600 shadow-xs"
+                ? "bg-white text-blue-600 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -493,7 +494,7 @@ function DashboardModule({
             onClick={() => setTimeScope("LAST_7")}
             className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
               timeScope === "LAST_7"
-                ? "bg-white text-orange-600 shadow-xs"
+                ? "bg-white text-blue-600 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -504,13 +505,72 @@ function DashboardModule({
             onClick={() => setTimeScope("THIS_MONTH")}
             className={`flex-1 md:flex-initial px-3.5 py-1.5 rounded-lg cursor-pointer transition-all ${
               timeScope === "THIS_MONTH"
-                ? "bg-white text-orange-600 shadow-xs"
+                ? "bg-white text-blue-600 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
             Este Mês
           </button>
         </div>
+      </div>
+
+      {/* QUICK ACTIONS ROW: As 4 Operações Principais */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+        <button
+          type="button"
+          onClick={() => onChangeModule?.("POS")}
+          className="p-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+        >
+          <div>
+            <span className="text-[10px] uppercase font-bold text-blue-100 block">Ponto de Venda</span>
+            <strong className="text-sm font-bold block mt-0.5">Nova Venda</strong>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-white/15 flex items-center justify-center text-white shrink-0 group-hover:scale-105 transition">
+            <ShoppingBag className="w-4 h-4" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChangeModule?.("STOCK")}
+          className="p-4 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-xl text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+        >
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Inventário</span>
+            <strong className="text-sm font-bold text-slate-800 block mt-0.5">Adicionar Produto</strong>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition">
+            <Package className="w-4 h-4" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChangeModule?.("CUSTOMERS")}
+          className="p-4 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-xl text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+        >
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Créditos & Clientes</span>
+            <strong className="text-sm font-bold text-slate-800 block mt-0.5">Receber Pagamento</strong>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition">
+            <CreditCard className="w-4 h-4" />
+          </div>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onChangeModule?.("CASH")}
+          className="p-4 bg-white hover:bg-slate-50 border border-slate-200/80 rounded-xl text-left transition flex items-center justify-between group shadow-xs cursor-pointer"
+        >
+          <div>
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Caixa do Turno</span>
+            <strong className="text-sm font-bold text-slate-800 block mt-0.5">Consultar Caixa</strong>
+          </div>
+          <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition">
+            <PiggyBank className="w-4 h-4" />
+          </div>
+        </button>
       </div>
 
       {/* ERROR ALERT: PostgreSQL Sales Fetch Failure (Do NOT mask error as zero sales) */}
@@ -549,12 +609,12 @@ function DashboardModule({
       {/* 2. KEY METRICS ROW (4 Cards) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Total Sales */}
-        <div className="bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-orange-200 transition-all">
+        <div className="bg-white p-4.5 rounded-2xl border border-slate-200/80 shadow-xs hover:border-blue-200 transition-all">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               {timeScope === "TODAY" ? "Vendas de Hoje" : timeScope === "YESTERDAY" ? "Vendas de Ontem" : timeScope === "LAST_7" ? "Vendas (7 Dias)" : "Vendas do Mês"}
             </span>
-            <div className="w-8 h-8 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center">
+            <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
               <ShoppingBag className="w-4 h-4" />
             </div>
           </div>
@@ -655,14 +715,14 @@ function DashboardModule({
           <div className="flex justify-between items-center mb-3">
             <div>
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-orange-500 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 inline-block" />
                 Evolução do Faturamento
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
                 Valores reais de vendas correspondentes ao período selecionado.
               </p>
             </div>
-            <span className="text-xs font-bold font-mono text-orange-600 bg-orange-50 px-2.5 py-1 rounded-lg border border-orange-100">
+            <span className="text-xs font-bold font-mono text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
               {stats.totalRevenue.toLocaleString()} {currency}
             </span>
           </div>
@@ -676,7 +736,7 @@ function DashboardModule({
                   <button
                     type="button"
                     onClick={() => onChangeModule("POS")}
-                    className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1 cursor-pointer"
+                    className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
                   >
                     Abrir Ponto de Venda (POS) <ArrowRight className="w-3 h-3" />
                   </button>
@@ -687,8 +747,8 @@ function DashboardModule({
                 <AreaChart data={chartTimelineData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="colorSalesClean" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f97316" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
+                      <stop offset="5%" stopColor="#2563eb" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -698,7 +758,7 @@ function DashboardModule({
                     formatter={(value: any) => [`${Number(value).toLocaleString()} ${currency}`, "Faturamento"]}
                     contentStyle={{ backgroundColor: "#0f172a", borderRadius: "10px", border: "none", color: "#fff", fontSize: "11px" }}
                   />
-                  <Area type="monotone" dataKey="valor" stroke="#f97316" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSalesClean)" />
+                  <Area type="monotone" dataKey="valor" stroke="#2563eb" strokeWidth={2.5} fillOpacity={1} fill="url(#colorSalesClean)" />
                 </AreaChart>
               </ResponsiveContainer>
             )}
@@ -824,7 +884,7 @@ function DashboardModule({
               <button
                 type="button"
                 onClick={() => onChangeModule("CASH")}
-                className="text-xs font-bold text-orange-600 hover:text-orange-700 flex items-center gap-1 cursor-pointer"
+                className="text-xs font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
               >
                 Ver Todas <ChevronRight className="w-3.5 h-3.5" />
               </button>
@@ -922,7 +982,7 @@ function DashboardModule({
                         setCustomPromoPrice(String(disc));
                         setDiscountPercent(20);
                       }}
-                      className="p-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition-colors cursor-pointer"
                       title="Criar Promoção"
                     >
                       <BadgePercent className="w-3.5 h-3.5" />
@@ -1047,7 +1107,7 @@ function DashboardModule({
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl p-5 max-w-md w-full space-y-4">
             <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
                 <BadgePercent className="w-5 h-5" />
               </div>
               <div>
@@ -1082,8 +1142,8 @@ function DashboardModule({
                     }}
                     className={`py-1.5 text-xs font-bold rounded-lg transition cursor-pointer border ${
                       discountPercent === pct 
-                        ? "bg-orange-600 text-white border-orange-600" 
-                        : "bg-slate-50 text-slate-700 border-slate-200"
+                        ? "bg-blue-600 text-white border-blue-600" 
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
                     }`}
                   >
                     {pct}%
@@ -1098,7 +1158,7 @@ function DashboardModule({
                 type="number"
                 value={customPromoPrice}
                 onChange={(e) => setCustomPromoPrice(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Novo preço"
               />
             </div>
@@ -1117,7 +1177,7 @@ function DashboardModule({
               <button
                 type="button"
                 onClick={() => handleApplyPromo(promoProduct.id, promoBatch.id, discountPercent, Number(customPromoPrice))}
-                className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-1.5 px-4 rounded-xl text-xs cursor-pointer shadow-xs"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1.5 px-4 rounded-xl text-xs cursor-pointer shadow-xs"
               >
                 Ativar Promoção
               </button>

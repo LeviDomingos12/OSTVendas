@@ -17,9 +17,11 @@ import {
   AuditLog, 
   SystemSettings, 
   UserRole, 
-  CashClosure 
+  CashClosure,
+  SupplierOrder 
 } from "../types";
 import { generateEntityId } from "../lib/deterministic";
+import { authenticatedFetch } from "../lib/apiClient";
 
 export interface SupabaseConfig {
   url: string;
@@ -376,6 +378,36 @@ export function buildProductRecord(
   }
   if (p.vatRate !== undefined) {
     record.vat_rate = p.vatRate;
+  }
+  if (p.expiryDate) {
+    record.expiry_date = p.expiryDate;
+  }
+  if (p.image) {
+    record.image = p.image;
+  }
+  if (p.emoji) {
+    record.emoji = p.emoji;
+  }
+  if (p.promotion) {
+    record.promotion = p.promotion;
+  }
+  if (p.isFavorite !== undefined) {
+    record.is_favorite = p.isFavorite;
+  }
+  if (p.brand) {
+    record.brand = p.brand;
+  }
+  if (p.weightBased !== undefined) {
+    record.weight_based = p.weightBased;
+  }
+  if (p.branchStocks) {
+    record.branch_stocks = p.branchStocks;
+  }
+  if (p.batches) {
+    record.batches = p.batches;
+  }
+  if (p.createdBy) {
+    record.created_by = p.createdBy;
   }
 
   const sPrice = Number(p.salePrice ?? (p as any).price ?? (p as any).sale_price ?? 0);
@@ -938,6 +970,8 @@ export const SupabaseSyncService = {
           isFavorite: Boolean(row.is_favorite ?? row.isFavorite ?? false),
           brand: row.brand || undefined,
           weightBased: Boolean(row.weight_based ?? row.weightBased ?? false),
+          branchStocks: row.branch_stocks || undefined,
+          batches: row.batches || undefined,
           tenantId: row.tenant_id || undefined,
           createdBy: row.created_by || undefined,
           createdAt: row.created_at || undefined,
@@ -1187,109 +1221,335 @@ export const SupabaseSyncService = {
     }
   },
 
-  // --- CLIENTES ---
+  // --- CLIENTES - PERSISTÊNCIA MULTICAMADA ADAPTATIVA (POSTGRESQL / SERVIDOR / LOCAL) ---
   async fetchCustomers(): Promise<Customer[]> {
     const client = getSupabaseClient();
-    if (!client) return [];
+    const candidateTables = ["clientes", "customers"];
+    let remoteCustomers: Customer[] = [];
+    let querySuccessful = false;
 
-    try {
-      const { data, error } = await client
-        .from("clientes")
-        .select("*")
-        .order("name", { ascending: true });
+    if (client) {
+      for (const table of candidateTables) {
+        try {
+          const { data, error } = await client
+            .from(table)
+            .select("*")
+            .order("name", { ascending: true });
 
-      if (error || !data) return [];
-
-      return data.map((row: any) => ({
-        id: row.id,
-        name: row.name,
-        nuit: row.nuit || "",
-        email: row.email || "",
-        phone: row.phone || "",
-        address: row.address || "",
-        totalSpent: Number(row.total_spent || 0),
-        purchaseCount: Number(row.purchase_count || 0),
-        debt: Number(row.debt || row.balance || 0),
-        loyaltyPoints: Number(row.loyalty_points || 0),
-        notes: row.notes || ""
-      })) as Customer[];
-    } catch {
-      return [];
+          if (!error && Array.isArray(data)) {
+            querySuccessful = true;
+            remoteCustomers = data.map((row: any) => ({
+              id: row.id,
+              name: row.name,
+              nuit: row.nuit || row.nif || "",
+              email: row.email || "",
+              phone: row.phone || row.telefone || "",
+              address: row.address || row.endereco || row.morada || "",
+              totalSpent: Number(row.total_spent || 0),
+              purchaseCount: Number(row.purchase_count || 0),
+              debt: Number(row.debt ?? row.balance ?? 0),
+              balance: Number(row.balance ?? row.debt ?? 0),
+              creditLimit: Number(row.credit_limit || 0),
+              lastPurchaseDate: row.last_purchase_date || undefined,
+              loyaltyPoints: Number(row.loyalty_points || 0),
+              creditBlocked: Boolean(row.credit_blocked),
+              preferredPaymentMethod: row.preferred_payment_method || undefined,
+              oneClickCheckoutEnabled: Boolean(row.one_click_checkout_enabled),
+              settlements: Array.isArray(row.settlements) ? row.settlements : [],
+              notes: row.notes || ""
+            }));
+            break;
+          }
+        } catch (e) {
+          console.warn(`[SupabaseSyncService.fetchCustomers] Aviso ao ler tabela '${table}':`, e);
+        }
+      }
     }
+
+    // Consulta persistência complementar do backend /api/customers
+    let serverCustomers: Customer[] = [];
+    try {
+      const resp = await authenticatedFetch("/api/customers");
+      if (resp.ok) {
+        const body = await resp.json();
+        if (body.success && Array.isArray(body.data)) {
+          serverCustomers = body.data;
+        }
+      }
+    } catch {}
+
+    // Lê cache local de emergência
+    let localCache: Customer[] = [];
+    try {
+      const raw = localStorage.getItem("erp_customers_cache");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) localCache = parsed;
+      }
+    } catch {}
+
+    // Fusão inteligente de 3 camadas
+    const mergedMap = new Map<string, Customer>();
+
+    // 1. Base com cache local
+    localCache.forEach(c => { if (c?.id) mergedMap.set(c.id, c); });
+
+    // 2. Servidor backend enriquece com dados persistidos no backend
+    serverCustomers.forEach(c => {
+      if (c?.id) {
+        const prev = mergedMap.get(c.id) || ({} as Customer);
+        mergedMap.set(c.id, { ...prev, ...c });
+      }
+    });
+
+    // 3. Supabase atualiza com dados do PostgreSQL
+    if (querySuccessful) {
+      remoteCustomers.forEach(c => {
+        if (c?.id) {
+          const prev = mergedMap.get(c.id);
+          if (prev) {
+            mergedMap.set(c.id, {
+              ...c,
+              address: c.address || prev.address || "",
+              notes: c.notes || prev.notes || "",
+              loyaltyPoints: c.loyaltyPoints || prev.loyaltyPoints || 0,
+              totalSpent: c.totalSpent || prev.totalSpent || 0,
+              purchaseCount: c.purchaseCount || prev.purchaseCount || 0,
+              settlements: (c.settlements && c.settlements.length > 0) ? c.settlements : (prev.settlements || []),
+              preferredPaymentMethod: c.preferredPaymentMethod || prev.preferredPaymentMethod
+            });
+          } else {
+            mergedMap.set(c.id, c);
+          }
+        }
+      });
+    }
+
+    const finalList = Array.from(mergedMap.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    // Mantém cache local atualizado
+    if (finalList.length > 0) {
+      try {
+        localStorage.setItem("erp_customers_cache", JSON.stringify(finalList));
+      } catch {}
+    }
+
+    // Auto-cura: se o Supabase estava vazio mas tínhamos clientes no servidor ou local, salva no Supabase em segundo plano
+    if (client && remoteCustomers.length === 0 && finalList.length > 0) {
+      this.syncCustomers(finalList).catch(() => {});
+    }
+
+    return finalList;
   },
 
   async saveCustomer(customer: Customer): Promise<boolean> {
-    const client = getSupabaseClient();
-    if (!client) return false;
+    if (!customer?.id || !customer?.name) return false;
 
+    // 1. Atualização imediata do cache local
     try {
-      const tenantId = getSupabaseConfig().tenantId;
-      const record = {
-        id: customer.id,
-        tenant_id: tenantId,
-        name: customer.name,
-        nuit: customer.nuit || "",
-        email: customer.email || "",
-        phone: customer.phone || "",
-        address: customer.address || "",
-        debt: customer.debt || (customer as any).balance || 0,
-        balance: (customer as any).balance || customer.debt || 0,
-        total_spent: customer.totalSpent || 0,
-        purchase_count: customer.purchaseCount || 0,
-        loyalty_points: customer.loyaltyPoints || 0,
-        credit_limit: (customer as any).creditLimit || 0,
-        notes: (customer as any).notes || "",
-        updated_at: new Date().toISOString()
-      };
+      const raw = localStorage.getItem("erp_customers_cache");
+      let currentCache: Customer[] = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(currentCache)) currentCache = [];
+      const idx = currentCache.findIndex(c => c.id === customer.id);
+      if (idx >= 0) {
+        currentCache[idx] = { ...currentCache[idx], ...customer };
+      } else {
+        currentCache.unshift(customer);
+      }
+      localStorage.setItem("erp_customers_cache", JSON.stringify(currentCache));
+    } catch {}
 
-      const { error } = await client.from("clientes").upsert(record, { onConflict: "id" });
-      return !error;
-    } catch {
-      return false;
+    // 2. Persistência direta no servidor backend
+    try {
+      authenticatedFetch("/api/customers/single", {
+        method: "POST",
+        body: JSON.stringify(customer)
+      }).catch(e => console.warn("[saveCustomer] Aviso backend:", e));
+    } catch {}
+
+    // 3. Persistência no Supabase / PostgreSQL com poda adaptativa de colunas
+    const client = getSupabaseClient();
+    if (!client) return true;
+
+    const tenantId = getSupabaseConfig().tenantId;
+    const candidateTables = ["clientes", "customers"];
+    const excludedCols = new Set<string>([
+      "address",
+      "debt",
+      "total_spent",
+      "purchase_count",
+      "loyalty_points",
+      "credit_blocked",
+      "preferred_payment_method",
+      "one_click_checkout_enabled",
+      "settlements",
+      "last_purchase_date",
+      "notes"
+    ]);
+
+    for (const table of candidateTables) {
+      let saved = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const rec: Record<string, any> = {
+            id: customer.id,
+            name: customer.name
+          };
+          if (!excludedCols.has("tenant_id")) rec.tenant_id = tenantId;
+          if (!excludedCols.has("nuit")) rec.nuit = customer.nuit || (customer as any).nif || "";
+          if (!excludedCols.has("email")) rec.email = customer.email || "";
+          if (!excludedCols.has("phone")) rec.phone = customer.phone || "";
+          if (!excludedCols.has("address")) rec.address = customer.address || "";
+          if (!excludedCols.has("balance")) rec.balance = customer.balance ?? customer.debt ?? 0;
+          if (!excludedCols.has("debt")) rec.debt = customer.debt ?? customer.balance ?? 0;
+          if (!excludedCols.has("credit_limit")) rec.credit_limit = (customer as any).creditLimit ?? 0;
+          if (!excludedCols.has("total_spent")) rec.total_spent = customer.totalSpent ?? 0;
+          if (!excludedCols.has("purchase_count")) rec.purchase_count = customer.purchaseCount ?? 0;
+          if (!excludedCols.has("loyalty_points")) rec.loyalty_points = customer.loyaltyPoints ?? 0;
+          if (!excludedCols.has("updated_at")) rec.updated_at = new Date().toISOString();
+
+          const { error } = await client.from(table).upsert(rec, { onConflict: "id" });
+          if (!error) {
+            saved = true;
+            break;
+          }
+
+          if (isTableMissingError(error)) {
+            break;
+          }
+
+          const missing = extractMissingColumn(error);
+          if (missing) {
+            excludedCols.add(missing);
+            continue;
+          }
+          break;
+        } catch {
+          break;
+        }
+      }
+      if (saved) break;
     }
+
+    return true;
   },
 
   async syncCustomers(customers: Customer[]): Promise<boolean> {
-    const client = getSupabaseClient();
-    if (!client || customers.length === 0) return false;
+    if (!Array.isArray(customers) || customers.length === 0) return true;
 
+    // 1. Atualiza cache local
     try {
-      const tenantId = getSupabaseConfig().tenantId;
-      const records = customers.map((c) => ({
-        id: c.id,
-        tenant_id: tenantId,
-        name: c.name,
-        nuit: c.nuit || "",
-        email: c.email || "",
-        phone: c.phone || "",
-        address: c.address || "",
-        debt: c.debt || (c as any).balance || 0,
-        balance: (c as any).balance || c.debt || 0,
-        total_spent: c.totalSpent || 0,
-        purchase_count: c.purchaseCount || 0,
-        loyalty_points: c.loyaltyPoints || 0,
-        credit_limit: (c as any).creditLimit || 0,
-        notes: (c as any).notes || "",
-        updated_at: new Date().toISOString()
-      }));
+      localStorage.setItem("erp_customers_cache", JSON.stringify(customers));
+    } catch {}
 
-      const { error } = await client.from("clientes").upsert(records, { onConflict: "id" });
-      return !error;
-    } catch {
-      return false;
+    // 2. Persiste em lote no servidor backend
+    try {
+      authenticatedFetch("/api/customers", {
+        method: "POST",
+        body: JSON.stringify({ customers })
+      }).catch(e => console.warn("[syncCustomers] Aviso backend:", e));
+    } catch {}
+
+    // 3. Persiste no Supabase / PostgreSQL com auto-adaptação
+    const client = getSupabaseClient();
+    if (!client) return true;
+
+    const tenantId = getSupabaseConfig().tenantId;
+    const candidateTables = ["clientes", "customers"];
+    const excludedCols = new Set<string>([
+      "address",
+      "debt",
+      "total_spent",
+      "purchase_count",
+      "loyalty_points",
+      "credit_blocked",
+      "preferred_payment_method",
+      "one_click_checkout_enabled",
+      "settlements",
+      "last_purchase_date",
+      "notes"
+    ]);
+
+    for (const table of candidateTables) {
+      let synced = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const records = customers.map(c => {
+            const rec: Record<string, any> = {
+              id: c.id,
+              name: c.name
+            };
+            if (!excludedCols.has("tenant_id")) rec.tenant_id = tenantId;
+            if (!excludedCols.has("nuit")) rec.nuit = c.nuit || (c as any).nif || "";
+            if (!excludedCols.has("email")) rec.email = c.email || "";
+            if (!excludedCols.has("phone")) rec.phone = c.phone || "";
+            if (!excludedCols.has("address")) rec.address = c.address || "";
+            if (!excludedCols.has("balance")) rec.balance = c.balance ?? c.debt ?? 0;
+            if (!excludedCols.has("debt")) rec.debt = c.debt ?? c.balance ?? 0;
+            if (!excludedCols.has("credit_limit")) rec.credit_limit = (c as any).creditLimit ?? 0;
+            if (!excludedCols.has("total_spent")) rec.total_spent = c.totalSpent ?? 0;
+            if (!excludedCols.has("purchase_count")) rec.purchase_count = c.purchaseCount ?? 0;
+            if (!excludedCols.has("loyalty_points")) rec.loyalty_points = c.loyaltyPoints ?? 0;
+            if (!excludedCols.has("updated_at")) rec.updated_at = new Date().toISOString();
+            return rec;
+          });
+
+          const { error } = await client.from(table).upsert(records, { onConflict: "id" });
+          if (!error) {
+            synced = true;
+            break;
+          }
+
+          if (isTableMissingError(error)) {
+            break;
+          }
+
+          const missing = extractMissingColumn(error);
+          if (missing) {
+            excludedCols.add(missing);
+            continue;
+          }
+          break;
+        } catch {
+          break;
+        }
+      }
+      if (synced) break;
     }
+
+    return true;
   },
 
   async deleteCustomer(customerId: string): Promise<boolean> {
-    const client = getSupabaseClient();
-    if (!client) return false;
-
+    // 1. Remove do cache local
     try {
-      const { error } = await client.from("clientes").delete().eq("id", customerId);
-      return !error;
-    } catch {
-      return false;
+      const raw = localStorage.getItem("erp_customers_cache");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const filtered = parsed.filter((c: any) => c.id !== customerId);
+          localStorage.setItem("erp_customers_cache", JSON.stringify(filtered));
+        }
+      }
+    } catch {}
+
+    // 2. Remove do servidor backend
+    try {
+      authenticatedFetch(`/api/customers/${customerId}`, { method: "DELETE" }).catch(() => {});
+    } catch {}
+
+    // 3. Remove do Supabase
+    const client = getSupabaseClient();
+    if (client) {
+      const candidateTables = ["clientes", "customers"];
+      for (const table of candidateTables) {
+        try {
+          await client.from(table).delete().eq("id", customerId);
+        } catch {}
+      }
     }
+
+    return true;
   },
 
   // --- VENDAS / TRANSAÇÕES ---
@@ -1321,26 +1581,38 @@ export const SupabaseSyncService = {
           }
         }
 
-        const res = await query;
-        if (!res.error) {
+        let res: any = null;
+        try {
+          res = await query;
+        } catch (fetchErr: any) {
+          lastError = {
+            message: fetchErr?.message || "Failed to fetch",
+            code: "FETCH_ERROR"
+          };
+          break;
+        }
+
+        if (res && !res.error) {
           data = res.data;
           lastError = null;
           break;
         }
 
-        const isSchemaCacheMissing =
-          res.error.code === "PGRST205" ||
-          (typeof res.error.message === "string" && res.error.message.includes("in the schema cache"));
+        if (res?.error) {
+          const isSchemaCacheMissing =
+            res.error.code === "PGRST205" ||
+            (typeof res.error.message === "string" && res.error.message.includes("in the schema cache"));
 
-        if (isSchemaCacheMissing) {
+          if (isSchemaCacheMissing) {
+            lastError = res.error;
+            continue;
+          }
+
+          // Se for um erro real do PostgreSQL (ex: timeout 57P01, permissão negada 42501, relation doesn't exist 42P01),
+          // não prossegue para outras tabelas para manter fidelidade estrita ao erro do banco.
           lastError = res.error;
-          continue;
+          break;
         }
-
-        // Se for um erro real do PostgreSQL (ex: timeout 57P01, permissão negada 42501, relation doesn't exist 42P01),
-        // não prossegue para outras tabelas para manter fidelidade estrita ao erro do banco.
-        lastError = res.error;
-        break;
       }
 
       if (lastError) {
@@ -1365,24 +1637,72 @@ export const SupabaseSyncService = {
         return [];
       }
 
-      return data.map((row: any) => ({
-        id: row.id,
-        invoiceNumber: row.invoice_number || row.invoiceNumber || row.id,
-        customerName: row.customer_name || row.customerName || "Consumidor Final",
-        customerId: row.customer_id || row.customerId || undefined,
-        grandTotal: Number(row.grand_total || row.grandTotal || 0),
-        subtotal: Number(row.subtotal || row.grand_total || row.grandTotal || 0),
-        vatTotal: Number(row.vat_total || row.vatTotal || 0),
-        discountTotal: Number(row.discount_total || row.discountTotal || 0),
-        paymentMethod: row.payment_method || row.paymentMethod || "CASH",
-        cashierName: row.operator_name || row.seller_name || row.sellerName || "",
-        items: Array.isArray(row.items)
-          ? row.items
-          : (typeof row.items_json === "string" ? JSON.parse(row.items_json || "[]") : []),
-        timestamp: row.timestamp || row.created_at || row.createdAt || new Date().toISOString(),
-        paymentStatus: row.payment_status || row.status || "PAID",
-        idempotencyKey: row.idempotency_key || undefined
-      }));
+      return data.map((row: any) => {
+        const grandTotal = Number(row.grand_total ?? row.grandTotal ?? row.total_amount ?? 0);
+        const subtotal = Number(row.subtotal ?? row.sub_total ?? grandTotal);
+        const vatTotal = Number(row.vat_total ?? row.vatTotal ?? row.tax_amount ?? 0);
+        const discountTotal = Number(row.discount_total ?? row.discountTotal ?? 0);
+
+        let rawItems: any[] = [];
+        if (Array.isArray(row.items)) {
+          rawItems = row.items;
+        } else if (typeof row.items_json === "string") {
+          try { rawItems = JSON.parse(row.items_json || "[]"); } catch { rawItems = []; }
+        } else if (typeof row.items === "string") {
+          try { rawItems = JSON.parse(row.items || "[]"); } catch { rawItems = []; }
+        }
+
+        const normalizedItems = rawItems.map((item: any) => {
+          const qty = Number(item.quantity ?? item.qty ?? 1);
+          const price = Number(item.price ?? item.salePrice ?? item.sale_price ?? item.unitPrice ?? item.unit_price ?? 0);
+          const itemSubtotal = Number(item.subtotal ?? item.sub_total ?? (price * qty));
+          const vatRate = Number(item.vatRate ?? item.vat_rate ?? 16);
+          const vatAmount = Number(item.vatAmount ?? item.vat_amount ?? (itemSubtotal * (vatRate / 100)));
+          const discountAmount = Number(item.discountAmount ?? item.discount_amount ?? 0);
+          const costPrice = Number(item.costPrice ?? item.cost_price ?? item.cost ?? 0);
+
+          return {
+            productId: item.productId || item.product_id || item.id || "",
+            productName: item.productName || item.product_name || item.name || "Artigo",
+            quantity: isNaN(qty) ? 1 : qty,
+            price: isNaN(price) ? 0 : price,
+            salePrice: isNaN(price) ? 0 : price,
+            subtotal: isNaN(itemSubtotal) ? 0 : itemSubtotal,
+            costPrice: isNaN(costPrice) ? 0 : costPrice,
+            vatRate: isNaN(vatRate) ? 16 : vatRate,
+            vatAmount: isNaN(vatAmount) ? 0 : vatAmount,
+            discountAmount: isNaN(discountAmount) ? 0 : discountAmount,
+            observation: item.observation || ""
+          };
+        });
+
+        return {
+          id: row.id,
+          invoiceNumber: row.invoice_number || row.invoiceNumber || row.id,
+          customerName: row.customer_name || row.customerName || "Consumidor Final",
+          customerId: row.customer_id || row.customerId || undefined,
+          customerNuit: row.customer_nuit || undefined,
+          customerPhone: row.customer_phone || undefined,
+          customerEmail: row.customer_email || undefined,
+          grandTotal: isNaN(grandTotal) ? 0 : grandTotal,
+          subtotal: isNaN(subtotal) ? (isNaN(grandTotal) ? 0 : grandTotal) : subtotal,
+          vatTotal: isNaN(vatTotal) ? 0 : vatTotal,
+          discountTotal: isNaN(discountTotal) ? 0 : discountTotal,
+          paymentMethod: row.payment_method || row.paymentMethod || "CASH",
+          paymentStatus: row.payment_status || row.status || "PAID",
+          cashierName: row.cashier_name || row.operator_name || row.seller_name || row.sellerName || "",
+          branchId: row.branch_id || undefined,
+          amountPaid: row.amount_paid != null ? Number(row.amount_paid) : undefined,
+          changeAmount: row.change_amount != null ? Number(row.change_amount) : undefined,
+          fiscalHash: row.fiscal_hash || undefined,
+          fiscalKeys: row.fiscal_keys || undefined,
+          fiscalCertified: Boolean(row.fiscal_certified),
+          items: normalizedItems,
+          notes: row.notes || undefined,
+          timestamp: row.timestamp || row.created_at || row.createdAt || new Date().toISOString(),
+          idempotencyKey: row.idempotency_key || undefined
+        };
+      });
     } catch (err: any) {
       if (
         err?.code === "PGRST205" ||
@@ -1453,7 +1773,7 @@ export const SupabaseSyncService = {
             productId: it.productId || it.id,
             productName: it.productName || it.name || "Artigo",
             quantity: Number(it.quantity || 1),
-            salePrice: Number(it.price || it.salePrice || it.unitPrice || 0),
+            salePrice: Number(it.salePrice || it.price || it.unitPrice || 0),
             costPrice: Number(it.costPrice || it.cost || 0),
             vatRate: Number(it.vatRate || 16)
           })),
@@ -1655,10 +1975,6 @@ export const SupabaseSyncService = {
 
         // 1. Falha de rede ou erro na chamada do RPC
         if (error) {
-          const errStr = error.message || "";
-          if (errStr.includes("uuid_generate_v4") || errStr.includes("PGRST202") || errStr.includes("schema cache") || errStr.includes("does not exist")) {
-            return await fallbackDirectSale(`RPC indisponível ou função em falta: ${errStr}`);
-          }
           console.error("[RPC process_sale_atomic] Erro de execução (Rollback acionado):", error.message);
           return { success: false, error: error.message };
         }
@@ -1750,6 +2066,45 @@ export const SupabaseSyncService = {
     }
   },
 
+  async recordSaleReturnAtomic(params: {
+    saleId?: string;
+    originalInvoice: string;
+    creditNoteNumber: string;
+    customerName?: string;
+    customerNuit?: string;
+    reason: string;
+    returnedItems: any[];
+    totalRefund: number;
+    refundMethod?: string;
+    operatorName?: string;
+  }): Promise<{ success: boolean; error?: string; creditNoteNumber?: string; totalRefund?: number }> {
+    const client = getSupabaseClient();
+    if (!client) return { success: false, error: "Supabase não conectado." };
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const payload: Record<string, any> = {
+        p_tenant_id: tenantId,
+        p_sale_id: params.saleId || null,
+        p_original_invoice: params.originalInvoice,
+        p_credit_note_number: params.creditNoteNumber,
+        p_customer_name: params.customerName || "Consumidor Final",
+        p_customer_nuit: params.customerNuit || null,
+        p_reason: params.reason,
+        p_returned_items: params.returnedItems,
+        p_total_refund: params.totalRefund,
+        p_refund_method: params.refundMethod || "CASH",
+        p_operator_name: params.operatorName || "Operador"
+      };
+
+      const { data, error } = await client.rpc("record_sale_return_atomic", payload);
+      if (error) return { success: false, error: error.message };
+      return data || { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  },
+
   /**
    * @deprecated Fluxo oficial de vendas: POS -> saveTransaction -> processSaleAtomic -> process_sale_atomic -> PostgreSQL.
    * Não permite caminhos alternativos que burlem a transação atómica no PostgreSQL.
@@ -1767,17 +2122,35 @@ export const SupabaseSyncService = {
       const records = transactions.map((t) => ({
         id: t.id,
         tenant_id: tenantId,
+        idempotency_key: t.idempotencyKey || t.id,
         invoice_number: t.invoiceNumber || t.id,
         customer_name: t.customerName || "Consumidor Final",
         customer_id: t.customerId || null,
+        customer_nuit: (t as any).customerNuit || null,
+        customer_phone: (t as any).customerPhone || null,
+        customer_email: (t as any).customerEmail || null,
         grand_total: t.grandTotal || t.subtotal || 0,
         subtotal: t.subtotal || t.grandTotal || 0,
         vat_total: t.vatTotal || 0,
         discount_total: t.discountTotal || 0,
         payment_method: t.paymentMethod,
+        payment_status: (t as any).paymentStatus || "PAID",
         operator_name: t.cashierName || "",
+        cashier_name: t.cashierName || "",
+        seller_name: t.cashierName || "",
+        branch_id: (t as any).branchId || null,
+        amount_paid: (t as any).amountPaid ?? (t.grandTotal || 0),
+        change_amount: (t as any).changeAmount ?? 0,
+        total_amount: t.grandTotal || t.subtotal || 0,
+        tax_amount: t.vatTotal || 0,
+        fiscal_hash: (t as any).fiscalHash || null,
+        fiscal_keys: (t as any).fiscalKeys || null,
+        fiscal_certified: (t as any).fiscalCertified ?? false,
+        status: (t as any).status || "COMPLETED",
         items: t.items || [],
+        notes: (t as any).notes || null,
         created_at: t.timestamp || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
         timestamp: t.timestamp || new Date().toISOString()
       }));
 
@@ -2333,10 +2706,18 @@ export const SupabaseSyncService = {
         theme: data.theme || "laranja",
         autoBackup: data.cloud_backup_enabled ?? true,
         smsGateway: "",
-        smtpServer: "",
-        reportRecipientEmail: "",
-        reportHour: "18:00",
-        reportFrequency: "daily",
+        smtpServer: data.smtp_server || "",
+        smtpHost: data.smtp_host || (data.val_json?.smtpHost) || "",
+        smtpPort: Number(data.smtp_port || data.val_json?.smtpPort || 587),
+        smtpUser: data.smtp_user || (data.val_json?.smtpUser) || "",
+        smtpPassword: data.smtp_password || (data.val_json?.smtpPassword) || "",
+        smtpSecure: data.smtp_secure ?? (data.val_json?.smtpSecure ?? false),
+        smtpEnabled: data.smtp_enabled ?? (data.val_json?.smtpEnabled ?? true),
+        smtpSenderName: data.smtp_sender_name || (data.val_json?.smtpSenderName) || "",
+        smtpFromEmail: data.smtp_from_email || (data.val_json?.smtpFromEmail) || "",
+        reportRecipientEmail: data.report_recipient_email || (data.val_json?.reportRecipientEmail) || "",
+        reportHour: data.report_hour || "18:00",
+        reportFrequency: data.report_frequency || "daily",
         ...(data.val_json || {})
       } as SystemSettings;
     } catch {
@@ -2369,11 +2750,136 @@ export const SupabaseSyncService = {
         backup_time: settings.backupTime || "18:00",
         logo_url: settings.logoUrl || "",
         theme: settings.theme || "laranja",
+        smtp_host: settings.smtpHost || "",
+        smtp_port: settings.smtpPort || 587,
+        smtp_user: settings.smtpUser || "",
+        smtp_password: settings.smtpPassword || "",
+        smtp_secure: settings.smtpSecure ?? false,
+        smtp_enabled: settings.smtpEnabled ?? true,
+        smtp_sender_name: (settings as any).smtpSenderName || "",
+        smtp_from_email: (settings as any).smtpFromEmail || "",
         val_json: settings,
         updated_at: new Date().toISOString()
       };
 
       const { error } = await client.from("settings").upsert(record, { onConflict: "id" });
+      if (error) {
+        console.warn("[SupabaseSyncService.saveSettings] Aviso do Supabase ao salvar 'settings':", error.message);
+      }
+
+      // Sincroniza também com a tabela companies se disponível
+      try {
+        await client.from("companies").upsert({
+          id: tenantId || "ost-tenant-001",
+          name: settings.companyName || "OST Comércio Geral, Lda",
+          tax_id: settings.companyNuit || settings.nuit || "",
+          email: settings.email || settings.storeEmail || "",
+          phone: (settings as any).companyPhone || settings.storeContact || "",
+          address: settings.companyAddress || settings.storeAddress || "",
+          currency: settings.currency || "MT",
+          logo_url: settings.logoUrl || "",
+          updated_at: new Date().toISOString()
+        }, { onConflict: "id" });
+      } catch {}
+
+      return !error;
+    } catch (err: any) {
+      console.warn("[SupabaseSyncService.saveSettings] Exceção ao salvar definições:", err?.message);
+      return false;
+    }
+  },
+
+  // --- ORDENS DE COMPRA / REPOSIÇÃO A FORNECEDORES ---
+  async fetchSupplierOrders(): Promise<SupplierOrder[]> {
+    const client = getSupabaseClient();
+    if (!client) return [];
+
+    try {
+      const { data, error } = await client
+        .from("supplier_orders")
+        .select("*")
+        .order("request_date", { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map((row: any) => ({
+        id: row.id,
+        supplierId: row.supplier_id,
+        supplierName: row.supplier_name,
+        productId: row.product_id,
+        productName: row.product_name,
+        quantityRequested: Number(row.quantity_requested || 0),
+        unitCost: Number(row.unit_cost || 0),
+        totalValue: Number(row.total_value || 0),
+        status: (row.status || "Pendente") as "Pendente" | "Recebido" | "Cancelado",
+        receiptStatus: (row.receipt_status || (row.status === "Recebido" ? "Entregue" : "Aguardando Envio")) as any,
+        paymentStatus: (row.payment_status || "Pendente") as "Pago" | "Crédito" | "Pendente",
+        paymentDueDate: row.payment_due_date,
+        requestDate: row.request_date ? String(row.request_date).split("T")[0] : new Date().toISOString().split("T")[0],
+        receivedDate: row.received_date ? String(row.received_date).split("T")[0] : undefined,
+        receivedQuantity: row.received_quantity ? Number(row.received_quantity) : undefined,
+        deliveryConfirmedDate: row.delivery_confirmed_date,
+        deliveryConfirmedBy: row.delivery_confirmed_by,
+        deliveryNotes: row.delivery_notes,
+        isReplenishmentOrder: row.is_replenishment_order ?? false
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async saveSupplierOrder(order: SupplierOrder): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const record = {
+        id: order.id,
+        tenant_id: tenantId,
+        supplier_id: order.supplierId,
+        supplier_name: order.supplierName,
+        product_id: order.productId,
+        product_name: order.productName,
+        quantity_requested: order.quantityRequested,
+        unit_cost: order.unitCost,
+        total_value: order.totalValue,
+        status: order.status,
+        payment_status: order.paymentStatus,
+        request_date: order.requestDate || new Date().toISOString(),
+        received_date: order.receivedDate ? new Date(order.receivedDate).toISOString() : null
+      };
+
+      const { error } = await client.from("supplier_orders").upsert(record, { onConflict: "id" });
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async saveSupplierOrders(orders: SupplierOrder[]): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client || orders.length === 0) return false;
+
+    try {
+      const tenantId = getSupabaseConfig().tenantId;
+      const records = orders.map(order => ({
+        id: order.id,
+        tenant_id: tenantId,
+        supplier_id: order.supplierId,
+        supplier_name: order.supplierName,
+        product_id: order.productId,
+        product_name: order.productName,
+        quantity_requested: order.quantityRequested,
+        unit_cost: order.unitCost,
+        total_value: order.totalValue,
+        status: order.status,
+        payment_status: order.paymentStatus,
+        request_date: order.requestDate || new Date().toISOString(),
+        received_date: order.receivedDate ? new Date(order.receivedDate).toISOString() : null
+      }));
+
+      const { error } = await client.from("supplier_orders").upsert(records, { onConflict: "id" });
       return !error;
     } catch {
       return false;

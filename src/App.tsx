@@ -109,13 +109,13 @@ interface Toast {
 }
 
 const NAV_MENU_ITEMS = [
-  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "dashboard", label: "Visão Geral", shortLabel: "Visão Geral", icon: LayoutDashboard, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
   { id: "pos", label: "Vendas (POS)", shortLabel: "Vendas", icon: ShoppingCart, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "stock", label: "Gestão de Stock", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
-  { id: "cash", label: "Gestão de Caixa", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
-  { id: "customers", label: "Gestão de Clientes", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
-  { id: "reports", label: "Relatórios & Faturação", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
-  { id: "settings", label: "Configurações Gerais", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
+  { id: "stock", label: "Stock & Produtos", shortLabel: "Stock", icon: Package, roles: ["ADMIN", "SUPERVISOR"] },
+  { id: "cash", label: "Caixa & Movimentos", shortLabel: "Caixa", icon: PiggyBank, roles: ["ADMIN", "SUPERVISOR", "CASHIER", "FINANCEIRO"] },
+  { id: "customers", label: "Clientes & Créditos", shortLabel: "Clientes", icon: Users, roles: ["ADMIN", "SUPERVISOR", "CASHIER"] },
+  { id: "reports", label: "Relatórios de Vendas", shortLabel: "Relatórios", icon: FileText, roles: ["ADMIN", "SUPERVISOR", "AUDITOR", "FINANCEIRO"] },
+  { id: "settings", label: "Configurações", shortLabel: "Configurações", icon: Settings, roles: ["ADMIN"] },
 ];
 
 const safeLocalStorageSetItem = (key: string, value: string): boolean => {
@@ -1962,7 +1962,7 @@ export default function App() {
     return dev;
   });
 
-  // Track operator-specific custom color theme
+  // Track operator-specific custom color theme (Padrão do Sistema: laranja OST)
   const [activeColorTheme, setActiveColorTheme] = useState<string>("laranja");
 
   // Load and apply color theme dynamically
@@ -1972,10 +1972,20 @@ export default function App() {
     const dbTheme = matchedEmployee?.theme;
     const userTheme = dbTheme || localStorage.getItem("erp_theme_" + userId);
     
-    if (userTheme) {
+    // Se o tema anterior guardado era o "azul" incorreto, repor para o padrão do sistema "laranja"
+    if (userTheme === "azul") {
+      try {
+        localStorage.setItem("erp_theme_" + userId, "laranja");
+      } catch {}
+      setActiveColorTheme("laranja");
+      applyTheme("laranja");
+      return;
+    }
+
+    if (userTheme && userTheme !== "azul" && userTheme !== "default") {
       setActiveColorTheme(userTheme);
       applyTheme(userTheme);
-    } else if (settings.theme) {
+    } else if (settings.theme && settings.theme !== "azul") {
       setActiveColorTheme(settings.theme);
       applyTheme(settings.theme);
     } else {
@@ -2315,7 +2325,26 @@ export default function App() {
           );
         }
       }
-      setCustomers(sbCustomers || []);
+      // Hidratação segura de clientes com proteção contra substituição indevida por lista vazia
+      setCustomers(prevCustomers => {
+        const incoming = sbCustomers || [];
+        if (prevCustomers.length > 0 && incoming.length === 0) {
+          console.warn("[HYDRATE] Proteção de clientes ativada: preservando clientes locais em vez de sobrescrever com lista vazia.");
+          return prevCustomers;
+        }
+        if (prevCustomers.length > 0 && incoming.length < prevCustomers.length) {
+          console.warn(`[HYDRATE] Lista remota com menor contagem (${incoming.length} < ${prevCustomers.length}). Preservando clientes existentes.`);
+          const incomingMap = new Map(incoming.map(c => [c.id, c]));
+          const merged = [...incoming];
+          for (const c of prevCustomers) {
+            if (!incomingMap.has(c.id)) {
+              merged.push(c);
+            }
+          }
+          return merged;
+        }
+        return incoming.length > 0 ? incoming : prevCustomers;
+      });
 
       if (sbTransactionsRes.success && sbTransactionsRes.txs !== null) {
         setTransactionsError(null);
@@ -2328,11 +2357,21 @@ export default function App() {
         const errMsg = sbTransactionsRes.error || "Falha na leitura das vendas do PostgreSQL";
         console.error("[HYDRATE] Erro real na leitura de vendas do PostgreSQL:", errMsg);
         setTransactionsError(errMsg);
-        showToast(
-          `Falha ao ler vendas do PostgreSQL: ${errMsg}. Os dados não foram mascarados como zero vendas.`,
-          "error",
-          "Erro PostgreSQL"
-        );
+        const isPendingSetupOrFetch =
+          errMsg.includes("Failed to fetch") ||
+          errMsg.includes("PGRST205") ||
+          errMsg.includes("schema cache") ||
+          errMsg.includes("não está disponível");
+
+        if (isPendingSetupOrFetch) {
+          console.warn("[HYDRATE] Conexão com vendas do PostgreSQL pendente de configuração:", errMsg);
+        } else {
+          showToast(
+            `Falha ao ler vendas do PostgreSQL: ${errMsg}. Os dados não foram mascarados como zero vendas.`,
+            "error",
+            "Erro PostgreSQL"
+          );
+        }
       }
 
       setCashFlow(sbCashflow || []);
@@ -2588,7 +2627,13 @@ export default function App() {
           const errMsg = err?.message || "Erro de conexão ao carregar transações do PostgreSQL";
           console.error("[SUPABASE] Erro real ao carregar transações do PostgreSQL:", err);
           setTransactionsError(errMsg);
-          showToast(`Erro ao carregar vendas do PostgreSQL: ${errMsg}`, "error", "Erro de Vendas");
+          const isPending =
+            errMsg.includes("Failed to fetch") ||
+            errMsg.includes("PGRST205") ||
+            errMsg.includes("não está disponível");
+          if (!isPending) {
+            showToast(`Erro ao carregar vendas do PostgreSQL: ${errMsg}`, "error", "Erro de Vendas");
+          }
         } finally {
           setIsLoadingTransactions(false);
         }
@@ -3014,6 +3059,23 @@ export default function App() {
     }
   };
 
+  const handleUpdateProductsBatch = async (updatedBatch: Product[]) => {
+    try {
+      console.log(`[PRODUCTS] 1. Gravando lote de ${updatedBatch.length} produtos no PostgreSQL...`);
+      await CommercialDataService.saveProductsBatch(updatedBatch);
+      console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para ${updatedBatch.length} produtos.`);
+
+      const updatedMap = new Map(updatedBatch.map(p => [p.id, p]));
+      setProducts(prev => prev.map(p => updatedMap.get(p.id) || p));
+      showToast(`Reajuste em lote de ${updatedBatch.length} produtos gravado com sucesso no PostgreSQL!`, "success", "Preços Atualizados em Lote");
+    } catch (err: any) {
+      const errMsg = err?.message || "Erro ao atualizar lote de produtos no PostgreSQL";
+      console.error(`[PRODUCTS] Falha ao atualizar lote no PostgreSQL:`, err);
+      showToast(`Erro ao gravar preços no PostgreSQL: ${errMsg}`, "error", "Falha de Gravação");
+      throw err;
+    }
+  };
+
   const handleDeleteProduct = async (productId: string) => {
     try {
       console.log(`[PRODUCTS] 1. Removendo produto "${productId}" no PostgreSQL...`);
@@ -3030,13 +3092,46 @@ export default function App() {
   };
 
   // CENTRAL MUTATION HOOKS - CUSTOMERS
-  const handleAddCustomer = (newC: Customer) => {
+  const handleAddCustomer = async (newC: Customer) => {
+    // 1. Atualiza estado imediatamente no frontend
+    let updatedList: Customer[] = [];
     setCustomers(prev => {
-      const updated = [newC, ...prev];
-      syncTable("customers", updated);
-      return updated;
+      const filtered = prev.filter(c => c.id !== newC.id);
+      updatedList = [newC, ...filtered];
+      return updatedList;
     });
+
+    // 2. Grava de forma persistente diretamente no serviço comercial (Supabase/PostgreSQL + Backend)
+    try {
+      await CommercialDataService.saveCustomer(newC);
+    } catch (err: any) {
+      console.warn("[handleAddCustomer] Falha na gravação individual direta, sincronizando lote:", err?.message);
+    }
+
+    // 3. Sincroniza tabela central para integridade
+    if (updatedList.length > 0) {
+      await syncTable("customers", updatedList);
+    }
   };
+
+  const handleUpdateCustomer = async (updatedC: Customer) => {
+    let updatedList: Customer[] = [];
+    setCustomers(prev => {
+      updatedList = prev.map(c => c.id === updatedC.id ? updatedC : c);
+      return updatedList;
+    });
+
+    try {
+      await CommercialDataService.saveCustomer(updatedC);
+    } catch (err: any) {
+      console.warn("[handleUpdateCustomer] Falha na atualização individual direta, sincronizando lote:", err?.message);
+    }
+
+    if (updatedList.length > 0) {
+      await syncTable("customers", updatedList);
+    }
+  };
+
   const handleDeleteCustomer = async (customerId: string) => {
     try {
       await CommercialDataService.removeCustomer(customerId);
@@ -4262,7 +4357,7 @@ export default function App() {
 
   return (
     <div className={`flex h-screen overflow-hidden font-sans transition-colors duration-200 ${
-      theme === "night" ? "bg-zinc-950 text-slate-200" : "bg-slate-50 text-slate-800"
+      theme === "night" ? "bg-zinc-950 text-white" : "bg-slate-50 text-black"
     }`}>
       
         {!isPOSFullscreen && (
@@ -4294,114 +4389,134 @@ export default function App() {
       {/* Outer body wrapper */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative z-10">
         
-        {/* TOP MINIMALIST STATUS BAR */}
+        {/* TOP CLEAN EXECUTIVE HEADER WITH QUICK ACTIONS */}
         {!isPOSFullscreen && (
-          <header className={`border-b h-14 px-4 md:px-6 shrink-0 flex items-center justify-between shadow-sm backdrop-blur-md relative z-20 transition-all ${
-            theme === "night" ? "bg-zinc-950/80 border-zinc-800/80" : "bg-white border-slate-200"
+          <header className={`border-b h-14 px-4 md:px-6 shrink-0 flex items-center justify-between relative z-20 transition-all ${
+            theme === "night" ? "bg-zinc-950 border-zinc-900 text-white" : "bg-white border-slate-200/80 text-black"
           }`}>
+            {/* Left: Mobile hamburger & Current Section Title */}
             <div className="flex items-center gap-3">
-              {/* Hamburger Menu Toggle - Visible on mobile/tablet */}
               <button
                 type="button"
                 onClick={() => setIsSidebarOpen(true)}
-                className="lg:hidden p-2 rounded-xl text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-zinc-900 transition shrink-0 cursor-pointer"
+                className={`lg:hidden p-1.5 rounded-lg transition shrink-0 cursor-pointer ${
+                  theme === "night" 
+                    ? "text-white hover:bg-zinc-900" 
+                    : "text-black hover:bg-slate-100"
+                }`}
                 aria-label="Abrir menu"
               >
                 <Menu className="w-5 h-5" />
               </button>
 
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold uppercase tracking-wider ${theme === "night" ? "text-slate-200" : "text-slate-800"}`}>
-                  {NAV_MENU_ITEMS.find(m => m.id === activeTab)?.label || "Sistema de Gestão"}
+                <span className={`text-sm font-bold tracking-tight ${theme === "night" ? "text-white" : "text-black"}`}>
+                  {NAV_MENU_ITEMS.find(m => m.id === activeTab.toLowerCase())?.label || "OST Vendas"}
                 </span>
               </div>
             </div>
-  
-            <div className="flex items-center gap-3 text-xs">
-              {/* Admin Name */}
-              <span className={`font-bold text-xs tracking-tight ${
-                theme === "night" ? "text-slate-200" : "text-slate-800"
-              }`}>
-                {activeUserDisplayName}
-              </span>
 
-              {/* Botão Alterar usuário */}
+            {/* Center: The 4 Core Quick Actions (Vender, Adicionar Produto, Receber Pagamento, Consultar Caixa) */}
+            <div className="hidden sm:flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab("POS")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                  activeTab === "POS"
+                    ? "bg-blue-700 text-white shadow-xs"
+                    : "bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
+                }`}
+                title="Abrir Ponto de Venda para realizar venda rápida"
+              >
+                <ShoppingCart className="w-3.5 h-3.5 text-white" />
+                <span>Vender</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("STOCK")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  activeTab === "STOCK"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                    : theme === "night"
+                    ? "bg-zinc-900 border-zinc-800 text-white hover:bg-zinc-800"
+                    : "bg-white border-slate-300 text-black hover:bg-slate-100"
+                }`}
+                title="Ir para o catálogo e adicionar produtos"
+              >
+                <Package className={`w-3.5 h-3.5 ${activeTab === "STOCK" || theme === "night" ? "text-white" : "text-black"}`} />
+                <span>Adicionar Produto</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("CUSTOMERS")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  activeTab === "CUSTOMERS"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                    : theme === "night"
+                    ? "bg-zinc-900 border-zinc-800 text-white hover:bg-zinc-800"
+                    : "bg-white border-slate-300 text-black hover:bg-slate-100"
+                }`}
+                title="Consultar contas de clientes e receber pagamentos pendentes"
+              >
+                <Users className={`w-3.5 h-3.5 ${activeTab === "CUSTOMERS" || theme === "night" ? "text-white" : "text-black"}`} />
+                <span>Receber Pagamento</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab("CASH")}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  activeTab === "CASH"
+                    ? "bg-blue-600 text-white border-blue-600 shadow-xs"
+                    : theme === "night"
+                    ? "bg-zinc-900 border-zinc-800 text-white hover:bg-zinc-800"
+                    : "bg-white border-slate-300 text-black hover:bg-slate-100"
+                }`}
+                title="Consultar saldo atual, entradas e fecho de caixa"
+              >
+                <PiggyBank className={`w-3.5 h-3.5 ${activeTab === "CASH" || theme === "night" ? "text-white" : "text-black"}`} />
+                <span>Consultar Caixa</span>
+              </button>
+            </div>
+  
+            {/* Right: User profile chip & switch user */}
+            <div className="flex items-center gap-2.5 text-xs">
+              <div className="text-right hidden md:block">
+                <span className={`font-bold text-xs block leading-tight ${
+                  theme === "night" ? "text-white" : "text-black"
+                }`}>
+                  {activeUserDisplayName}
+                </span>
+                <span className={`text-[10px] font-semibold ${
+                  theme === "night" ? "text-white" : "text-black"
+                }`}>
+                  {companyDisplayName}
+                </span>
+              </div>
+
               <button
                 id="quick-switch-user-btn"
+                type="button"
                 onClick={() => {
                   setIsUserSwitchModalOpen(true);
                   if (activeUser) {
                     setSwitchSelectedEmployeeId(activeUser.id);
                   }
                 }}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer text-xs font-bold ${
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer text-xs font-semibold ${
                   theme === "night" 
-                    ? "bg-zinc-900 border-zinc-800 text-orange-400 hover:text-orange-300 hover:border-orange-500/50" 
-                    : "bg-white border-slate-200 text-orange-600 hover:bg-slate-50 hover:text-orange-700 shadow-sm"
+                    ? "bg-zinc-900 border-zinc-800 text-white hover:bg-zinc-800" 
+                    : "bg-white border-slate-300 text-black hover:bg-slate-100 shadow-xs"
                 }`}
-                title="Alterar usuário"
+                title="Alterar operador ou utilizador do sistema"
               >
-                <Users className="w-3.5 h-3.5" />
-                <span>Alterar usuário</span>
+                <Users className={`w-3.5 h-3.5 ${theme === "night" ? "text-white" : "text-black"}`} />
+                <span className="hidden sm:inline">Trocar Utilizador</span>
               </button>
             </div>
           </header>
-        )}
-
-        {/* COMPACT HORIZONTAL TOP NAVIGATION MODULES BAR */}
-        {!isPOSFullscreen && (
-          <div className={`border-b px-4 md:px-6 py-2 shrink-0 flex items-center gap-2 overflow-x-auto scrollbar-none z-15 transition-all ${
-            theme === "night" 
-              ? "bg-zinc-900/60 border-zinc-850/60 text-slate-300" 
-              : "bg-white border-slate-150 text-slate-700 shadow-sm"
-          }`}>
-            <div className="flex items-center gap-2 flex-nowrap overflow-x-auto scrollbar-none py-1 font-sans">
-              {NAV_MENU_ITEMS
-                .filter((item) => {
-                  if (simplifiedRole === "CASHIER") {
-                    return item.roles.includes("CASHIER");
-                  }
-                  return true;
-                })
-                .map((item) => {
-                  const roleCheck = canRoleAccessModule(simplifiedRole, item.id);
-                  const authorized = roleCheck.allowed;
-                  const active = activeTab.toLowerCase() === item.id;
-                  
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => authorized && setActiveTab(item.id.toUpperCase())}
-                      disabled={!authorized}
-                      className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap select-none shrink-0 group ${
-                        active 
-                          ? "bg-orange-500 text-white shadow-sm shadow-orange-500/20" 
-                          : authorized 
-                            ? theme === "night" 
-                              ? "text-slate-400 hover:text-slate-150 hover:bg-zinc-850 cursor-pointer" 
-                              : "text-slate-650 hover:text-orange-600 hover:bg-orange-50/50 cursor-pointer"
-                            : "opacity-35 cursor-not-allowed text-slate-400"
-                      }`}
-                      title={authorized ? item.label : "Acesso Restrito para " + simplifiedRole}
-                    >
-                      <item.icon className={`w-4 h-4 shrink-0 transition-colors ${
-                        active 
-                          ? "text-white" 
-                          : authorized 
-                            ? theme === "night" 
-                              ? "text-slate-500 group-hover:text-slate-300" 
-                              : "text-slate-400 group-hover:text-orange-500"
-                            : "text-slate-400"
-                      }`} />
-                      <span>{item.shortLabel}</span>
-                      {!authorized && (
-                        <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-            </div>
-          </div>
         )}
   
         {/* INNER SCROLLABLE WORKPORT PANEL CONTENT */}
@@ -4437,6 +4552,7 @@ export default function App() {
                     settings={settings}
                     onAddAuditLog={handleAddAuditLog}
                     currency={currency}
+                    onAddCustomer={handleAddCustomer}
                     onShowToast={showToast}
                     isPOSFullscreen={isPOSFullscreen}
                     onChangePOSFullscreen={setIsPOSFullscreen}
@@ -4561,6 +4677,7 @@ export default function App() {
                     transactions={filteredTransactions}
                     onAddProduct={handleAddProduct}
                     onUpdateProduct={handleUpdateProduct}
+                    onUpdateProductsBatch={handleUpdateProductsBatch}
                     onDeleteProduct={handleDeleteProduct}
                     onAddAuditLog={handleAddAuditLog}
                     currentRole={simplifiedRole}
@@ -4598,13 +4715,7 @@ export default function App() {
                     transactions={transactions}
                     settings={settings}
                     onAddCustomer={handleAddCustomer}
-                    onUpdateCustomer={(updatedC) => {
-                      setCustomers(prev => {
-                        const updated = prev.map(c => c.id === updatedC.id ? updatedC : c);
-                        syncTable("customers", updated);
-                        return updated;
-                      });
-                    }}
+                    onUpdateCustomer={handleUpdateCustomer}
                     onAddCashFlowEntry={handleAddCashFlowEntry}
                     onDeleteCustomer={handleDeleteCustomer}
                     onAddAuditLog={handleAddAuditLog}
@@ -4639,6 +4750,8 @@ export default function App() {
                 ) : (
                   <ReportsModule
                     transactions={filteredTransactions}
+                    products={products}
+                    employees={employees}
                     settings={settings}
                     onUpdateSettings={handleUpdateSettings}
                     onAddAuditLog={handleAddAuditLog}
@@ -4660,7 +4773,9 @@ export default function App() {
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -12, scale: 0.995 }}
                 transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                className="h-full"
+                className="h-full settings-tab-container"
+                data-module="settings"
+                data-tab="SETTINGS"
               >
                 {!canRoleAccessModule(simplifiedRole, activeTab.toLowerCase()).allowed ? (
                   <RoleAccessDeniedScreen
@@ -4709,6 +4824,8 @@ export default function App() {
                       activeTab === "AI" ? "ai" :
                       activeTab === "TRAINING" ? "training" :
                       activeTab === "GATEWAY" ? "gateway" :
+                      activeTab === "SMTP" ? "smtp" :
+                      activeTab === "POSTGRESQL" || activeTab === "DATABASE" ? "postgresql" :
                       activeTab === "PLANS" ? "plans" : undefined
                     }
                     onChangeModule={(mod) => setActiveTab(mod.toUpperCase())}

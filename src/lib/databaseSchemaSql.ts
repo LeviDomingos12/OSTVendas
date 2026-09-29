@@ -252,10 +252,40 @@ CREATE TABLE IF NOT EXISTS public.clientes (
   nuit TEXT,
   email TEXT,
   phone TEXT,
-  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  address TEXT,
   credit_limit NUMERIC(14,2) DEFAULT 0.00,
+  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  debt NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_spent NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  purchase_count INTEGER NOT NULL DEFAULT 0,
+  last_purchase_date TIMESTAMPTZ,
+  loyalty_points INTEGER NOT NULL DEFAULT 0,
+  credit_blocked BOOLEAN NOT NULL DEFAULT false,
+  preferred_payment_method TEXT,
+  one_click_checkout_enabled BOOLEAN DEFAULT false,
+  settlements JSONB DEFAULT '[]'::jsonb,
+  notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==============================================================================
+-- 7.1 Devoluções e Notas de Crédito (public.returns)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.returns (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  credit_note_number TEXT NOT NULL,
+  sale_id TEXT,
+  original_invoice_number TEXT NOT NULL,
+  customer_name TEXT DEFAULT 'Consumidor Final',
+  customer_nuit TEXT,
+  reason TEXT NOT NULL,
+  items JSONB NOT NULL DEFAULT '[]'::jsonb,
+  total_refund NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  refund_method TEXT NOT NULL DEFAULT 'CASH',
+  operator_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS public.customer_debts (
@@ -282,6 +312,7 @@ ALTER TABLE public.caixa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_debts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.returns ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS allow_all_vendas ON public.vendas;
 CREATE POLICY allow_all_vendas ON public.vendas FOR ALL TO public USING (true) WITH CHECK (true);
@@ -304,6 +335,9 @@ CREATE POLICY allow_all_clientes ON public.clientes FOR ALL TO public USING (tru
 DROP POLICY IF EXISTS allow_all_customer_debts ON public.customer_debts;
 CREATE POLICY allow_all_customer_debts ON public.customer_debts FOR ALL TO public USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS allow_all_returns ON public.returns;
+CREATE POLICY allow_all_returns ON public.returns FOR ALL TO public USING (true) WITH CHECK (true);
+
 GRANT ALL ON public.vendas TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.venda_itens TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.stock_movements TO postgres, authenticated, anon, service_role;
@@ -311,6 +345,7 @@ GRANT ALL ON public.caixa TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.audit_logs TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.clientes TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.customer_debts TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.returns TO postgres, authenticated, anon, service_role;
 
 -- ==============================================================================
 -- 9. FUNÇÃO ATÓMICA OFICIAL: public.process_sale_atomic
@@ -547,6 +582,418 @@ $$;
 GRANT EXECUTE ON FUNCTION public.process_sale_atomic TO postgres, authenticated, anon, service_role;
 
 -- ==============================================================================
+-- 9.1 FUNÇÃO ATÓMICA DE DEVOLUÇÃO: public.record_sale_return_atomic
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.record_sale_return_atomic(
+  p_tenant_id TEXT,
+  p_sale_id TEXT,
+  p_original_invoice TEXT,
+  p_credit_note_number TEXT,
+  p_customer_name TEXT,
+  p_customer_nuit TEXT,
+  p_reason TEXT,
+  p_returned_items JSONB,
+  p_total_refund NUMERIC,
+  p_refund_method TEXT,
+  p_operator_name TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_tenant_id TEXT;
+  v_item JSONB;
+  v_prod_id TEXT;
+  v_qty NUMERIC;
+  v_curr_stock NUMERIC;
+  v_new_stock NUMERIC;
+  v_price NUMERIC;
+BEGIN
+  v_tenant_id := COALESCE(NULLIF(p_tenant_id, ''), 'ost-tenant-001');
+
+  -- 1. Registar a Nota de Crédito / Devolução
+  INSERT INTO public.returns (
+    id, tenant_id, credit_note_number, sale_id, original_invoice_number,
+    customer_name, customer_nuit, reason, items, total_refund, refund_method, operator_name, created_at
+  ) VALUES (
+    gen_random_uuid()::TEXT, v_tenant_id, p_credit_note_number, p_sale_id, p_original_invoice,
+    p_customer_name, p_customer_nuit, p_reason, p_returned_items, p_total_refund, p_refund_method, p_operator_name, NOW()
+  );
+
+  -- 2. Restaurar o stock de cada artigo devolvido
+  FOR v_item IN SELECT * FROM jsonb_array_elements(p_returned_items)
+  LOOP
+    v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
+    v_qty := COALESCE((v_item->>'quantity')::NUMERIC, 1.00);
+    v_price := COALESCE((v_item->>'price')::NUMERIC, 0.00);
+
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id LIMIT 1;
+    IF v_curr_stock IS NULL THEN
+      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id LIMIT 1;
+    END IF;
+
+    v_new_stock := COALESCE(v_curr_stock, 0.00) + v_qty;
+
+    UPDATE public.produtos SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
+    UPDATE public.products SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
+
+    INSERT INTO public.stock_movements (
+      id, tenant_id, product_id, type, quantity, previous_stock, new_stock,
+      cost_price, reason, reference_id, user_name, timestamp
+    ) VALUES (
+      gen_random_uuid()::TEXT, v_tenant_id, v_prod_id, 'RETURN', v_qty,
+      COALESCE(v_curr_stock, 0.00), v_new_stock, v_price, 'Devolução Ref ' || p_credit_note_number, p_sale_id, p_operator_name, NOW()
+    );
+  END LOOP;
+
+  -- 3. Saída de caixa se reembolso efetuado em dinheiro
+  IF p_refund_method = 'CASH' AND p_total_refund > 0 THEN
+    INSERT INTO public.caixa (
+      id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
+    ) VALUES (
+      gen_random_uuid()::TEXT, v_tenant_id, 'DEVOLUTION', p_total_refund,
+      'Reembolso Devolução NC ' || p_credit_note_number || ' (Fatura ' || p_original_invoice || ')',
+      p_operator_name, p_sale_id, NOW()
+    );
+  END IF;
+
+  -- 4. Atualizar o estado da venda se aplicável
+  IF p_sale_id IS NOT NULL AND p_sale_id <> '' THEN
+    UPDATE public.vendas SET status = 'REFUNDED', updated_at = NOW() WHERE id = p_sale_id;
+  END IF;
+
+  -- 5. Registar auditoria
+  INSERT INTO public.audit_logs (
+    id, tenant_id, user_name, action, module, details, timestamp
+  ) VALUES (
+    gen_random_uuid()::TEXT, v_tenant_id, p_operator_name, 'DEVOLUCAO_CONCLUIDA', 'POS',
+    'Nota de Crédito ' || p_credit_note_number || ' emitida para fatura ' || p_original_invoice || ' no valor de ' || p_total_refund || ' MT.',
+    NOW()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'credit_note_number', p_credit_note_number,
+    'total_refund', p_total_refund
+  );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenticated, anon, service_role;
+
+-- ==============================================================================
 -- 10. Recarregar o cache do PostgREST imediatamente
 -- ==============================================================================
 NOTIFY pgrst, 'reload schema';`;
+
+export const SETTINGS_SQL_SCHEMA = `-- ==============================================================================
+-- DEFINIÇÕES DO SISTEMA E EMPRESA (public.settings e public.companies)
+-- ==============================================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.companies (
+  id TEXT PRIMARY KEY DEFAULT ('comp_' || substr(uuid_generate_v4()::TEXT, 1, 8)),
+  name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  owner_uid TEXT NOT NULL DEFAULT 'system',
+  tax_id TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  currency TEXT DEFAULT 'MT',
+  logo_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.settings (
+  id TEXT PRIMARY KEY DEFAULT 'config',
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  company_address TEXT DEFAULT '',
+  company_nuit TEXT DEFAULT '',
+  company_phone TEXT DEFAULT '',
+  company_email TEXT DEFAULT '',
+  receipt_footer_message TEXT DEFAULT '',
+  enable_vat BOOLEAN DEFAULT true,
+  vat_percentage NUMERIC(5,2) DEFAULT 16.00,
+  currency TEXT NOT NULL DEFAULT 'MT',
+  low_stock_threshold NUMERIC(14,2) DEFAULT 5.00,
+  default_printer TEXT DEFAULT 'thermal_80mm',
+  cloud_backup_enabled BOOLEAN DEFAULT true,
+  backup_frequency TEXT DEFAULT 'daily',
+  backup_time TEXT DEFAULT '18:00',
+  logo_url TEXT DEFAULT '',
+  theme TEXT DEFAULT 'laranja',
+  smtp_host TEXT DEFAULT '',
+  smtp_port INTEGER DEFAULT 587,
+  smtp_user TEXT DEFAULT '',
+  smtp_password TEXT DEFAULT '',
+  smtp_secure BOOLEAN DEFAULT false,
+  smtp_enabled BOOLEAN DEFAULT true,
+  smtp_sender_name TEXT DEFAULT '',
+  smtp_from_email TEXT DEFAULT '',
+  val_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_settings_tenant ON public.settings (tenant_id);
+
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS allow_all_settings ON public.settings;
+CREATE POLICY allow_all_settings ON public.settings FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_companies ON public.companies;
+CREATE POLICY allow_all_companies ON public.companies FOR ALL TO public USING (true) WITH CHECK (true);
+GRANT ALL ON public.settings TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.companies TO postgres, authenticated, anon, service_role;
+NOTIFY pgrst, 'reload schema';`;
+
+export const STAFF_SQL_SCHEMA = `-- ==============================================================================
+-- COLABORADORES E PERFIS (public.colaboradores e public.profiles)
+-- ==============================================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.colaboradores (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  auth_uid TEXT,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'VENDEDOR',
+  contact TEXT DEFAULT '',
+  salary NUMERIC(14,2) DEFAULT 0.00,
+  admission_date DATE DEFAULT CURRENT_DATE,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  branch TEXT DEFAULT '',
+  subscription_plan TEXT DEFAULT 'OURO',
+  foto_perfil TEXT DEFAULT '',
+  pin TEXT DEFAULT '',
+  theme TEXT DEFAULT 'laranja',
+  two_factor_enabled BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id TEXT PRIMARY KEY,
+  company_id TEXT,
+  email TEXT,
+  full_name TEXT,
+  role TEXT DEFAULT 'ADMIN',
+  avatar_url TEXT,
+  phone TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_colaboradores_tenant ON public.colaboradores (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_colaboradores_email ON public.colaboradores (email);
+
+ALTER TABLE public.colaboradores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS allow_all_colaboradores ON public.colaboradores;
+CREATE POLICY allow_all_colaboradores ON public.colaboradores FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_profiles ON public.profiles;
+CREATE POLICY allow_all_profiles ON public.profiles FOR ALL TO public USING (true) WITH CHECK (true);
+GRANT ALL ON public.colaboradores TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.profiles TO postgres, authenticated, anon, service_role;
+NOTIFY pgrst, 'reload schema';`;
+
+export const CUSTOMERS_SQL_SCHEMA = `-- ==============================================================================
+-- CLIENTES E CRÉDITO (public.clientes, public.customers e customer_debts)
+-- ==============================================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.clientes (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  name TEXT NOT NULL,
+  nuit TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  credit_limit NUMERIC(14,2) DEFAULT 0.00,
+  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  debt NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_spent NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  purchase_count INTEGER NOT NULL DEFAULT 0,
+  last_purchase_date TIMESTAMPTZ,
+  loyalty_points INTEGER NOT NULL DEFAULT 0,
+  credit_blocked BOOLEAN NOT NULL DEFAULT false,
+  preferred_payment_method TEXT,
+  one_click_checkout_enabled BOOLEAN DEFAULT false,
+  settlements JSONB DEFAULT '[]'::jsonb,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.customers (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  name TEXT NOT NULL,
+  nuit TEXT,
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  credit_limit NUMERIC(14,2) DEFAULT 0.00,
+  balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  debt NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_spent NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  purchase_count INTEGER NOT NULL DEFAULT 0,
+  last_purchase_date TIMESTAMPTZ,
+  loyalty_points INTEGER NOT NULL DEFAULT 0,
+  credit_blocked BOOLEAN NOT NULL DEFAULT false,
+  preferred_payment_method TEXT,
+  one_click_checkout_enabled BOOLEAN DEFAULT false,
+  settlements JSONB DEFAULT '[]'::jsonb,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.customer_debts (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  customer_id TEXT NOT NULL,
+  sale_id TEXT,
+  total_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  paid_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  remaining_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  due_date TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'PENDING',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  settled_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS public.debt_payments (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  debt_id TEXT,
+  customer_id TEXT NOT NULL,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  payment_method TEXT NOT NULL DEFAULT 'CASH',
+  receipt_number TEXT,
+  operator_name TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_clientes_tenant ON public.clientes (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_clientes_phone ON public.clientes (phone);
+CREATE INDEX IF NOT EXISTS idx_customer_debts_cust ON public.customer_debts (customer_id);
+
+ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.customer_debts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.debt_payments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS allow_all_clientes ON public.clientes;
+CREATE POLICY allow_all_clientes ON public.clientes FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_customers ON public.customers;
+CREATE POLICY allow_all_customers ON public.customers FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_customer_debts ON public.customer_debts;
+CREATE POLICY allow_all_customer_debts ON public.customer_debts FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_debt_payments ON public.debt_payments;
+CREATE POLICY allow_all_debt_payments ON public.debt_payments FOR ALL TO public USING (true) WITH CHECK (true);
+GRANT ALL ON public.clientes TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.customers TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.customer_debts TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.debt_payments TO postgres, authenticated, anon, service_role;
+NOTIFY pgrst, 'reload schema';`;
+
+export const CAIXA_AUDIT_SQL_SCHEMA = `-- ==============================================================================
+-- CAIXA, TURNOS, FECHAMENTOS E AUDITORIA (public.caixa, cash_closures, audit_logs)
+-- ==============================================================================
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+CREATE TABLE IF NOT EXISTS public.cash_closures (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  date TEXT NOT NULL,
+  opening_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_sales NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_cash NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_mpesa NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_emola NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_card NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_credit NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  total_expenses NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  expected_in_drawer NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  actual_in_drawer NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  difference NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  notes TEXT,
+  closed_by TEXT NOT NULL DEFAULT 'Operador',
+  closed_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.cash_shifts (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  operator_id TEXT,
+  operator_name TEXT NOT NULL,
+  initial_cash NUMERIC(14,2) NOT NULL DEFAULT 0.00,
+  final_cash NUMERIC(14,2),
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  opened_at TIMESTAMPTZ DEFAULT NOW(),
+  closed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  action TEXT NOT NULL,
+  category TEXT NOT NULL,
+  details TEXT NOT NULL,
+  user_name TEXT NOT NULL DEFAULT 'Sistema',
+  user_role TEXT DEFAULT 'ADMIN',
+  ip_address TEXT,
+  device TEXT
+);
+
+CREATE TABLE IF NOT EXISTS public.recovery_requests (
+  id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
+  email TEXT NOT NULL,
+  phone TEXT,
+  token TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  used BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant ON public.audit_logs (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_cash_closures_tenant ON public.cash_closures (tenant_id);
+
+ALTER TABLE public.cash_closures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS allow_all_cash_closures ON public.cash_closures;
+CREATE POLICY allow_all_cash_closures ON public.cash_closures FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_cash_shifts ON public.cash_shifts;
+CREATE POLICY allow_all_cash_shifts ON public.cash_shifts FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_audit_logs ON public.audit_logs;
+CREATE POLICY allow_all_audit_logs ON public.audit_logs FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS allow_all_recovery_requests ON public.recovery_requests;
+CREATE POLICY allow_all_recovery_requests ON public.recovery_requests FOR ALL TO public USING (true) WITH CHECK (true);
+GRANT ALL ON public.cash_closures TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.cash_shifts TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.audit_logs TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.recovery_requests TO postgres, authenticated, anon, service_role;
+NOTIFY pgrst, 'reload schema';`;
+
+export const FULL_DATABASE_SCHEMA_SQL =
+  SETTINGS_SQL_SCHEMA +
+  "\n\n" +
+  STAFF_SQL_SCHEMA +
+  "\n\n" +
+  CUSTOMERS_SQL_SCHEMA +
+  "\n\n" +
+  PRODUCTS_SQL_SCHEMA +
+  "\n\n" +
+  SALES_SQL_SCHEMA +
+  "\n\n" +
+  CAIXA_AUDIT_SQL_SCHEMA;

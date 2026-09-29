@@ -1,11 +1,11 @@
 import { Router, Request, Response } from "express";
-import nodemailer from "nodemailer";
 import { emailSendSchema } from "./validation";
 import { requireAuth } from "./authMiddleware";
+import { createActiveSmtpTransporter, getActiveSmtpConfig } from "./smtpService";
 
 export const communicationRouter = Router();
 
-// Transporter Helper
+// Transporter Helper - Usa prioritariamente as credenciais gravadas no Banco de Dados
 function createSmtpTransporter(customConfig?: {
   host?: string;
   port?: number;
@@ -13,22 +13,7 @@ function createSmtpTransporter(customConfig?: {
   pass?: string;
   secure?: boolean;
 }) {
-  const host = customConfig?.host || process.env.SMTP_HOST || "smtp.gmail.com";
-  const port = customConfig?.port || parseInt(process.env.SMTP_PORT || "587", 10);
-  const user = customConfig?.user || process.env.SMTP_USER;
-  const pass = customConfig?.pass || process.env.SMTP_PASS || process.env.SMTP_PASSWORD;
-  const secure = customConfig?.secure !== undefined ? customConfig.secure : (port === 465);
-
-  if (!user || !pass) {
-    return null;
-  }
-
-  return nodemailer.createTransport({
-    host,
-    port,
-    secure,
-    auth: { user, pass }
-  });
+  return createActiveSmtpTransporter(customConfig);
 }
 
 // 1. Send Generic Email
@@ -48,9 +33,11 @@ communicationRouter.post("/email/send", async (req: Request, res: Response) => {
       });
     }
 
-    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const smtpConfig = getActiveSmtpConfig();
+    const fromAddress = smtpConfig.fromEmail || smtpConfig.user || process.env.SMTP_FROM || process.env.SMTP_USER;
+    const senderName = smtpConfig.senderName || "OST Vendas ERP";
     const info = await transporter.sendMail({
-      from: `"OST Vendas ERP" <${fromAddress}>`,
+      from: `"${senderName}" <${fromAddress}>`,
       to,
       subject,
       text: isHtml ? undefined : body,
@@ -81,7 +68,9 @@ communicationRouter.post("/email/dispatch-invoice", async (req: Request, res: Re
       });
     }
 
-    const fromAddress = process.env.SMTP_FROM || process.env.SMTP_USER;
+    const smtpConfig = getActiveSmtpConfig();
+    const fromAddress = smtpConfig.fromEmail || smtpConfig.user || process.env.SMTP_FROM || process.env.SMTP_USER;
+    const senderName = smtpConfig.senderName || "OST Vendas Faturação";
     const attachments = pdfBase64 ? [{
       filename: `Fatura_${invoiceNumber}.pdf`,
       content: pdfBase64.split("base64,")[1] || pdfBase64,
@@ -89,7 +78,7 @@ communicationRouter.post("/email/dispatch-invoice", async (req: Request, res: Re
     }] : [];
 
     await transporter.sendMail({
-      from: `"OST Vendas Faturação" <${fromAddress}>`,
+      from: `"${senderName}" <${fromAddress}>`,
       to,
       subject: `Fatura Fiscal ${invoiceNumber} - OST Vendas`,
       html: `

@@ -8,12 +8,22 @@ let pool: pg.Pool | null = null;
 let dbInstance: any = null;
 
 export const isCloudSqlAvailable = (): boolean => {
+  const dbUrl = process.env.DATABASE_URL;
+  if (
+    dbUrl &&
+    !dbUrl.includes("IP_DO_CLOUDSQL") &&
+    !dbUrl.includes("SENHA") &&
+    !dbUrl.includes("example.com") &&
+    dbUrl.startsWith("postgres")
+  ) {
+    return true;
+  }
   return !!(
-    process.env.DATABASE_URL ||
-    (process.env.SQL_HOST &&
-      process.env.SQL_USER &&
-      process.env.SQL_PASSWORD &&
-      process.env.SQL_DB_NAME)
+    process.env.SQL_HOST &&
+    !process.env.SQL_HOST.includes("IP_DO_CLOUDSQL") &&
+    process.env.SQL_USER &&
+    process.env.SQL_PASSWORD &&
+    process.env.SQL_DB_NAME
   );
 };
 

@@ -77,14 +77,132 @@ export const BackendManager = {
  */
 export const ConnectionService = {
   /**
-   * Valida se a ligação com o Supabase está operacional
+   * Valida se a ligação com o Supabase/PostgreSQL está operacional (suporta opcionalmente DATABASE_URL)
    */
-  async test(): Promise<boolean> {
+  async test(databaseUrl?: string): Promise<boolean> {
     try {
+      if (databaseUrl && databaseUrl.trim().length > 0) {
+        const res = await fetch("/api/database/test-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connectionString: databaseUrl.trim() })
+        });
+        if (res.ok) {
+          const body = await res.json();
+          return Boolean(body.connected);
+        }
+      }
       const latency = await measureSupabaseLatency(SUPABASE_URL, SUPABASE_ANON_KEY);
       return latency.status !== "error";
     } catch {
       return false;
+    }
+  },
+
+  /**
+   * Validação completa de conectividade com Supabase / PostgreSQL retornando latência e tabelas
+   */
+  async validatePostgresConnection(databaseUrl?: string): Promise<{
+    success: boolean;
+    connected: boolean;
+    latencyMs: number;
+    message: string;
+    version?: string;
+    source?: string;
+    tables?: any[];
+    allRequiredTablesExist?: boolean;
+    error?: string;
+  }> {
+    try {
+      const res = await fetch("/api/database/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(databaseUrl && databaseUrl.trim().length > 0 ? { connectionString: databaseUrl.trim() } : {})
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          success: Boolean(data.success),
+          connected: Boolean(data.connected),
+          latencyMs: data.latencyMs || 0,
+          message: data.message || (data.connected ? "Conexão bem-sucedida" : "Falha na conexão"),
+          version: data.version,
+          source: data.source,
+          tables: data.tables || [],
+          allRequiredTablesExist: Boolean(data.allRequiredTablesExist),
+          error: data.error
+        };
+      }
+      return {
+        success: false,
+        connected: false,
+        latencyMs: 0,
+        message: "Erro HTTP ao testar conexão com o servidor PostgreSQL.",
+        error: `Status ${res.status}`
+      };
+    } catch (err: any) {
+      // Fallback para medição via Supabase Client
+      try {
+        const start = Date.now();
+        const latency = await measureSupabaseLatency(SUPABASE_URL, SUPABASE_ANON_KEY);
+        const elapsed = Date.now() - start;
+        const online = latency.status !== "error";
+        return {
+          success: online,
+          connected: online,
+          latencyMs: elapsed,
+          message: online ? "Conexão direta com Supabase operacional." : latency.message,
+          error: online ? undefined : latency.message
+        };
+      } catch {
+        return {
+          success: false,
+          connected: false,
+          latencyMs: 0,
+          message: err.message || "Erro de rede ao validar conexão com PostgreSQL.",
+          error: err.message
+        };
+      }
+    }
+  },
+
+  /**
+   * Executa scripts SQL para criar as tabelas de sistema (produtos, clientes, transações, definições, colaboradores, caixa)
+   */
+  async createSystemTables(
+    databaseUrl?: string,
+    target: "all" | "products" | "customers" | "transactions" | "settings" | "staff" | "suppliers" | "caixa" = "all"
+  ): Promise<{
+    success: boolean;
+    executedTables: string[];
+    logs: string[];
+    error?: string;
+  }> {
+    try {
+      const res = await fetch("/api/database/run-schema-sql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target,
+          config: databaseUrl && databaseUrl.trim().length > 0 ? { connectionString: databaseUrl.trim() } : undefined
+        })
+      });
+      if (res.ok) {
+        return await res.json();
+      }
+      return {
+        success: false,
+        executedTables: [],
+        logs: [`Erro HTTP ${res.status} ao solicitar criação de tabelas.`],
+        error: `HTTP ${res.status}`
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        executedTables: [],
+        logs: [`Falha na requisição: ${err.message}`],
+        error: err.message
+      };
     }
   },
 
@@ -275,27 +393,47 @@ export const CommercialDataService = {
 
   // --- CLIENTES ---
   async fetchCustomers(): Promise<Customer[]> {
-    return await SupabaseSyncService.fetchCustomers();
+    try {
+      return await SupabaseSyncService.fetchCustomers();
+    } catch (err: any) {
+      console.error("[CommercialDataService.fetchCustomers] Erro ao ler clientes:", err);
+      return [];
+    }
   },
 
   async saveCustomer(customer: Customer): Promise<void> {
-    const ok = await SupabaseSyncService.saveCustomer(customer);
-    if (!ok) {
-      throw new Error(`Falha ao gravar cliente "${customer.name}" no PostgreSQL.`);
+    try {
+      const ok = await SupabaseSyncService.saveCustomer(customer);
+      if (!ok) {
+        throw new Error(`Falha ao gravar cliente "${customer.name}" no PostgreSQL.`);
+      }
+    } catch (err: any) {
+      console.error(`[CommercialDataService.saveCustomer] Erro ao gravar cliente "${customer.name}":`, err);
+      throw err;
     }
   },
 
   async saveCustomersBatch(customers: Customer[]): Promise<void> {
-    const ok = await SupabaseSyncService.syncCustomers(customers);
-    if (!ok) {
-      throw new Error("Falha ao salvar lote de clientes no PostgreSQL.");
+    try {
+      const ok = await SupabaseSyncService.syncCustomers(customers);
+      if (!ok) {
+        throw new Error("Falha ao salvar lote de clientes no PostgreSQL.");
+      }
+    } catch (err: any) {
+      console.error("[CommercialDataService.saveCustomersBatch] Erro ao salvar lote de clientes:", err);
+      throw err;
     }
   },
 
   async removeCustomer(customerId: string): Promise<void> {
-    const ok = await SupabaseSyncService.deleteCustomer(customerId);
-    if (!ok) {
-      throw new Error(`Falha ao remover cliente ${customerId} no PostgreSQL.`);
+    try {
+      const ok = await SupabaseSyncService.deleteCustomer(customerId);
+      if (!ok) {
+        throw new Error(`Falha ao remover cliente ${customerId} no PostgreSQL.`);
+      }
+    } catch (err: any) {
+      console.error(`[CommercialDataService.removeCustomer] Erro ao remover cliente ${customerId}:`, err);
+      throw err;
     }
   },
 
@@ -460,13 +598,53 @@ export const CommercialDataService = {
 
   // --- DEFINIÇÕES (SETTINGS) ---
   async fetchSettings(): Promise<SystemSettings | null> {
-    return await SupabaseSyncService.fetchSettings();
+    try {
+      const sbSettings = await SupabaseSyncService.fetchSettings();
+      if (sbSettings) return sbSettings;
+    } catch (e) {
+      console.warn("[CommercialDataService.fetchSettings] Aviso ao ler do Supabase:", e);
+    }
+
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) {
+        const body = await res.json();
+        if (body.settings) return body.settings;
+      }
+    } catch {}
+
+    return null;
   },
 
   async saveSettings(settings: SystemSettings): Promise<void> {
-    const ok = await SupabaseSyncService.saveSettings(settings);
-    if (!ok) {
-      throw new Error("Falha ao salvar configurações no PostgreSQL.");
+    let savedToBackend = false;
+    try {
+      const res = await fetch("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings)
+      });
+      if (res.ok) {
+        savedToBackend = true;
+      }
+    } catch (e) {
+      console.warn("[CommercialDataService.saveSettings] Aviso na API /api/settings:", e);
+    }
+
+    let savedToSupabase = false;
+    try {
+      savedToSupabase = await SupabaseSyncService.saveSettings(settings);
+    } catch (e) {
+      console.warn("[CommercialDataService.saveSettings] Aviso no Supabase:", e);
+    }
+
+    // Persistência local de segurança
+    try {
+      localStorage.setItem("erp_company_settings", JSON.stringify(settings));
+    } catch {}
+
+    if (!savedToBackend && !savedToSupabase) {
+      console.warn("[CommercialDataService.saveSettings] Configurações da empresa guardadas localmente.");
     }
   },
 

@@ -21,7 +21,8 @@ import {
   MessageSquare,
   Filter,
   Gift,
-  Check
+  Check,
+  Edit2
 } from "lucide-react";
 import { sendEmail } from "../lib/gmail";
 import { Customer, UserRole, Transaction, SystemSettings } from "../types";
@@ -84,7 +85,18 @@ function CustomersModule({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [nuit, setNuit] = useState("");
+  const [creditLimit, setCreditLimit] = useState<number | "">("");
   const [localError, setLocalError] = useState("");
+
+  // Customer Editor States
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editNuit, setEditNuit] = useState("");
+  const [editCreditLimit, setEditCreditLimit] = useState<number | "">("");
 
   // SMS Marketing & Loyalty Campaigns states
   const [showSmsPanel, setShowSmsPanel] = useState(false);
@@ -197,11 +209,12 @@ function CustomersModule({
 
     const payload: Customer = {
       id: generateEntityId("cust"),
-      name,
-      phone,
-      email: email || "",
-      address: address || "Indisponível",
-      nuit: "",
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email.trim() || "",
+      address: address.trim() || "Indisponível",
+      nuit: nuit.trim() || "",
+      creditLimit: Number(creditLimit) || 0,
       totalSpent: 0,
       purchaseCount: 0,
       debt: 0,
@@ -227,6 +240,50 @@ function CustomersModule({
     setPhone("");
     setEmail("");
     setAddress("");
+    setNuit("");
+    setCreditLimit("");
+  };
+
+  const handleOpenEditModal = (c: Customer) => {
+    setEditingCustomer(c);
+    setEditName(c.name || "");
+    setEditPhone(c.phone || "");
+    setEditEmail(c.email || "");
+    setEditAddress(c.address || "");
+    setEditNuit(c.nuit || "");
+    setEditCreditLimit((c as any).creditLimit || 0);
+  };
+
+  const handleSaveEditCustomer = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCustomer || !onUpdateCustomer) return;
+    if (!editName.trim() || !editPhone.trim()) {
+      if (onShowToast) onShowToast("Por favor, preencha os campos obrigatórios (Nome e Contacto).", "error");
+      return;
+    }
+
+    const updatedCustomer: Customer = {
+      ...editingCustomer,
+      name: editName.trim(),
+      phone: editPhone.trim(),
+      email: editEmail.trim(),
+      address: editAddress.trim() || "Indisponível",
+      nuit: editNuit.trim(),
+      creditLimit: Number(editCreditLimit) || 0
+    };
+
+    onUpdateCustomer(updatedCustomer);
+    onAddAuditLog(
+      "Atualizar Cliente",
+      "CLIENTES",
+      `Dados cadastrais do cliente '${updatedCustomer.name}' atualizados por ${currentRole}.`
+    );
+
+    if (onShowToast) {
+      onShowToast(`Cliente '${updatedCustomer.name}' atualizado com sucesso!`, "success", "Atualização Concluída");
+    }
+
+    setEditingCustomer(null);
   };
 
   // Delete Customer
@@ -993,14 +1050,14 @@ function CustomersModule({
     <div className="space-y-6">
       
       {/* Sub tabs navigation */}
-      <div className="flex gap-1 border-b border-slate-200/30 pb-px mb-5 flex-wrap">
+      <div className="flex gap-1 border-b border-slate-200/80 pb-px mb-5 flex-wrap">
         <button
           type="button"
           onClick={() => setActiveSubTab("list")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "list"
-              ? "border-amber-500 text-amber-500"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:bg-blue-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <Users className="w-4 h-4" />
@@ -1014,10 +1071,10 @@ function CustomersModule({
             }
             setActiveSubTab("purchases");
           }}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "purchases"
-              ? "border-amber-500 text-amber-500"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:bg-blue-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <ShoppingBag className="w-4 h-4" />
@@ -1026,22 +1083,22 @@ function CustomersModule({
         <button
           type="button"
           onClick={() => setActiveSubTab("debts")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "debts"
-              ? "border-red-500 text-red-600"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-red-600 text-red-600 bg-red-50/30 dark:bg-red-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
-          <AlertCircle className="w-4 h-4" />
+          <AlertCircle className="w-4 h-4 text-red-600" />
           Com Dívidas ({customers.filter(c => c.debt > 0).length})
         </button>
         <button
           type="button"
           onClick={() => setActiveSubTab("register")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "register"
-              ? "border-amber-500 text-amber-500"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:bg-blue-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <Plus className="w-4 h-4" />
@@ -1050,10 +1107,10 @@ function CustomersModule({
         <button
           type="button"
           onClick={() => setActiveSubTab("history")}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "history"
-              ? "border-amber-500 text-amber-500"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:bg-blue-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
           <CheckCircle2 className="w-4 h-4" />
@@ -1065,13 +1122,13 @@ function CustomersModule({
             setActiveSubTab("campaigns");
             setShowSmsPanel(true);
           }}
-          className={`px-4 py-2 text-xs font-bold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
+          className={`px-4 py-2 text-xs font-semibold transition-all border-b-2 flex items-center gap-1.5 cursor-pointer ${
             activeSubTab === "campaigns"
-              ? "border-lime-500 text-lime-600 font-extrabold"
-              : "border-transparent text-slate-400 hover:text-slate-250 hover:border-slate-300"
+              ? "border-blue-600 text-blue-600 bg-blue-50/30 dark:bg-blue-950/20"
+              : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
           }`}
         >
-          <Smartphone className="w-4 h-4 text-lime-600" />
+          <Smartphone className="w-4 h-4" />
           Campanhas SMS ({customers.length})
         </button>
       </div>
@@ -1082,10 +1139,10 @@ function CustomersModule({
           <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center">
             
             {/* KPI quick filtering hooks */}
-            <div className="flex gap-2.5 flex-wrap">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => setFilterType("ALL")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border ${
                   filterType === "ALL"
                     ? "bg-slate-900 border-slate-900 text-white"
                     : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -1096,19 +1153,19 @@ function CustomersModule({
 
               <button
                 onClick={() => setFilterType("VIP")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border flex items-center gap-1.5 ${
                   filterType === "VIP"
-                    ? "bg-amber-500 border-amber-500 text-white"
-                    : "bg-white border-slate-200 text-amber-700 hover:bg-amber-50"
+                    ? "bg-blue-600 border-blue-600 text-white"
+                    : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50"
                 }`}
               >
-                <Star className="w-3.5 h-3.5" />
-                VIP (Recorrentes) ({customers.filter(c => c.purchaseCount >= 10).length})
+                <Star className="w-3.5 h-3.5 text-amber-500" />
+                VIP ({customers.filter(c => c.purchaseCount >= 10).length})
               </button>
 
               <button
                 onClick={() => setActiveSubTab("debts")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border flex items-center gap-1.5 ${
                   activeSubTab === "debts"
                     ? "bg-red-600 border-red-600 text-white"
                     : "bg-white border-slate-200 text-red-600 hover:bg-red-50"
@@ -1120,31 +1177,31 @@ function CustomersModule({
 
               <button
                 onClick={() => setFilterType("INACTIVE")}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer border ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer border ${
                   filterType === "INACTIVE"
-                    ? "bg-slate-500 border-slate-500 text-white"
+                    ? "bg-slate-700 border-slate-700 text-white"
                     : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50"
                 }`}
               >
-                Inativos / Poucos Clientes ({customers.filter(c => c.purchaseCount <= 4).length})
+                Pouco Ativos ({customers.filter(c => c.purchaseCount <= 4).length})
               </button>
             </div>
 
             {/* Action Triggers */}
-            <div className="flex gap-2.5 items-center w-full md:w-auto">
+            <div className="flex gap-2 items-center w-full md:w-auto">
               <button
                 onClick={() => setShowSmsPanel(!showSmsPanel)}
-                className="flex-1 md:flex-initial bg-lime-100 hover:bg-lime-200 py-2 px-3.5 rounded-xl text-xs font-bold text-lime-850 flex items-center justify-center gap-1.5 cursor-pointer transition border border-lime-200"
+                className="flex-1 md:flex-initial bg-white hover:bg-slate-50 border border-slate-200 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition shadow-2xs"
               >
-                <Smartphone className="w-4 h-4 text-lime-700 shrink-0" />
-                Campanhas SMS Marketing
+                <Smartphone className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                Campanhas SMS
               </button>
 
               <button
                 onClick={() => setActiveSubTab("register")}
-                className="flex-1 md:flex-initial bg-orange-500 hover:bg-orange-600 py-2 px-4 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-1.5 shadow-md shadow-orange-500/10 cursor-pointer transition"
+                className="flex-1 md:flex-initial bg-blue-600 hover:bg-blue-700 py-1.5 px-3.5 rounded-lg text-xs font-medium text-white flex items-center justify-center gap-1.5 shadow-xs cursor-pointer transition"
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5" />
                 Cadastrar Cliente
               </button>
             </div>
@@ -1261,6 +1318,13 @@ function CustomersModule({
                                 <ShoppingBag className="w-3 h-3 text-amber-600 shrink-0" />
                                 Compras
                               </button>
+                              <button
+                                onClick={() => handleOpenEditModal(c)}
+                                className="p-1 text-slate-400 hover:text-orange-600 rounded transition cursor-pointer"
+                                title="Editar Cliente"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
                               {hasDebt && (
                                 <button
                                   onClick={() => {
@@ -1356,6 +1420,31 @@ function CustomersModule({
                 onChange={(e) => setAddress(e.target.value)}
                 className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-semibold outline-none focus:border-orange-500 text-slate-850"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">NUIT Fiscal</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 123456789"
+                  value={nuit}
+                  onChange={(e) => setNuit(e.target.value)}
+                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Limite Crédito ({currency})</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  placeholder="Ex: 5000"
+                  value={creditLimit}
+                  onChange={(e) => setCreditLimit(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="w-full bg-slate-55 border border-slate-200 rounded-lg p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
             </div>
 
             <div className="flex gap-2 pt-2">
@@ -1946,6 +2035,110 @@ function CustomersModule({
                       Confirmar Liquidação
                     </>
                   )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edição de Cliente */}
+      {editingCustomer && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 border border-slate-200 shadow-2xl animate-in zoom-in-95 duration-150 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <Edit2 className="w-5 h-5 text-orange-500" />
+                <h3 className="font-bold text-slate-900 text-sm">Editar Cadastro de Cliente</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingCustomer(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditCustomer} className="space-y-3 text-xs">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Nome Completo *</label>
+                <input
+                  type="text"
+                  required
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Contacto Telefónico *</label>
+                <input
+                  type="tel"
+                  required
+                  value={editPhone}
+                  onChange={(e) => setEditPhone(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">E-mail</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Endereço Residencial</label>
+                <input
+                  type="text"
+                  value={editAddress}
+                  onChange={(e) => setEditAddress(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-semibold outline-none focus:border-orange-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">NUIT Fiscal</label>
+                  <input
+                    type="text"
+                    value={editNuit}
+                    onChange={(e) => setEditNuit(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Limite Crédito ({currency})</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="100"
+                    value={editCreditLimit}
+                    onChange={(e) => setEditCreditLimit(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono font-semibold outline-none focus:border-orange-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingCustomer(null)}
+                  className="w-1/2 py-2.5 border border-slate-200 bg-white text-slate-700 font-bold rounded-xl text-xs cursor-pointer hover:bg-slate-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs cursor-pointer shadow-md"
+                >
+                  Salvar Alterações
                 </button>
               </div>
             </form>
