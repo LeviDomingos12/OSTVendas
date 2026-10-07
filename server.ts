@@ -1469,24 +1469,97 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
     }
   });
 
-  // GET: Obter Definições Gerais e Identidade da Empresa (PostgreSQL / Local)
+  // GET: Obter Definições Gerais e Identidade da Empresa (PostgreSQL / Local) - Isolado por Email
   app.get("/api/settings", async (req, res) => {
     try {
-      const SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+      const userEmail = String(
+        req.headers["x-user-email"] || 
+        req.headers["user-email"] || 
+        req.query.userEmail || 
+        req.query.email || 
+        ""
+      ).trim().toLowerCase();
+
+      const userFileName = userEmail ? `settings_${userEmail.replace(/[^a-z0-9]/g, "_")}.json` : "settings.json";
+      const USER_SETTINGS_FILE = path.join(DB_DIR, userFileName);
+      const GLOBAL_SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+
       let stored: any = {};
-      if (fs.existsSync(SETTINGS_FILE)) {
+      if (fs.existsSync(USER_SETTINGS_FILE)) {
         try {
-          stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+          stored = JSON.parse(fs.readFileSync(USER_SETTINGS_FILE, "utf-8"));
+        } catch {}
+      } else if (!userEmail && fs.existsSync(GLOBAL_SETTINGS_FILE)) {
+        try {
+          stored = JSON.parse(fs.readFileSync(GLOBAL_SETTINGS_FILE, "utf-8"));
         } catch {}
       }
 
-      // Se houver conexão PostgreSQL ativa, consulta a tabela public.settings
+      // Se houver conexão PostgreSQL ativa, consulta a tabela public.company_settings isolada por email
       try {
         const pgConfig = getActivePostgresConfig();
         if (pgConfig.source !== "none") {
           const pool = createPgPool(pgConfig);
           const client = await pool.connect();
           try {
+            // Garante que a tabela company_settings existe
+            await client.query(SQL_SCRIPTS.settings);
+
+            if (userEmail) {
+              const csResult = await client.query(
+                "SELECT * FROM public.company_settings WHERE LOWER(TRIM(user_email)) = $1 LIMIT 1;",
+                [userEmail]
+              );
+              if (csResult.rows.length > 0) {
+                const row = csResult.rows[0];
+                const merged = {
+                  ...stored,
+                  companyName: row.company_name,
+                  slogan: row.slogan || "",
+                  companyAddress: row.address,
+                  storeAddress: row.address,
+                  companyNuit: row.tax_id || row.company_nuit || "",
+                  nuit: row.tax_id || row.company_nuit || "",
+                  companyPhone: row.phone,
+                  storeContact: row.phone,
+                  companyEmail: row.email,
+                  storeEmail: row.email,
+                  email: row.email,
+                  currency: row.currency || "MT",
+                  defaultVat: Number(row.vat_percentage ?? row.default_vat ?? 16),
+                  vatDefaultRate: Number(row.vat_percentage ?? row.default_vat ?? 16),
+                  paperSize: row.paper_size || "80MM",
+                  printerAutoCut: row.printer_auto_cut ?? true,
+                  logoUrl: row.logo_url || "",
+                  theme: row.theme || "laranja",
+                  userEmail,
+                  ...(row.val_json || {})
+                };
+                return res.json({ success: true, settings: merged, source: "postgresql_company_settings", userEmail });
+              }
+
+              // Fallback para tabela company_profiles
+              const cpResult = await client.query(
+                "SELECT * FROM public.company_profiles WHERE LOWER(TRIM(email)) = $1 LIMIT 1;",
+                [userEmail]
+              );
+              if (cpResult.rows.length > 0) {
+                const row = cpResult.rows[0];
+                const merged = {
+                  ...stored,
+                  companyName: row.company_name,
+                  companyNuit: row.nuit || "",
+                  nuit: row.nuit || "",
+                  companyAddress: row.address || "",
+                  storeAddress: row.address || "",
+                  logoUrl: row.logo_url || "",
+                  userEmail
+                };
+                return res.json({ success: true, settings: merged, source: "postgresql_company_profiles", userEmail });
+              }
+            }
+
+            // Fallback para tabela settings global caso não haja email específico ainda
             const result = await client.query("SELECT * FROM public.settings WHERE id = 'config' LIMIT 1;");
             if (result.rows.length > 0) {
               const row = result.rows[0];
@@ -1502,7 +1575,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
                 vatDefaultRate: row.vat_percentage || 16,
                 ...(row.val_json || {})
               };
-              return res.json({ success: true, settings: merged, source: "postgresql" });
+              return res.json({ success: true, settings: merged, source: "postgresql", userEmail: userEmail || null });
             }
           } finally {
             client.release();
@@ -1513,21 +1586,33 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         console.warn("[SETTINGS] Aviso ao ler do PostgreSQL:", pgErr.message);
       }
 
-      res.json({ success: true, settings: stored, source: "local_store" });
+      res.json({ success: true, settings: stored, source: "local_store", userEmail: userEmail || null });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
-  // POST: Gravar Definições Gerais e Identidade da Empresa (Nome, NUIT, Endereço, etc.)
+  // POST: Gravar Definições Gerais e Identidade da Empresa com Isolamento Estrito por Email
   app.post("/api/settings", async (req, res) => {
     try {
       const updatedData = req.body || {};
-      const SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+      const userEmail = String(
+        req.headers["x-user-email"] || 
+        req.headers["user-email"] || 
+        updatedData.userEmail || 
+        updatedData.storeEmail || 
+        updatedData.email || 
+        ""
+      ).trim().toLowerCase();
+
+      const userFileName = userEmail ? `settings_${userEmail.replace(/[^a-z0-9]/g, "_")}.json` : "settings.json";
+      const USER_SETTINGS_FILE = path.join(DB_DIR, userFileName);
+      const GLOBAL_SETTINGS_FILE = path.join(DB_DIR, "settings.json");
+
       let stored: any = {};
-      if (fs.existsSync(SETTINGS_FILE)) {
+      if (fs.existsSync(USER_SETTINGS_FILE)) {
         try {
-          stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
+          stored = JSON.parse(fs.readFileSync(USER_SETTINGS_FILE, "utf-8"));
         } catch {
           stored = {};
         }
@@ -1536,15 +1621,19 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
       const merged = {
         ...stored,
         ...updatedData,
+        userEmail: userEmail || stored.userEmail || "",
         updated_at: new Date().toISOString()
       };
 
       if (!fs.existsSync(DB_DIR)) {
         fs.mkdirSync(DB_DIR, { recursive: true });
       }
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+      fs.writeFileSync(USER_SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+      if (!userEmail) {
+        fs.writeFileSync(GLOBAL_SETTINGS_FILE, JSON.stringify(merged, null, 2), "utf-8");
+      }
 
-      // Se houver conexão com o PostgreSQL, sincroniza com public.settings e public.companies
+      // Se houver conexão com o PostgreSQL, sincroniza com public.company_settings isolada por email
       let pgSynced = false;
       try {
         const pgConfig = getActivePostgresConfig();
@@ -1556,6 +1645,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             await client.query(SQL_SCRIPTS.settings);
             
             const companyName = merged.companyName || "OST Comércio Geral, Lda";
+            const slogan = merged.slogan || "";
             const companyAddress = merged.companyAddress || merged.storeAddress || "";
             const companyNuit = merged.companyNuit || merged.nuit || "";
             const companyPhone = merged.companyPhone || merged.storeContact || "";
@@ -1563,7 +1653,91 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             const currency = merged.currency || "MT";
             const vat = merged.defaultVat ?? merged.vatDefaultRate ?? 16;
             const logoUrl = merged.logoUrl || "";
+            const paperSize = merged.paperSize || "80MM";
+            const printerAutoCut = merged.printerAutoCut ?? true;
+            const theme = merged.theme || "laranja";
 
+            if (userEmail) {
+              // Grava na tabela dedicada company_settings isolada pelo email do utilizador
+              await client.query(`
+                INSERT INTO public.company_settings (
+                  user_email, company_name, slogan, tax_id, company_nuit, phone, email, address,
+                  currency, default_vat, vat_percentage, enable_vat, paper_size, printer_auto_cut,
+                  logo_url, theme, val_json, updated_at
+                ) VALUES (
+                  $1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $9, true, $10, $11, $12, $13, $14, NOW()
+                )
+                ON CONFLICT (LOWER(TRIM(user_email))) DO UPDATE SET
+                  company_name = EXCLUDED.company_name,
+                  slogan = EXCLUDED.slogan,
+                  tax_id = EXCLUDED.tax_id,
+                  company_nuit = EXCLUDED.company_nuit,
+                  phone = EXCLUDED.phone,
+                  email = EXCLUDED.email,
+                  address = EXCLUDED.address,
+                  currency = EXCLUDED.currency,
+                  default_vat = EXCLUDED.default_vat,
+                  vat_percentage = EXCLUDED.vat_percentage,
+                  paper_size = EXCLUDED.paper_size,
+                  printer_auto_cut = EXCLUDED.printer_auto_cut,
+                  logo_url = EXCLUDED.logo_url,
+                  theme = EXCLUDED.theme,
+                  val_json = EXCLUDED.val_json,
+                  updated_at = NOW();
+              `, [
+                userEmail,
+                companyName,
+                slogan,
+                companyNuit,
+                companyPhone,
+                companyEmail,
+                companyAddress,
+                currency,
+                vat,
+                paperSize,
+                printerAutoCut,
+                logoUrl,
+                theme,
+                JSON.stringify(merged)
+              ]);
+
+              // Sincroniza também a tabela company_profiles com email como chave única de isolamento
+              await client.query(`
+                INSERT INTO public.company_profiles (
+                  email, company_name, nuit, address, logo_url, updated_at
+                ) VALUES (
+                  $1, $2, $3, $4, $5, NOW()
+                )
+                ON CONFLICT (email) DO UPDATE SET
+                  company_name = EXCLUDED.company_name,
+                  nuit = EXCLUDED.nuit,
+                  address = EXCLUDED.address,
+                  logo_url = EXCLUDED.logo_url,
+                  updated_at = NOW();
+              `, [userEmail, companyName, companyNuit, companyAddress, logoUrl]);
+
+              // Sincroniza também a tabela companies com owner_email
+              const companyId = "comp_" + Buffer.from(userEmail).toString("hex").slice(0, 16);
+              await client.query(`
+                INSERT INTO public.companies (
+                  id, name, owner_uid, owner_email, tax_id, email, phone, address, currency, logo_url, updated_at
+                ) VALUES (
+                  $1, $2, 'auth_user', $3, $4, $5, $6, $7, $8, $9, NOW()
+                )
+                ON CONFLICT (id) DO UPDATE SET
+                  name = EXCLUDED.name,
+                  owner_email = EXCLUDED.owner_email,
+                  tax_id = EXCLUDED.tax_id,
+                  email = EXCLUDED.email,
+                  phone = EXCLUDED.phone,
+                  address = EXCLUDED.address,
+                  currency = EXCLUDED.currency,
+                  logo_url = EXCLUDED.logo_url,
+                  updated_at = NOW();
+              `, [companyId, companyName, userEmail, companyNuit, companyEmail, companyPhone, companyAddress, currency, logoUrl]);
+            }
+
+            // Atualiza também o registro global legacy para compatibilidade retroativa
             await client.query(`
               INSERT INTO public.settings (
                 id, tenant_id, company_name, company_address, company_nuit, company_phone, company_email,
@@ -1584,23 +1758,6 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
                 updated_at = NOW();
             `, [companyName, companyAddress, companyNuit, companyPhone, companyEmail, currency, vat, logoUrl, JSON.stringify(merged)]);
 
-            await client.query(`
-              INSERT INTO public.companies (
-                id, name, owner_uid, tax_id, email, phone, address, currency, logo_url, updated_at
-              ) VALUES (
-                'ost-tenant-001', $1, 'system', $2, $3, $4, $5, $6, $7, NOW()
-              )
-              ON CONFLICT (id) DO UPDATE SET
-                name = EXCLUDED.name,
-                tax_id = EXCLUDED.tax_id,
-                email = EXCLUDED.email,
-                phone = EXCLUDED.phone,
-                address = EXCLUDED.address,
-                currency = EXCLUDED.currency,
-                logo_url = EXCLUDED.logo_url,
-                updated_at = NOW();
-            `, [companyName, companyNuit, companyEmail, companyPhone, companyAddress, currency, logoUrl]);
-
             pgSynced = true;
           } finally {
             client.release();
@@ -1613,12 +1770,189 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
 
       res.json({
         success: true,
-        message: "Dados da empresa e definições gravados com sucesso!",
+        message: "Dados da empresa e definições gravados com sucesso com isolamento por email!",
+        userEmail: userEmail || null,
         pgSynced,
         settings: merged
       });
     } catch (err: any) {
       console.error("[SETTINGS] Erro ao gravar dados da empresa:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET: Obter Perfil da Empresa (company_profiles) isolado por e-mail autenticado
+  app.get("/api/company-profile", async (req, res) => {
+    try {
+      const userEmail = (
+        (req.headers["x-user-email"] as string) ||
+        (req.query.email as string) ||
+        ""
+      ).trim().toLowerCase();
+
+      if (!userEmail) {
+        return res.status(400).json({ success: false, error: "E-mail de utilizador não fornecido para consulta isolada." });
+      }
+
+      // 1. Tenta carregar do PostgreSQL (tabela company_profiles)
+      const pgConfig = getActivePostgresConfig();
+      if (pgConfig.source !== "none") {
+        try {
+          const pool = createPgPool(pgConfig);
+          const client = await pool.connect();
+          try {
+            const result = await client.query(
+              "SELECT * FROM public.company_profiles WHERE LOWER(TRIM(email)) = $1 LIMIT 1;",
+              [userEmail]
+            );
+            if (result.rows.length > 0) {
+              const row = result.rows[0];
+              return res.json({
+                success: true,
+                profile: {
+                  id: row.id,
+                  email: row.email,
+                  company_name: row.company_name,
+                  nuit: row.nuit || "",
+                  address: row.address || "",
+                  logo_url: row.logo_url || "",
+                  created_at: row.created_at,
+                  updated_at: row.updated_at
+                },
+                source: "postgresql_company_profiles"
+              });
+            }
+          } finally {
+            client.release();
+            pool.end().catch(() => {});
+          }
+        } catch (pgErr: any) {
+          console.warn("[COMPANY_PROFILE] Aviso PostgreSQL:", pgErr.message);
+        }
+      }
+
+      // 2. Fallback de ficheiro local isolado por utilizador
+      const safeEmailKey = userEmail.replace(/[^a-z0-9]/gi, "_");
+      const userProfileFile = path.resolve(process.cwd(), `company_profile_${safeEmailKey}.json`);
+      if (fs.existsSync(userProfileFile)) {
+        try {
+          const raw = fs.readFileSync(userProfileFile, "utf-8");
+          const parsed = JSON.parse(raw);
+          return res.json({ success: true, profile: parsed, source: "isolated_file" });
+        } catch {}
+      }
+
+      // Caso não exista ainda registo prévio, retorna null
+      return res.json({ success: true, profile: null, userEmail });
+    } catch (err: any) {
+      console.error("[COMPANY_PROFILE] Erro ao obter perfil:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST: Salvar Perfil da Empresa (company_profiles) isolado por e-mail autenticado
+  app.post("/api/company-profile", async (req, res) => {
+    try {
+      const authHeaderEmail = (req.headers["x-user-email"] as string || "").trim().toLowerCase();
+      const bodyEmail = (req.body?.email as string || "").trim().toLowerCase();
+      const userEmail = authHeaderEmail || bodyEmail;
+
+      if (!userEmail) {
+        return res.status(400).json({ success: false, error: "E-mail autenticado é obrigatório para gravação isolada." });
+      }
+
+      // Proteção de isolamento RLS: Se o cabeçalho veio autenticado, o utilizador só pode editar o seu próprio registo
+      if (authHeaderEmail && bodyEmail && authHeaderEmail !== bodyEmail) {
+        return res.status(403).json({ success: false, error: "Violação de isolamento: você só pode editar o perfil do seu próprio e-mail autenticado." });
+      }
+
+      const {
+        company_name,
+        companyName,
+        nuit,
+        address,
+        logo_url,
+        logoUrl
+      } = req.body;
+
+      const finalCompanyName = (company_name || companyName || "Minha Empresa, Lda").trim();
+      const finalNuit = (nuit || "").trim();
+      const finalAddress = (address || "").trim();
+      const finalLogoUrl = (logo_url || logoUrl || "").trim();
+
+      const profileRecord = {
+        id: req.body.id || `cp_${Buffer.from(userEmail).toString("hex").slice(0, 12)}`,
+        email: userEmail,
+        company_name: finalCompanyName,
+        nuit: finalNuit,
+        address: finalAddress,
+        logo_url: finalLogoUrl,
+        updated_at: new Date().toISOString()
+      };
+
+      // 1. Grava no PostgreSQL com ON CONFLICT (email)
+      let pgSynced = false;
+      const pgConfig = getActivePostgresConfig();
+      if (pgConfig.source !== "none") {
+        try {
+          const pool = createPgPool(pgConfig);
+          const client = await pool.connect();
+          try {
+            await client.query(`
+              INSERT INTO public.company_profiles (
+                email, company_name, nuit, address, logo_url, updated_at
+              ) VALUES (
+                $1, $2, $3, $4, $5, NOW()
+              )
+              ON CONFLICT (email) DO UPDATE SET
+                company_name = EXCLUDED.company_name,
+                nuit = EXCLUDED.nuit,
+                address = EXCLUDED.address,
+                logo_url = EXCLUDED.logo_url,
+                updated_at = NOW();
+            `, [userEmail, finalCompanyName, finalNuit, finalAddress, finalLogoUrl]);
+
+            // Sincroniza também com company_settings para compatibilidade total
+            await client.query(`
+              INSERT INTO public.company_settings (
+                user_email, company_name, nuit, store_address, logo_url, updated_at
+              ) VALUES (
+                $1, $2, $3, $4, $5, NOW()
+              )
+              ON CONFLICT (user_email) DO UPDATE SET
+                company_name = EXCLUDED.company_name,
+                nuit = EXCLUDED.nuit,
+                store_address = EXCLUDED.store_address,
+                logo_url = EXCLUDED.logo_url,
+                updated_at = NOW();
+            `, [userEmail, finalCompanyName, finalNuit, finalAddress, finalLogoUrl]);
+
+            pgSynced = true;
+          } finally {
+            client.release();
+            pool.end().catch(() => {});
+          }
+        } catch (pgErr: any) {
+          console.warn("[COMPANY_PROFILE] Aviso PostgreSQL:", pgErr.message);
+        }
+      }
+
+      // 2. Persiste em ficheiro local isolado por utilizador
+      try {
+        const safeEmailKey = userEmail.replace(/[^a-z0-9]/gi, "_");
+        const userProfileFile = path.resolve(process.cwd(), `company_profile_${safeEmailKey}.json`);
+        fs.writeFileSync(userProfileFile, JSON.stringify(profileRecord, null, 2), "utf-8");
+      } catch {}
+
+      res.json({
+        success: true,
+        message: "Perfil da empresa gravado com sucesso com isolamento na tabela company_profiles!",
+        profile: profileRecord,
+        userEmail,
+        pgSynced
+      });
+    } catch (err: any) {
+      console.error("[COMPANY_PROFILE] Erro ao salvar perfil:", err);
       res.status(500).json({ success: false, error: err.message });
     }
   });

@@ -66,6 +66,7 @@ import { PromoFlyerGenerator } from "./PromoFlyerGenerator";
 import StockThresholdsSettings from "./StockThresholdsSettings";
 import { BulkMarkupModal } from "./stock/BulkMarkupModal";
 import { CommercialDataService } from "../services/dataService";
+import { imageStorageService } from "../services/imageStorageService";
 import { 
   generateEntityId, 
   generateProductCode, 
@@ -1519,6 +1520,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
     };
 
     try {
+      if (imageUrl) {
+        imageStorageService.saveProductImage(payload.id, imageUrl, payload.name).catch(console.warn);
+      }
+
       if (editingProduct) {
         await onUpdateProduct(payload);
         onAddAuditLog(
@@ -4797,16 +4802,63 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                   />
                 </div>
 
-                {/* Image URL input (Optional) */}
-                <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase">URL da Imagem do Produto (Opcional)</label>
-                  <input
-                    type="url"
-                    placeholder="https://exemplo.com/imagem.png"
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none focus:border-orange-500"
-                  />
+                {/* Image URL or Local File Upload */}
+                <div className="space-y-1 md:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">
+                      Imagem do Produto (Carregar Foto ou Link)
+                    </label>
+                    {imageUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setImageUrl("")}
+                        className="text-[9.5px] text-rose-500 hover:underline cursor-pointer"
+                      >
+                        Remover Foto
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <input
+                      type="text"
+                      placeholder="Link da imagem ou carregue abaixo..."
+                      value={imageUrl.startsWith("data:") ? "Foto guardada na memória local" : imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      className="flex-1 bg-white border border-slate-200 rounded-lg p-2 font-semibold outline-none focus:border-orange-500 text-xs"
+                    />
+                    <label className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition shrink-0">
+                      <Upload className="w-3.5 h-3.5" />
+                      Carregar Foto
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            const saved = await imageStorageService.saveImage(file, {
+                              category: "PRODUCT",
+                              name: name ? `Foto ${name}` : file.name,
+                              maxWidth: 1000,
+                              maxHeight: 1000,
+                              quality: 0.85
+                            });
+                            setImageUrl(saved.dataUrl);
+                            if (onShowToast) onShowToast("Foto do produto carregada e otimizada!", "success");
+                          } catch (err) {
+                            console.error(err);
+                            if (onShowToast) onShowToast("Erro ao processar imagem.", "error");
+                          }
+                        }}
+                      />
+                    </label>
+                    {imageUrl && (
+                      <div className="w-9 h-9 rounded-lg border border-slate-200 overflow-hidden bg-slate-50 shrink-0 flex items-center justify-center">
+                        <img src={imageUrl} alt="Prévia" className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Emoji visual selector */}
@@ -5891,10 +5943,10 @@ ${settings?.storeContact ? `Contacto: ${settings.storeContact}` : ""}`;
                     </p>
                   </div>
 
-                  {/* Visual Simulation / Interactive Preview Card */}
+                  {/* Visual Calculation / Interactive Preview Card */}
                   <div className="bg-slate-50 border border-slate-150 p-4.5 rounded-2xl dark:bg-zinc-950/40 dark:border-zinc-850 space-y-3">
                     <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 flex items-center gap-1">
-                      <Info className="w-3.5 h-3.5 text-orange-500" /> Simulação de Prazo de Alerta
+                      <Info className="w-3.5 h-3.5 text-orange-500" /> Cálculo Prático de Prazo de Alerta
                     </h4>
                     
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center">

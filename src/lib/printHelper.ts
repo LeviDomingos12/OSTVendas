@@ -452,6 +452,16 @@ export function printInvoiceHTML(tx: Transaction, settings: SystemSettings) {
                 <span>Total Pago</span>
                 <span style="font-family: 'JetBrains Mono', monospace;">${tx.grandTotal.toLocaleString()} ${currency}</span>
               </div>
+              ${(tx.paymentMethod === "CASH" || tx.amountPaid != null) ? `
+                <div class="summary-row" style="color: #059669; font-weight: 600; margin-top: 4px;">
+                  <span>Valor Entregue (Dinheiro)</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${(tx.amountPaid || tx.grandTotal).toLocaleString()} ${currency}</span>
+                </div>
+                <div class="summary-row" style="color: #0284c7; font-weight: 600;">
+                  <span>Troco Devolvido</span>
+                  <span style="font-family: 'JetBrains Mono', monospace;">${(tx.changeAmount || 0).toLocaleString()} ${currency}</span>
+                </div>
+              ` : ""}
               <div style="text-align: right; margin-top: 4px; font-size: 11px; color: #64748b; font-style: italic;">
                 Método de Pagamento: <strong>${tx.paymentMethod}</strong>
                 ${tx.paymentDetails ? `<br><span style="color: #64748b; font-weight: normal;">(${tx.paymentDetails})</span>` : ""}
@@ -820,6 +830,17 @@ export function printThermal80mmReceipt(tx: Transaction, settings: SystemSetting
             <span>TOTAL PAGO:</span>
             <span>${tx.grandTotal.toLocaleString("pt-MZ")} ${currency}</span>
           </div>
+
+          ${(tx.paymentMethod === "CASH" || tx.amountPaid != null) ? `
+            <div class="summary-row" style="color: #000; font-weight: 600;">
+              <span>RECEBIDO (DINHEIRO):</span>
+              <span>${(tx.amountPaid || tx.grandTotal).toLocaleString("pt-MZ")} ${currency}</span>
+            </div>
+            <div class="summary-row" style="color: #000; font-weight: 600;">
+              <span>TROCO DEVOLVIDO:</span>
+              <span>${(tx.changeAmount || 0).toLocaleString("pt-MZ")} ${currency}</span>
+            </div>
+          ` : ''}
 
           <div class="summary-row" style="margin-top: 4px;">
             <span>MÉTODO:</span>

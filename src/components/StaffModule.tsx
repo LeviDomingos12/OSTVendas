@@ -176,14 +176,6 @@ export default function StaffModule({
     }, 1200);
   };
 
-  const handleSimulateFailure = async () => {
-    try {
-      await authenticatedFetch("/api/force-diagnostic-404-error-for-testing");
-    } catch (e) {
-      // Ignored
-    }
-  };
-
   // Views and filters states for employees
   const [viewMode, setViewMode] = useState<"cards" | "list" | "table">("cards");
   const [searchTerm, setSearchTerm] = useState("");
@@ -327,14 +319,14 @@ export default function StaffModule({
   const [isExportStaffDropdownOpen, setIsExportStaffDropdownOpen] = useState(false);
   const [isExportAuditDropdownOpen, setIsExportAuditDropdownOpen] = useState(false);
 
-  // Database Errors Friendly Translation helper
+  // System Errors Friendly Translation helper
   const translateDatabaseMessage = (details: string | undefined | null): string => {
     const dStr = details || "";
     if (dStr.toLowerCase().includes("permission-denied") || dStr.toLowerCase().includes("permissions") || dStr.toLowerCase().includes("insufficient")) {
-      return "Acesso negado ao recurso solicitado (permissões insuficientes de base de dados).";
+      return "Acesso negado ao recurso solicitado (permissões insuficientes).";
     }
     if (dStr.toLowerCase().includes("unavailable") || dStr.toLowerCase().includes("network")) {
-      return "Banco de dados indisponível temporariamente. Tentando recuperar conexão.";
+      return "Servidor indisponível temporariamente. A tentar restabelecer conexão.";
     }
     return dStr;
   };
@@ -2635,7 +2627,7 @@ export default function StaffModule({
                                 </div>
                                 <div className="leading-relaxed">
                                   <p>Dispositivo / Navegador: {log.device || "Desktop (Chrome)"}</p>
-                                  <p className="mt-1">Base de Dados: PostgreSQL / Cloud SQL</p>
+                                  <p className="mt-1">Servidor: Nuvem Central Segura</p>
                                   <p className="mt-1 text-slate-400">Timestamp ISO: {log.timestamp}</p>
                                   <p className="mt-2 text-rose-400 font-bold">Traceback: {log.details}</p>
                                 </div>
@@ -2675,7 +2667,7 @@ export default function StaffModule({
                   </span>
                 </div>
                 <span className="text-[10px] text-slate-400 block mt-0.5 truncate">
-                  {navigator.onLine ? "Sincronização com Base de Dados ativa" : "Operando com Cache e Banco Local Offline"}
+                  {navigator.onLine ? "Sincronização em Tempo Real Ativa" : "Modo Local Seguro (Offline)"}
                 </span>
               </div>
             </div>
@@ -2746,14 +2738,6 @@ export default function StaffModule({
                   )}
                   {isDiagnosing ? "Executando..." : "Executar Autodiagnóstico"}
                 </button>
-
-                <button
-                  onClick={handleSimulateFailure}
-                  className="w-full bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold py-2.5 px-4 rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer transition"
-                >
-                  <AlertTriangle className="w-4 h-4 text-red-500" />
-                  Simular Falha de API (404)
-                </button>
               </div>
 
               {/* DIAGNOSTIC RESULT STATUS */}
@@ -2773,7 +2757,7 @@ export default function StaffModule({
                       </div>
 
                       <div className="bg-white p-3 rounded-lg border border-slate-200/60 flex flex-col justify-center">
-                        <span className="text-[9px] font-bold text-slate-400 uppercase font-mono">Banco de Dados PostgreSQL</span>
+                        <span className="text-[9px] font-bold text-slate-400 uppercase font-mono">Serviço de Dados Central</span>
                         <span className={`text-xs font-bold mt-1.5 flex items-center gap-1.5 ${
                           diagnosticResult.db === "ok" ? "text-emerald-600" : "text-red-600"
                         }`}>
@@ -2784,7 +2768,7 @@ export default function StaffModule({
                     </div>
                   ) : (
                     <div className="text-center py-6 text-slate-400 italic text-xs font-medium">
-                      Execute o autodiagnóstico para testar o status de comunicação da API e banco de dados.
+                      Execute o diagnóstico para testar o estado da comunicação com os serviços centrais.
                     </div>
                   )}
                 </div>
@@ -2868,7 +2852,7 @@ export default function StaffModule({
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-slate-700">
                                   <div className="space-y-1">
                                     <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Origem / Rota</span>
-                                    <span className="font-mono text-slate-800 block text-[11px] break-all">{log.details.match(/https?:\/\/[^\s]+/)?.[0] || "API interna / PostgreSQL"}</span>
+                                    <span className="font-mono text-slate-800 block text-[11px] break-all">{log.details.match(/https?:\/\/[^\s]+/)?.[0] || "Serviço Interno Central"}</span>
                                   </div>
                                   <div className="space-y-1">
                                     <span className="text-[10px] font-bold text-slate-400 uppercase block font-mono">Identificador Único</span>

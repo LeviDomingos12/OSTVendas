@@ -26,6 +26,8 @@ import { exportCashbookPdf, exportSingleClosurePdf } from "./cash/cashPdfService
 import CashAnalyticalCharts from "./CashAnalyticalCharts";
 import { DENOMINATIONS } from "./DenominationCounter";
 
+import { ActiveCashShift } from "../services/cashShiftService";
+
 interface CashRegisterModuleProps {
   cashFlow: CashFlowEntry[];
   transactions: Transaction[];
@@ -39,6 +41,9 @@ interface CashRegisterModuleProps {
   settings?: SystemSettings;
   theme?: string;
   onShowToast?: (msg: string, type?: "success" | "error" | "warning" | "info") => void;
+  activeShift?: ActiveCashShift | null;
+  onOpenShift?: (floatVal: number, supervisor: string, notes: string, registerId?: string) => Promise<void> | void;
+  onCloseShift?: (physVal: number, supervisor: string, notes: string, denominations?: Record<string, number>) => Promise<void> | void;
 }
 
 function CashRegisterModule({
@@ -53,16 +58,24 @@ function CashRegisterModule({
   currency = "MT",
   settings = {} as SystemSettings,
   theme = "light",
-  onShowToast
+  onShowToast,
+  activeShift,
+  onOpenShift,
+  onCloseShift
 }: CashRegisterModuleProps) {
   // Main Module Tab Navigation
   const [activeTab, setActiveTab] = useState<"dashboard" | "cashbook" | "closures" | "analytics">("dashboard");
 
-  // Shift Status & Float (strictly in-memory, loaded directly from PostgreSQL/Supabase)
-  const [shiftStatus, setShiftStatus] = useState<"OPEN" | "CLOSED">("CLOSED");
-  const [openingBalance, setOpeningBalance] = useState<number>(0);
-  const [shiftOpenedAt, setShiftOpenedAt] = useState<string>("");
-  const [shiftOpenedBy, setShiftOpenedBy] = useState<string>("");
+  // Shift Status & Float (strictly in-memory, loaded directly from PostgreSQL/Supabase or prop)
+  const [internalShiftStatus, setInternalShiftStatus] = useState<"OPEN" | "CLOSED">("CLOSED");
+  const [internalOpeningBalance, setInternalOpeningBalance] = useState<number>(0);
+  const [internalShiftOpenedAt, setInternalShiftOpenedAt] = useState<string>("");
+  const [internalShiftOpenedBy, setInternalShiftOpenedBy] = useState<string>("");
+
+  const shiftStatus = activeShift !== undefined ? (activeShift ? activeShift.status : "CLOSED") : internalShiftStatus;
+  const openingBalance = activeShift !== undefined ? (activeShift ? activeShift.openingBalance : 0) : internalOpeningBalance;
+  const shiftOpenedAt = activeShift !== undefined ? (activeShift ? activeShift.openedAt : "") : internalShiftOpenedAt;
+  const shiftOpenedBy = activeShift !== undefined ? (activeShift ? activeShift.openedBy : activeUsername) : internalShiftOpenedBy;
 
   // Closures History State (strictly in-memory, loaded directly from PostgreSQL/Supabase)
   const [closuresHistory, setClosuresHistory] = useState<CashClosure[]>([]);
@@ -74,10 +87,10 @@ function CashRegisterModule({
     // Load active shift status from PostgreSQL
     CommercialDataService.fetchActiveCashShift().then((shift) => {
       if (isMounted && shift) {
-        setShiftStatus(shift.status);
-        setOpeningBalance(shift.openingBalance || 0);
-        setShiftOpenedAt(shift.openedAt || "");
-        setShiftOpenedBy(shift.openedBy || activeUsername);
+        setInternalShiftStatus(shift.status);
+        setInternalOpeningBalance(shift.openingBalance || 0);
+        setInternalShiftOpenedAt(shift.openedAt || "");
+        setInternalShiftOpenedBy(shift.openedBy || activeUsername);
       }
     }).catch(err => {
       console.warn("[CAIXA] Erro ao carregar turno ativo do PostgreSQL:", err);
@@ -146,13 +159,40 @@ function CashRegisterModule({
     setDenomCounts(empty);
   };
 
+  // Date helpers - timezone-safe formatting
+  const formatLocalDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const dateSplit = (rawDate: any): string => {
+    if (!rawDate) return "";
+    if (typeof rawDate === "string") {
+      const cleaned = rawDate.includes(" ") && !rawDate.includes("T") 
+        ? rawDate.replace(" ", "T") 
+        : rawDate;
+      const d = new Date(cleaned);
+      if (!isNaN(d.getTime())) return formatLocalDate(d);
+      const match = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+      return rawDate.split("T")[0].split(" ")[0];
+    }
+    try {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) return formatLocalDate(d);
+    } catch {}
+    return "";
+  };
+
   // Date Range for Cashbook
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().split("T")[0];
+    return formatLocalDate(d);
   });
-  const [endDate, setEndDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [endDate, setEndDate] = useState(() => formatLocalDate(new Date()));
 
   // Modals Visibility
   const [showOpenModal, setShowOpenModal] = useState(false);
@@ -167,7 +207,8 @@ function CashRegisterModule({
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.timestamp) return false;
-      const d = t.timestamp.split("T")[0];
+      if (t.status === "CANCELLED" || (t as any).status === "REFUNDED") return false;
+      const d = dateSplit(t.timestamp);
       return d >= startDate && d <= endDate;
     });
   }, [transactions, startDate, endDate]);
@@ -176,7 +217,7 @@ function CashRegisterModule({
   const filteredCashFlow = useMemo(() => {
     return cashFlow.filter(f => {
       if (!f.timestamp) return false;
-      const d = f.timestamp.split("T")[0];
+      const d = dateSplit(f.timestamp);
       return d >= startDate && d <= endDate;
     });
   }, [cashFlow, startDate, endDate]);
@@ -191,13 +232,15 @@ function CashRegisterModule({
     let transferSales = 0;
 
     filteredTransactions.forEach(t => {
-      if ((t.status as string) === "CANCELLED") return;
+      if ((t.status as string) === "CANCELLED" || (t as any).status === "REFUNDED") return;
       const amt = Number(t.grandTotal || 0);
-      if (t.paymentMethod === "CASH") cashSales += amt;
-      else if (t.paymentMethod === "MPESA") mpesaSales += amt;
-      else if (t.paymentMethod === "EMOLA") emolaSales += amt;
-      else if (t.paymentMethod === "CARD") posCardSales += amt;
-      else if (t.paymentMethod === "TRANSFER") transferSales += amt;
+      const m = (t.paymentMethod || "").toUpperCase();
+      if (m === "CASH" || m.includes("DINHEIRO")) cashSales += amt;
+      else if (m.includes("MPESA") || m.includes("M-PESA")) mpesaSales += amt;
+      else if (m.includes("EMOLA") || m.includes("E-MOLA")) emolaSales += amt;
+      else if (m.includes("CARD") || m.includes("POS") || m.includes("CARTAO") || m.includes("CARTÃO")) posCardSales += amt;
+      else if (m.includes("TRANSFER") || m.includes("BANCO")) transferSales += amt;
+      else cashSales += amt;
     });
 
     const digitalSales = mpesaSales + emolaSales + posCardSales + transferSales;
@@ -212,6 +255,10 @@ function CashRegisterModule({
     let quebras = 0;
 
     filteredCashFlow.forEach(f => {
+      // Ignorar lançamentos de venda e troco vinculados (já consolidados em cashSales)
+      if (f.category === "RECEBIMENTO_VENDA" || f.id.startsWith("cf-pay-") || f.id.startsWith("cf-sale-")) return;
+      if (f.category === "TROCO_DEVOLVIDO" || f.id.startsWith("cf-troco-")) return;
+
       const amt = Number(f.amount || 0);
       const r = (f.reason || "").toLowerCase();
       if (f.type === "REINFORCEMENT") {
@@ -344,11 +391,16 @@ function CashRegisterModule({
 
   // Handlers for Operational Actions
   const handleOpenShift = useCallback((floatVal: number, supervisor: string, notes: string) => {
-    setOpeningBalance(floatVal);
-    setShiftStatus("OPEN");
+    if (onOpenShift) {
+      onOpenShift(floatVal, supervisor, notes, "POS-01");
+      return;
+    }
+
+    setInternalOpeningBalance(floatVal);
+    setInternalShiftStatus("OPEN");
     const now = new Date().toISOString();
-    setShiftOpenedAt(now);
-    setShiftOpenedBy(activeUsername);
+    setInternalShiftOpenedAt(now);
+    setInternalShiftOpenedBy(activeUsername);
 
     // Persist active shift in Supabase
     CommercialDataService.saveActiveCashShift({
@@ -366,9 +418,18 @@ function CashRegisterModule({
       `Turno aberto por ${activeUsername} com fundo inicial de ${floatVal.toLocaleString()} ${currency}. Homologado por: ${supervisor}. Obs: ${notes || "N/A"}`
     );
     onShowToast?.("Turno de caixa aberto com sucesso!", "success");
-  }, [activeUsername, currency, onAddAuditLog, onShowToast]);
+  }, [activeUsername, currency, onAddAuditLog, onShowToast, onOpenShift]);
 
-  const handleCloseShift = useCallback((physVal: number, supervisor: string, notes: string) => {
+  const handleCloseShift = useCallback(async (physVal: number, supervisor: string, notes: string) => {
+    if (onCloseShift) {
+      await onCloseShift(physVal, supervisor, notes, denomCounts);
+      const closures = await CommercialDataService.fetchCashClosures();
+      if (closures && closures.length > 0) {
+        setClosuresHistory(closures);
+      }
+      return;
+    }
+
     const diff = physVal - cashMetrics.theoreticalTotal;
     const now = new Date().toISOString();
 
@@ -404,7 +465,7 @@ function CashRegisterModule({
     };
 
     setClosuresHistory(prev => [newClosure, ...prev]);
-    setShiftStatus("CLOSED");
+    setInternalShiftStatus("CLOSED");
 
     // Persist closure and shift status to Supabase
     CommercialDataService.saveCashClosure(newClosure);
@@ -426,7 +487,7 @@ function CashRegisterModule({
     // Auto-generate closing document PDF
     exportSingleClosurePdf(newClosure, currency, settings);
     onShowToast?.(`Caixa fechado com sucesso! Desvio: ${diff.toLocaleString()} ${currency}`, diff === 0 ? "success" : "warning");
-  }, [cashMetrics, openingBalance, shiftOpenedAt, shiftOpenedBy, activeUsername, currency, settings, onAddAuditLog, onShowToast]);
+  }, [cashMetrics, openingBalance, shiftOpenedAt, shiftOpenedBy, activeUsername, currency, settings, onAddAuditLog, onShowToast, onCloseShift, denomCounts]);
 
   const handleSangria = useCallback((amt: number, dest: string, reason: string, supervisor: string) => {
     const entry: CashFlowEntry = {
@@ -472,7 +533,7 @@ function CashRegisterModule({
   }, [activeUsername, currency, onAddCashFlowEntry, onAddAuditLog, onShowToast]);
 
   const handleAdjustOpeningBalance = useCallback((newFloat: number, reason: string, supervisor: string) => {
-    setOpeningBalance(newFloat);
+    setInternalOpeningBalance(newFloat);
     
     if (shiftStatus === "OPEN") {
       CommercialDataService.saveActiveCashShift({

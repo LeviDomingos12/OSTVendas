@@ -27,9 +27,10 @@ interface ProfitMarginWidgetProps {
   currency: string;
   selectedDateStr: string;
   isToday: boolean;
+  timeScope?: "TODAY" | "YESTERDAY" | "LAST_7" | "THIS_MONTH";
 }
 
-export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
+export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = React.memo(({
   dailySales,
   dailyCostOfSales,
   dailyProfit,
@@ -42,10 +43,52 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
   marginPointsDiff,
   currency,
   selectedDateStr,
-  isToday
+  isToday,
+  timeScope = "TODAY"
 }) => {
   const isPositiveGrowth = profitGrowthRate >= 0;
   const isPositiveMarginDiff = marginPointsDiff >= 0;
+
+  // Adaptive labels according to the selected timeScope
+  const scopeTitle = timeScope === "THIS_MONTH"
+    ? "Margem de Lucro Mensal"
+    : timeScope === "LAST_7"
+    ? "Margem de Lucro (7 Dias)"
+    : timeScope === "YESTERDAY"
+    ? "Margem de Lucro (Ontem)"
+    : "Margem de Lucro Diária";
+
+  const scopeSubtitle = timeScope === "THIS_MONTH"
+    ? "Mês Atual"
+    : timeScope === "LAST_7"
+    ? "Últimos 7 Dias"
+    : timeScope === "YESTERDAY"
+    ? "Ontem"
+    : (isToday ? "Hoje" : new Date(selectedDateStr).toLocaleDateString("pt-MZ"));
+
+  const comparisonLabel = timeScope === "THIS_MONTH"
+    ? "vs mês anterior"
+    : timeScope === "LAST_7"
+    ? "vs 7 dias anteriores"
+    : "vs dia anterior";
+
+  const comparisonDetail = timeScope === "THIS_MONTH"
+    ? `vs mês anterior (${yesterdayProfitMarginPercent.toFixed(1)}%)`
+    : timeScope === "LAST_7"
+    ? `vs período anterior (${yesterdayProfitMarginPercent.toFixed(1)}%)`
+    : `vs ontem (${yesterdayProfitMarginPercent.toFixed(1)}%)`;
+
+  const profitCardLabel = timeScope === "THIS_MONTH"
+    ? "Lucro Mensal Líquido"
+    : timeScope === "LAST_7"
+    ? "Lucro Líquido (7 Dias)"
+    : "Lucro Diário Líquido";
+
+  const prevPeriodLabel = timeScope === "THIS_MONTH"
+    ? "Mês anterior"
+    : timeScope === "LAST_7"
+    ? "Período anterior"
+    : "Ontem";
 
   // Margin classification
   const marginStatus = dailyProfitMarginPercent >= 35 
@@ -82,15 +125,15 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
               </span>
             </div>
             <h3 className="text-sm font-extrabold text-slate-800 mt-0.5 flex items-center gap-1.5">
-              Margem de Lucro Diária
+              {scopeTitle}
               <span className="text-[11px] font-normal text-slate-400">
-                ({isToday ? "Hoje" : new Date(selectedDateStr).toLocaleDateString("pt-MZ")})
+                ({scopeSubtitle})
               </span>
             </h3>
           </div>
         </div>
 
-        {/* Variation Badge vs Yesterday */}
+        {/* Variation Badge vs Previous Period */}
         <div className="flex items-center gap-2">
           <div 
             className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-black tracking-tight border shadow-xs ${
@@ -98,7 +141,7 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
                 ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
                 : "bg-rose-50 text-rose-700 border-rose-200"
             }`}
-            title={`Lucro Diário: ${dailyProfit.toLocaleString()} ${currency} vs ${yesterdayProfit.toLocaleString()} ${currency} no dia anterior`}
+            title={`Lucro Atual: ${dailyProfit.toLocaleString()} ${currency} vs ${yesterdayProfit.toLocaleString()} ${currency} (${prevPeriodLabel.toLowerCase()})`}
           >
             {isPositiveGrowth ? (
               <TrendingUp className="w-3.5 h-3.5" />
@@ -108,7 +151,7 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
             <span>
               {isPositiveGrowth ? "+" : ""}{profitGrowthRate.toFixed(1)}%
             </span>
-            <span className="text-[10px] font-bold opacity-75 font-sans">vs dia anterior</span>
+            <span className="text-[10px] font-bold opacity-75 font-sans">{comparisonLabel}</span>
           </div>
         </div>
       </div>
@@ -130,7 +173,7 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
               isPositiveMarginDiff ? "text-emerald-600" : "text-rose-600"
             }`}>
               {isPositiveMarginDiff ? <ArrowUpRight className="w-3 h-3 inline" /> : <ArrowDownRight className="w-3 h-3 inline" />}
-              {isPositiveMarginDiff ? "+" : ""}{marginPointsDiff.toFixed(1)} pp vs ontem ({yesterdayProfitMarginPercent.toFixed(1)}%)
+              {isPositiveMarginDiff ? "+" : ""}{marginPointsDiff.toFixed(1)} pp {comparisonDetail}
             </span>
           </div>
           {/* Visual Mini Progress Bar */}
@@ -144,10 +187,10 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
           </div>
         </div>
 
-        {/* Metric 2: Daily Net Profit (Vendas - Custo) */}
+        {/* Metric 2: Net Profit (Vendas - Custo) */}
         <div className="bg-slate-50/70 p-3.5 rounded-xl border border-slate-100/80 flex flex-col justify-between">
           <div className="flex items-center justify-between text-slate-500">
-            <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">Lucro Diário Líquido</span>
+            <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wide">{profitCardLabel}</span>
             <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
           </div>
           <div className="mt-2">
@@ -155,7 +198,7 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
               +{dailyProfit.toLocaleString()} <span className="text-xs font-mono font-medium text-slate-400">{currency}</span>
             </span>
             <p className="text-[10px] text-slate-500 font-mono mt-0.5">
-              Ontem: {yesterdayProfit.toLocaleString()} {currency}
+              {prevPeriodLabel}: {yesterdayProfit.toLocaleString()} {currency}
             </p>
           </div>
         </div>
@@ -185,4 +228,4 @@ export const ProfitMarginWidget: React.FC<ProfitMarginWidgetProps> = ({
       </div>
     </motion.div>
   );
-};
+});

@@ -18,7 +18,8 @@ import {
   SystemSettings, 
   UserRole, 
   CashClosure,
-  SupplierOrder 
+  SupplierOrder,
+  CompanyProfile 
 } from "../types";
 import { generateEntityId } from "../lib/deterministic";
 import { authenticatedFetch } from "../lib/apiClient";
@@ -2669,12 +2670,96 @@ export const SupabaseSyncService = {
     }
   },
 
-  // --- DEFINIÇÕES DO SISTEMA (SETTINGS) ---
-  async fetchSettings(): Promise<SystemSettings | null> {
+  // --- DEFINIÇÕES DO SISTEMA E EMPRESA (SETTINGS & COMPANY SETTINGS) ---
+  async fetchSettings(userEmail?: string): Promise<SystemSettings | null> {
     const client = getSupabaseClient();
     if (!client) return null;
 
     try {
+      // 1. Tenta carregar dados isolados da tabela dedicada company_settings para o email do utilizador
+      const cleanEmail = (userEmail || "").trim().toLowerCase();
+      if (cleanEmail) {
+        try {
+          const { data: csData } = await client
+            .from("company_settings")
+            .select("*")
+            .ilike("user_email", cleanEmail)
+            .maybeSingle();
+
+          if (csData) {
+            return {
+              companyName: csData.company_name,
+              slogan: csData.slogan || "",
+              companyAddress: csData.address,
+              storeAddress: csData.address,
+              companyNuit: csData.tax_id || csData.company_nuit || "",
+              nuit: csData.tax_id || csData.company_nuit || "",
+              companyPhone: csData.phone,
+              storeContact: csData.phone,
+              companyEmail: csData.email,
+              storeEmail: csData.email,
+              email: csData.email,
+              receiptFooterMessage: csData.receipt_footer_message || csData.slogan || "",
+              enableVat: csData.enable_vat ?? true,
+              vatPercentage: Number(csData.vat_percentage || 16),
+              vatDefaultRate: Number(csData.vat_percentage || 16),
+              defaultVat: Number(csData.vat_percentage || 16),
+              currency: csData.currency || "MT",
+              lowStockThreshold: 5,
+              smsStockThreshold: 5,
+              defaultPrinter: "thermal_80mm",
+              printerName: "thermal_80mm",
+              paperSize: csData.paper_size || "80MM",
+              printerAutoCut: csData.printer_auto_cut ?? true,
+              cloudBackupEnabled: true,
+              backupFrequency: "daily",
+              backupTime: "18:00",
+              logoUrl: csData.logo_url || "",
+              theme: csData.theme || "laranja",
+              autoBackup: true,
+              smsGateway: "",
+              userEmail: cleanEmail,
+              ...(csData.val_json || {})
+            } as SystemSettings;
+          }
+
+          // Fallback: consulta a tabela company_profiles
+          const { data: cpData } = await client
+            .from("company_profiles")
+            .select("*")
+            .ilike("email", cleanEmail)
+            .maybeSingle();
+
+          if (cpData) {
+            return {
+              companyName: cpData.company_name,
+              companyNuit: cpData.nuit || "",
+              nuit: cpData.nuit || "",
+              storeAddress: cpData.address || "",
+              companyAddress: cpData.address || "",
+              logoUrl: cpData.logo_url || "",
+              userEmail: cleanEmail,
+              storeEmail: cleanEmail,
+              email: cleanEmail,
+              currency: "MT",
+              defaultVat: 16,
+              vatDefaultRate: 16,
+              paperSize: "80MM",
+              printerAutoCut: true,
+              theme: "laranja",
+              cloudBackupEnabled: true,
+              backupFrequency: "daily",
+              autoBackup: true,
+              smsGateway: "",
+              smtpServer: ""
+            } as unknown as SystemSettings;
+          }
+        } catch (csFetchErr) {
+          console.warn("[SupabaseSyncService.fetchSettings] Aviso ao buscar company_settings/company_profiles:", csFetchErr);
+        }
+      }
+
+      // 2. Fallback para tabela settings legacy por tenant/config global
       const { data, error } = await client
         .from("settings")
         .select("*")
@@ -2725,11 +2810,73 @@ export const SupabaseSyncService = {
     }
   },
 
-  async saveSettings(settings: SystemSettings): Promise<boolean> {
+  async saveSettings(settings: SystemSettings, userEmail?: string): Promise<boolean> {
     const client = getSupabaseClient();
     if (!client) return false;
 
     try {
+      const cleanEmail = (userEmail || settings.email || settings.storeEmail || "").trim().toLowerCase();
+
+      // 1. Grava na tabela dedicada company_settings com isolamento por email
+      if (cleanEmail) {
+        try {
+          await client.from("company_settings").upsert({
+            user_email: cleanEmail,
+            company_name: settings.companyName,
+            slogan: settings.slogan || "",
+            tax_id: settings.companyNuit || settings.nuit || "",
+            company_nuit: settings.companyNuit || settings.nuit || "",
+            phone: (settings as any).companyPhone || settings.storeContact || "",
+            email: settings.storeEmail || settings.email || "",
+            address: settings.companyAddress || settings.storeAddress || "",
+            currency: settings.currency || "MT",
+            vat_percentage: settings.defaultVat ?? settings.vatDefaultRate ?? 16,
+            default_vat: settings.defaultVat ?? settings.vatDefaultRate ?? 16,
+            enable_vat: (settings as any).enableVat ?? true,
+            receipt_footer_message: (settings as any).receiptFooterMessage || settings.slogan || "",
+            paper_size: settings.paperSize || "80MM",
+            printer_auto_cut: settings.printerAutoCut ?? true,
+            logo_url: settings.logoUrl || "",
+            theme: settings.theme || "laranja",
+            val_json: settings,
+            updated_at: new Date().toISOString()
+          }, { onConflict: "user_email" });
+
+          // Sincroniza também a tabela company_profiles com email como chave única de isolamento
+          try {
+            await client.from("company_profiles").upsert({
+              email: cleanEmail,
+              company_name: settings.companyName || "OST Comércio Geral, Lda",
+              nuit: settings.companyNuit || settings.nuit || "",
+              address: settings.companyAddress || settings.storeAddress || "",
+              logo_url: settings.logoUrl || "",
+              updated_at: new Date().toISOString()
+            }, { onConflict: "email" });
+          } catch (cpErr) {
+            console.warn("[SupabaseSyncService.saveSettings] Aviso em company_profiles:", cpErr);
+          }
+
+          // Sincroniza também a tabela companies com owner_email
+          const companyId = "comp_" + cleanEmail.replace(/[^a-z0-9]/g, "").slice(0, 16);
+          await client.from("companies").upsert({
+            id: companyId,
+            name: settings.companyName || "OST Comércio Geral, Lda",
+            owner_uid: "auth_user",
+            owner_email: cleanEmail,
+            tax_id: settings.companyNuit || settings.nuit || "",
+            email: settings.email || settings.storeEmail || "",
+            phone: (settings as any).companyPhone || settings.storeContact || "",
+            address: settings.companyAddress || settings.storeAddress || "",
+            currency: settings.currency || "MT",
+            logo_url: settings.logoUrl || "",
+            updated_at: new Date().toISOString()
+          }, { onConflict: "id" });
+        } catch (csErr) {
+          console.warn("[SupabaseSyncService.saveSettings] Aviso ao gravar em company_settings:", csErr);
+        }
+      }
+
+      // 2. Grava também no registro global settings para retrocompatibilidade
       const tenantId = getSupabaseConfig().tenantId;
       const record = {
         id: "config",
@@ -2767,24 +2914,77 @@ export const SupabaseSyncService = {
         console.warn("[SupabaseSyncService.saveSettings] Aviso do Supabase ao salvar 'settings':", error.message);
       }
 
-      // Sincroniza também com a tabela companies se disponível
-      try {
-        await client.from("companies").upsert({
-          id: tenantId || "ost-tenant-001",
-          name: settings.companyName || "OST Comércio Geral, Lda",
-          tax_id: settings.companyNuit || settings.nuit || "",
-          email: settings.email || settings.storeEmail || "",
-          phone: (settings as any).companyPhone || settings.storeContact || "",
-          address: settings.companyAddress || settings.storeAddress || "",
-          currency: settings.currency || "MT",
-          logo_url: settings.logoUrl || "",
-          updated_at: new Date().toISOString()
-        }, { onConflict: "id" });
-      } catch {}
-
       return !error;
     } catch (err: any) {
       console.warn("[SupabaseSyncService.saveSettings] Exceção ao salvar definições:", err?.message);
+      return false;
+    }
+  },
+
+  // --- PERFIL DE EMPRESA ISOLADO POR EMAIL (company_profiles) ---
+  async fetchCompanyProfile(email: string): Promise<CompanyProfile | null> {
+    const client = getSupabaseClient();
+    if (!client) return null;
+    const cleanEmail = (email || "").trim().toLowerCase();
+    if (!cleanEmail) return null;
+
+    try {
+      const { data, error } = await client
+        .from("company_profiles")
+        .select("*")
+        .eq("email", cleanEmail)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("[SupabaseSyncService.fetchCompanyProfile] Aviso na consulta:", error.message);
+        return null;
+      }
+
+      if (!data) return null;
+
+      return {
+        id: data.id,
+        email: data.email,
+        company_name: data.company_name,
+        nuit: data.nuit || "",
+        address: data.address || "",
+        logo_url: data.logo_url || "",
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      };
+    } catch (e: any) {
+      console.warn("[SupabaseSyncService.fetchCompanyProfile] Erro ao buscar company_profiles:", e?.message);
+      return null;
+    }
+  },
+
+  async saveCompanyProfile(profile: Partial<CompanyProfile>, email: string): Promise<boolean> {
+    const client = getSupabaseClient();
+    if (!client) return false;
+    const cleanEmail = (email || profile.email || "").trim().toLowerCase();
+    if (!cleanEmail) return false;
+
+    try {
+      const record = {
+        email: cleanEmail,
+        company_name: profile.company_name?.trim() || "Minha Empresa, Lda",
+        nuit: profile.nuit?.trim() || "",
+        address: profile.address?.trim() || "",
+        logo_url: profile.logo_url || "",
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await client
+        .from("company_profiles")
+        .upsert(record, { onConflict: "email" });
+
+      if (error) {
+        console.warn("[SupabaseSyncService.saveCompanyProfile] Aviso do Supabase:", error.message);
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.warn("[SupabaseSyncService.saveCompanyProfile] Exceção ao gravar company_profiles:", e?.message);
       return false;
     }
   },

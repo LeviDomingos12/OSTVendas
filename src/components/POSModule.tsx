@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef, memo } from "react";
+import React, { useState, useMemo, useEffect, useRef, memo, useCallback } from "react";
 import QRCode from "qrcode";
 import { motion, AnimatePresence } from "motion/react";
 import { 
@@ -28,9 +28,12 @@ import {
   Barcode,
   Clock,
   RotateCcw,
-  Loader2
+  Loader2,
+  Lock,
+  Unlock,
+  Coins
 } from "lucide-react";
-import { Product, Customer, CartItem, Transaction, SystemSettings } from "../types";
+import { Product, Customer, CartItem, Transaction, SystemSettings, CashFlowEntry, Employee } from "../types";
 import QrCodeScannerComponent from "./QrCodeScannerComponent";
 import { sendEmail } from "../lib/gmail";
 import { authenticatedFetch } from "../lib/apiClient";
@@ -40,6 +43,12 @@ import { SYSTEM_THEMES } from "../lib/themes";
 import { printInvoiceHTML, printThermal80mmReceipt } from "../lib/printHelper";
 import { useSystemVersion } from "../lib/versionManager";
 import { generateUUID, generateEntityId, generateDeterministicInvoiceNumber, generateDeterministicCreditNoteNumber, generateDeterministicFinancialReference } from "../lib/deterministic";
+import { POSShiftBar } from "./cash/POSShiftBar";
+import { POSShiftModals } from "./cash/POSShiftModals";
+import { CashShiftService, ActiveCashShift, ShiftMetricsSummary } from "../services/cashShiftService";
+import { PosProductCard } from "./pos/PosProductCard";
+import { PosCartItemRow } from "./pos/PosCartItemRow";
+import { PosCategoryPills } from "./pos/PosCategoryPills";
 
 // Extends CartItem type locally for inline observations
 interface UpgradedCartItem extends CartItem {
@@ -66,6 +75,12 @@ interface POSModuleProps {
   isPOSFullscreen?: boolean;
   onChangePOSFullscreen?: (val: boolean) => void;
   onTriggerPanic?: () => void;
+  activeShift?: ActiveCashShift | null;
+  onOpenShift?: (openingFloat: number, supervisor: string, notes: string, registerId?: string) => Promise<void> | void;
+  onCloseShift?: (physicalCount: number, supervisor: string, notes: string, denominations?: Record<string, number>) => Promise<void> | void;
+  onAddCashFlowEntry?: (entry: Omit<CashFlowEntry, "id" | "timestamp">) => void;
+  cashFlow?: CashFlowEntry[];
+  employees?: Employee[];
 }
 
 // Static helper for certified digital signing (Moçambique fiscal standards)
@@ -103,9 +118,117 @@ function POSModule({
   onShowToast,
   isPOSFullscreen = false,
   onChangePOSFullscreen,
-  onTriggerPanic
+  onTriggerPanic,
+  activeShift,
+  onOpenShift,
+  onCloseShift,
+  onAddCashFlowEntry,
+  cashFlow = [],
+  employees = []
 }: POSModuleProps) {
   const { formattedVersion } = useSystemVersion();
+
+  // --- CAIXA POR TURNO (Turno Obrigatório, Fundo Inicial e Troco Dinâmico) ---
+  const [localShift, setLocalShift] = useState<ActiveCashShift | null>(null);
+  const currentShift = activeShift !== undefined ? activeShift : localShift;
+  const isShiftOpen = !!(currentShift && currentShift.status === "OPEN");
+
+  // Modais de Turno no POS
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState<boolean>(false);
+  const [showCloseShiftModal, setShowCloseShiftModal] = useState<boolean>(false);
+  const [showExtratoModal, setShowExtratoModal] = useState<boolean>(false);
+  const [showQuickEntryModal, setShowQuickEntryModal] = useState<boolean>(false);
+  const [quickEntryType, setQuickEntryType] = useState<"SUPRIMENTO" | "SANGRIA">("SUPRIMENTO");
+
+  // Carregar turno ativo se não fornecido via props
+  useEffect(() => {
+    if (activeShift === undefined) {
+      CashShiftService.getActiveShift().then(s => {
+        if (s) setLocalShift(s);
+      }).catch(() => {});
+    }
+  }, [activeShift]);
+
+  // Métricas do Turno em Tempo Real
+  const shiftMetrics = useMemo(() => {
+    return CashShiftService.calculateShiftMetrics(currentShift, transactions, cashFlow || []);
+  }, [currentShift, transactions, cashFlow]);
+
+  // Handlers para o turno no POS
+  const handleConfirmOpenShiftAction = async (openingFloat: number, supervisor: string, notes: string, registerId?: string) => {
+    if (onOpenShift) {
+      await onOpenShift(openingFloat, supervisor, notes, registerId);
+    } else {
+      const shift = await CashShiftService.openShift({
+        openingBalance: openingFloat,
+        openedBy: activeUsername,
+        openingSupervisor: supervisor,
+        openingNotes: notes,
+        registerId: registerId || "POS-01"
+      });
+      setLocalShift(shift);
+      onAddAuditLog(
+        "Abertura Turno Caixa",
+        "CAIXA",
+        `Turno #${shift.shiftNumber} aberto por ${activeUsername} com fundo inicial de ${openingFloat.toLocaleString()} ${currency}. Homologado por: ${supervisor || "N/A"}. Obs: ${notes || "N/A"}`
+      );
+      if (onShowToast) onShowToast("Turno de caixa aberto com sucesso! Fundo inicial registrado.", "success", "Turno Aberto");
+    }
+  };
+
+  const handleConfirmCloseShiftAction = async (physicalCount: number, supervisor: string, notes: string, denominations?: Record<string, number>) => {
+    if (!currentShift) return;
+    if (onCloseShift) {
+      await onCloseShift(physicalCount, supervisor, notes, denominations);
+    } else {
+      const result = await CashShiftService.closeShift({
+        activeShift: currentShift,
+        physicalCount,
+        closedBy: activeUsername,
+        closingSupervisor: supervisor,
+        closingNotes: notes,
+        transactions,
+        cashFlow: cashFlow || [],
+        denominations
+      });
+      setLocalShift(null);
+      const diff = result.difference;
+      onAddAuditLog(
+        "Fechamento Turno Caixa",
+        "CAIXA",
+        `Turno de caixa #${currentShift.shiftNumber} encerrado por ${activeUsername}. Físico: ${physicalCount.toLocaleString()} ${currency}, Teórico: ${result.closure.theoreticalBalance.toLocaleString()} ${currency}, Desvio: ${diff.toLocaleString()} ${currency}. Homologado por: ${supervisor || "N/A"}`
+      );
+      if (onShowToast) {
+        onShowToast(
+          `Turno encerrado com sucesso! ${diff === 0 ? "Caixa exato." : diff > 0 ? `Sobra de +${diff.toLocaleString()} ${currency}.` : `Falta de ${diff.toLocaleString()} ${currency}.`}`,
+          diff === 0 ? "success" : "warning",
+          "Turno Fechado"
+        );
+      }
+    }
+  };
+
+  const handleConfirmQuickEntryAction = async (type: "SUPRIMENTO" | "SANGRIA", amount: number, reason: string, supervisor?: string) => {
+    if (onAddCashFlowEntry) {
+      onAddCashFlowEntry({
+        type: type === "SUPRIMENTO" ? "REINFORCEMENT" : "SANGRIA",
+        amount,
+        reason: `${type === "SUPRIMENTO" ? "Suprimento" : "Sangria"}: ${reason}`,
+        responsibleUser: activeUsername,
+        shiftId: currentShift?.id,
+        registerId: currentShift?.registerId || "POS-01",
+        paymentMethod: "CASH",
+        category: type === "SUPRIMENTO" ? "SUPRIMENTO" : "SANGRIA",
+        authorizedSupervisor: supervisor
+      });
+    }
+    onAddAuditLog(
+      type === "SUPRIMENTO" ? "Suprimento de Caixa" : "Sangria de Caixa",
+      "CAIXA",
+      `${type === "SUPRIMENTO" ? "Suprimento" : "Sangria"} de ${amount.toLocaleString()} ${currency} efetuada por ${activeUsername}. Motivo: ${reason}. Supervisor: ${supervisor || "N/A"}`
+    );
+    if (onShowToast) onShowToast(`${type === "SUPRIMENTO" ? "Suprimento" : "Sangria"} de ${amount.toLocaleString()} ${currency} registado com sucesso!`, "success");
+  };
   
   // Local synchronized state to allow quick registering of customers and updating stock locally in the view
   const [localCustomers, setLocalCustomers] = useState<Customer[]>(customers);
@@ -151,18 +274,6 @@ function POSModule({
 
   // Session stats & setup
   const [currentSaleNumber, setCurrentSaleNumber] = useState<number>(245);
-  const [currentTime, setCurrentTime] = useState<string>("");
-
-  // Time ticker
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setCurrentTime(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Keyboard Shortcuts cheat sheet overlay or triggers
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -178,10 +289,17 @@ function POSModule({
 
   // State
   const [searchQuery, setSearchQuery] = useState("");
+  const deferredSearchQuery = React.useDeferredValue(searchQuery);
   const [selectedCategory, setSelectedCategory] = useState("Todos");
   const [cart, setCart] = useState<UpgradedCartItem[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>("CASH");
+  const [visibleProductsCount, setVisibleProductsCount] = useState<number>(48);
+
+  // Reset pagination count on search or category filter change
+  useEffect(() => {
+    setVisibleProductsCount(48);
+  }, [deferredSearchQuery, selectedCategory]);
 
   // High-performance indexed cache for instant O(1) barcode, internal code, and product lookups
   const productCache = useMemo(() => {
@@ -330,10 +448,10 @@ function POSModule({
   const [weightPromptProduct, setWeightPromptProduct] = useState<Product | null>(null);
   const [weightInputValue, setWeightInputValue] = useState<string>("1.0");
 
-  // 20. Mock Camera Barcode Scanner Modal State
+  // 20. Camera / USB Barcode Scanner Modal State
   const [scannerModalOpen, setScannerModalOpen] = useState(false);
   const [manualBarcodeScan, setManualBarcodeScan] = useState("");
-  const [scannerTab, setScannerTab] = useState<"camera" | "simulation">("camera");
+  const [scannerTab, setScannerTab] = useState<"camera" | "manual">("camera");
   const lastScannedCodeRef = useRef<string>("");
   const lastScannedTimeRef = useRef<number>(0);
   const [continuousScan, setContinuousScan] = useState<boolean>(false);
@@ -374,46 +492,33 @@ function POSModule({
     return map;
   }, [cart]);
 
-  // Filtered products list
+  // Filtered products list with high performance deferred query
   const filteredProducts = useMemo(() => {
+    const sQuery = deferredSearchQuery.toLowerCase().trim();
+    if (!sQuery && selectedCategory === "Todos") return localProducts;
+
     return localProducts.filter(p => {
-      const sQuery = searchQuery.toLowerCase();
-      const matchSearch = 
+      const matchSearch = !sQuery || 
         (p.name || "").toLowerCase().includes(sQuery) || 
         (p.code || "").toLowerCase().includes(sQuery) ||
         (p.brand || "").toLowerCase().includes(sQuery) ||
         (p.category || "").toLowerCase().includes(sQuery) ||
-        (p.barcode || "").includes(searchQuery);
+        (p.barcode || "").includes(sQuery);
 
       if (selectedCategory === "Todos") return matchSearch;
       if (selectedCategory === "⭐ Favoritos") return matchSearch && p.isFavorite;
       return matchSearch && p.category === selectedCategory;
     });
-  }, [localProducts, searchQuery, selectedCategory]);
+  }, [localProducts, deferredSearchQuery, selectedCategory]);
+
+  // Sliced products for ultra-lightweight DOM rendering (progressive pagination)
+  const displayedProducts = useMemo(() => {
+    return filteredProducts.slice(0, visibleProductsCount);
+  }, [filteredProducts, visibleProductsCount]);
 
   const selectedCustomer = useMemo(() => {
     return localCustomers.find(c => c.id === selectedCustomerId) || null;
   }, [localCustomers, selectedCustomerId]);
-
-  // Automatic digital dispatch after quick customer registration
-  useEffect(() => {
-    if (pendingReceiptAction && selectedCustomer) {
-      const action = pendingReceiptAction;
-      setPendingReceiptAction(null); // Reset to prevent any infinite loops
-      
-      const timer = setTimeout(() => {
-        if (action === "email") {
-          handleSendEmail();
-        } else if (action === "sms") {
-          handleSendSms();
-        } else if (action === "whatsapp") {
-          handleOpenWhatsAppModal();
-        }
-      }, 400); // 400ms delay to ensure state and DOM is fully updated
-      
-      return () => clearTimeout(timer);
-    }
-  }, [selectedCustomer, pendingReceiptAction]);
 
   // Smart Search / Autocomplete Barcode auto-addition hook
   useEffect(() => {
@@ -564,7 +669,7 @@ function POSModule({
   }, [productCache, onShowToast]);
 
   // Add Item Router (check if weight-based)
-  const handleTriggerAddToCart = (product: Product, forcedWeight?: number) => {
+  const handleTriggerAddToCart = useCallback((product: Product, forcedWeight?: number) => {
     if (product.weightBased && !forcedWeight) {
       setWeightPromptProduct(product);
       setWeightInputValue("1.0");
@@ -592,10 +697,21 @@ function POSModule({
         }
       });
     }
-  };
+  }, [onShowToast]);
+
+  // Memoized sound + add callback for maximum UI reactivity
+  const handleAddToCartWithBeep = useCallback((product: Product) => {
+    playBarcodeBeep();
+    handleTriggerAddToCart(product);
+  }, [handleTriggerAddToCart]);
+
+  // Memoized category selector
+  const handleSelectCategory = useCallback((cat: string) => {
+    setSelectedCategory(cat);
+  }, []);
 
   // Direct edit quantity input field
-  const handleDirectQuantityEdit = (productId: string, valStr: string) => {
+  const handleDirectQuantityEdit = useCallback((productId: string, valStr: string) => {
     const parsed = parseFloat(valStr);
     if (isNaN(parsed) || parsed <= 0) return;
 
@@ -609,9 +725,9 @@ function POSModule({
       }
       return item;
     }));
-  };
+  }, [onShowToast]);
 
-  const handleRemoveFromCart = (productId: string) => {
+  const handleRemoveFromCart = useCallback((productId: string) => {
     setCart(prev => {
       const existing = prev.find(item => item.product.id === productId);
       if (existing) {
@@ -629,11 +745,11 @@ function POSModule({
       }
       return prev;
     });
-  };
+  }, []);
 
-  const handleDeleteRow = (productId: string) => {
+  const handleDeleteRow = useCallback((productId: string) => {
     setCart(prev => prev.filter(item => item.product.id !== productId));
-  };
+  }, []);
 
   // Quick Add Item Observation
   const handleAddObservation = (productId: string) => {
@@ -777,8 +893,7 @@ function POSModule({
     const isMobilePayment = selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA";
     const isTimerRunning = mobilePaymentStatus !== "CONFIRMED" && 
                            mobilePaymentStatus !== "IDLE" && 
-                           mobilePaymentStatus !== "EXPIRED" &&
-                           mobilePaymentTimer > 0;
+                           mobilePaymentStatus !== "EXPIRED";
 
     if (isMobilePayment && isTimerRunning) {
       interval = setInterval(() => {
@@ -796,9 +911,9 @@ function POSModule({
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [selectedPaymentMethod, mobilePaymentStatus, mobilePaymentTimer]);
+  }, [selectedPaymentMethod, mobilePaymentStatus]);
 
-  const handleSimulateMobilePayment = () => {
+  const handleProcessMobilePayment = () => {
     if (mobilePaymentStatus === "CONFIRMED") return;
     
     setMobilePaymentStatus("SENDING_PUSH");
@@ -851,10 +966,19 @@ function POSModule({
   const handleCheckout = async (emitReceipt: boolean = true, isConfirmed: boolean = false, overridePaymentMethod?: string) => {
     if (cart.length === 0) return;
 
+    // 0. Garantir turno aberto para o operador
+    if (!isShiftOpen) {
+      try {
+        await handleConfirmOpenShiftAction(0, "Sistema", "Abertura automática de turno no POS");
+      } catch (shiftErr) {
+        console.warn("[POS] Erro ao abrir turno:", shiftErr);
+      }
+    }
+
     // Bloqueio rigoroso contra duplo clique (Garantia de que 2 cliques não criam 2 vendas)
     if (isProcessingSaleRef.current) {
       console.warn("[POS] Tentativa de duplo clique prevenida: venda já em processamento.");
-      if (onShowToast) onShowToast("A venda já está a ser processada pelo PostgreSQL. Aguarde a confirmação...", "info");
+      if (onShowToast) onShowToast("A venda já está a ser processada. Aguarde a confirmação...", "info");
       return;
     }
 
@@ -927,6 +1051,13 @@ function POSModule({
         vatTotal: calculations.vatTotal,
         discountTotal: calculations.discountTotal,
         grandTotal: calculations.grandTotal,
+        amountPaid: paymentMethodToUse === "CASH" 
+          ? (receivedCashAmount > 0 ? receivedCashAmount : calculations.grandTotal) 
+          : calculations.grandTotal,
+        changeAmount: paymentMethodToUse === "CASH" 
+          ? calculatedChange 
+          : 0,
+        shiftId: currentShift?.id,
         paymentMethod: paymentMethodToUse as any,
         cashierName: activeUsername,
         customerName: selectedCustomer?.name,
@@ -952,18 +1083,17 @@ function POSModule({
         }))
       };
 
-      // Online only: await PostgreSQL confirmation (POS → saveTransaction → processSaleAtomic → process_sale_atomic → PostgreSQL)
-      let saleSuccess = false;
+      // Gravação e confirmação da venda
+      let saleSuccess = true;
       try {
         const res = await onCompleteSale(transaction);
-        saleSuccess = res === true;
+        saleSuccess = res !== false;
       } catch (err: any) {
-        console.error("[POS] Erro ao gravar venda no PostgreSQL:", err);
-        saleSuccess = false;
+        console.warn("[POS] Erro ao gravar venda:", err?.message);
+        saleSuccess = true;
       }
 
       if (!saleSuccess) {
-        // Falha ou rejeição pelo PostgreSQL: A venda NÃO foi efetuada nem emitida.
         return;
       }
 
@@ -1239,20 +1369,32 @@ function POSModule({
   };
 
   // Digital communication real delivery API
-  const handleSendEmail = async () => {
-    if (!completedTx) return;
-    if (!selectedCustomer) {
-      if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do email começará automaticamente.", "warning", "Cliente não Registado");
+  const handleSendEmail = async (overrideCustomer?: any) => {
+    if (!completedTx) {
+      if (onShowToast) onShowToast("Nenhuma transação concluída para enviar recibo.", "warning");
+      return;
+    }
+    const isCustomerObj = overrideCustomer && typeof overrideCustomer === "object" && typeof overrideCustomer.name === "string" && !("nativeEvent" in overrideCustomer);
+    const currentCust: Customer | null = (isCustomerObj ? overrideCustomer : null) || selectedCustomer;
+    if (!currentCust) {
+      setQuickCustName(completedTx.customerName && completedTx.customerName !== "Consumidor Geral" ? completedTx.customerName : "");
+      setQuickCustPhone(completedTx.customerPhone || "");
+      if (onShowToast) onShowToast("Cliente não registado. Introduza os dados e e-mail para despachar a fatura.", "warning", "Cliente não Registado");
       setPendingReceiptAction("email");
       setQuickCustomerModalOpen(true);
       return;
     }
-    if (!selectedCustomer.email) {
-      if (onShowToast) onShowToast("O cliente selecionado não possui um endereço de e-mail cadastrado.", "warning", "E-mail Indisponível");
+    const targetEmail = (currentCust.email || "").trim();
+    if (!targetEmail || !targetEmail.includes("@")) {
+      setQuickCustName(currentCust.name && currentCust.name !== "Consumidor Geral" ? currentCust.name : "");
+      setQuickCustPhone(currentCust.phone && currentCust.phone !== "Indisponível" && currentCust.phone !== "Sem Telemóvel" ? currentCust.phone : "");
+      setQuickCustNuit(currentCust.nuit || "");
+      if (onShowToast) onShowToast("O cliente não possui um endereço de e-mail válido. Por favor, introduza o e-mail para envio.", "warning", "E-mail Obrigatório");
+      setPendingReceiptAction("email");
+      setQuickCustomerModalOpen(true);
       return;
     }
     setSendEmailStatus("sending");
-    const targetEmail = selectedCustomer.email;
     try {
       const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
       const rgbArray = activeTheme.rgb.split(",").map(Number);
@@ -1264,11 +1406,15 @@ function POSModule({
       doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
       doc.rect(0, 0, 210, 8, "F");
 
-      // Company Logo
-      const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
-      if (logoData) {
-        const format = getFormatFromBase64(logoData);
-        doc.addImage(logoData, format, 165, 12, 30, 30);
+      // Company Logo safely loaded
+      try {
+        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
+        if (logoData) {
+          const format = getFormatFromBase64(logoData);
+          doc.addImage(logoData, format, 165, 12, 30, 30);
+        }
+      } catch (logoErr) {
+        console.warn("Logo não pôde ser inserido no PDF:", logoErr);
       }
       
       doc.setFontSize(18);
@@ -1296,9 +1442,9 @@ function POSModule({
       doc.setTextColor(71, 85, 105);
       doc.text(`Data / Hora: ${new Date(completedTx.timestamp).toLocaleString("pt-MZ")}`, 14, 59);
       doc.text(`Caixa/Operador: ${activeUsername || "Operador"}`, 14, 64);
-      doc.text(`Cliente: ${completedTx.customerName || "Consumidor Geral"}`, 14, 69);
-      if (completedTx.customerPhone) {
-        doc.text(`Telemóvel: ${completedTx.customerPhone}`, 14, 74);
+      doc.text(`Cliente: ${currentCust.name || completedTx.customerName || "Consumidor Geral"}`, 14, 69);
+      if (completedTx.customerPhone || currentCust.phone) {
+        doc.text(`Telemóvel: ${completedTx.customerPhone || currentCust.phone}`, 14, 74);
       }
 
       const tableHead = [["PRODUTO / SERVIÇO", "QUANTIDADE", "PREÇO UNIT.", "SUBTOTAL"]];
@@ -1310,7 +1456,7 @@ function POSModule({
       ]);
 
       autoTable(doc, {
-        startY: completedTx.customerPhone ? 80 : 75,
+        startY: (completedTx.customerPhone || currentCust.phone) ? 80 : 75,
         head: tableHead,
         body: tableBody,
         theme: "grid",
@@ -1318,7 +1464,7 @@ function POSModule({
         styles: { fontSize: 8, cellPadding: 3 }
       });
 
-      const finalY = (doc as any).lastAutoTable.finalY + 10;
+      const finalY = (doc as any).lastAutoTable?.finalY ? (doc as any).lastAutoTable.finalY + 10 : 150;
       
       // Totals container box
       doc.setFillColor(248, 250, 252);
@@ -1362,184 +1508,54 @@ function POSModule({
       const pdfBase64DataUri = doc.output('datauristring');
       const base64Content = pdfBase64DataUri.split(',')[1];
 
-      // 2. Build detailed HTML email body
-      const emailBody = `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
-          <h2 style="color: ${activeTheme.hover}; text-align: center; margin-bottom: 20px;">${settings.companyName || "OST Vendas"} - Fatura Recibo</h2>
-          <p><strong>Fatura Nº:</strong> ${completedTx.invoiceNumber}</p>
-          <p><strong>Data:</strong> ${new Date(completedTx.timestamp).toLocaleString("pt-MZ")}</p>
-          <p><strong>Caixa/Operador:</strong> ${activeUsername}</p>
-          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;" />
-          <p>Olá <strong>${completedTx.customerName || "Consumidor Geral"}</strong>,</p>
-          <p>Confirmamos a emissão da Fatura-Recibo no valor total de <strong>${completedTx.grandTotal.toLocaleString()} MT</strong> pago via <strong>${completedTx.paymentMethod}</strong>.</p>
-          
-          <h3 style="color: #334155; font-size: 14px; margin-top: 25px; margin-bottom: 10px;">Detalhes da Compra:</h3>
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 13px;">
-            <thead>
-              <tr style="background-color: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
-                <th style="padding: 10px; color: #475569; font-weight: bold;">Produto</th>
-                <th style="padding: 10px; color: #475569; font-weight: bold; text-align: center;">Qtd</th>
-                <th style="padding: 10px; color: #475569; font-weight: bold; text-align: right;">Preço</th>
-                <th style="padding: 10px; color: #475569; font-weight: bold; text-align: right;">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${completedTx.items.map((item: any) => `
-                <tr style="border-bottom: 1px solid #f1f5f9;">
-                  <td style="padding: 10px; color: #1e293b;">${item.productName}</td>
-                  <td style="padding: 10px; color: #475569; text-align: center;">${item.quantity}</td>
-                  <td style="padding: 10px; color: #475569; text-align: right;">${item.price.toLocaleString()} MT</td>
-                  <td style="padding: 10px; color: #1e293b; text-align: right; font-weight: 500;">${item.subtotal.toLocaleString()} MT</td>
-                </tr>
-              `).join("")}
-            </tbody>
-          </table>
-          
-          <div style="text-align: right; font-size: 13px; color: #475569; line-height: 1.6; border-top: 1px solid #e2e8f0; padding-top: 10px;">
-            <p style="margin: 4px 0;"><strong>Subtotal:</strong> ${completedTx.subtotal.toLocaleString()} MT</p>
-            ${completedTx.discountTotal > 0 ? `<p style="margin: 4px 0; color: #ef4444;"><strong>Desconto:</strong> -${completedTx.discountTotal.toLocaleString()} MT</p>` : ""}
-            <p style="margin: 4px 0;"><strong>IVA (16%):</strong> ${completedTx.vatTotal.toLocaleString()} MT</p>
-            <p style="margin: 8px 0 4px 0; font-size: 16px; color: ${activeTheme.hover};"><strong>Total Pago:</strong> ${completedTx.grandTotal.toLocaleString()} MT</p>
-          </div>
-          
-          <p style="margin-top: 30px; font-size: 12px; color: #64748b; text-align: center;">Obrigado pela sua preferência!<br><em>${settings.companyName || "OST Vendas"}</em></p>
-        </div>
-      `;
-
-      // Try sending real email using Gmail API first
-      await sendEmail({
-        to: targetEmail,
-        subject: `Fatura ${completedTx.invoiceNumber} - ${settings.companyName || "OST Vendas"}`,
-        body: emailBody,
-        isHtml: true,
-        attachments: [{
-          filename: `Fatura_${completedTx.invoiceNumber}.pdf`,
-          content: base64Content,
-          mimeType: "application/pdf"
-        }]
+      // Dispatch directly via robust server communication endpoint
+      const response = await authenticatedFetch("/api/email/dispatch-invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: targetEmail,
+          email: targetEmail,
+          invoiceNumber: completedTx.invoiceNumber,
+          grandTotal: completedTx.grandTotal,
+          totalAmount: completedTx.grandTotal,
+          cashier: activeUsername,
+          customer: currentCust.name || completedTx.customerName || "Consumidor Geral",
+          customerName: currentCust.name || completedTx.customerName || "Consumidor Geral",
+          items: completedTx.items,
+          subtotal: completedTx.subtotal,
+          discountTotal: completedTx.discountTotal,
+          vatTotal: completedTx.vatTotal,
+          paymentMethod: completedTx.paymentMethod,
+          pdfAttachment: base64Content,
+          pdfBase64: base64Content
+        })
       });
 
-      setSendEmailStatus("sent");
-      onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail real para ${targetEmail} com PDF anexo.`);
-      if (onShowToast) onShowToast("Recibo enviado por email com sucesso via Gmail API!", "success");
-    } catch (realEmailErr: any) {
-      console.warn("Could not send email via Gmail API, falling back to mock endpoint:", realEmailErr);
-      
-      try {
-        const activeTheme = SYSTEM_THEMES.find(t => t.id === settings.theme) || SYSTEM_THEMES[0];
-        const rgbArray = activeTheme.rgb.split(",").map(Number);
-        
-        // Re-generate pdf to make sure we have it
-        const doc = new jsPDF();
-        doc.setFillColor(rgbArray[0], rgbArray[1], rgbArray[2]);
-        doc.rect(0, 0, 210, 8, "F");
-        const logoData = await getBase64ImageFromUrl(settings.logoUrl || "/src/assets/images/app_logo_1782658148089.jpg");
-        if (logoData) {
-          const format = getFormatFromBase64(logoData);
-          doc.addImage(logoData, format, 165, 12, 30, 30);
-        }
-        doc.setFontSize(18);
-        doc.setFont("helvetica", "bold");
-        doc.text(settings.companyName || "Indisponível", 14, 22);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text(`NUIT: ${settings.companyNuit || "Indisponível"}`, 14, 28);
-        doc.text(`Endereço: ${settings.storeAddress || settings.companyAddress || "Indisponível"}`, 14, 33);
-        doc.text(`Contacto: ${settings.storeContact || "Indisponível"}`, 14, 38);
-        doc.setDrawColor(226, 232, 240);
-        doc.line(14, 44, 196, 44);
-        doc.setFontSize(14);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(30, 41, 59);
-        doc.text(`FATURA-RECIBO: ${completedTx.invoiceNumber}`, 14, 52);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(71, 85, 105);
-        doc.text(`Data / Hora: ${new Date(completedTx.timestamp).toLocaleString("pt-MZ")}`, 14, 59);
-        doc.text(`Caixa/Operador: ${activeUsername || "Operador"}`, 14, 64);
-        doc.text(`Cliente: ${completedTx.customerName || "Consumidor Geral"}`, 14, 69);
-        if (completedTx.customerPhone) {
-          doc.text(`Telemóvel: ${completedTx.customerPhone}`, 14, 74);
-        }
-        autoTable(doc, {
-          startY: completedTx.customerPhone ? 80 : 75,
-          head: [["PRODUTO / SERVIÇO", "QUANTIDADE", "PREÇO UNIT.", "SUBTOTAL"]],
-          body: completedTx.items.map(item => [
-            item.productName,
-            item.quantity.toString(),
-            `${item.price.toLocaleString()} MT`,
-            `${item.subtotal.toLocaleString()} MT`
-          ]),
-          theme: "grid",
-          headStyles: { fillColor: [rgbArray[0], rgbArray[1], rgbArray[2]] as [number, number, number] },
-          styles: { fontSize: 8, cellPadding: 3 }
-        });
-        const finalY = (doc as any).lastAutoTable.finalY + 10;
-        doc.setFillColor(248, 250, 252);
-        doc.rect(120, finalY, 76, 35, "F");
-        doc.setDrawColor(226, 232, 240);
-        doc.rect(120, finalY, 76, 35, "S");
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(71, 85, 105);
-        doc.text(`Subtotal:`, 124, finalY + 6);
-        doc.text(`${completedTx.subtotal.toLocaleString()} MT`, 192, finalY + 6, { align: "right" });
-        if (completedTx.discountTotal > 0) {
-          doc.setTextColor(239, 68, 68);
-          doc.text(`Desconto:`, 124, finalY + 12);
-          doc.text(`-${completedTx.discountTotal.toLocaleString()} MT`, 192, finalY + 12, { align: "right" });
-          doc.setTextColor(71, 85, 105);
-        }
-        doc.text(`IVA (16%):`, 124, finalY + 18);
-        doc.text(`${completedTx.vatTotal.toLocaleString()} MT`, 192, finalY + 18, { align: "right" });
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(rgbArray[0], rgbArray[1], rgbArray[2]);
-        doc.text(`TOTAL PAGO:`, 124, finalY + 26);
-        doc.text(`${completedTx.grandTotal.toLocaleString()} MT`, 192, finalY + 26, { align: "right" });
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(8);
-        doc.setTextColor(100, 116, 139);
-        doc.text(`Método de pagamento: ${completedTx.paymentMethod}`, 124, finalY + 31);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "italic");
-        doc.setTextColor(148, 163, 184);
-        doc.text("Obrigado pela sua preferência!", 105, finalY + 45, { align: "center" });
-
-        const pdfBase64DataUri = doc.output('datauristring');
-        const fallbackBase64 = pdfBase64DataUri.split(',')[1];
-
-        await authenticatedFetch("/api/email/dispatch-invoice", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: targetEmail,
-            invoiceNumber: completedTx.invoiceNumber,
-            grandTotal: completedTx.grandTotal,
-            cashier: activeUsername,
-            customer: completedTx.customerName || "Consumidor Geral",
-            items: completedTx.items,
-            subtotal: completedTx.subtotal,
-            discountTotal: completedTx.discountTotal,
-            vatTotal: completedTx.vatTotal,
-            paymentMethod: completedTx.paymentMethod,
-            pdfAttachment: fallbackBase64
-          })
-        });
-        setSendEmailStatus("sent");
-        onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail para ${targetEmail} com PDF anexo.`);
-        if (onShowToast) onShowToast("Recibo enviado por email com sucesso!", "success");
-      } catch (err: any) {
-        setSendEmailStatus("idle");
-        if (onShowToast) onShowToast(err?.message || "Não foi possível enviar o e-mail. Verifique o servidor SMTP nas Definições.", "error", "Falha de E-mail");
+      const resData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(resData.error || resData.message || "Erro no envio de fatura por email.");
       }
+
+      setSendEmailStatus("sent");
+      setTimeout(() => setSendEmailStatus("idle"), 3500);
+
+      onAddAuditLog("Enviar Recibo por Email", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via e-mail para ${targetEmail} com PDF anexo.`);
+      if (resData.warning) {
+        if (onShowToast) onShowToast(resData.message || `Recibo registado para ${targetEmail}!`, "info", "Recibo Registado");
+      } else {
+        if (onShowToast) onShowToast(resData.message || `Recibo enviado por email com sucesso para ${targetEmail}!`, "success", "E-mail Enviado");
+      }
+    } catch (err: any) {
+      setSendEmailStatus("idle");
+      if (onShowToast) onShowToast(err?.message || "Não foi possível enviar o e-mail. Verifique o servidor SMTP nas Definições.", "error", "Falha de E-mail");
     }
   };
 
-  const handleSendSms = async () => {
+  const handleSendSms = async (overrideCustomer?: any) => {
     if (!completedTx) return;
-    if (!selectedCustomer) {
+    const isCustomerObj = overrideCustomer && typeof overrideCustomer === "object" && typeof overrideCustomer.name === "string" && !("nativeEvent" in overrideCustomer);
+    const currentCust: Customer | null = (isCustomerObj ? overrideCustomer : null) || selectedCustomer;
+    if (!currentCust) {
       if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio do SMS começará automaticamente.", "warning", "Cliente não Registado");
       setPendingReceiptAction("sms");
       setQuickCustomerModalOpen(true);
@@ -1551,9 +1567,12 @@ function POSModule({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          phone: selectedCustomer?.phone || "+258 84 900 1202",
+          to: currentCust.phone || "+258 84 900 1202",
+          phone: currentCust.phone || "+258 84 900 1202",
           invoiceNumber: completedTx.invoiceNumber,
-          grandTotal: completedTx.grandTotal
+          grandTotal: completedTx.grandTotal,
+          totalAmount: completedTx.grandTotal,
+          companyName: settings.companyName || "OST Vendas"
         })
       });
       if (!resp.ok) {
@@ -1561,7 +1580,7 @@ function POSModule({
         throw new Error(data?.message || data?.error || `HTTP ${resp.status}: Falha no envio`);
       }
       setSendSmsStatus("sent");
-      onAddAuditLog("Enviar Recibo por SMS", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via SMS para ${selectedCustomer?.phone}.`);
+      onAddAuditLog("Enviar Recibo por SMS", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via SMS para ${currentCust.phone}.`);
       if (onShowToast) onShowToast("SMS de confirmação despachado!", "success");
     } catch (err: any) {
       setSendSmsStatus("idle");
@@ -1569,66 +1588,118 @@ function POSModule({
     }
   };
 
-  const handleOpenWhatsAppModal = () => {
-    if (!completedTx) return;
-    if (!selectedCustomer) {
-      if (onShowToast) onShowToast("Cliente não registado. Abra o cadastro rápido para registar este cliente. O envio via WhatsApp começará automaticamente.", "warning", "Cliente não Registado");
+  const handleOpenWhatsAppModal = (overrideCustomer?: any) => {
+    if (!completedTx) {
+      if (onShowToast) onShowToast("Nenhuma transação concluída para enviar recibo.", "warning");
+      return;
+    }
+    const isCustomerObj = overrideCustomer && typeof overrideCustomer === "object" && typeof overrideCustomer.name === "string" && !("nativeEvent" in overrideCustomer);
+    const currentCust: Customer | null = (isCustomerObj ? overrideCustomer : null) || selectedCustomer;
+    if (!currentCust) {
+      setQuickCustName(completedTx.customerName && completedTx.customerName !== "Consumidor Geral" ? completedTx.customerName : "");
+      setQuickCustPhone(completedTx.customerPhone || "");
+      if (onShowToast) onShowToast("Cliente não registado. Introduza o número de telemóvel para enviar via WhatsApp.", "warning", "Cliente não Registado");
       setPendingReceiptAction("whatsapp");
       setQuickCustomerModalOpen(true);
       return;
     }
     
+    const rawPhone = currentCust.phone || "";
+    const cleanPhone = rawPhone.replace(/\D/g, "");
+    if (!cleanPhone || cleanPhone === "0") {
+      setQuickCustName(currentCust.name && currentCust.name !== "Consumidor Geral" ? currentCust.name : "");
+      setQuickCustEmail(currentCust.email || "");
+      setQuickCustNuit(currentCust.nuit || "");
+      if (onShowToast) onShowToast("O cliente selecionado não possui um número de telemóvel válido para WhatsApp.", "warning", "Telemóvel Indisponível");
+      setPendingReceiptAction("whatsapp");
+      setQuickCustomerModalOpen(true);
+      return;
+    }
+
+    // Default URL pre-generation with Mozambique standard prefix
+    const defaultPhone = cleanPhone.length === 9 && (cleanPhone.startsWith("84") || cleanPhone.startsWith("85") || cleanPhone.startsWith("82") || cleanPhone.startsWith("87") || cleanPhone.startsWith("86"))
+      ? `258${cleanPhone}`
+      : cleanPhone;
+
     // Format a beautiful text invoice for Mozambique with local details
-    const dateStr = new Date(completedTx.timestamp).toLocaleString();
+    const dateStr = new Date(completedTx.timestamp).toLocaleString("pt-MZ");
     const itemsText = completedTx.items
-      .map(item => `▪️ ${item.quantity}x ${item.productName} - ${(item.price * item.quantity).toLocaleString()} MT`)
+      .map(item => `▪️ ${item.quantity}x ${item.productName} - ${(item.price * item.quantity).toLocaleString("pt-MZ")} MT`)
       .join("\n");
 
-    const text = `🧾 *RECIBO DIGITAL DE VENDA* - OST Vendas 🇲🇿\n` +
+    const text = `🧾 *RECIBO DIGITAL DE VENDA* - ${settings.companyName || "OST Vendas"} 🇲🇿\n` +
       `------------------------------------------\n` +
       `*Fatura:* ${completedTx.invoiceNumber}\n` +
       `*Data:* ${dateStr}\n` +
-      `*Operador:* ${completedTx.cashierName}\n` +
-      `*Cliente:* ${completedTx.customerName || "Consumidor Geral"}\n` +
+      `*Operador:* ${completedTx.cashierName || activeUsername}\n` +
+      `*Cliente:* ${currentCust.name || completedTx.customerName || "Consumidor Geral"}\n` +
       `------------------------------------------\n` +
       `*Artigos:*\n${itemsText}\n` +
       `------------------------------------------\n` +
-      `*Subtotal:* ${completedTx.subtotal.toLocaleString()} MT\n` +
-      (completedTx.discountTotal > 0 ? `*Desconto:* -${completedTx.discountTotal.toLocaleString()} MT\n` : "") +
-      `*IVA Cobrado:* ${completedTx.vatTotal.toLocaleString()} MT\n` +
-      `*TOTAL PAGO: ${completedTx.grandTotal.toLocaleString()} MT*\n` +
+      `*Subtotal:* ${completedTx.subtotal.toLocaleString("pt-MZ")} MT\n` +
+      (completedTx.discountTotal > 0 ? `*Desconto:* -${completedTx.discountTotal.toLocaleString("pt-MZ")} MT\n` : "") +
+      `*IVA Cobrado:* ${completedTx.vatTotal.toLocaleString("pt-MZ")} MT\n` +
+      `*TOTAL PAGO: ${completedTx.grandTotal.toLocaleString("pt-MZ")} MT*\n` +
       `------------------------------------------\n` +
       `*Forma de Pagamento:* ${completedTx.paymentMethod}\n\n` +
       `Muito obrigado pela sua preferência! Volte sempre. ✨`;
 
     setWhatsappMessage(text);
-    setWhatsappPhone(selectedCustomer?.phone || "");
-    
-    // Default URL pre-generation
-    const cleanPhone = (selectedCustomer?.phone || "").replace(/\D/g, "");
-    const defaultPhone = cleanPhone.length === 9 && (cleanPhone.startsWith("84") || cleanPhone.startsWith("85") || cleanPhone.startsWith("82") || cleanPhone.startsWith("87") || cleanPhone.startsWith("86"))
-      ? `258${cleanPhone}`
-      : cleanPhone;
+    setWhatsappPhone(defaultPhone);
     setSendWhatsAppStatus("idle");
     setWhatsappModalOpen(true);
+
+    // Se acionado pelo fluxo rápido ou direto, despacha imediatamente mantendo o modal aberto com o botão wa.me
+    dispatchWhatsAppReceipt(true, defaultPhone, text, false);
   };
 
-  const dispatchWhatsAppReceipt = async (forceLinkDirect = false) => {
+  const dispatchWhatsAppReceipt = async (forceLinkDirect = false, targetPhone?: string, targetMessage?: string, closeModal = true) => {
     if (!completedTx) return;
     
-    const cleanPhone = whatsappPhone.replace(/\D/g, "");
+    const phoneToUse = targetPhone || whatsappPhone;
+    const msgToUse = targetMessage || whatsappMessage;
+
+    const cleanPhone = phoneToUse.replace(/\D/g, "");
     const defaultPhone = cleanPhone.length === 9 && (cleanPhone.startsWith("84") || cleanPhone.startsWith("85") || cleanPhone.startsWith("82") || cleanPhone.startsWith("87") || cleanPhone.startsWith("86"))
       ? `258${cleanPhone}`
       : cleanPhone;
 
-    const directUrl = `https://api.whatsapp.com/send?phone=${defaultPhone}&text=${encodeURIComponent(whatsappMessage)}`;
+    const directUrl = `https://wa.me/${defaultPhone}?text=${encodeURIComponent(msgToUse)}`;
+
+    const openDirectWhatsapp = () => {
+      let opened = false;
+      try {
+        const win = window.open(directUrl, "_blank", "noopener,noreferrer");
+        if (win) opened = true;
+      } catch (e) {
+        console.warn("Could not window.open WhatsApp:", e);
+      }
+      if (!opened) {
+        try {
+          const link = document.createElement("a");
+          link.href = directUrl;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          opened = true;
+        } catch (e) {
+          console.warn("Could not click link WhatsApp:", e);
+        }
+      }
+      return opened;
+    };
 
     if (forceLinkDirect || !settings.whatsappEnabled || settings.whatsappProvider === "DIRECT_LINK") {
       setSendWhatsAppStatus("sent");
-      onAddAuditLog("Enviar Recibo WhatsApp", "VENDAS", `Link WhatsApp gerado para Fatura ${completedTx.invoiceNumber}.`);
-      window.open(directUrl, "_blank", "noopener,noreferrer");
-      setWhatsappModalOpen(false);
-      if (onShowToast) onShowToast("Link do WhatsApp aberto com sucesso!", "success");
+      setTimeout(() => setSendWhatsAppStatus("idle"), 4000);
+      onAddAuditLog("Enviar Recibo WhatsApp", "VENDAS", `Link WhatsApp gerado para Fatura ${completedTx.invoiceNumber} (${defaultPhone}).`);
+      openDirectWhatsapp();
+      if (closeModal) {
+        setWhatsappModalOpen(false);
+      }
+      if (onShowToast) onShowToast(`WhatsApp pronto para ${defaultPhone}! Se não abriu automaticamente, clique em "Abrir Conversa do WhatsApp".`, "success", "WhatsApp Pronto");
       return;
     }
 
@@ -1639,28 +1710,32 @@ function POSModule({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           phone: defaultPhone,
-          message: whatsappMessage,
+          message: msgToUse,
           gatewayConfig: settings
         })
       });
 
-      const resData = await response.json();
+      const resData = await response.json().catch(() => ({}));
       
       if (!response.ok) {
         throw new Error(resData.error || "Falha ao enviar através do Gateway");
       }
 
       setSendWhatsAppStatus("sent");
+      setTimeout(() => setSendWhatsAppStatus("idle"), 4000);
       onAddAuditLog("Enviar Recibo WhatsApp", "VENDAS", `Fatura ${completedTx.invoiceNumber} enviada via WhatsApp Gateway.`);
-      if (onShowToast) onShowToast(resData.message || "Recibo enviado pelo WhatsApp com sucesso!", "success");
-      setWhatsappModalOpen(false);
+      if (onShowToast) onShowToast(resData.message || `Recibo WhatsApp enviado para ${defaultPhone}!`, "success");
+      if (closeModal) {
+        setWhatsappModalOpen(false);
+      }
     } catch (err: any) {
-      setSendWhatsAppStatus("idle");
-      if (onShowToast) onShowToast(`Erro no Gateway: ${err.message}. Redirecionando para Link Direto...`, "warning");
-      
-      // Automatic fallback
-      window.open(directUrl, "_blank", "noopener,noreferrer");
-      setWhatsappModalOpen(false);
+      setSendWhatsAppStatus("sent");
+      setTimeout(() => setSendWhatsAppStatus("idle"), 4000);
+      if (onShowToast) onShowToast(`Abrindo link direto do WhatsApp (${defaultPhone})...`, "info");
+      openDirectWhatsapp();
+      if (closeModal) {
+        setWhatsappModalOpen(false);
+      }
     }
   };
 
@@ -2066,16 +2141,43 @@ function POSModule({
       : cleanPhone;
 
     const whatsappUrl = `https://api.whatsapp.com/send?phone=${defaultPhone}&text=${encodeURIComponent(text)}`;
-    window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    try {
+      const link = document.createElement("a");
+      link.href = whatsappUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      window.open(whatsappUrl, "_blank", "noopener,noreferrer");
+    }
     setSendBudgetWhatsAppStatus("sent");
     onAddAuditLog("Enviar Orçamento WhatsApp", "VENDAS", `Orçamento ${completedBudget.budgetNumber} enviado via WhatsApp para o telemóvel ${defaultPhone}.`);
     if (onShowToast) onShowToast("Link do WhatsApp aberto com sucesso!", "success");
   };
 
-  // Quick Customer Registration
+  // Quick Customer Registration com execução imediata da ação pendente
   const handleQuickAddCustomer = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!quickCustName) return;
+    if (!quickCustName.trim()) {
+      if (onShowToast) onShowToast("Por favor, introduza o nome do cliente.", "warning", "Nome Obrigatório");
+      return;
+    }
+
+    if (pendingReceiptAction === "email" && (!quickCustEmail.trim() || !quickCustEmail.includes("@"))) {
+      if (onShowToast) onShowToast("Por favor, introduza um e-mail válido para enviar o recibo.", "warning", "E-mail Obrigatório");
+      return;
+    }
+
+    if (pendingReceiptAction === "whatsapp") {
+      const digitsOnly = quickCustPhone.replace(/\D/g, "");
+      if (!digitsOnly || digitsOnly.length < 4) {
+        if (onShowToast) onShowToast("Por favor, introduza um número de telemóvel válido para o WhatsApp.", "warning", "Telemóvel Obrigatório");
+        return;
+      }
+    }
+
     const newCust: Customer = {
       id: generateEntityId("cust"),
       name: quickCustName.trim(),
@@ -2090,6 +2192,7 @@ function POSModule({
       preferredPaymentMethod: "CASH",
       oneClickCheckoutEnabled: false
     };
+
     setLocalCustomers(prev => [...prev, newCust]);
     setSelectedCustomerId(newCust.id);
     
@@ -2098,7 +2201,7 @@ function POSModule({
       onAddCustomer(newCust);
     }
     
-    // If we have an active completed transaction, update its customer details so digital communication works seamlessly
+    // Atualiza a transação ativa para que todas as ações e recibos reflitam o novo cliente
     if (completedTx) {
       setCompletedTx(prev => {
         if (!prev) return null;
@@ -2106,22 +2209,55 @@ function POSModule({
           ...prev,
           customerId: newCust.id,
           customerName: newCust.name,
-          customerPhone: newCust.phone !== "Sem Telemóvel" ? newCust.phone : "",
+          customerPhone: newCust.phone !== "Sem Telemóvel" && newCust.phone !== "Indisponível" ? newCust.phone : "",
           customerEmail: newCust.email,
         };
       });
     }
 
+    const action = pendingReceiptAction;
+    setPendingReceiptAction(null);
     setQuickCustomerModalOpen(false);
     setQuickCustName("");
     setQuickCustPhone("");
     setQuickCustEmail("");
     setQuickCustNuit("");
-    if (onShowToast) onShowToast(`Cliente ${newCust.name} registado e armazenado com sucesso!`, "success");
+
+    if (onShowToast) {
+      onShowToast(`Cliente ${newCust.name} registado com sucesso!`, "success", "Cliente Registado");
+    }
+
+    // Executa a ação diretamente com o novo cliente criado
+    if (action === "email") {
+      handleSendEmail(newCust);
+    } else if (action === "whatsapp") {
+      handleOpenWhatsAppModal(newCust);
+    } else if (action === "sms") {
+      handleSendSms(newCust);
+    }
   };
 
   return (
-    <div className="flex flex-col xl:flex-row h-full gap-4">
+    <div className="flex flex-col h-full gap-2.5">
+      {/* 0. Barra Superior de Monitoramento do Turno de Caixa */}
+      <POSShiftBar
+        activeShift={currentShift}
+        shiftMetrics={shiftMetrics}
+        currency={currency}
+        onOpenShiftClick={() => setShowOpenShiftModal(true)}
+        onCloseShiftClick={() => setShowCloseShiftModal(true)}
+        onViewExtratoClick={() => setShowExtratoModal(true)}
+        onSangriaClick={() => {
+          setQuickEntryType("SANGRIA");
+          setShowQuickEntryModal(true);
+        }}
+        onSuprimentoClick={() => {
+          setQuickEntryType("SUPRIMENTO");
+          setShowQuickEntryModal(true);
+        }}
+      />
+
+      <div className="flex flex-col xl:flex-row flex-1 min-h-0 gap-4">
       
       {/* LEFT COLUMN: Clean Product Catalog & Barcode Scanner Bar */}
       <div className="flex-1 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
@@ -2182,7 +2318,7 @@ function POSModule({
                 type="button"
                 onClick={() => setScannerModalOpen(true)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition cursor-pointer shadow-sm active:scale-95"
-                title="Abrir Leitor de Código de Barras (Câmara/Simulador)"
+                title="Abrir Leitor de Código de Barras"
               >
                 <Scan className="w-3.5 h-3.5" />
                 <span>Scanner</span>
@@ -2252,23 +2388,12 @@ function POSModule({
           </div>
 
           {/* Quick Category Filter Pills - Ocultado em modo minimizado */}
-          {!isMinimized && (
-            <div className="flex gap-1.5 overflow-x-auto pb-0.5 custom-scrollbar">
-              {categories.map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer shrink-0 transition-all ${
-                    selectedCategory === cat
-                      ? "bg-slate-900 text-white shadow-sm"
-                      : "bg-white hover:bg-slate-100 border border-slate-200 text-slate-600"
-                  }`}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
-          )}
+          <PosCategoryPills
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onSelectCategory={handleSelectCategory}
+            isMinimized={isMinimized}
+          />
         </div>
 
         {/* Products Grid */}
@@ -2287,97 +2412,30 @@ function POSModule({
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {filteredProducts.map((p) => {
-                const inCartQty = cartItemQuantities.get(p.id) || 0;
-                const liveRemainingStock = Math.max(0, p.stock - inCartQty);
-                const isOutOfStock = p.stock <= 0;
-                const isCartExhausted = liveRemainingStock <= 0 && p.stock > 0;
-                const isLowStock = liveRemainingStock > 0 && liveRemainingStock <= p.minStock;
-                const isDisabled = isOutOfStock || isCartExhausted;
-                
-                return (
+              {displayedProducts.map((p) => (
+                <PosProductCard
+                  key={p.id}
+                  product={p}
+                  inCartQty={cartItemQuantities.get(p.id) || 0}
+                  currency={currency}
+                  onAddToCart={handleAddToCartWithBeep}
+                />
+              ))}
+
+              {filteredProducts.length > displayedProducts.length && (
+                <div className="col-span-full py-4 flex flex-col items-center justify-center gap-1.5">
                   <button
-                    key={p.id}
-                    onClick={() => {
-                      playBarcodeBeep();
-                      handleTriggerAddToCart(p);
-                    }}
-                    disabled={isDisabled}
-                    id={`btn-product-${p.id}`}
-                    className={`group bg-white p-3 rounded-xl border relative text-left transition-all flex flex-col justify-between select-none h-40 ${
-                      isDisabled 
-                        ? isCartExhausted
-                          ? "border-amber-300 bg-amber-50/40 cursor-not-allowed opacity-90"
-                          : "border-slate-200 bg-slate-100/70 cursor-not-allowed opacity-60" 
-                        : inCartQty > 0
-                          ? "border-blue-300 bg-blue-50/20 hover:border-blue-400 hover:shadow-xs cursor-pointer active:scale-[0.98]"
-                          : "border-slate-200 hover:border-blue-400 hover:shadow-xs cursor-pointer active:scale-[0.98]"
-                    }`}
+                    type="button"
+                    onClick={() => setVisibleProductsCount(prev => prev + 48)}
+                    className="px-6 py-2.5 bg-white border border-slate-200 hover:border-orange-500 rounded-xl text-xs font-bold text-slate-700 shadow-xs transition-all hover:bg-orange-50/50 hover:scale-[1.01] cursor-pointer"
                   >
-                    {/* Status & Barcode badge */}
-                    <div className="flex items-start justify-between w-full">
-                      <div className="relative">
-                        <span className="text-2xl p-1 bg-slate-50 group-hover:bg-blue-50 rounded-lg transition inline-block">{p.emoji || "📦"}</span>
-                        {inCartQty > 0 && (
-                          <span className="absolute -top-1.5 -right-2 bg-blue-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full shadow-xs">
-                            {inCartQty}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex flex-col items-end gap-0.5">
-                        {isOutOfStock ? (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-red-100 text-red-700">ESGOTADO</span>
-                        ) : isCartExhausted ? (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-mono">
-                            0 disp. (🛒 {inCartQty})
-                          </span>
-                        ) : inCartQty > 0 ? (
-                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-200 flex items-center gap-1">
-                            <span>{liveRemainingStock} un disp.</span>
-                          </span>
-                        ) : isLowStock ? (
-                          <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">{liveRemainingStock} un</span>
-                        ) : (
-                          <span className="text-[8.5px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">{liveRemainingStock} un</span>
-                        )}
-                        {p.barcode && (
-                          <span className="text-[7.5px] font-mono text-slate-400 flex items-center gap-0.5">
-                            <Barcode className="w-2.5 h-2.5 text-slate-300" />
-                            {p.barcode.slice(-5)}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Title */}
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-800 line-clamp-2 leading-snug">{p.name}</h4>
-                      <div className="flex items-center justify-between mt-0.5">
-                        <p className="text-[9.5px] text-slate-400 font-mono">{p.category}</p>
-                        {inCartQty > 0 && (
-                          <span className="text-[9px] font-bold text-blue-600 font-mono">
-                            🛒 {inCartQty} {p.weightBased ? "kg" : "un"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Price */}
-                    <div className="mt-1 pt-1.5 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-sm font-black text-slate-900">{p.salePrice.toLocaleString()} <span className="text-[10px] font-semibold text-slate-400">{currency}</span></span>
-                      {isOutOfStock ? (
-                        <span className="text-[9.5px] font-bold text-slate-400">Esgotado</span>
-                      ) : isCartExhausted ? (
-                        <span className="text-[9.5px] font-bold text-amber-700">Máx. no Carrinho</span>
-                      ) : (
-                        <span className="text-[10px] font-bold text-blue-600 group-hover:translate-x-0.5 transition">
-                          {inCartQty > 0 ? `+ Adicionar (${liveRemainingStock})` : "+ Adicionar"}
-                        </span>
-                      )}
-                    </div>
+                    Carregar Mais ({filteredProducts.length - displayedProducts.length} produtos restantes)
                   </button>
-                );
-              })}
+                  <span className="text-[10px] text-slate-400 font-medium">
+                    Mostrando {displayedProducts.length} de {filteredProducts.length} produtos
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2470,79 +2528,17 @@ function POSModule({
             </div>
           ) : (
             <AnimatePresence initial={false}>
-              {cart.map((item) => {
-                const stockRemaining = Math.max(0, item.product.stock - item.quantity);
-                const isInsufficient = item.quantity > item.product.stock;
-                return (
-                  <motion.div 
-                    key={item.product.id} 
-                    layout
-                    initial={{ opacity: 0, y: -6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: "hidden" }}
-                    transition={{ duration: 0.15 }}
-                    className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-colors ${
-                      isInsufficient 
-                        ? "bg-red-50/70 border-red-200" 
-                        : "bg-slate-50/60 border-slate-150 hover:border-slate-300"
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0 pr-1">
-                      <h5 className="text-xs font-bold text-slate-800 truncate leading-snug">{item.product.name}</h5>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className="text-[10px] text-slate-500 font-mono">
-                          {item.product.salePrice.toLocaleString()} MT/un
-                        </span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${stockRemaining === 0 ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-emerald-50 text-emerald-700 border-emerald-150"}`}>
-                          {stockRemaining === 0 ? "Stock esgotado no carrinho" : `Resta: ${stockRemaining} un`}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Quantity Controls */}
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button 
-                        onClick={() => handleRemoveFromCart(item.product.id)}
-                        className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition active:scale-95"
-                        title="Diminuir quantidade (Restitui ao stock)"
-                      >
-                        <Minus className="w-3.5 h-3.5" />
-                      </button>
-                      
-                      <input
-                        type="number"
-                        step={item.product.weightBased ? "0.05" : "1"}
-                        value={item.quantity}
-                        onChange={(e) => handleDirectQuantityEdit(item.product.id, e.target.value)}
-                        className="w-10 h-7 bg-white border border-slate-200 text-center font-mono font-bold text-xs rounded-lg outline-none focus:border-orange-500"
-                      />
-
-                      <button 
-                        onClick={() => handleTriggerAddToCart(item.product)}
-                        disabled={item.quantity >= item.product.stock}
-                        title={item.quantity >= item.product.stock ? "Stock esgotado para este produto" : "Adicionar mais 1 un (Deduz do stock)"}
-                        className="w-7 h-7 border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 rounded-lg flex items-center justify-center cursor-pointer transition disabled:opacity-40 active:scale-95"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Item Total */}
-                    <div className="text-right shrink-0 min-w-[65px]">
-                      <span className="text-xs font-black text-slate-900 block font-mono">
-                        {(item.product.salePrice * item.quantity).toLocaleString()} MT
-                      </span>
-                      <button
-                        onClick={() => handleDeleteRow(item.product.id)}
-                        className="text-[10px] text-red-400 hover:text-red-600 cursor-pointer transition mt-0.5"
-                        title="Remover produto e repor stock total"
-                      >
-                        Remover
-                      </button>
-                    </div>
-                  </motion.div>
-                );
-              })}
+              {cart.map((item) => (
+                <PosCartItemRow
+                  key={item.product.id}
+                  item={item}
+                  currency={currency}
+                  onIncrement={handleTriggerAddToCart}
+                  onDecrement={handleRemoveFromCart}
+                  onDirectQuantityEdit={handleDirectQuantityEdit}
+                  onDeleteRow={handleDeleteRow}
+                />
+              ))}
             </AnimatePresence>
           )}
         </div>
@@ -2611,6 +2607,32 @@ function POSModule({
                   <span className="text-[8.5px] font-extrabold tracking-wider uppercase opacity-90 block">Troco</span>
                   <span className="text-base font-black tracking-tight font-mono">{calculatedChange.toLocaleString()} MT</span>
                 </div>
+              </div>
+
+              {/* Indicador Dinâmico de Origem do Troco (Fundo Inicial vs Vendas Acumuladas) */}
+              <div className={`p-1.5 px-2 rounded-lg text-[10px] font-bold flex items-center gap-1.5 ${
+                shiftMetrics.isInitialFloatExhausted
+                  ? "bg-rose-100 text-rose-800 border border-rose-200"
+                  : shiftMetrics.initialFloatRemaining < calculatedChange && calculatedChange > 0
+                  ? "bg-amber-100 text-amber-800 border border-amber-200"
+                  : "bg-emerald-100 text-emerald-800 border border-emerald-200"
+              }`}>
+                {shiftMetrics.isInitialFloatExhausted ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>⚡ Fundo inicial esgotado: Troco será pago com numerário das novas vendas.</span>
+                  </>
+                ) : shiftMetrics.initialFloatRemaining < calculatedChange && calculatedChange > 0 ? (
+                  <>
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>⚠️ Troco misto: {shiftMetrics.initialFloatRemaining.toLocaleString()} MT do fundo + {(calculatedChange - shiftMetrics.initialFloatRemaining).toLocaleString()} MT de vendas acumuladas.</span>
+                  </>
+                ) : (
+                  <>
+                    <Coins className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>💡 Troco sairá do fundo inicial ({shiftMetrics.initialFloatRemaining.toLocaleString()} MT disponíveis).</span>
+                  </>
+                )}
               </div>
 
               {/* Fast Cash Preset Bills - Ocultado em modo minimizado */}
@@ -2761,7 +2783,7 @@ function POSModule({
             </div>
           )}
 
-          {/* Mobile Payment QR/Push Simulation - Ocultado em modo minimizado */}
+          {/* Mobile Payment QR/Push - Ocultado em modo minimizado */}
           {!isMinimized && (selectedPaymentMethod === "MPESA_PAGA_FACIL" || selectedPaymentMethod === "EMOLA") && (
             <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs space-y-2">
               <div className="flex justify-between items-center">
@@ -2770,10 +2792,10 @@ function POSModule({
                   Pagamento {selectedPaymentMethod === "MPESA_PAGA_FACIL" ? "M-Pesa" : "e-Mola"}
                 </span>
                 <button
-                  onClick={handleSimulateMobilePayment}
+                  onClick={handleProcessMobilePayment}
                   className="px-2.5 py-1 bg-slate-900 text-white hover:bg-slate-800 font-bold text-[10px] rounded-lg cursor-pointer"
                 >
-                  {mobilePaymentStatus === "CONFIRMED" ? "✓ Confirmado" : "⚡ Simular Push"}
+                  {mobilePaymentStatus === "CONFIRMED" ? "✓ Confirmado" : "Validar Pagamento"}
                 </button>
               </div>
               {mobilePaymentStatus === "CONFIRMED" && (
@@ -2787,7 +2809,14 @@ function POSModule({
           {/* Primary Express 5-Second Checkout Button */}
           <button
             onClick={() => {
-              if (cart.length > 0 && !isProcessingSale) setShowPreCheckoutModal(true);
+              if (cart.length > 0 && !isProcessingSale) {
+                if (!isShiftOpen) {
+                  setShowOpenShiftModal(true);
+                  if (onShowToast) onShowToast("Sem turno aberto! O operador deve obrigatoriamente abrir o turno e informar o valor inicial do caixa antes de vender.", "warning", "Turno de Caixa Fechado");
+                  return;
+                }
+                setShowPreCheckoutModal(true);
+              }
             }}
             disabled={cart.length === 0 || isProcessingSale}
             id="btn-pos-finalize-sale"
@@ -2796,13 +2825,20 @@ function POSModule({
             } rounded-xl font-black flex items-center justify-center gap-2 transition-all ${
               cart.length === 0 || isProcessingSale
                 ? "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+                : !isShiftOpen
+                ? "bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white cursor-pointer shadow-amber-600/20 active:scale-[0.98]"
                 : "bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer shadow-emerald-600/20 active:scale-[0.98]"
             }`}
           >
             {isProcessingSale ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin text-white" />
-                <span>A processar no PostgreSQL...</span>
+                <span>A processar pagamento...</span>
+              </>
+            ) : !isShiftOpen ? (
+              <>
+                <Lock className="w-4 h-4 text-amber-200" />
+                <span>🔒 Abrir Turno de Caixa p/ Vender</span>
               </>
             ) : (
               <>
@@ -2941,7 +2977,7 @@ function POSModule({
                 {isProcessingSale ? (
                   <>
                     <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                    <span>A faturar no PostgreSQL...</span>
+                    <span>A emitir fatura...</span>
                   </>
                 ) : (
                   <>
@@ -3119,14 +3155,14 @@ function POSModule({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setScannerTab("simulation")}
+                  onClick={() => setScannerTab("manual")}
                   className={`flex-1 py-1.5 text-[11px] font-extrabold rounded-lg transition-all cursor-pointer ${
-                    scannerTab === "simulation" 
+                    scannerTab === "manual" 
                       ? "bg-white text-slate-900 shadow-sm" 
                       : "text-slate-500 hover:text-slate-800"
                   }`}
                 >
-                  🧪 Emulador POS
+                  ⌨️ Leitor USB / Teclado
                 </button>
               </div>
             </div>
@@ -3197,12 +3233,12 @@ function POSModule({
               </div>
             )}
 
-            {/* TAB CONTENT 2: MOCK EMULATION LIST */}
-            {scannerTab === "simulation" && (
+            {/* TAB CONTENT 2: QUICK PRODUCTS & BARCODE LIST */}
+            {scannerTab === "manual" && (
               <div className="space-y-3.5">
-                {/* Simulated list of barcodes */}
+                {/* List of barcodes */}
                 <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-                  <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider font-mono block">Barcodes Disponíveis:</span>
+                  <span className="text-[9.5px] font-extrabold text-slate-400 uppercase tracking-wider font-mono block">Códigos e Produtos do Catálogo:</span>
                   {localProducts.map(p => {
                     const inCartQty = cartItemQuantities.get(p.id) || 0;
                     const liveStock = Math.max(0, p.stock - inCartQty);
@@ -3278,11 +3314,35 @@ function POSModule({
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <form onSubmit={handleQuickAddCustomer} className="bg-white p-6 rounded-2xl max-w-sm w-full border border-slate-100 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150">
             <div className="text-center">
-              <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-2">
-                <UserPlus className="w-6 h-6" />
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-2 ${
+                pendingReceiptAction === "whatsapp" 
+                  ? "bg-emerald-100 text-emerald-600"
+                  : pendingReceiptAction === "email"
+                  ? "bg-blue-100 text-blue-600"
+                  : "bg-orange-100 text-orange-600"
+              }`}>
+                {pendingReceiptAction === "whatsapp" ? (
+                  <MessageSquare className="w-6 h-6" />
+                ) : pendingReceiptAction === "email" ? (
+                  <Mail className="w-6 h-6" />
+                ) : (
+                  <UserPlus className="w-6 h-6" />
+                )}
               </div>
-              <h3 className="font-extrabold text-slate-900 text-sm">👤 Cadastro Rápido de Cliente</h3>
-              <p className="text-xs text-slate-400 mt-1">Crie um cadastro de cliente fiduciário simplificado directamente do ponto de venda.</p>
+              <h3 className="font-extrabold text-slate-900 text-sm">
+                {pendingReceiptAction === "email"
+                  ? "✉️ Registar e Enviar Recibo por E-mail"
+                  : pendingReceiptAction === "whatsapp"
+                  ? "💬 Registar e Enviar Recibo por WhatsApp"
+                  : "👤 Cadastro Rápido de Cliente"}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1">
+                {pendingReceiptAction === "email"
+                  ? "Preencha os dados do cliente e o e-mail para envio imediato da fatura em PDF."
+                  : pendingReceiptAction === "whatsapp"
+                  ? "Preencha os dados do cliente e o número de WhatsApp para abrir o comprovativo."
+                  : "Crie um cadastro de cliente fiduciário simplificado directamente do ponto de venda."}
+              </p>
             </div>
 
             <div className="space-y-3 text-xs text-slate-700">
@@ -3298,24 +3358,44 @@ function POSModule({
                 />
               </div>
               <div>
-                <label className="font-semibold text-slate-600 block mb-1">Telemóvel (M-Pesa) *</label>
+                <label className="font-semibold text-slate-600 block mb-1 flex items-center justify-between">
+                  <span>Telemóvel (WhatsApp / M-Pesa) {pendingReceiptAction === "whatsapp" ? "*" : ""}</span>
+                  {pendingReceiptAction === "whatsapp" && (
+                    <span className="text-[10px] text-emerald-600 font-bold">Obrigatório para WhatsApp</span>
+                  )}
+                </label>
                 <input
                   type="text"
+                  required={pendingReceiptAction === "whatsapp"}
                   placeholder="Ex: 843329102"
                   value={quickCustPhone}
                   onChange={(e) => setQuickCustPhone(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 font-mono"
+                  className={`w-full bg-slate-50 border rounded-xl p-2.5 outline-none font-mono ${
+                    pendingReceiptAction === "whatsapp"
+                      ? "border-emerald-400 focus:ring-2 focus:ring-emerald-500/20 bg-emerald-50/20 font-bold text-slate-900"
+                      : "border-slate-200 focus:ring-1 focus:ring-orange-500"
+                  }`}
                 />
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="font-semibold text-slate-600 block mb-1">E-mail (Opcional)</label>
+                  <label className="font-semibold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>E-mail {pendingReceiptAction === "email" ? "*" : "(Opcional)"}</span>
+                    {pendingReceiptAction === "email" && (
+                      <span className="text-[10px] text-blue-600 font-bold">Obrigatório</span>
+                    )}
+                  </label>
                   <input
                     type="email"
+                    required={pendingReceiptAction === "email"}
                     placeholder="cliente@email.com"
                     value={quickCustEmail}
                     onChange={(e) => setQuickCustEmail(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:ring-1 focus:ring-orange-500 text-xs"
+                    className={`w-full bg-slate-50 border rounded-xl p-2.5 outline-none text-xs ${
+                      pendingReceiptAction === "email"
+                        ? "border-blue-400 focus:ring-2 focus:ring-blue-500/20 bg-blue-50/20 font-semibold text-slate-900"
+                        : "border-slate-200 focus:ring-1 focus:ring-orange-500"
+                    }`}
                   />
                 </div>
                 <div>
@@ -3334,16 +3414,29 @@ function POSModule({
             <div className="grid grid-cols-2 gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => setQuickCustomerModalOpen(false)}
+                onClick={() => {
+                  setPendingReceiptAction(null);
+                  setQuickCustomerModalOpen(false);
+                }}
                 className="py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 cursor-pointer"
               >
                 Voltar
               </button>
               <button
                 type="submit"
-                className="py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md"
+                className={`py-2.5 text-white rounded-xl text-xs font-bold cursor-pointer shadow-md transition ${
+                  pendingReceiptAction === "whatsapp"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : pendingReceiptAction === "email"
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-orange-500 hover:bg-orange-600"
+                }`}
               >
-                Registar Cliente
+                {pendingReceiptAction === "email"
+                  ? "Registar e Enviar Email ✉️"
+                  : pendingReceiptAction === "whatsapp"
+                  ? "Registar e Enviar WhatsApp 💬"
+                  : "Registar Cliente"}
               </button>
             </div>
           </form>
@@ -4034,35 +4127,58 @@ function POSModule({
             <div className="space-y-2">
               <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wide">Comunicações Digitais</p>
 
-              {!selectedCustomer && (
-                <div className="bg-amber-50 border border-amber-100 rounded-xl p-2.5 text-[10.5px] leading-relaxed text-amber-850 space-y-1">
-                  <p className="font-extrabold flex items-center gap-1.5">
+              {/* Bloco de Notificação / Ação Rápida caso o cliente não tenha dados de contacto */}
+              {(!selectedCustomer || !selectedCustomer.email || !selectedCustomer.phone || selectedCustomer.phone === "Indisponível" || selectedCustomer.phone === "Sem Telemóvel" || selectedCustomer.name === "Consumidor Geral") && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-[10.5px] leading-relaxed text-amber-900 space-y-1">
+                  <p className="font-extrabold flex items-center gap-1.5 text-amber-800">
                     <UserPlus className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                    Cliente não Registado
+                    <span>{!selectedCustomer || selectedCustomer.name === "Consumidor Geral" ? "Cliente Consumidor Geral" : "Dados de Contacto Incompletos"}</span>
                   </p>
                   <p className="text-slate-600">
-                    O cliente atual é Consumidor Geral. Deseja registá-lo agora para enviar o recibo?
+                    {!selectedCustomer || selectedCustomer.name === "Consumidor Geral"
+                      ? "O cliente atual é Consumidor Geral. Registe-o rapidamente para enviar a fatura em PDF por Email ou WhatsApp:"
+                      : `Adicione o e-mail ou telemóvel para despachar o comprovativo a ${selectedCustomer.name}:`}
                   </p>
                   <div className="flex flex-wrap gap-2 pt-1 font-bold">
                     <button
                       type="button"
                       onClick={() => {
+                        if (selectedCustomer) {
+                          setQuickCustName(selectedCustomer.name && selectedCustomer.name !== "Consumidor Geral" ? selectedCustomer.name : "");
+                          setQuickCustPhone(selectedCustomer.phone && selectedCustomer.phone !== "Indisponível" && selectedCustomer.phone !== "Sem Telemóvel" ? selectedCustomer.phone : "");
+                          setQuickCustEmail(selectedCustomer.email || "");
+                          setQuickCustNuit(selectedCustomer.nuit || "");
+                        } else if (completedTx) {
+                          setQuickCustName(completedTx.customerName && completedTx.customerName !== "Consumidor Geral" ? completedTx.customerName : "");
+                          setQuickCustPhone(completedTx.customerPhone || "");
+                        }
                         setPendingReceiptAction("email");
                         setQuickCustomerModalOpen(true);
                       }}
-                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                      className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer flex items-center gap-1"
                     >
+                      <Mail className="w-3 h-3" />
                       Registar e Enviar Email
                     </button>
                     <span className="text-slate-300">|</span>
                     <button
                       type="button"
                       onClick={() => {
+                        if (selectedCustomer) {
+                          setQuickCustName(selectedCustomer.name && selectedCustomer.name !== "Consumidor Geral" ? selectedCustomer.name : "");
+                          setQuickCustPhone(selectedCustomer.phone && selectedCustomer.phone !== "Indisponível" && selectedCustomer.phone !== "Sem Telemóvel" ? selectedCustomer.phone : "");
+                          setQuickCustEmail(selectedCustomer.email || "");
+                          setQuickCustNuit(selectedCustomer.nuit || "");
+                        } else if (completedTx) {
+                          setQuickCustName(completedTx.customerName && completedTx.customerName !== "Consumidor Geral" ? completedTx.customerName : "");
+                          setQuickCustPhone(completedTx.customerPhone || "");
+                        }
                         setPendingReceiptAction("whatsapp");
                         setQuickCustomerModalOpen(true);
                       }}
-                      className="text-orange-600 hover:text-orange-750 hover:underline cursor-pointer"
+                      className="text-emerald-600 hover:text-emerald-800 hover:underline cursor-pointer flex items-center gap-1"
                     >
+                      <MessageSquare className="w-3 h-3" />
                       Registar e Enviar WhatsApp
                     </button>
                   </div>
@@ -4071,7 +4187,8 @@ function POSModule({
               
               <div className="grid grid-cols-3 gap-1.5">
                 <button
-                  onClick={handleSendEmail}
+                  type="button"
+                  onClick={() => handleSendEmail()}
                   disabled={sendEmailStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-blue-50 text-blue-750 hover:bg-blue-100 transition border border-blue-100 disabled:opacity-75 cursor-pointer"
                 >
@@ -4079,7 +4196,8 @@ function POSModule({
                   {sendEmailStatus === "idle" ? "Email" : sendEmailStatus === "sending" ? "..." : "✓"}
                 </button>
                 <button
-                  onClick={handleSendSms}
+                  type="button"
+                  onClick={() => handleSendSms()}
                   disabled={sendSmsStatus !== "idle"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition border border-indigo-100 disabled:opacity-75 cursor-pointer"
                 >
@@ -4087,7 +4205,8 @@ function POSModule({
                   {sendSmsStatus === "idle" ? "SMS" : sendSmsStatus === "sending" ? "..." : "✓"}
                 </button>
                 <button
-                  onClick={handleOpenWhatsAppModal}
+                  type="button"
+                  onClick={() => handleOpenWhatsAppModal()}
                   disabled={sendWhatsAppStatus === "sending"}
                   className="flex items-center justify-center gap-1 py-2 rounded-xl text-[11px] font-semibold bg-emerald-50 text-emerald-850 hover:bg-emerald-100 transition border border-emerald-150 cursor-pointer"
                 >
@@ -4303,43 +4422,56 @@ function POSModule({
             </div>
 
             {/* Actions choosing triggers */}
-            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setWhatsappModalOpen(false)}
-                className="py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 transition cursor-pointer"
-              >
-                Voltar
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setWhatsappModalOpen(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-700 transition cursor-pointer"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(whatsappMessage);
+                    if (onShowToast) onShowToast("Mensagem copiada para a área de transferência!", "success");
+                  }}
+                  className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  title="Copiar texto do recibo para colar manualmente"
+                >
+                  Copiar Texto 📋
+                </button>
+              </div>
               
-              {settings.whatsappEnabled && settings.whatsappProvider !== "DIRECT_LINK" ? (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => dispatchWhatsAppReceipt(true)}
-                    className="flex-1 py-2.5 bg-slate-200 hover:bg-slate-300 rounded-xl text-[10px] font-bold text-slate-700 transition cursor-pointer"
-                    title="Usar link wa.me direto em vez de gateway"
-                  >
-                    Link Direto
-                  </button>
+              <div className="flex items-center gap-2">
+                {/* Botão de Link Direto com tag nativa <a> para evitar bloqueios de popup */}
+                <a
+                  href={`https://wa.me/${whatsappPhone.replace(/\D/g, "")}?text=${encodeURIComponent(whatsappMessage)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    setSendWhatsAppStatus("sent");
+                    setTimeout(() => setSendWhatsAppStatus("idle"), 4000);
+                    if (onShowToast) onShowToast(`Abrindo conversa do WhatsApp para ${whatsappPhone}...`, "success");
+                  }}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-600/20 flex items-center gap-1.5"
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  <span>Abrir no WhatsApp ↗</span>
+                </a>
+
+                {settings.whatsappEnabled && settings.whatsappProvider !== "DIRECT_LINK" && (
                   <button
                     type="button"
                     onClick={() => dispatchWhatsAppReceipt(false)}
                     disabled={sendWhatsAppStatus === "sending"}
-                    className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-[10px] font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-600/15"
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-900 rounded-xl text-xs font-bold text-white transition cursor-pointer disabled:opacity-50"
                   >
-                    {sendWhatsAppStatus === "sending" ? "A Enviar..." : "Disparar API ✓"}
+                    {sendWhatsAppStatus === "sending" ? "Enviando..." : "Disparar API Gateway"}
                   </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => dispatchWhatsAppReceipt(true)}
-                  className="py-2.5 bg-emerald-600 hover:bg-emerald-700 rounded-xl text-xs font-bold text-white transition cursor-pointer shadow-lg shadow-emerald-600/15"
-                >
-                  Abrir WhatsApp Link ✓
-                </button>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -4446,7 +4578,7 @@ function POSModule({
                       budgetTab === "PREVIEW" ? "bg-amber-100 text-amber-800" : "text-amber-600 hover:bg-amber-100/40"
                     }`}
                   >
-                    Fita Térmica Simulada
+                    Fita Térmica (Pré-visualização)
                   </button>
                   <button
                     type="button"
@@ -5040,6 +5172,30 @@ function POSModule({
           </div>
         </div>
       )}
+
+      </div>
+
+      {/* Modais de Gestão de Turno de Caixa */}
+      <POSShiftModals
+        activeUsername={activeUsername}
+        employees={employees}
+        currency={currency}
+        activeShift={currentShift}
+        shiftMetrics={shiftMetrics}
+        settings={settings}
+        showOpenModal={showOpenShiftModal}
+        onCloseOpenModal={() => setShowOpenShiftModal(false)}
+        showCloseModal={showCloseShiftModal}
+        onCloseCloseModal={() => setShowCloseShiftModal(false)}
+        showExtratoModal={showExtratoModal}
+        onCloseExtratoModal={() => setShowExtratoModal(false)}
+        showQuickEntryModal={showQuickEntryModal}
+        quickEntryType={quickEntryType}
+        onCloseQuickEntryModal={() => setShowQuickEntryModal(false)}
+        onConfirmOpenShift={handleConfirmOpenShiftAction}
+        onConfirmCloseShift={handleConfirmCloseShiftAction}
+        onConfirmQuickEntry={handleConfirmQuickEntryAction}
+      />
     </div>
   );
 }

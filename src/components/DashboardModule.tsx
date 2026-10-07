@@ -1,4 +1,4 @@
-import { useMemo, useState, memo } from "react";
+import { useMemo, useState, useCallback, memo } from "react";
 import { 
   DollarSign, 
   ShoppingBag,
@@ -58,6 +58,59 @@ interface DashboardModuleProps {
 
 const PAYMENT_COLORS = ["#2563eb", "#10b981", "#6366f1", "#0284c7", "#64748b"];
 
+// Pure date formatting helpers placed outside component scope to avoid reallocation per render
+const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const dateSplit = (rawDate: any): string => {
+  if (!rawDate) return "";
+  if (typeof rawDate === "string") {
+    // Fast path: ISO string starting with YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}/.test(rawDate)) {
+      return rawDate.substring(0, 10);
+    }
+    const cleaned = rawDate.includes(" ") && !rawDate.includes("T") 
+      ? rawDate.replace(" ", "T") 
+      : rawDate;
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) return formatLocalDate(d);
+    return rawDate.split("T")[0].split(" ")[0];
+  }
+  try {
+    const d = new Date(rawDate);
+    if (!isNaN(d.getTime())) return formatLocalDate(d);
+  } catch {}
+  return "";
+};
+
+interface NormalizedTxItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  costPrice: number;
+  subtotal: number;
+  emoji?: string;
+}
+
+interface NormalizedTransaction {
+  id: string;
+  original: Transaction;
+  dateStr: string;
+  monthStr: string;
+  timestampMs: number;
+  hour: number;
+  grandTotal: number;
+  paymentMethod: string;
+  items: NormalizedTxItem[];
+  totalQuantity: number;
+  totalCost: number;
+}
+
 function DashboardModule({
   products,
   transactions,
@@ -86,25 +139,7 @@ function DashboardModule({
   const [flyerProduct, setFlyerProduct] = useState<Product | null>(null);
   const [confirmDiscardBatch, setConfirmDiscardBatch] = useState<any | null>(null);
 
-  // Date helpers - timezone-safe formatting matching local user time
-  const formatLocalDate = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
-
-  const dateSplit = (isoStr: string) => {
-    if (!isoStr) return "";
-    try {
-      const d = new Date(isoStr);
-      if (!isNaN(d.getTime())) return formatLocalDate(d);
-    } catch {
-      // fallback to substring
-    }
-    return isoStr.split("T")[0];
-  };
-  
+  // Date anchors memoized
   const todayStr = useMemo(() => formatLocalDate(new Date()), []);
   
   const yesterdayStr = useMemo(() => {
@@ -123,72 +158,172 @@ function DashboardModule({
     return list;
   }, []);
 
+  const last7DaysSet = useMemo(() => new Set(last7DaysStrings), [last7DaysStrings]);
+
+  const prev7DaysSet = useMemo(() => {
+    const set = new Set<string>();
+    for (let i = 7; i < 14; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      set.add(formatLocalDate(d));
+    }
+    return set;
+  }, []);
+
   const currentMonthStr = useMemo(() => todayStr.substring(0, 7), [todayStr]);
 
-  // Filter transactions based on selected scope (100% REAL DATA FROM POSTGRESQL, ZERO MOCK, NO PARALLEL CACHE)
-  const scopedTransactions = useMemo(() => {
-    return transactions.filter(tx => {
-      const txDate = dateSplit(tx.timestamp);
-      if (timeScope === "TODAY") return txDate === todayStr;
-      if (timeScope === "YESTERDAY") return txDate === yesterdayStr;
-      if (timeScope === "LAST_7") return last7DaysStrings.includes(txDate);
-      if (timeScope === "THIS_MONTH") return txDate.startsWith(currentMonthStr);
-      return true;
-    });
-  }, [transactions, timeScope, todayStr, yesterdayStr, last7DaysStrings, currentMonthStr]);
+  const lastMonthStr = useMemo(() => {
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() - 1);
+    return formatLocalDate(d).substring(0, 7);
+  }, []);
 
-  // Product cost lookup helper
-  const productCostMap = useMemo(() => {
-    const map = new Map<string, number>();
-    products.forEach(p => {
-      map.set(p.id, Number(p.costPrice || 0));
-    });
+  // Product Map: O(1) hashmap lookup avoiding quadratic O(N*M) array finds
+  const productMap = useMemo(() => {
+    const map = new Map<string, Product>();
+    for (let i = 0; i < products.length; i++) {
+      map.set(products[i].id, products[i]);
+    }
     return map;
   }, [products]);
 
-  // Real KPI statistics directly from authoritative PostgreSQL transactions
+  // Normalized and parsed transactions: Performed ONCE per transactions/products change.
+  // Parses dates, extracts items JSON, and computes totals so subsequent renders and scope switches are instantaneous.
+  const validNormalizedTransactions = useMemo(() => {
+    const list: NormalizedTransaction[] = [];
+
+    for (let i = 0; i < transactions.length; i++) {
+      const tx = transactions[i];
+      // Exclude cancelled and refunded transactions
+      if (tx.status === "CANCELLED" || (tx as any).status === "REFUNDED") continue;
+
+      const dateStr = dateSplit(tx.timestamp);
+      if (!dateStr) continue;
+
+      const dateObj = new Date(tx.timestamp);
+      const timestampMs = !isNaN(dateObj.getTime()) ? dateObj.getTime() : 0;
+      const hour = !isNaN(dateObj.getTime()) ? dateObj.getHours() : 12;
+      const grandTotal = Number(tx.grandTotal || 0);
+
+      // Parse items safely only once
+      let rawItems: any[] = [];
+      if (Array.isArray(tx.items)) {
+        rawItems = tx.items;
+      } else if (typeof (tx as any).items === "string") {
+        try { rawItems = JSON.parse((tx as any).items); } catch {}
+      } else if (typeof (tx as any).itemsJson === "string") {
+        try { rawItems = JSON.parse((tx as any).itemsJson); } catch {}
+      }
+
+      let txQuantity = 0;
+      let txCost = 0;
+      const parsedItems: NormalizedTxItem[] = [];
+
+      for (let j = 0; j < rawItems.length; j++) {
+        const it = rawItems[j];
+        const prodId = it.productId || it.product_id || it.id || it.name || `item-${j}`;
+        const prod = productMap.get(prodId);
+        const qty = Number(it.quantity || it.qty || 1);
+        const price = Number(it.price || it.salePrice || it.sale_price || 0);
+        const costPrice = it.costPrice !== undefined ? Number(it.costPrice) : Number(prod?.costPrice || 0);
+        const subtotal = Number(it.subtotal || (price * qty));
+
+        txQuantity += qty;
+        txCost += costPrice * qty;
+
+        parsedItems.push({
+          productId: prodId,
+          name: it.productName || it.product_name || prod?.name || "Produto",
+          quantity: qty,
+          price,
+          costPrice,
+          subtotal,
+          emoji: prod?.emoji || "📦"
+        });
+      }
+
+      list.push({
+        id: tx.id,
+        original: tx,
+        dateStr,
+        monthStr: dateStr.substring(0, 7),
+        timestampMs,
+        hour,
+        grandTotal,
+        paymentMethod: tx.paymentMethod || "CASH",
+        items: parsedItems,
+        totalQuantity: txQuantity,
+        totalCost: txCost
+      });
+    }
+
+    return list;
+  }, [transactions, productMap]);
+
+  // Filter transactions based on selected scope: O(N) fast property check using precomputed date strings
+  const scopedTransactions = useMemo(() => {
+    return validNormalizedTransactions.filter(tx => {
+      if (timeScope === "TODAY") return tx.dateStr === todayStr;
+      if (timeScope === "YESTERDAY") return tx.dateStr === yesterdayStr;
+      if (timeScope === "LAST_7") return last7DaysSet.has(tx.dateStr);
+      if (timeScope === "THIS_MONTH") return tx.dateStr.startsWith(currentMonthStr);
+      return true;
+    });
+  }, [validNormalizedTransactions, timeScope, todayStr, yesterdayStr, last7DaysSet, currentMonthStr]);
+
+  // Real KPI statistics directly from authoritative transactions: Fast single-pass aggregation
   const stats = useMemo(() => {
-    // Current period metrics
     let totalRevenue = 0;
     let totalCost = 0;
     let totalQuantity = 0;
     const txCount = scopedTransactions.length;
 
-    scopedTransactions.forEach(tx => {
-      totalRevenue += Number(tx.grandTotal || 0);
-      if (Array.isArray(tx.items)) {
-        tx.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 1);
-          totalQuantity += qty;
-          const unitCost = item.costPrice !== undefined ? Number(item.costPrice) : (productCostMap.get(item.productId) || 0);
-          totalCost += unitCost * qty;
-        });
-      }
-    });
+    for (let i = 0; i < txCount; i++) {
+      const tx = scopedTransactions[i];
+      totalRevenue += tx.grandTotal;
+      totalCost += tx.totalCost;
+      totalQuantity += tx.totalQuantity;
+    }
 
     const totalProfit = Math.max(0, totalRevenue - totalCost);
     const avgTicket = txCount > 0 ? Math.round(totalRevenue / txCount) : 0;
     const profitMarginPercent = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
 
-    // Yesterday comparison for daily profit margin widget
-    const yesterdayTxs = transactions.filter(tx => dateSplit(tx.timestamp) === yesterdayStr);
-    let yRevenue = 0;
-    let yCost = 0;
-    yesterdayTxs.forEach(tx => {
-      yRevenue += Number(tx.grandTotal || 0);
-      if (Array.isArray(tx.items)) {
-        tx.items.forEach((item: any) => {
-          const qty = Number(item.quantity || 1);
-          const unitCost = item.costPrice !== undefined ? Number(item.costPrice) : (productCostMap.get(item.productId) || 0);
-          yCost += unitCost * qty;
-        });
-      }
-    });
-    const yProfit = Math.max(0, yRevenue - yCost);
-    const yMarginPercent = yRevenue > 0 ? Math.round((yProfit / yRevenue) * 100) : 0;
+    // Comparison metrics:
+    let prevRevenue = 0;
+    let prevCost = 0;
 
-    const profitGrowthRate = yProfit > 0 ? ((totalProfit - yProfit) / yProfit) * 100 : (totalProfit > 0 ? 100 : 0);
-    const marginPointsDiff = profitMarginPercent - yMarginPercent;
+    if (timeScope === "THIS_MONTH") {
+      for (let i = 0; i < validNormalizedTransactions.length; i++) {
+        const tx = validNormalizedTransactions[i];
+        if (tx.monthStr === lastMonthStr) {
+          prevRevenue += tx.grandTotal;
+          prevCost += tx.totalCost;
+        }
+      }
+    } else if (timeScope === "LAST_7") {
+      for (let i = 0; i < validNormalizedTransactions.length; i++) {
+        const tx = validNormalizedTransactions[i];
+        if (prev7DaysSet.has(tx.dateStr)) {
+          prevRevenue += tx.grandTotal;
+          prevCost += tx.totalCost;
+        }
+      }
+    } else {
+      for (let i = 0; i < validNormalizedTransactions.length; i++) {
+        const tx = validNormalizedTransactions[i];
+        if (tx.dateStr === yesterdayStr) {
+          prevRevenue += tx.grandTotal;
+          prevCost += tx.totalCost;
+        }
+      }
+    }
+
+    const prevProfit = Math.max(0, prevRevenue - prevCost);
+    const prevMarginPercent = prevRevenue > 0 ? Math.round((prevProfit / prevRevenue) * 100) : 0;
+    const profitGrowthRate = prevProfit > 0 ? ((totalProfit - prevProfit) / prevProfit) * 100 : (totalProfit > 0 ? 100 : 0);
+    const marginPointsDiff = profitMarginPercent - prevMarginPercent;
 
     return {
       totalRevenue,
@@ -198,31 +333,29 @@ function DashboardModule({
       txCount,
       avgTicket,
       profitMarginPercent,
-      yesterdaySales: yRevenue,
-      yesterdayCostOfSales: yCost,
-      yesterdayProfit: yProfit,
-      yesterdayProfitMarginPercent: yMarginPercent,
+      yesterdaySales: prevRevenue,
+      yesterdayCostOfSales: prevCost,
+      yesterdayProfit: prevProfit,
+      yesterdayProfitMarginPercent: prevMarginPercent,
       profitGrowthRate,
       marginPointsDiff
     };
-  }, [scopedTransactions, transactions, yesterdayStr, productCostMap]);
+  }, [scopedTransactions, validNormalizedTransactions, timeScope, yesterdayStr, lastMonthStr, prev7DaysSet]);
 
   // Chart: Timeline of sales in selected scope
   const chartTimelineData = useMemo(() => {
     if (timeScope === "TODAY" || timeScope === "YESTERDAY") {
-      // Group by hour blocks (08:00 to 20:00)
-      const hoursMap: Record<string, number> = {};
+      // Group by hour blocks (08:00 to 22:00)
+      const hoursMap: Record<string, number> = {
+        "08:00": 0, "10:00": 0, "12:00": 0, "14:00": 0,
+        "16:00": 0, "18:00": 0, "20:00": 0, "22:00": 0
+      };
       const targetDate = timeScope === "TODAY" ? todayStr : yesterdayStr;
-      
-      const hourSlots = ["08:00", "10:00", "12:00", "14:00", "16:00", "18:00", "20:00", "22:00"];
-      hourSlots.forEach(h => { hoursMap[h] = 0; });
 
-      scopedTransactions.forEach(tx => {
-        const txDate = dateSplit(tx.timestamp);
-        if (txDate === targetDate) {
-          const dateObj = new Date(tx.timestamp);
-          const hour = dateObj.getHours();
-          // Find closest slot
+      for (let i = 0; i < scopedTransactions.length; i++) {
+        const tx = scopedTransactions[i];
+        if (tx.dateStr === targetDate) {
+          const hour = tx.hour;
           let slot = "08:00";
           if (hour >= 21) slot = "22:00";
           else if (hour >= 19) slot = "20:00";
@@ -233,13 +366,13 @@ function DashboardModule({
           else if (hour >= 9) slot = "10:00";
           else slot = "08:00";
 
-          hoursMap[slot] = (hoursMap[slot] || 0) + tx.grandTotal;
+          hoursMap[slot] += tx.grandTotal;
         }
-      });
+      }
 
-      return hourSlots.map(h => ({
+      return Object.keys(hoursMap).map(h => ({
         label: h,
-        valor: Math.round(hoursMap[h] || 0)
+        valor: Math.round(hoursMap[h])
       }));
     }
 
@@ -247,14 +380,16 @@ function DashboardModule({
       // Last 7 days ordered chronologically
       const days = [...last7DaysStrings].reverse();
       const map: Record<string, number> = {};
-      days.forEach(d => { map[d] = 0; });
+      for (let i = 0; i < days.length; i++) {
+        map[days[i]] = 0;
+      }
 
-      scopedTransactions.forEach(tx => {
-        const d = dateSplit(tx.timestamp);
-        if (map[d] !== undefined) {
-          map[d] += tx.grandTotal;
+      for (let i = 0; i < scopedTransactions.length; i++) {
+        const tx = scopedTransactions[i];
+        if (map[tx.dateStr] !== undefined) {
+          map[tx.dateStr] += tx.grandTotal;
         }
-      });
+      }
 
       return days.map(d => {
         const parts = d.split("-");
@@ -266,31 +401,39 @@ function DashboardModule({
       });
     }
 
-    // THIS_MONTH: group into weeks / 5-day buckets
-    const daysInMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
-    const buckets = [
-      { label: "Dias 01-07", start: 1, end: 7, total: 0 },
-      { label: "Dias 08-14", start: 8, end: 14, total: 0 },
-      { label: "Dias 15-21", start: 15, end: 21, total: 0 },
-      { label: "Dias 22-28", start: 22, end: 28, total: 0 },
-      { label: `Dias 29-${daysInMonth}`, start: 29, end: 31, total: 0 },
-    ];
+    // THIS_MONTH: Day-by-day sales volume for each day of current month
+    const now = new Date();
+    const currentDay = now.getDate();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const monthPart = currentMonthStr.split("-")[1] || String(now.getMonth() + 1).padStart(2, "0");
 
-    scopedTransactions.forEach(tx => {
-      const d = new Date(tx.timestamp).getDate();
-      const bucket = buckets.find(b => d >= b.start && d <= b.end);
-      if (bucket) {
-        bucket.total += tx.grandTotal;
+    const maxDay = Math.max(Math.min(currentDay, daysInMonth), 7);
+    const dayMap: Record<number, number> = {};
+    for (let day = 1; day <= maxDay; day++) {
+      dayMap[day] = 0;
+    }
+
+    for (let i = 0; i < scopedTransactions.length; i++) {
+      const tx = scopedTransactions[i];
+      if (tx.dateStr.startsWith(currentMonthStr)) {
+        const dayPart = parseInt(tx.dateStr.split("-")[2], 10);
+        if (!isNaN(dayPart) && dayPart >= 1 && dayPart <= daysInMonth) {
+          dayMap[dayPart] = (dayMap[dayPart] || 0) + tx.grandTotal;
+        }
       }
+    }
+
+    return Object.entries(dayMap).map(([dayStr, total]) => {
+      const dayNum = parseInt(dayStr, 10);
+      const paddedDay = String(dayNum).padStart(2, "0");
+      return {
+        label: `${paddedDay}/${monthPart}`,
+        valor: Math.round(total)
+      };
     });
+  }, [scopedTransactions, timeScope, todayStr, yesterdayStr, last7DaysStrings, currentMonthStr]);
 
-    return buckets.map(b => ({
-      label: b.label,
-      valor: Math.round(b.total)
-    }));
-  }, [scopedTransactions, timeScope, todayStr, yesterdayStr, last7DaysStrings]);
-
-  // Chart: Payment methods distribution (100% REAL from PostgreSQL transactions)
+  // Chart: Payment methods distribution - O(N) fast pass with precomputed grandTotal
   const chartPaymentMethods = useMemo(() => {
     const map: Record<string, number> = {
       "Dinheiro": 0,
@@ -301,9 +444,10 @@ function DashboardModule({
       "Outro": 0
     };
 
-    scopedTransactions.forEach(tx => {
+    for (let i = 0; i < scopedTransactions.length; i++) {
+      const tx = scopedTransactions[i];
       const method = (tx.paymentMethod || "").toUpperCase();
-      const amount = Number(tx.grandTotal || 0);
+      const amount = tx.grandTotal;
       if (method === "CASH" || method.includes("DINHEIRO")) {
         map["Dinheiro"] += amount;
       } else if (method.includes("MPESA") || method.includes("M-PESA")) {
@@ -317,46 +461,47 @@ function DashboardModule({
       } else {
         map["Outro"] += amount;
       }
-    });
+    }
 
     return Object.entries(map)
       .filter(([_, value]) => value > 0)
       .map(([name, value]) => ({ name, value: Math.round(value) }));
   }, [scopedTransactions]);
 
-  // Top Selling Products in period (100% REAL)
+  // Top Selling Products in period: Direct O(items) iteration without quadratic products.find lookup
   const topProducts = useMemo(() => {
     const map: Record<string, { id: string; name: string; quantity: number; revenue: number; emoji?: string }> = {};
 
-    scopedTransactions.forEach(tx => {
-      if (Array.isArray(tx.items)) {
-        tx.items.forEach(item => {
-          if (!map[item.productId]) {
-            const originalProduct = products.find(p => p.id === item.productId);
-            map[item.productId] = {
-              id: item.productId,
-              name: item.productName || originalProduct?.name || "Produto",
-              quantity: 0,
-              revenue: 0,
-              emoji: originalProduct?.emoji || "📦"
-            };
-          }
-          map[item.productId].quantity += item.quantity || 1;
-          map[item.productId].revenue += (item.price || 0) * (item.quantity || 1);
-        });
+    for (let i = 0; i < scopedTransactions.length; i++) {
+      const tx = scopedTransactions[i];
+      for (let j = 0; j < tx.items.length; j++) {
+        const item = tx.items[j];
+        const prodId = item.productId;
+        if (!map[prodId]) {
+          map[prodId] = {
+            id: prodId,
+            name: item.name,
+            quantity: 0,
+            revenue: 0,
+            emoji: item.emoji
+          };
+        }
+        map[prodId].quantity += item.quantity;
+        map[prodId].revenue += item.subtotal;
       }
-    });
+    }
 
     return Object.values(map)
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 5);
-  }, [scopedTransactions, products]);
+  }, [scopedTransactions]);
 
-  // Recent Transactions in period (100% REAL, max 6)
+  // Recent Transactions in period (max 6): Fast numeric timestamp sort
   const recentTransactions = useMemo(() => {
     return [...scopedTransactions]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, 6);
+      .sort((a, b) => b.timestampMs - a.timestampMs)
+      .slice(0, 6)
+      .map(tx => tx.original);
   }, [scopedTransactions]);
 
   // Expiring Batches (within 30 days) from real products
@@ -366,9 +511,11 @@ function DashboardModule({
     const thirtyDaysAhead = new Date();
     thirtyDaysAhead.setDate(now.getDate() + 30);
 
-    products.forEach(p => {
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
       if (Array.isArray(p.batches)) {
-        p.batches.forEach(b => {
+        for (let j = 0; j < p.batches.length; j++) {
+          const b = p.batches[j];
           if (b.quantity > 0 && b.expiryDate) {
             const expDate = new Date(b.expiryDate);
             if (expDate <= thirtyDaysAhead) {
@@ -384,15 +531,15 @@ function DashboardModule({
               });
             }
           }
-        });
+        }
       }
-    });
+    }
 
     return list.sort((a, b) => a.daysLeft - b.daysLeft);
   }, [products]);
 
-  // Actions for batch promos / discards
-  const handleApplyPromo = (prodId: string, batchId: string, pct: number, promoPrice: number) => {
+  // Actions for batch promos / discards memoized with useCallback
+  const handleApplyPromo = useCallback((prodId: string, batchId: string, pct: number, promoPrice: number) => {
     const prod = products.find(p => p.id === prodId);
     if (!prod || !onUpdateProduct) return;
 
@@ -415,9 +562,9 @@ function DashboardModule({
     }
     setPromoProduct(null);
     setPromoBatch(null);
-  };
+  }, [products, onUpdateProduct, onAddAuditLog, onShowToast, currency]);
 
-  const handleDiscardBatch = (batchId: string) => {
+  const handleDiscardBatch = useCallback((batchId: string) => {
     if (!confirmDiscardBatch || !onUpdateProduct) return;
     const prod = confirmDiscardBatch.product;
     if (!prod) return;
@@ -444,7 +591,7 @@ function DashboardModule({
       onShowToast(`Lote ${confirmDiscardBatch.batchCode} descartado com sucesso.`, "info");
     }
     setConfirmDiscardBatch(null);
-  };
+  }, [confirmDiscardBatch, onUpdateProduct, onAddAuditLog, onShowToast]);
 
   return (
     <div className="space-y-6 pb-12">
@@ -582,13 +729,13 @@ function DashboardModule({
             </div>
             <div>
               <h4 className="font-black text-sm text-rose-950 flex items-center gap-2">
-                <span>Falha na Leitura das Vendas (PostgreSQL)</span>
+                <span>Falha na Leitura das Vendas</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">
                   Erro Crítico
                 </span>
               </h4>
               <p className="text-xs text-rose-800 font-medium mt-1 leading-relaxed">
-                A base de dados retornou o seguinte erro: <code className="bg-rose-100/80 px-1.5 py-0.5 rounded font-mono font-bold text-rose-900 border border-rose-200">{transactionsError}</code>. Os valores abaixo não refletem zero vendas reais; a recuperação das vendas falhou.
+                O servidor retornou o seguinte erro: <code className="bg-rose-100/80 px-1.5 py-0.5 rounded font-mono font-bold text-rose-900 border border-rose-200">{transactionsError}</code>. Os valores abaixo não refletem zero vendas reais; a recuperação das vendas falhou.
               </p>
             </div>
           </div>
@@ -706,6 +853,7 @@ function DashboardModule({
         currency={currency}
         selectedDateStr={todayStr}
         isToday={timeScope === "TODAY"}
+        timeScope={timeScope}
       />
 
       {/* 4. BALANCED CHARTS ROW (2 Columns) */}

@@ -248,6 +248,33 @@ function ReportsModule({
     setShowPrintModal(t);
   }, []);
 
+  // Date helpers - timezone-safe formatting
+  const formatLocalDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const dateSplit = (rawDate: any): string => {
+    if (!rawDate) return "";
+    if (typeof rawDate === "string") {
+      const cleaned = rawDate.includes(" ") && !rawDate.includes("T") 
+        ? rawDate.replace(" ", "T") 
+        : rawDate;
+      const d = new Date(cleaned);
+      if (!isNaN(d.getTime())) return formatLocalDate(d);
+      const match = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+      return rawDate.split("T")[0].split(" ")[0];
+    }
+    try {
+      const d = new Date(rawDate);
+      if (!isNaN(d.getTime())) return formatLocalDate(d);
+    } catch {}
+    return "";
+  };
+
   // Monthly summary state & calculations
   const [showMonthlySummaryModal, setShowMonthlySummaryModal] = useState(false);
 
@@ -263,12 +290,14 @@ function ReportsModule({
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonth = now.getMonth(); // 0-indexed
+    const currentMonthPrefix = `${currentYear}-${String(currentMonth + 1).padStart(2, "0")}`;
 
-    // Filter transactions for current month
+    // Filter transactions for current month (excluding cancelled sales)
     const monthlyTx = transactions.filter(t => {
       if (!t.timestamp) return false;
-      const d = new Date(t.timestamp);
-      return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+      if (t.status === "CANCELLED" || (t as any).status === "REFUNDED") return false;
+      const tDate = dateSplit(t.timestamp);
+      return tDate.startsWith(currentMonthPrefix);
     });
 
     let totalSales = 0;
@@ -286,23 +315,26 @@ function ReportsModule({
       totalVat += isNaN(v) ? 0 : v;
       totalDiscount += isNaN(d) ? 0 : d;
 
-      if (Array.isArray(t.items)) {
-        t.items.forEach(item => {
-          const name = item.productName || (item as any).name || "Produto Geral";
-          if (!productSales[name]) {
-            productSales[name] = { qty: 0, revenue: 0 };
-          }
-          const itemQty = Number(item.quantity || 1);
-          const itemPrice = Number(item.price ?? (item as any).salePrice ?? (item as any).unitPrice ?? 0);
-          const itemSubtotal = Number((item as any).subtotal ?? (itemPrice * itemQty));
-          const safeQty = isNaN(itemQty) ? 1 : itemQty;
-          const safeRev = isNaN(itemSubtotal) ? (isNaN(itemPrice) ? 0 : itemPrice * safeQty) : itemSubtotal;
+      let itemsList: any[] = [];
+      if (Array.isArray(t.items)) itemsList = t.items;
+      else if (typeof (t as any).items === "string") { try { itemsList = JSON.parse((t as any).items); } catch {} }
+      else if (typeof (t as any).itemsJson === "string") { try { itemsList = JSON.parse((t as any).itemsJson); } catch {} }
 
-          productSales[name].qty += safeQty;
-          productSales[name].revenue += safeRev;
-          totalItemsCount += safeQty;
-        });
-      }
+      itemsList.forEach(item => {
+        const name = item.productName || (item as any).name || "Produto Geral";
+        if (!productSales[name]) {
+          productSales[name] = { qty: 0, revenue: 0 };
+        }
+        const itemQty = Number(item.quantity || 1);
+        const itemPrice = Number(item.price ?? (item as any).salePrice ?? (item as any).unitPrice ?? 0);
+        const itemSubtotal = Number((item as any).subtotal ?? (itemPrice * itemQty));
+        const safeQty = isNaN(itemQty) ? 1 : itemQty;
+        const safeRev = isNaN(itemSubtotal) ? (isNaN(itemPrice) ? 0 : itemPrice * safeQty) : itemSubtotal;
+
+        productSales[name].qty += safeQty;
+        productSales[name].revenue += safeRev;
+        totalItemsCount += safeQty;
+      });
     });
 
     const averageTicket = monthlyTx.length ? Math.round(totalSales / monthlyTx.length) : 0;
@@ -344,7 +376,8 @@ function ReportsModule({
   const filteredTransactions = useMemo(() => {
     return transactions.filter(t => {
       if (!t.timestamp) return false;
-      const tDate = t.timestamp.split("T")[0];
+      if (t.status === "CANCELLED" || (t as any).status === "REFUNDED") return false;
+      const tDate = dateSplit(t.timestamp);
       return tDate >= startDate && tDate <= endDate;
     });
   }, [transactions, startDate, endDate]);
@@ -2704,13 +2737,13 @@ function ReportsModule({
             </div>
             <div>
               <h4 className="font-black text-sm text-rose-950 flex items-center gap-2">
-                <span>Falha na Leitura das Vendas (PostgreSQL)</span>
+                <span>Falha na Leitura das Vendas</span>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-rose-200 text-rose-800">
                   Bloqueio Fiscal
                 </span>
               </h4>
               <p className="text-xs text-rose-800 font-medium mt-1 leading-relaxed">
-                A base de dados retornou o seguinte erro: <code className="bg-rose-100/80 px-1.5 py-0.5 rounded font-mono font-bold text-rose-900 border border-rose-200">{transactionsError}</code>. Os relatórios de faturação e IVA não foram gerados com zero vendas para evitar falsas declarações fiscais.
+                O servidor retornou o seguinte erro: <code className="bg-rose-100/80 px-1.5 py-0.5 rounded font-mono font-bold text-rose-900 border border-rose-200">{transactionsError}</code>. Os relatórios de faturação e IVA não foram gerados com zero vendas para evitar falsas declarações fiscais.
               </p>
             </div>
           </div>
@@ -2722,7 +2755,7 @@ function ReportsModule({
               className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold shrink-0 flex items-center gap-2 transition cursor-pointer shadow-sm hover:shadow"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>Recarregar do PostgreSQL</span>
+              <span>Recarregar Dados</span>
             </button>
           )}
         </div>
@@ -2868,6 +2901,73 @@ function ReportsModule({
             <div>
               <h3 className="font-bold text-slate-800 text-sm">Gerador Manual de Relatórios Fiscais</h3>
               <p className="text-xs text-slate-400 mt-0.5">Selecione o intervalo de datas e o formato de exportação.</p>
+            </div>
+
+            {/* Quick Period Presets */}
+            <div className="flex flex-wrap items-center gap-1.5 pb-1">
+              <button
+                type="button"
+                onClick={() => {
+                  const today = formatLocalDate(new Date());
+                  setStartDate(today);
+                  setEndDate(today);
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shadow-xs active:scale-95"
+              >
+                Hoje
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const d = new Date();
+                  d.setDate(d.getDate() - 6);
+                  setStartDate(formatLocalDate(d));
+                  setEndDate(formatLocalDate(new Date()));
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shadow-xs active:scale-95"
+              >
+                7 Dias
+              </button>
+              <button
+                type="button"
+                id="btn-filter-this-month"
+                onClick={() => {
+                  const now = new Date();
+                  const year = now.getFullYear();
+                  const month = String(now.getMonth() + 1).padStart(2, "0");
+                  setStartDate(`${year}-${month}-01`);
+                  setEndDate(formatLocalDate(now));
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-800 transition cursor-pointer shadow-xs active:scale-95 flex items-center gap-1"
+              >
+                <Calendar className="w-3 h-3 text-orange-600" />
+                Este Mês
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const now = new Date();
+                  const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                  const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                  setStartDate(formatLocalDate(lastMonthDate));
+                  setEndDate(formatLocalDate(lastDayOfMonth));
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shadow-xs active:scale-95"
+              >
+                Mês Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const past = new Date();
+                  past.setDate(past.getDate() - 30);
+                  setStartDate(formatLocalDate(past));
+                  setEndDate(formatLocalDate(new Date()));
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shadow-xs active:scale-95"
+              >
+                30 Dias
+              </button>
             </div>
 
             {/* Date filter inputs */}
@@ -3406,15 +3506,15 @@ function ReportsModule({
               </p>
             </div>
 
-            {/* Simulated Rate Selector */}
+            {/* Comparative Rate Selector */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
               <div className="flex items-center gap-2 text-slate-800 font-bold text-xs uppercase tracking-wider">
                 <Percent className="w-4 h-4 text-emerald-500" />
-                Simulação de Alíquota Diferencial
+                Análise com Alíquota Comparativa
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-[10px] font-bold text-slate-500 uppercase">
-                  <span>Alíquota do Simulador:</span>
+                  <span>Alíquota de Projeção:</span>
                   <span className="text-emerald-600 font-mono text-xs">{simulatedIvaRate}%</span>
                 </div>
                 <input
@@ -3428,7 +3528,7 @@ function ReportsModule({
                 />
               </div>
               <p className="text-[11px] text-slate-400">
-                Alíquota oficial de Moçambique: 16%. Ajuste o slider para simular o imposto arrecadado com alíquotas diferentes.
+                Alíquota oficial de Moçambique: 16%. Ajuste o seletor para projetar o imposto arrecadado com taxas alternativas.
               </p>
             </div>
           </div>
@@ -3483,7 +3583,7 @@ function ReportsModule({
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 lg:col-span-2">
               <div>
                 <h3 className="font-bold text-slate-800 text-sm">Resumo da Apuração de IVA (Modelo Oficial)</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Balancete simulado em conformidade com o regulamento do IVA de Moçambique.</p>
+                <p className="text-xs text-slate-400 mt-0.5">Balancete oficial em conformidade com o regulamento do IVA de Moçambique.</p>
               </div>
 
               {/* Sheet Table */}
@@ -3569,7 +3669,7 @@ function ReportsModule({
                 {/* Simulated Rate Stats Card if slider adjusted */}
                 {simulatedIvaRate !== 16 && (
                   <div className="bg-emerald-50/50 p-3.5 rounded-xl border border-emerald-100 text-xs space-y-1">
-                    <span className="text-[9px] font-bold text-emerald-700 uppercase block tracking-wider">Cenário de Simulação Diferencial</span>
+                    <span className="text-[9px] font-bold text-emerald-700 uppercase block tracking-wider">Cenário de Análise Fiscal Comparativa</span>
                     <p className="text-slate-600 text-[11px] leading-snug">
                       Se a alíquota de IVA fosse <span className="font-bold">{simulatedIvaRate}%</span>, o IVA coletado seria de <span className="font-bold">{formatMZ(vatCalculations.simulatedVatCollected)}</span> (diferença de <span className="font-bold">{formatMZ(vatCalculations.simulatedVatCollected - vatCalculations.realVatCollected)}</span>).
                     </p>

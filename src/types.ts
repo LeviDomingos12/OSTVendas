@@ -100,6 +100,8 @@ export interface Transaction extends MultiTenantMetadata {
   vatTotal: number;
   discountTotal: number;
   grandTotal: number;
+  amountPaid?: number;
+  changeAmount?: number;
   paymentMethod: "CASH" | "MPESA_PAGA_FACIL" | "EMOLA" | "POS_CARD" | "CREDIT_CARD" | "BANK_TRANSFER" | "MIXED" | "DEBT";
   paymentDetails?: string;
   cashierName: string;
@@ -111,6 +113,7 @@ export interface Transaction extends MultiTenantMetadata {
   customerEmail?: string;
   nuit?: string;
   branchId?: string; // Associated branch ID
+  shiftId?: string; // Shift ID associated with this sale
   fiscalHash?: string; // AGT/MEF Fiscal Hash signature
   fiscalKeys?: string; // Short sign key e.g. "D4-F5-G6-A2"
   fiscalCertified?: boolean; // Certified indicator
@@ -127,13 +130,17 @@ export interface CashFlowEntry extends MultiTenantMetadata {
   shiftId?: string;
   registerId?: string;
   paymentMethod?: "CASH" | "MPESA_PAGA_FACIL" | "EMOLA" | "POS_CARD" | "BANK_TRANSFER" | "OTHER";
-  category?: "SUPRIMENTO" | "SANGRIA" | "DESPESA_OPERACIONAL" | "PAGAMENTO_FORNECEDOR" | "DEVOLUCAO_VENDA" | "QUEBRA_CAIXA" | "SOBRA_CAIXA" | "RECEBIMENTO_DIVIDA" | "OUTRO";
+  category?: "SUPRIMENTO" | "SANGRIA" | "DESPESA_OPERACIONAL" | "PAGAMENTO_FORNECEDOR" | "DEVOLUCAO_VENDA" | "QUEBRA_CAIXA" | "SOBRA_CAIXA" | "RECEBIMENTO_DIVIDA" | "OUTRO" | "RECEBIMENTO_VENDA" | "TROCO_DEVOLVIDO";
   reference?: string;
   destination?: string;
   supplierOrClient?: string;
   authorizedSupervisor?: string;
   supervisorPinVerified?: boolean;
   notes?: string;
+  amountIn?: number;
+  amountOut?: number;
+  balanceAfter?: number;
+  changeSource?: string;
 }
 
 export interface CashShift extends MultiTenantMetadata {
@@ -365,6 +372,17 @@ export interface Branch {
   contact: string;
   city?: string;
   code?: string;
+}
+
+export interface CompanyProfile {
+  id?: string;
+  email: string;
+  company_name: string;
+  nuit?: string;
+  address?: string;
+  logo_url?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface StockTransfer {

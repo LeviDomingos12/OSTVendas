@@ -684,7 +684,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
                     <span>O sistema funciona sem conexão à internet (Offline)?</span>
                   </h4>
                   <p className="text-[11.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                    O sistema opera em modo Online Only para garantir a integridade em tempo real com a base de dados central (Supabase/PostgreSQL). É necessária uma ligação ativa à internet para emitir vendas com total segurança e confiabilidade fiscal.
+                    O sistema opera em modo seguro com sincronização contínua para garantir a integridade em tempo real com o servidor central protegido. É necessária uma ligação ativa à internet para emitir vendas com total segurança e conformidade fiscal.
                   </p>
                 </div>
 
@@ -708,7 +708,7 @@ export const TutorialModal: React.FC<TutorialModalProps> = ({
                     <span>Como faço uma cópia de segurança (Backup) dos meus dados?</span>
                   </h4>
                   <p className="text-[11.5px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                    Aceda ao módulo de <b>Definições &gt; Cópia de Segurança &amp; Backup</b> para realizar o download em ficheiro JSON do banco de dados completo ou configurar sincronização automática na nuvem.
+                    Aceda ao módulo de <b>Definições &gt; Cópia de Segurança &amp; Dados</b> para descarregar o ficheiro de backup completo ou executar sincronização na nuvem.
                   </p>
                 </div>
               </div>

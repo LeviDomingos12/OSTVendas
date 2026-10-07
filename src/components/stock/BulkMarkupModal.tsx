@@ -157,7 +157,7 @@ export const BulkMarkupModal: React.FC<BulkMarkupModalProps> = ({
 
       onClose();
     } catch (err: any) {
-      setErrorMessage(err?.message || "Erro ao gravar reajuste de preços no PostgreSQL.");
+      setErrorMessage(err?.message || "Erro ao gravar reajuste de preços no servidor.");
     } finally {
       setIsSubmitting(false);
     }
@@ -561,7 +561,7 @@ export const BulkMarkupModal: React.FC<BulkMarkupModalProps> = ({
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <CheckCircle2 className="w-4 h-4 text-emerald-500" />
             <span>
-              {finalProductsToUpdate.length} produto(s) serão gravados no banco de dados.
+              {finalProductsToUpdate.length} produto(s) serão atualizados no sistema.
             </span>
           </div>
 
@@ -584,7 +584,7 @@ export const BulkMarkupModal: React.FC<BulkMarkupModalProps> = ({
               {isSubmitting ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Gravando no PostgreSQL...</span>
+                  <span>A gravar reajuste...</span>
                 </>
               ) : (
                 <>

@@ -618,7 +618,7 @@ export default function StockReplenishModal({
             isNight ? "border-zinc-800 bg-zinc-950 text-zinc-500" : "bg-slate-50 border-slate-100 text-slate-400"
           }`}>
             <span className="font-medium text-left">
-              * Atualiza diretamente o stock no inventário e sincroniza com o banco de dados.
+              * Atualiza diretamente o stock no inventário e sincroniza com o servidor central.
             </span>
             <div className="flex items-center gap-1.5 font-bold font-mono">
               <span className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-slate-400">Ctrl + S</span>

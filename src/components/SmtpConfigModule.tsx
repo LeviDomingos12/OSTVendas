@@ -322,14 +322,14 @@ export default function SmtpConfigModule({
       onAddAuditLog(
         "Configurações SMTP Salvas",
         "SERVIÇO DE E-MAIL",
-        `Credenciais do servidor SMTP (${smtpHost.trim()}:${smtpPort}) gravadas no banco de dados, substituindo variáveis .env.`
+        `Credenciais do servidor SMTP (${smtpHost.trim()}:${smtpPort}) guardadas com sucesso.`
       );
 
       if (onShowToast) {
         onShowToast(
-          "Credenciais SMTP salvas no banco de dados com sucesso! O sistema não depende mais do arquivo .env.",
+          "Credenciais SMTP guardadas com sucesso no sistema!",
           "success",
-          "Banco de Dados Atualizado"
+          "Configuração Guardada"
         );
       }
     } catch (err: any) {
@@ -343,7 +343,7 @@ export default function SmtpConfigModule({
 
   return (
     <div className="space-y-6 text-black font-sans">
-      {/* Top Banner: Informação de Substituição do .env */}
+      {/* Top Banner: Informação de Configuração */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-start gap-3.5">
@@ -356,16 +356,13 @@ export default function SmtpConfigModule({
                   Configurações de Servidor SMTP & E-mail
                 </h2>
                 <span className="px-2.5 py-0.5 bg-emerald-100 text-black rounded-full text-[11px] font-bold border border-emerald-300 flex items-center gap-1">
-                  <Database className="w-3 h-3 text-black" />
-                  Salvo no Banco de Dados
-                </span>
-                <span className="px-2.5 py-0.5 bg-orange-100 text-black rounded-full text-[11px] font-bold border border-orange-300">
-                  Substitui .env
+                  <ShieldCheck className="w-3 h-3 text-emerald-700" />
+                  Ambiente Protegido
                 </span>
               </div>
               <p className="text-xs text-black mt-1 leading-relaxed max-w-3xl">
-                Configure as credenciais SMTP diretamente nesta tela para envio de faturas, relatórios automáticos, alertas de stock e reposição de PINs.
-                As configurações são guardadas com segurança na base de dados, eliminando qualquer necessidade de variáveis de ambiente manuais no arquivo <code className="bg-slate-100 px-1 py-0.5 rounded text-black font-mono font-bold">.env</code>.
+                Configure as credenciais SMTP para envio de faturas, relatórios automáticos, alertas de stock e reposição de PINs.
+                As configurações são guardadas com segurança no sistema de forma persistente e protegida.
               </p>
             </div>
           </div>
@@ -390,7 +387,7 @@ export default function SmtpConfigModule({
             <div className="flex items-center gap-2 mt-1">
               <span className={`w-2 h-2 rounded-full ${serverSource === "database" ? "bg-emerald-600" : "bg-amber-600"}`} />
               <span className="text-xs font-bold text-black">
-                {serverSource === "database" ? "Banco de Dados (Autoritativo)" : serverSource === "env" ? "Variáveis .env (Fallback)" : "Não configurado"}
+                {serverSource === "database" ? "Configurado no Sistema" : serverSource === "env" ? "Servidor Local" : "Não configurado"}
               </span>
             </div>
           </div>
@@ -665,8 +662,8 @@ export default function SmtpConfigModule({
             {/* Submit Bar */}
             <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs text-black">
-                <Database className="w-4 h-4 text-black" />
-                <span>Armazenamento: <strong>PostgreSQL / settings (Base de Dados)</strong></span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                <span>Armazenamento: <strong>Configuração Segura de Sistema</strong></span>
               </div>
 
               <button
@@ -677,12 +674,12 @@ export default function SmtpConfigModule({
                 {isSaving ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span>A Gravar no Banco...</span>
+                    <span>A Guardar Definições...</span>
                   </>
                 ) : (
                   <>
                     <Save className="w-4 h-4 text-white" />
-                    <span>Salvar no Banco de Dados</span>
+                    <span>Salvar Configuração</span>
                   </>
                 )}
               </button>

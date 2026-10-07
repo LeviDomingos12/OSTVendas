@@ -569,7 +569,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
             {!quizStarted ? (
               <div className="space-y-3.5 text-center py-4">
                 <p className="text-[11px] text-slate-400 dark:text-slate-400 font-medium leading-relaxed">
-                  Avalie suas habilidades de faturamento e regras fiscais vigentes em Moçambique com o nosso mini simulador oficial.
+                  Avalie os seus conhecimentos de faturação e regras fiscais vigentes em Moçambique no teste prático oficial.
                 </p>
                 <button
                   onClick={startQuiz}
@@ -763,7 +763,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
                 }`}
               >
                 <Video className="w-3.5 h-3.5" />
-                📺 Vídeo Real Animado (YouTube Embed)
+                📺 Vídeo Tutorial Explicativo
               </button>
               <button
                 onClick={() => { setPlayerMode("simulation"); setIsPlaying(true); }}
@@ -774,7 +774,7 @@ export default function TrainingModule({ videos, currency }: TrainingModuleProps
                 }`}
               >
                 <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-                🔮 Simulador 3D de Software
+                ✨ Demonstração Prática Interativa
               </button>
             </div>
 

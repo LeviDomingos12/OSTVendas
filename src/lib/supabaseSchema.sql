@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.companies (
   id TEXT PRIMARY KEY DEFAULT ('comp_' || substr(uuid_generate_v4()::TEXT, 1, 8)),
   name TEXT NOT NULL,
   owner_uid TEXT NOT NULL,
+  owner_email TEXT,
   tax_id TEXT,
   email TEXT,
   phone TEXT,
@@ -28,6 +29,48 @@ CREATE TABLE IF NOT EXISTS public.companies (
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 2.1b DEFINIÇÕES E DADOS DA EMPRESA POR UTILIZADOR / EMAIL ISOLADO
+CREATE TABLE IF NOT EXISTS public.company_settings (
+  id TEXT PRIMARY KEY DEFAULT ('cs_' || substr(uuid_generate_v4()::TEXT, 1, 12)),
+  user_email TEXT NOT NULL,
+  company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  slogan TEXT DEFAULT '',
+  tax_id TEXT DEFAULT '',
+  company_nuit TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  currency TEXT DEFAULT 'MT',
+  default_vat NUMERIC(5,2) DEFAULT 16.00,
+  vat_percentage NUMERIC(5,2) DEFAULT 16.00,
+  enable_vat BOOLEAN DEFAULT true,
+  receipt_footer_message TEXT DEFAULT '',
+  paper_size TEXT DEFAULT '80MM',
+  printer_auto_cut BOOLEAN DEFAULT true,
+  logo_url TEXT DEFAULT '',
+  theme TEXT DEFAULT 'laranja',
+  val_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_company_settings_user_email ON public.company_settings (LOWER(TRIM(user_email)));
+CREATE INDEX IF NOT EXISTS idx_company_settings_lookup ON public.company_settings (user_email);
+
+-- 2.1c PERFIS DE EMPRESA ISOLADOS POR EMAIL / COMPANY PROFILES
+CREATE TABLE IF NOT EXISTS public.company_profiles (
+  id TEXT PRIMARY KEY DEFAULT ('cp_' || substr(uuid_generate_v4()::TEXT, 1, 12)),
+  email TEXT UNIQUE NOT NULL,
+  company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  nuit TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  logo_url TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_company_profiles_email ON public.company_profiles (LOWER(TRIM(email)));
 
 -- 2.2 PERFIS DE UTILIZADOR / PROFILES (Direct mapping with auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -946,6 +989,8 @@ ALTER TABLE public.recurring_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_training_progress ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.company_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 
 -- Macro de políticas permissivas para operação híbrida (Public / Authenticated / Service Role)
@@ -953,7 +998,7 @@ DO $$
 DECLARE
   tbl TEXT;
   tbls TEXT[] := ARRAY[
-    'companies', 'profiles', 'categories', 'suppliers', 'branches',
+    'companies', 'company_settings', 'company_profiles', 'profiles', 'categories', 'suppliers', 'branches',
     'produtos', 'products', 'product_batches', 'stock_movements', 'stock_transfers',
     'clientes', 'customer_debts', 'debt_payments', 'vendas', 'venda_itens',
     'returns', 'suspended_carts', 'caixa', 'cash_registers', 'cash_shifts',
@@ -967,6 +1012,53 @@ BEGIN
     EXECUTE format('GRANT ALL ON public.%I TO postgres, authenticated, anon, service_role;', tbl);
   END LOOP;
 END $$;
+
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente
+DROP POLICY IF EXISTS "allow_all_company_profiles" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_select_matching_email" ON public.company_profiles
+  FOR SELECT
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_insert_matching_email" ON public.company_profiles
+  FOR INSERT
+  TO authenticated, anon, public
+  WITH CHECK (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_update_matching_email" ON public.company_profiles
+  FOR UPDATE
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_delete_matching_email" ON public.company_profiles
+  FOR DELETE
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 -- Views retrocompatíveis adicionais
 CREATE OR REPLACE VIEW public.sales AS SELECT * FROM public.vendas;

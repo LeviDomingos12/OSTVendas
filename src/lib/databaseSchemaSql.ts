@@ -689,14 +689,57 @@ GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenti
 NOTIFY pgrst, 'reload schema';`;
 
 export const SETTINGS_SQL_SCHEMA = `-- ==============================================================================
--- DEFINIÇÕES DO SISTEMA E EMPRESA (public.settings e public.companies)
+-- DEFINIÇÕES DO SISTEMA E EMPRESA (public.company_settings, public.settings e public.companies)
 -- ==============================================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- TABELA DEDICADA PARA DADOS DA EMPRESA COM ISOLAMENTO POR EMAIL DO UTILIZADOR
+CREATE TABLE IF NOT EXISTS public.company_settings (
+  id TEXT PRIMARY KEY DEFAULT ('cs_' || substr(uuid_generate_v4()::TEXT, 1, 12)),
+  user_email TEXT NOT NULL,
+  company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  slogan TEXT DEFAULT '',
+  tax_id TEXT DEFAULT '',
+  company_nuit TEXT DEFAULT '',
+  phone TEXT DEFAULT '',
+  email TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  currency TEXT DEFAULT 'MT',
+  default_vat NUMERIC(5,2) DEFAULT 16.00,
+  vat_percentage NUMERIC(5,2) DEFAULT 16.00,
+  enable_vat BOOLEAN DEFAULT true,
+  receipt_footer_message TEXT DEFAULT '',
+  paper_size TEXT DEFAULT '80MM',
+  printer_auto_cut BOOLEAN DEFAULT true,
+  logo_url TEXT DEFAULT '',
+  theme TEXT DEFAULT 'laranja',
+  val_json JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_company_settings_user_email ON public.company_settings (LOWER(TRIM(user_email)));
+CREATE INDEX IF NOT EXISTS idx_company_settings_lookup ON public.company_settings (user_email);
+
+-- TABELA DEDICADA: company_profiles (Isolamento por email com RLS)
+CREATE TABLE IF NOT EXISTS public.company_profiles (
+  id TEXT PRIMARY KEY DEFAULT ('cp_' || substr(uuid_generate_v4()::TEXT, 1, 12)),
+  email TEXT UNIQUE NOT NULL,
+  company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
+  nuit TEXT DEFAULT '',
+  address TEXT DEFAULT '',
+  logo_url TEXT DEFAULT '',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_company_profiles_email ON public.company_profiles (LOWER(TRIM(email)));
 
 CREATE TABLE IF NOT EXISTS public.companies (
   id TEXT PRIMARY KEY DEFAULT ('comp_' || substr(uuid_generate_v4()::TEXT, 1, 8)),
   name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
   owner_uid TEXT NOT NULL DEFAULT 'system',
+  owner_email TEXT,
   tax_id TEXT,
   email TEXT,
   phone TEXT,
@@ -741,12 +784,65 @@ CREATE TABLE IF NOT EXISTS public.settings (
 
 CREATE INDEX IF NOT EXISTS idx_settings_tenant ON public.settings (tenant_id);
 
+ALTER TABLE public.company_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
+
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente
+DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_select_matching_email" ON public.company_profiles
+  FOR SELECT
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_insert_matching_email" ON public.company_profiles
+  FOR INSERT
+  TO authenticated, anon, public
+  WITH CHECK (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_update_matching_email" ON public.company_profiles
+  FOR UPDATE
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
+CREATE POLICY "company_profiles_delete_matching_email" ON public.company_profiles
+  FOR DELETE
+  TO authenticated, anon, public
+  USING (
+    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+DROP POLICY IF EXISTS allow_all_company_settings ON public.company_settings;
+CREATE POLICY allow_all_company_settings ON public.company_settings FOR ALL TO public USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS allow_all_settings ON public.settings;
 CREATE POLICY allow_all_settings ON public.settings FOR ALL TO public USING (true) WITH CHECK (true);
 DROP POLICY IF EXISTS allow_all_companies ON public.companies;
 CREATE POLICY allow_all_companies ON public.companies FOR ALL TO public USING (true) WITH CHECK (true);
+GRANT ALL ON public.company_profiles TO postgres, authenticated, anon, service_role;
+GRANT ALL ON public.company_settings TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.settings TO postgres, authenticated, anon, service_role;
 GRANT ALL ON public.companies TO postgres, authenticated, anon, service_role;
 NOTIFY pgrst, 'reload schema';`;
