@@ -232,6 +232,51 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
 );
 
--- Grant privileges to application user
+-- Security hardening: Revoke public privileges and grant strictly to application user
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
 GRANT ALL ON ALL TABLES IN SCHEMA public TO ostvendas_app;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO ostvendas_app;
+
+-- Enable Row Level Security on all multi-tenant tables
+ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE customer_debts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE debt_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cash_registers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE cash_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
+
+-- Tenant Isolation Function & RLS Policies
+CREATE OR REPLACE FUNCTION public.current_tenant_id() RETURNS TEXT AS $$
+BEGIN
+  RETURN NULLIF(current_setting('app.current_tenant_id', true), '');
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.current_tenant_id() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO ostvendas_app;
+
+CREATE POLICY tenant_isolation_companies ON companies USING (id = current_tenant_id());
+CREATE POLICY tenant_isolation_categories ON categories USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_suppliers ON suppliers USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_products ON products USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_stock_movements ON stock_movements USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_customers ON customers USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_customer_debts ON customer_debts USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_debt_payments ON debt_payments USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_sales ON sales USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_sale_items ON sale_items USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_sale_payments ON sale_payments USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_cash_registers ON cash_registers USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_cash_movements ON cash_movements USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_tenant_id());
+CREATE POLICY tenant_isolation_settings ON settings USING (tenant_id = current_tenant_id());

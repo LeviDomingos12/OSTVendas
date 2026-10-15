@@ -141,13 +141,13 @@ export const QuickLogoModal: React.FC<QuickLogoModalProps> = ({
                 <ImageIcon className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="font-extrabold text-sm tracking-tight text-slate-800 dark:text-slate-100 flex items-center gap-2">
+                <h3 className="font-extrabold text-sm tracking-tight text-slate-800 dark:text-white flex items-center gap-2">
                   <span>Configuração Rápida do Logotipo</span>
                   <span className="text-[10px] bg-orange-500/15 text-orange-600 dark:text-orange-400 font-bold px-2 py-0.5 rounded-full border border-orange-500/20">
                     Atalho Direto
                   </span>
                 </h3>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                <p className="text-[11px] text-slate-500 dark:text-white/90">
                   {companyName} &bull; Personalização rápida para documentos e sistema
                 </p>
               </div>
@@ -183,7 +183,7 @@ export const QuickLogoModal: React.FC<QuickLogoModalProps> = ({
 
               <div className="space-y-1 text-left flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                  <span className="text-xs font-bold text-slate-800 dark:text-white">
                     Pré-visualização do Logotipo
                   </span>
                   {logoInput && logoInput !== "/src/assets/images/app_logo_1782658148089.jpg" ? (
@@ -191,12 +191,12 @@ export const QuickLogoModal: React.FC<QuickLogoModalProps> = ({
                       Personalizado
                     </span>
                   ) : (
-                    <span className="text-[10px] bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-slate-400 font-medium px-2 py-0.5 rounded-md">
+                    <span className="text-[10px] bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-white/80 font-medium px-2 py-0.5 rounded-md">
                       Padrão
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-tight">
+                <p className="text-[11px] text-slate-500 dark:text-white/90 leading-tight">
                   Aparecerá nas faturas, recibos em papel de 80mm/A4, relatórios PDF e no cabeçalho do ERP.
                 </p>
                 <p className="text-[10px] font-mono text-orange-600 dark:text-orange-400">
@@ -280,10 +280,10 @@ export const QuickLogoModal: React.FC<QuickLogoModalProps> = ({
                   <Upload className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                  <p className="text-xs font-bold text-slate-800 dark:text-white">
                     Clique para selecionar ou arraste uma imagem aqui
                   </p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
+                  <p className="text-[11px] text-slate-400 dark:text-white/80 mt-0.5">
                     Formatos suportados: PNG, JPG, WEBP, SVG (máx. 5MB)
                   </p>
                 </div>
@@ -346,8 +346,8 @@ export const QuickLogoModal: React.FC<QuickLogoModalProps> = ({
                       <img src={preset.url} alt={preset.name} className="max-w-full max-h-full object-contain" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">{preset.name}</p>
-                      <p className="text-[10px] text-slate-400">Clique para aplicar</p>
+                      <p className="text-xs font-bold text-slate-800 dark:text-white truncate">{preset.name}</p>
+                      <p className="text-[10px] text-slate-400 dark:text-white/80">Clique para aplicar</p>
                     </div>
                   </button>
                 ))}

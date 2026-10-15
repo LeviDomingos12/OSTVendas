@@ -16,7 +16,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_id TEXT,
   owner_id TEXT,
   created_by TEXT,
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS public.products (
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.produtos (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_id TEXT,
   owner_id TEXT,
   created_by TEXT,
@@ -101,23 +101,110 @@ CREATE INDEX IF NOT EXISTS idx_produtos_active ON public.produtos (is_active);
 -- ==============================================================================
 -- 5. Políticas de Segurança (Row Level Security) e Concessão de Permissões
 -- ==============================================================================
+-- Helper de contexto multi-tenant seguro e autoritativo
+-- NUNCA aceita JWTs, parâmetros ou variáveis de sessão controlados pelo cliente para trocar de empresa
+CREATE OR REPLACE FUNCTION public.current_tenant_id() RETURNS TEXT AS $$
+BEGIN
+  -- Se o utilizador estiver autenticado, derivar o tenant estritamente da identidade autorizada no banco
+  IF auth.uid() IS NOT NULL THEN
+    RETURN public.get_my_company_id();
+  END IF;
+
+  -- Se for operação interna do sistema com credenciais de serviço devidamente verificadas
+  IF (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  ) THEN
+    RETURN NULLIF(current_setting('app.current_tenant_id', true), '');
+  END IF;
+
+  -- Acessos anónimos ou sem credenciais de serviço válidas não possuem tenant
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.current_tenant_id() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO authenticated, service_role, postgres;
+
+CREATE OR REPLACE FUNCTION public.get_my_company_id()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT company_id FROM public.profiles WHERE id = auth.uid() AND company_id IS NOT NULL AND company_id <> '' LIMIT 1),
+    (SELECT tenant_id FROM public.colaboradores WHERE auth_uid = auth.uid()::text AND status = 'ACTIVE' AND tenant_id IS NOT NULL AND tenant_id <> '' LIMIT 1),
+    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text AND id IS NOT NULL AND id <> '' LIMIT 1)
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_my_company_id() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.get_my_company_id() TO authenticated, service_role, postgres;
+
+CREATE OR REPLACE FUNCTION public.get_my_role()
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(
+    (SELECT role FROM public.profiles WHERE id = auth.uid() LIMIT 1),
+    (SELECT role FROM public.colaboradores WHERE auth_uid = auth.uid()::text AND status = 'ACTIVE' LIMIT 1),
+    NULL
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_my_role() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.get_my_role() TO authenticated, service_role, postgres;
+
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.produtos ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS allow_all_products ON public.products;
-CREATE POLICY allow_all_products ON public.products FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_products ON public.products;
+CREATE POLICY tenant_isolation_products ON public.products
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_produtos ON public.produtos;
-CREATE POLICY allow_all_produtos ON public.produtos FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_produtos ON public.produtos;
+CREATE POLICY tenant_isolation_produtos ON public.produtos
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
-GRANT ALL ON public.products TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.produtos TO postgres, authenticated, anon, service_role;
+REVOKE ALL ON public.products FROM anon, public;
+REVOKE ALL ON public.produtos FROM anon, public;
+GRANT ALL ON public.products TO postgres, authenticated, service_role;
+GRANT ALL ON public.produtos TO postgres, authenticated, service_role;
 
 -- ==============================================================================
 -- 6. View de Compatibilidade para variações de digitação (public.produts)
 -- ==============================================================================
-CREATE OR REPLACE VIEW public.produts AS SELECT * FROM public.products;
-GRANT ALL ON public.produts TO postgres, authenticated, anon, service_role;
+CREATE OR REPLACE VIEW public.produts WITH (security_invoker = true) AS SELECT * FROM public.products;
+REVOKE ALL ON public.produts FROM anon, public;
+GRANT ALL ON public.produts TO postgres, authenticated, service_role;
 
 -- ==============================================================================
 -- 7. Recarregar o cache de esquemas do PostgREST imediatamente
@@ -135,7 +222,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.vendas (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   idempotency_key TEXT,
   invoice_number TEXT NOT NULL,
   customer_id TEXT,
@@ -172,7 +259,7 @@ CREATE INDEX IF NOT EXISTS idx_vendas_created ON public.vendas (created_at);
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.venda_itens (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   sale_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
   product_name TEXT NOT NULL,
@@ -194,7 +281,7 @@ CREATE INDEX IF NOT EXISTS idx_venda_itens_prod ON public.venda_itens (product_i
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'EXIT_SALE',
   quantity NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -216,7 +303,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_tenant ON public.stock_movements 
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.caixa (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   cash_register_id TEXT,
   type TEXT NOT NULL DEFAULT 'INPUT',
   amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -233,7 +320,7 @@ CREATE INDEX IF NOT EXISTS idx_caixa_tenant ON public.caixa (tenant_id);
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   user_id TEXT,
   user_name TEXT,
   action TEXT NOT NULL,
@@ -247,7 +334,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.clientes (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -274,7 +361,7 @@ CREATE TABLE IF NOT EXISTS public.clientes (
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.returns (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   credit_note_number TEXT NOT NULL,
   sale_id TEXT,
   original_invoice_number TEXT NOT NULL,
@@ -290,7 +377,7 @@ CREATE TABLE IF NOT EXISTS public.returns (
 
 CREATE TABLE IF NOT EXISTS public.customer_debts (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   customer_id TEXT NOT NULL,
   sale_id TEXT,
   total_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -315,37 +402,142 @@ ALTER TABLE public.customer_debts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.returns ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS allow_all_vendas ON public.vendas;
-CREATE POLICY allow_all_vendas ON public.vendas FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_vendas ON public.vendas;
+CREATE POLICY tenant_isolation_vendas ON public.vendas
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_venda_itens ON public.venda_itens;
-CREATE POLICY allow_all_venda_itens ON public.venda_itens FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_venda_itens ON public.venda_itens;
+CREATE POLICY tenant_isolation_venda_itens ON public.venda_itens
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_stock_movements ON public.stock_movements;
-CREATE POLICY allow_all_stock_movements ON public.stock_movements FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_stock_movements ON public.stock_movements;
+CREATE POLICY tenant_isolation_stock_movements ON public.stock_movements
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_caixa ON public.caixa;
-CREATE POLICY allow_all_caixa ON public.caixa FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_caixa ON public.caixa;
+CREATE POLICY tenant_isolation_caixa ON public.caixa
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_audit_logs ON public.audit_logs;
-CREATE POLICY allow_all_audit_logs ON public.audit_logs FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_audit_logs ON public.audit_logs;
+CREATE POLICY tenant_isolation_audit_logs ON public.audit_logs
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_clientes ON public.clientes;
-CREATE POLICY allow_all_clientes ON public.clientes FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_clientes ON public.clientes;
+CREATE POLICY tenant_isolation_clientes ON public.clientes
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_customer_debts ON public.customer_debts;
-CREATE POLICY allow_all_customer_debts ON public.customer_debts FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_customer_debts ON public.customer_debts;
+CREATE POLICY tenant_isolation_customer_debts ON public.customer_debts
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
 DROP POLICY IF EXISTS allow_all_returns ON public.returns;
-CREATE POLICY allow_all_returns ON public.returns FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_returns ON public.returns;
+CREATE POLICY tenant_isolation_returns ON public.returns
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
 
-GRANT ALL ON public.vendas TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.venda_itens TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.stock_movements TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.caixa TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.audit_logs TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.clientes TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.customer_debts TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.returns TO postgres, authenticated, anon, service_role;
+REVOKE ALL ON public.vendas FROM anon, public;
+REVOKE ALL ON public.venda_itens FROM anon, public;
+REVOKE ALL ON public.stock_movements FROM anon, public;
+REVOKE ALL ON public.caixa FROM anon, public;
+REVOKE ALL ON public.audit_logs FROM anon, public;
+REVOKE ALL ON public.clientes FROM anon, public;
+REVOKE ALL ON public.customer_debts FROM anon, public;
+REVOKE ALL ON public.returns FROM anon, public;
+
+GRANT ALL ON public.vendas TO postgres, authenticated, service_role;
+GRANT ALL ON public.venda_itens TO postgres, authenticated, service_role;
+GRANT ALL ON public.stock_movements TO postgres, authenticated, service_role;
+GRANT ALL ON public.caixa TO postgres, authenticated, service_role;
+GRANT ALL ON public.audit_logs TO postgres, authenticated, service_role;
+GRANT ALL ON public.clientes TO postgres, authenticated, service_role;
+GRANT ALL ON public.customer_debts TO postgres, authenticated, service_role;
+GRANT ALL ON public.returns TO postgres, authenticated, service_role;
 
 -- ==============================================================================
 -- 9. FUNÇÃO ATÓMICA OFICIAL: public.process_sale_atomic
@@ -398,9 +590,34 @@ DECLARE
   v_existing_invoice_number TEXT;
   v_existing_total NUMERIC;
   v_prod_found BOOLEAN;
+  v_is_service BOOLEAN;
 BEGIN
-  -- 0. Determinar empresa/tenant
-  v_tenant_id := COALESCE(NULLIF(p_company_id, ''), 'ost-tenant-001');
+  -- 0. Verificar credenciais internas de serviço (service_role, postgres, supabase_admin)
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  -- 0.1 Determinar e validar autoritativamente o tenant
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado sem empresa autorizada vinculada.');
+    END IF;
+    IF p_company_id IS NOT NULL AND TRIM(p_company_id) <> '' AND TRIM(p_company_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    -- Operação interna com credenciais de serviço devidamente verificadas
+    v_tenant_id := NULLIF(TRIM(p_company_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
+  ELSE
+    -- Rejeitar chamadas anónimas ou sem identidade autenticada/credenciais de serviço
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
+  END IF;
 
   -- 0.1 Normalização de campos derivados
   v_total := COALESCE(p_total, 0.00);
@@ -413,7 +630,7 @@ BEGIN
   -- 0.2 Verificação de Idempotência
   SELECT id, invoice_number, grand_total INTO v_existing_sale_id, v_existing_invoice_number, v_existing_total
   FROM public.vendas 
-  WHERE (tenant_id = v_tenant_id OR tenant_id = 'ost-tenant-001')
+  WHERE tenant_id = v_tenant_id
     AND (
       id = p_sale_id 
       OR (v_idempotency_key IS NOT NULL AND (id = v_idempotency_key OR idempotency_key = v_idempotency_key))
@@ -579,10 +796,219 @@ END;
 $$;
 
 -- Concessão de permissões de execução
-GRANT EXECUTE ON FUNCTION public.process_sale_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.process_sale_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.process_sale_atomic TO postgres, authenticated, service_role;
 
 -- ==============================================================================
--- 9.1 FUNÇÃO ATÓMICA DE DEVOLUÇÃO: public.record_sale_return_atomic
+-- 9.1 REPLENISH STOCK ATOMIC (Entrada de Stock Atómica com Auditoria)
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
+  p_tenant_id TEXT,
+  p_product_id TEXT,
+  p_quantity NUMERIC,
+  p_cost_price NUMERIC DEFAULT NULL,
+  p_reason TEXT DEFAULT 'Reabastecimento de Stock',
+  p_user_name TEXT DEFAULT 'Sistema',
+  p_received_by TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_tenant_id TEXT;
+  v_curr_stock NUMERIC;
+  v_new_stock NUMERIC;
+  v_curr_cost NUMERIC;
+  v_new_cost NUMERIC;
+  v_operator TEXT;
+  v_is_service BOOLEAN;
+BEGIN
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
+  END IF;
+
+  IF p_quantity <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Quantidade de reabastecimento deve ser superior a zero.');
+  END IF;
+
+  v_operator := COALESCE(p_received_by, p_user_name, 'Sistema');
+
+  SELECT stock, cost_price INTO v_curr_stock, v_curr_cost 
+  FROM public.produtos 
+  WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
+
+  IF NOT FOUND THEN
+    SELECT stock, cost INTO v_curr_stock, v_curr_cost 
+    FROM public.products 
+    WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
+  END IF;
+
+  IF v_curr_stock IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no catálogo de produtos da sua organização.');
+  END IF;
+
+  v_new_stock := v_curr_stock + p_quantity;
+  v_new_cost := COALESCE(p_cost_price, v_curr_cost);
+
+  UPDATE public.produtos 
+  SET stock = v_new_stock, cost_price = v_new_cost, cost = v_new_cost, updated_at = NOW()
+  WHERE id = p_product_id AND tenant_id = v_tenant_id;
+
+  UPDATE public.products 
+  SET stock = v_new_stock, cost_price = v_new_cost, cost = v_new_cost, updated_at = NOW()
+  WHERE id = p_product_id AND tenant_id = v_tenant_id;
+
+  INSERT INTO public.stock_movements (
+    id, tenant_id, product_id, type, quantity,
+    previous_stock, new_stock, cost_price, reason, user_name, timestamp
+  ) VALUES (
+    uuid_generate_v4()::TEXT, v_tenant_id, p_product_id, 'ENTRY', p_quantity,
+    v_curr_stock, v_new_stock, v_new_cost, p_reason, v_operator, NOW()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'product_id', p_product_id,
+    'previous_stock', v_curr_stock,
+    'new_stock', v_new_stock
+  );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.replenish_stock_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.replenish_stock_atomic TO postgres, authenticated, service_role;
+
+-- ==============================================================================
+-- 9.2 SETTLE DEBT PAYMENT ATOMIC (Liquidação de Dívida Atómica)
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
+  p_tenant_id TEXT,
+  p_debt_id TEXT,
+  p_customer_id TEXT,
+  p_amount NUMERIC,
+  p_payment_method TEXT,
+  p_notes TEXT DEFAULT NULL,
+  p_user_name TEXT DEFAULT 'Operador',
+  p_received_by TEXT DEFAULT NULL,
+  p_idempotency_key TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $$
+DECLARE
+  v_tenant_id TEXT;
+  v_remaining NUMERIC;
+  v_new_remaining NUMERIC;
+  v_debt_customer_id TEXT;
+  v_operator TEXT;
+  v_is_service BOOLEAN;
+BEGIN
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
+  END IF;
+
+  IF p_amount <= 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'O valor do pagamento de dívida deve ser superior a zero.');
+  END IF;
+
+  v_operator := COALESCE(p_received_by, p_user_name, 'Operador');
+
+  SELECT remaining_balance, customer_id INTO v_remaining, v_debt_customer_id 
+  FROM public.customer_debts 
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado na organização.');
+  END IF;
+
+  IF p_amount > v_remaining THEN
+    RETURN jsonb_build_object('success', false, 'error', 'O valor do pagamento (' || p_amount || ') é superior ao saldo pendente (' || v_remaining || ').');
+  END IF;
+
+  v_new_remaining := GREATEST(0.00, v_remaining - p_amount);
+
+  UPDATE public.customer_debts 
+  SET 
+    paid_amount = paid_amount + p_amount,
+    remaining_balance = v_new_remaining,
+    status = CASE WHEN v_new_remaining <= 0 THEN 'SETTLED' ELSE 'PARTIAL' END,
+    settled_at = CASE WHEN v_new_remaining <= 0 THEN NOW() ELSE NULL END
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id;
+
+  INSERT INTO public.debt_payments (
+    id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, notes, timestamp
+  ) VALUES (
+    COALESCE(p_idempotency_key, uuid_generate_v4()::TEXT), v_tenant_id, p_debt_id, v_debt_customer_id, p_amount, p_payment_method, v_operator, p_notes, NOW()
+  );
+
+  UPDATE public.clientes 
+  SET balance = GREATEST(0.00, balance - p_amount),
+      debt = GREATEST(0.00, debt - p_amount),
+      updated_at = NOW()
+  WHERE id = v_debt_customer_id AND tenant_id = v_tenant_id;
+
+  INSERT INTO public.caixa (
+    id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
+  ) VALUES (
+    uuid_generate_v4()::TEXT, v_tenant_id, 'INPUT', p_amount, 'Liquidação de Dívida (Cliente ' || v_debt_customer_id || ')', v_operator, p_debt_id, NOW()
+  );
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'debt_id', p_debt_id,
+    'amount_paid', p_amount,
+    'remaining_balance', v_new_remaining
+  );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.settle_debt_payment_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.settle_debt_payment_atomic TO postgres, authenticated, service_role;
+
+-- ==============================================================================
+-- 9.3 FUNÇÃO ATÓMICA DE DEVOLUÇÃO: public.record_sale_return_atomic
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.record_sale_return_atomic(
   p_tenant_id TEXT,
@@ -610,8 +1036,30 @@ DECLARE
   v_curr_stock NUMERIC;
   v_new_stock NUMERIC;
   v_price NUMERIC;
+  v_is_service BOOLEAN;
 BEGIN
-  v_tenant_id := COALESCE(NULLIF(p_tenant_id, ''), 'ost-tenant-001');
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado sem empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
+  END IF;
 
   -- 1. Registar a Nota de Crédito / Devolução
   INSERT INTO public.returns (
@@ -629,15 +1077,15 @@ BEGIN
     v_qty := COALESCE((v_item->>'quantity')::NUMERIC, 1.00);
     v_price := COALESCE((v_item->>'price')::NUMERIC, 0.00);
 
-    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id LIMIT 1;
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     IF v_curr_stock IS NULL THEN
-      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id LIMIT 1;
+      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     END IF;
 
     v_new_stock := COALESCE(v_curr_stock, 0.00) + v_qty;
 
-    UPDATE public.produtos SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
-    UPDATE public.products SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
+    UPDATE public.produtos SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id AND tenant_id = v_tenant_id;
+    UPDATE public.products SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id AND tenant_id = v_tenant_id;
 
     INSERT INTO public.stock_movements (
       id, tenant_id, product_id, type, quantity, previous_stock, new_stock,
@@ -661,7 +1109,7 @@ BEGIN
 
   -- 4. Atualizar o estado da venda se aplicável
   IF p_sale_id IS NOT NULL AND p_sale_id <> '' THEN
-    UPDATE public.vendas SET status = 'REFUNDED', updated_at = NOW() WHERE id = p_sale_id;
+    UPDATE public.vendas SET status = 'REFUNDED', updated_at = NOW() WHERE id = p_sale_id AND tenant_id = v_tenant_id;
   END IF;
 
   -- 5. Registar auditoria
@@ -681,7 +1129,8 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.record_sale_return_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenticated, service_role;
 
 -- ==============================================================================
 -- 10. Recarregar o cache do PostgREST imediatamente
@@ -752,7 +1201,7 @@ CREATE TABLE IF NOT EXISTS public.companies (
 
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'config',
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
   company_address TEXT DEFAULT '',
   company_nuit TEXT DEFAULT '',
@@ -789,62 +1238,81 @@ ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.companies ENABLE ROW LEVEL SECURITY;
 
--- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente autenticado
+DROP POLICY IF EXISTS "allow_all_company_profiles" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_matching_email" ON public.company_profiles;
 DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_select_matching_email" ON public.company_profiles
-  FOR SELECT
-  TO authenticated, anon, public
-  USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
 DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_insert_matching_email" ON public.company_profiles
-  FOR INSERT
-  TO authenticated, anon, public
-  WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
 DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_update_matching_email" ON public.company_profiles
-  FOR UPDATE
-  TO authenticated, anon, public
+DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
+
+CREATE POLICY "company_profiles_matching_email" ON public.company_profiles
+  FOR ALL TO authenticated
   USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
     OR current_user = 'postgres'
   )
   WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
-DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_delete_matching_email" ON public.company_profiles
-  FOR DELETE
-  TO authenticated, anon, public
-  USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
     OR current_user = 'postgres'
   );
 
 DROP POLICY IF EXISTS allow_all_company_settings ON public.company_settings;
-CREATE POLICY allow_all_company_settings ON public.company_settings FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS company_settings_matching_email ON public.company_settings;
+CREATE POLICY company_settings_matching_email ON public.company_settings
+  FOR ALL TO authenticated
+  USING (
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(user_email)) = LOWER(TRIM(auth.jwt()->>'email')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(user_email)) = LOWER(TRIM(auth.jwt()->>'email')))
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_settings ON public.settings;
-CREATE POLICY allow_all_settings ON public.settings FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_settings ON public.settings;
+CREATE POLICY tenant_isolation_settings ON public.settings
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_companies ON public.companies;
-CREATE POLICY allow_all_companies ON public.companies FOR ALL TO public USING (true) WITH CHECK (true);
-GRANT ALL ON public.company_profiles TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.company_settings TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.settings TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.companies TO postgres, authenticated, anon, service_role;
+DROP POLICY IF EXISTS tenant_isolation_companies ON public.companies;
+CREATE POLICY tenant_isolation_companies ON public.companies
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+REVOKE ALL ON public.company_profiles FROM anon, public;
+REVOKE ALL ON public.company_settings FROM anon, public;
+REVOKE ALL ON public.settings FROM anon, public;
+REVOKE ALL ON public.companies FROM anon, public;
+
+GRANT ALL ON public.company_profiles TO postgres, authenticated, service_role;
+GRANT ALL ON public.company_settings TO postgres, authenticated, service_role;
+GRANT ALL ON public.settings TO postgres, authenticated, service_role;
+GRANT ALL ON public.companies TO postgres, authenticated, service_role;
 NOTIFY pgrst, 'reload schema';`;
 
 export const STAFF_SQL_SCHEMA = `-- ==============================================================================
@@ -854,7 +1322,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   auth_uid TEXT,
   name TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -891,11 +1359,41 @@ CREATE INDEX IF NOT EXISTS idx_colaboradores_email ON public.colaboradores (emai
 ALTER TABLE public.colaboradores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS allow_all_colaboradores ON public.colaboradores;
-CREATE POLICY allow_all_colaboradores ON public.colaboradores FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_colaboradores ON public.colaboradores;
+CREATE POLICY tenant_isolation_colaboradores ON public.colaboradores
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_profiles ON public.profiles;
-CREATE POLICY allow_all_profiles ON public.profiles FOR ALL TO public USING (true) WITH CHECK (true);
-GRANT ALL ON public.colaboradores TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.profiles TO postgres, authenticated, anon, service_role;
+DROP POLICY IF EXISTS profiles_isolation ON public.profiles;
+CREATE POLICY profiles_isolation ON public.profiles
+  FOR ALL TO authenticated
+  USING (
+    id = auth.uid()
+    OR (public.current_tenant_id() IS NOT NULL AND company_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    id = auth.uid()
+    OR (public.current_tenant_id() IS NOT NULL AND company_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+REVOKE ALL ON public.colaboradores FROM anon, public;
+REVOKE ALL ON public.profiles FROM anon, public;
+GRANT ALL ON public.colaboradores TO postgres, authenticated, service_role;
+GRANT ALL ON public.profiles TO postgres, authenticated, service_role;
 NOTIFY pgrst, 'reload schema';`;
 
 export const CUSTOMERS_SQL_SCHEMA = `-- ==============================================================================
@@ -905,7 +1403,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.clientes (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -929,7 +1427,7 @@ CREATE TABLE IF NOT EXISTS public.clientes (
 
 CREATE TABLE IF NOT EXISTS public.customers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -953,7 +1451,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
 
 CREATE TABLE IF NOT EXISTS public.customer_debts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   customer_id TEXT NOT NULL,
   sale_id TEXT,
   total_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -967,7 +1465,7 @@ CREATE TABLE IF NOT EXISTS public.customer_debts (
 
 CREATE TABLE IF NOT EXISTS public.debt_payments (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   debt_id TEXT,
   customer_id TEXT NOT NULL,
   amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -987,17 +1485,74 @@ ALTER TABLE public.customers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_debts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.debt_payments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS allow_all_clientes ON public.clientes;
-CREATE POLICY allow_all_clientes ON public.clientes FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_clientes ON public.clientes;
+CREATE POLICY tenant_isolation_clientes ON public.clientes
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_customers ON public.customers;
-CREATE POLICY allow_all_customers ON public.customers FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_customers ON public.customers;
+CREATE POLICY tenant_isolation_customers ON public.customers
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_customer_debts ON public.customer_debts;
-CREATE POLICY allow_all_customer_debts ON public.customer_debts FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_customer_debts ON public.customer_debts;
+CREATE POLICY tenant_isolation_customer_debts ON public.customer_debts
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_debt_payments ON public.debt_payments;
-CREATE POLICY allow_all_debt_payments ON public.debt_payments FOR ALL TO public USING (true) WITH CHECK (true);
-GRANT ALL ON public.clientes TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.customers TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.customer_debts TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.debt_payments TO postgres, authenticated, anon, service_role;
+DROP POLICY IF EXISTS tenant_isolation_debt_payments ON public.debt_payments;
+CREATE POLICY tenant_isolation_debt_payments ON public.debt_payments
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+REVOKE ALL ON public.clientes FROM anon, public;
+REVOKE ALL ON public.customers FROM anon, public;
+REVOKE ALL ON public.customer_debts FROM anon, public;
+REVOKE ALL ON public.debt_payments FROM anon, public;
+
+GRANT ALL ON public.clientes TO postgres, authenticated, service_role;
+GRANT ALL ON public.customers TO postgres, authenticated, service_role;
+GRANT ALL ON public.customer_debts TO postgres, authenticated, service_role;
+GRANT ALL ON public.debt_payments TO postgres, authenticated, service_role;
 NOTIFY pgrst, 'reload schema';`;
 
 export const CAIXA_AUDIT_SQL_SCHEMA = `-- ==============================================================================
@@ -1007,7 +1562,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.cash_closures (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   date TEXT NOT NULL,
   opening_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   total_sales NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -1027,7 +1582,7 @@ CREATE TABLE IF NOT EXISTS public.cash_closures (
 
 CREATE TABLE IF NOT EXISTS public.cash_shifts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   operator_id TEXT,
   operator_name TEXT NOT NULL,
   initial_cash NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -1039,7 +1594,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
 
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   action TEXT NOT NULL,
   category TEXT NOT NULL,
@@ -1068,17 +1623,72 @@ ALTER TABLE public.cash_shifts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS allow_all_cash_closures ON public.cash_closures;
-CREATE POLICY allow_all_cash_closures ON public.cash_closures FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_cash_closures ON public.cash_closures;
+CREATE POLICY tenant_isolation_cash_closures ON public.cash_closures
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_cash_shifts ON public.cash_shifts;
-CREATE POLICY allow_all_cash_shifts ON public.cash_shifts FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_cash_shifts ON public.cash_shifts;
+CREATE POLICY tenant_isolation_cash_shifts ON public.cash_shifts
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_audit_logs ON public.audit_logs;
-CREATE POLICY allow_all_audit_logs ON public.audit_logs FOR ALL TO public USING (true) WITH CHECK (true);
+DROP POLICY IF EXISTS tenant_isolation_audit_logs ON public.audit_logs;
+CREATE POLICY tenant_isolation_audit_logs ON public.audit_logs
+  FOR ALL TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
 DROP POLICY IF EXISTS allow_all_recovery_requests ON public.recovery_requests;
-CREATE POLICY allow_all_recovery_requests ON public.recovery_requests FOR ALL TO public USING (true) WITH CHECK (true);
-GRANT ALL ON public.cash_closures TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.cash_shifts TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.audit_logs TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.recovery_requests TO postgres, authenticated, anon, service_role;
+DROP POLICY IF EXISTS service_role_recovery_requests ON public.recovery_requests;
+CREATE POLICY service_role_recovery_requests ON public.recovery_requests
+  FOR ALL TO authenticated
+  USING (
+    auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  )
+  WITH CHECK (
+    auth.role() = 'service_role'
+    OR current_user = 'postgres'
+  );
+
+REVOKE ALL ON public.cash_closures FROM anon, public;
+REVOKE ALL ON public.cash_shifts FROM anon, public;
+REVOKE ALL ON public.audit_logs FROM anon, public;
+REVOKE ALL ON public.recovery_requests FROM anon, public;
+
+GRANT ALL ON public.cash_closures TO postgres, authenticated, service_role;
+GRANT ALL ON public.cash_shifts TO postgres, authenticated, service_role;
+GRANT ALL ON public.audit_logs TO postgres, authenticated, service_role;
+GRANT ALL ON public.recovery_requests TO postgres, authenticated, service_role;
 NOTIFY pgrst, 'reload schema';`;
 
 export const FULL_DATABASE_SCHEMA_SQL =

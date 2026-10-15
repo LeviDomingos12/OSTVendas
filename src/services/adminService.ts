@@ -77,8 +77,8 @@ export const AdminService = {
 
     console.log("[AdminService] 🧹 Iniciando varredura e purga nas coleções do Supabase...");
 
-    // 1. Tabela 'produtos' / 'products'
-    for (const table of ["produtos", "products"]) {
+    // 1. Tabela oficial 'products'
+    for (const table of ["products"]) {
       try {
         const { data, error } = await supabase.from(table).select("*");
         if (!error && Array.isArray(data) && data.length > 0) {

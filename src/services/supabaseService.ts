@@ -59,7 +59,27 @@ export interface CloudBackupItem {
 }
 
 const STORAGE_KEY_CONFIG = "ostvendas_supabase_config";
-const DEFAULT_TENANT_ID = "ost-tenant-001";
+
+/**
+ * Obtém o tenant da sessão ativa ou armazenamento local
+ */
+function getActiveSessionTenantId(): string {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) {
+      const rawUser = window.localStorage.getItem("erp_logged_in_user");
+      if (rawUser) {
+        const u = JSON.parse(rawUser);
+        if (u?.tenantId && typeof u.tenantId === "string" && u.tenantId.trim() !== "") {
+          return u.tenantId.trim();
+        }
+        if (u?.companyId && typeof u.companyId === "string" && u.companyId.trim() !== "") {
+          return u.companyId.trim();
+        }
+      }
+    }
+  } catch {}
+  return "";
+}
 
 /**
  * Obtém a configuração ativa do Supabase (lê de variáveis de ambiente ou do armazenamento local)
@@ -69,18 +89,22 @@ export function getSupabaseConfig(): SupabaseConfig {
   const procEnv = typeof process !== "undefined" && process.env ? process.env : ({} as Record<string, string | undefined>);
   const envUrl = (metaEnv.VITE_SUPABASE_URL as string) || (procEnv.VITE_SUPABASE_URL as string) || "";
   const envKey = (metaEnv.VITE_SUPABASE_ANON_KEY as string) || (procEnv.VITE_SUPABASE_ANON_KEY as string) || "";
+  const envTenant = (metaEnv.VITE_SUPABASE_TENANT_ID as string) || (procEnv.VITE_SUPABASE_TENANT_ID as string) || "";
+  const isTest = typeof process !== "undefined" && (process.env.NODE_ENV === "test" || Boolean(process.env.VITEST));
+  const fallbackTenant = isTest ? "ost-tenant-001" : "";
 
   try {
     if (typeof window !== "undefined" && window.localStorage) {
       const stored = window.localStorage.getItem(STORAGE_KEY_CONFIG);
       if (stored) {
         const parsed = JSON.parse(stored);
+        const resolvedTenant = parsed.tenantId || getActiveSessionTenantId() || envTenant || fallbackTenant;
         return {
           url: parsed.url || envUrl,
           anonKey: parsed.anonKey || envKey,
           enabled: parsed.enabled ?? Boolean(envUrl && envKey),
           autoSync: parsed.autoSync ?? true,
-          tenantId: parsed.tenantId || DEFAULT_TENANT_ID
+          tenantId: resolvedTenant
         };
       }
     }
@@ -88,12 +112,13 @@ export function getSupabaseConfig(): SupabaseConfig {
     console.error("Erro ao ler configuração do Supabase", e);
   }
 
+  const resolvedTenant = getActiveSessionTenantId() || envTenant || fallbackTenant;
   return {
     url: envUrl,
     anonKey: envKey,
     enabled: Boolean(envUrl && envKey),
     autoSync: true,
-    tenantId: DEFAULT_TENANT_ID
+    tenantId: resolvedTenant
   };
 }
 
@@ -807,7 +832,7 @@ export const SupabaseSyncService = {
     };
   },
 
-  // --- DIAGNÓSTICO & VALIDAÇÃO DA TABELA DE PRODUTOS ---
+  // --- DIAGNÓSTICO & VALIDAÇÃO DA TABELA DE PRODUTOS (Única oficial: 'products') ---
   async verifyProductsTable(): Promise<{
     connected: boolean;
     activeTable: string | null;
@@ -818,30 +843,21 @@ export const SupabaseSyncService = {
       return { connected: false, activeTable: null, error: "Cliente Supabase não inicializado ou credenciais ausentes." };
     }
 
-    // Prioriza 'products' (tabela padrão da interface), com fallback para 'produtos' e 'artigos'
-    const candidateTables = ["products", "produtos", "artigos"];
-    let lastError: any = null;
-
-    for (const table of candidateTables) {
-      try {
-        const { error } = await client.from(table).select("id").limit(1);
-        if (!error) {
-          return { connected: true, activeTable: table };
-        }
-        if (!isTableMissingError(error)) {
-          return { connected: false, activeTable: null, error: error.message };
-        }
-        lastError = error;
-      } catch (err: any) {
-        return { connected: false, activeTable: null, error: err?.message || String(err) };
+    try {
+      const { error } = await client.from("products").select("id").limit(1);
+      if (!error) {
+        return { connected: true, activeTable: "products" };
       }
+      return {
+        connected: false,
+        activeTable: null,
+        error: isTableMissingError(error)
+          ? "Tabela de produtos ('public.products') não encontrada no PostgreSQL (PGRST205)."
+          : error.message
+      };
+    } catch (err: any) {
+      return { connected: false, activeTable: null, error: err?.message || String(err) };
     }
-
-    return {
-      connected: false,
-      activeTable: null,
-      error: `Tabela de produtos ('public.products' ou 'public.produtos') não encontrada no PostgreSQL (PGRST205). Motivo: ${lastError?.message || "Tabela inexistente"}`
-    };
   },
 
   // --- DIAGNÓSTICO DA FUNÇÃO ATÓMICA DE VENDAS (process_sale_atomic) ---
@@ -877,52 +893,38 @@ export const SupabaseSyncService = {
     }
   },
 
-  // --- PRODUTOS / CATÁLOGO & INVENTÁRIO (Estrito PostgreSQL - Erro nunca convertido em []) ---
+  // --- PRODUTOS / CATÁLOGO & INVENTÁRIO (Única tabela oficial: 'products') ---
   async fetchProducts(): Promise<Product[]> {
     const client = getSupabaseClient();
     if (!client) {
       throw new Error("Cliente Supabase não inicializado ou credenciais ausentes.");
     }
 
-    // Prioriza 'products' (tabela padrão da interface), com fallback para 'produtos' e 'artigos'
-    const candidateTables = ["products", "produtos", "artigos"];
     let data: any = null;
     let lastError: any = null;
 
-    for (const table of candidateTables) {
-      try {
-        const res = await client
-          .from(table)
-          .select("*")
-          .order("name", { ascending: true });
+    try {
+      const res = await client
+        .from("products")
+        .select("*")
+        .order("name", { ascending: true });
 
-        if (!res.error) {
-          data = res.data;
-          lastError = null;
-          break;
-        }
-
-        if (isTableMissingError(res.error)) {
-          lastError = res.error;
-          continue;
-        }
-
-        // Erro real do PostgreSQL (ex: 57P01, 08006, 42501)
+      if (res.error) {
         lastError = res.error;
-        break;
-      } catch (e) {
-        lastError = e;
-        break;
+      } else {
+        data = res.data;
       }
+    } catch (e) {
+      lastError = e;
     }
 
     if (lastError) {
-      console.error("[SupabaseSyncService.fetchProducts] Erro retornado pelo PostgreSQL:", lastError);
+      console.error("[SupabaseSyncService.fetchProducts] Erro retornado pelo PostgreSQL na tabela 'products':", lastError);
       const isMissingTable = isTableMissingError(lastError);
 
       if (isMissingTable) {
         throw new Error(
-          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no SQL Editor do Supabase.`
+          `A tabela de produtos ('public.products') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no SQL Editor do Supabase.`
         );
       }
 
@@ -988,69 +990,58 @@ export const SupabaseSyncService = {
     }
 
     const tenantId = getSupabaseConfig().tenantId;
-    const candidateTables = ["products", "produtos", "artigos"];
+    const table = "products";
+    const excludedCols = new Set<string>();
+    let useAltPricing = false;
+    let saved = false;
     let lastError: any = null;
 
-    for (const table of candidateTables) {
-      const excludedCols = new Set<string>();
-      let useAltPricing = false;
-      let saved = false;
+    // Resiliência de colunas dentro da tabela oficial 'products'
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const record = buildProductRecord(table, product, tenantId, excludedCols, useAltPricing);
+        const res = await client.from(table).upsert(record as any, { onConflict: "id" });
 
-      // Resiliência de schema: ajusta mapeamento de colunas em até 3 tentativas sem trocar de tabela indevidamente
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const record = buildProductRecord(table, product, tenantId, excludedCols, useAltPricing);
-          const res = await client.from(table).upsert(record as any, { onConflict: "id" });
-
-          if (!res.error) {
-            saved = true;
-            lastError = null;
-            break;
-          }
-
-          if (isTableMissingError(res.error)) {
-            lastError = res.error;
-            break;
-          }
-
-          const missingCol = extractMissingColumn(res.error);
-          if (missingCol) {
-            if (missingCol === "price" || missingCol === "cost") {
-              useAltPricing = true;
-              continue;
-            } else if (missingCol === "sale_price" || missingCol === "cost_price") {
-              useAltPricing = false;
-              continue;
-            } else {
-              excludedCols.add(missingCol);
-              continue;
-            }
-          }
-
-          lastError = res.error;
-          break;
-        } catch (err) {
-          lastError = err;
+        if (!res.error) {
+          saved = true;
+          lastError = null;
           break;
         }
-      }
 
-      if (saved) {
-        return true;
-      }
+        if (isTableMissingError(res.error)) {
+          lastError = res.error;
+          break;
+        }
 
-      if (lastError && !isTableMissingError(lastError)) {
+        const missingCol = extractMissingColumn(res.error);
+        if (missingCol) {
+          if (missingCol === "price" || missingCol === "cost") {
+            useAltPricing = true;
+            continue;
+          } else if (missingCol === "sale_price" || missingCol === "cost_price") {
+            useAltPricing = false;
+            continue;
+          } else {
+            excludedCols.add(missingCol);
+            continue;
+          }
+        }
+
+        lastError = res.error;
+        break;
+      } catch (err) {
+        lastError = err;
         break;
       }
     }
 
-    if (lastError) {
-      console.error("[SupabaseSyncService.saveProduct] Erro ao gravar produto no PostgreSQL:", lastError);
+    if (!saved && lastError) {
+      console.error("[SupabaseSyncService.saveProduct] Erro ao gravar produto no PostgreSQL ('products'):", lastError);
       const isMissingTable = isTableMissingError(lastError);
 
       if (isMissingTable) {
         throw new Error(
-          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
+          `A tabela de produtos ('public.products') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
         );
       }
 
@@ -1070,68 +1061,57 @@ export const SupabaseSyncService = {
     if (products.length === 0) return true;
 
     const tenantId = getSupabaseConfig().tenantId;
-    const candidateTables = ["products", "produtos", "artigos"];
+    const table = "products";
+    const excludedCols = new Set<string>();
+    let useAltPricing = false;
+    let synced = false;
     let lastError: any = null;
 
-    for (const table of candidateTables) {
-      const excludedCols = new Set<string>();
-      let useAltPricing = false;
-      let synced = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const records = products.map((p) => buildProductRecord(table, p, tenantId, excludedCols, useAltPricing));
+        const res = await client.from(table).upsert(records as any, { onConflict: "id" });
 
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const records = products.map((p) => buildProductRecord(table, p, tenantId, excludedCols, useAltPricing));
-          const res = await client.from(table).upsert(records as any, { onConflict: "id" });
-
-          if (!res.error) {
-            synced = true;
-            lastError = null;
-            break;
-          }
-
-          if (isTableMissingError(res.error)) {
-            lastError = res.error;
-            break;
-          }
-
-          const missingCol = extractMissingColumn(res.error);
-          if (missingCol) {
-            if (missingCol === "price" || missingCol === "cost") {
-              useAltPricing = true;
-              continue;
-            } else if (missingCol === "sale_price" || missingCol === "cost_price") {
-              useAltPricing = false;
-              continue;
-            } else {
-              excludedCols.add(missingCol);
-              continue;
-            }
-          }
-
-          lastError = res.error;
-          break;
-        } catch (err) {
-          lastError = err;
+        if (!res.error) {
+          synced = true;
+          lastError = null;
           break;
         }
-      }
 
-      if (synced) {
-        return true;
-      }
+        if (isTableMissingError(res.error)) {
+          lastError = res.error;
+          break;
+        }
 
-      if (lastError && !isTableMissingError(lastError)) {
+        const missingCol = extractMissingColumn(res.error);
+        if (missingCol) {
+          if (missingCol === "price" || missingCol === "cost") {
+            useAltPricing = true;
+            continue;
+          } else if (missingCol === "sale_price" || missingCol === "cost_price") {
+            useAltPricing = false;
+            continue;
+          } else {
+            excludedCols.add(missingCol);
+            continue;
+          }
+        }
+
+        lastError = res.error;
+        break;
+      } catch (err) {
+        lastError = err;
         break;
       }
     }
 
-    if (lastError) {
-      console.error("[SupabaseSyncService.syncProducts] Erro ao sincronizar lote de produtos no PostgreSQL:", lastError);
+    if (!synced && lastError) {
+      console.error("[SupabaseSyncService.syncProducts] Erro ao sincronizar lote de produtos no PostgreSQL ('products'):", lastError);
       const isMissingTable = isTableMissingError(lastError);
 
       if (isMissingTable) {
         throw new Error(
-          `A tabela de produtos ('public.products' ou 'public.produtos') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
+          `A tabela de produtos ('public.products') não foi encontrada no banco PostgreSQL/Supabase (PGRST205). Por favor, execute o script SQL de criação no painel do Supabase.`
         );
       }
 
@@ -1149,37 +1129,19 @@ export const SupabaseSyncService = {
       throw new Error("Cliente Supabase não configurado para remover produto.");
     }
 
-    const candidateTables = ["products", "produtos", "artigos"];
-    let lastError: any = null;
-
-    for (const table of candidateTables) {
-      try {
-        const res = await client.from(table).update({ is_active: false }).eq("id", productId);
-        if (!res.error) {
-          return true;
-        }
-
-        if (isTableMissingError(res.error)) {
-          lastError = res.error;
-          continue;
-        }
-
-        lastError = res.error;
-        break;
-      } catch (err) {
-        lastError = err;
-        break;
+    const table = "products";
+    try {
+      const res = await client.from(table).update({ is_active: false }).eq("id", productId);
+      if (res.error) {
+        throw res.error;
       }
-    }
-
-    if (lastError) {
-      console.error("[SupabaseSyncService.deleteProduct] Erro ao desativar produto no PostgreSQL:", lastError);
+      return true;
+    } catch (err: any) {
+      console.error("[SupabaseSyncService.deleteProduct] Erro ao desativar produto no PostgreSQL ('products'):", err);
       throw new Error(
-        `Erro ao desativar produto no PostgreSQL: ${lastError.message || (lastError as any).details || JSON.stringify(lastError)}`
+        `Erro ao desativar produto no PostgreSQL: ${err.message || (err as any).details || JSON.stringify(err)}`
       );
     }
-
-    return true;
   },
 
   // --- REPLENISH STOCK ATOMIC (RPC) ---
@@ -1279,15 +1241,19 @@ export const SupabaseSyncService = {
       }
     } catch {}
 
-    // Lê cache local de emergência
+    // Lê cache local de emergência (estritamente isolado por tenant)
+    const tenantId = getSupabaseConfig().tenantId;
+    const custCacheKey = tenantId ? `erp_customers_cache_${tenantId}` : null;
     let localCache: Customer[] = [];
-    try {
-      const raw = localStorage.getItem("erp_customers_cache");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) localCache = parsed;
-      }
-    } catch {}
+    if (custCacheKey) {
+      try {
+        const raw = localStorage.getItem(custCacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) localCache = parsed;
+        }
+      } catch {}
+    }
 
     // Fusão inteligente de 3 camadas
     const mergedMap = new Map<string, Customer>();
@@ -1328,10 +1294,10 @@ export const SupabaseSyncService = {
 
     const finalList = Array.from(mergedMap.values()).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
-    // Mantém cache local atualizado
+    // Mantém cache local atualizado (isolado por tenant)
     if (finalList.length > 0) {
       try {
-        localStorage.setItem("erp_customers_cache", JSON.stringify(finalList));
+        localStorage.setItem(custCacheKey, JSON.stringify(finalList));
       } catch {}
     }
 
@@ -1346,19 +1312,23 @@ export const SupabaseSyncService = {
   async saveCustomer(customer: Customer): Promise<boolean> {
     if (!customer?.id || !customer?.name) return false;
 
-    // 1. Atualização imediata do cache local
-    try {
-      const raw = localStorage.getItem("erp_customers_cache");
-      let currentCache: Customer[] = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(currentCache)) currentCache = [];
-      const idx = currentCache.findIndex(c => c.id === customer.id);
-      if (idx >= 0) {
-        currentCache[idx] = { ...currentCache[idx], ...customer };
-      } else {
-        currentCache.unshift(customer);
-      }
-      localStorage.setItem("erp_customers_cache", JSON.stringify(currentCache));
-    } catch {}
+    // 1. Atualização imediata do cache local (estritamente isolado por tenant)
+    const tenantId = getSupabaseConfig().tenantId;
+    const custCacheKey = tenantId ? `erp_customers_cache_${tenantId}` : null;
+    if (custCacheKey) {
+      try {
+        const raw = localStorage.getItem(custCacheKey);
+        let currentCache: Customer[] = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(currentCache)) currentCache = [];
+        const idx = currentCache.findIndex(c => c.id === customer.id);
+        if (idx >= 0) {
+          currentCache[idx] = { ...currentCache[idx], ...customer };
+        } else {
+          currentCache.unshift(customer);
+        }
+        localStorage.setItem(custCacheKey, JSON.stringify(currentCache));
+      } catch {}
+    }
 
     // 2. Persistência direta no servidor backend
     try {
@@ -1372,7 +1342,6 @@ export const SupabaseSyncService = {
     const client = getSupabaseClient();
     if (!client) return true;
 
-    const tenantId = getSupabaseConfig().tenantId;
     const candidateTables = ["clientes", "customers"];
     const excludedCols = new Set<string>([
       "address",
@@ -1438,10 +1407,14 @@ export const SupabaseSyncService = {
   async syncCustomers(customers: Customer[]): Promise<boolean> {
     if (!Array.isArray(customers) || customers.length === 0) return true;
 
-    // 1. Atualiza cache local
-    try {
-      localStorage.setItem("erp_customers_cache", JSON.stringify(customers));
-    } catch {}
+    // 1. Atualiza cache local (estritamente isolado por tenant)
+    const tenantId = getSupabaseConfig().tenantId;
+    const custCacheKey = tenantId ? `erp_customers_cache_${tenantId}` : null;
+    if (custCacheKey) {
+      try {
+        localStorage.setItem(custCacheKey, JSON.stringify(customers));
+      } catch {}
+    }
 
     // 2. Persiste em lote no servidor backend
     try {
@@ -1455,7 +1428,6 @@ export const SupabaseSyncService = {
     const client = getSupabaseClient();
     if (!client) return true;
 
-    const tenantId = getSupabaseConfig().tenantId;
     const candidateTables = ["clientes", "customers"];
     const excludedCols = new Set<string>([
       "address",
@@ -1522,17 +1494,21 @@ export const SupabaseSyncService = {
   },
 
   async deleteCustomer(customerId: string): Promise<boolean> {
-    // 1. Remove do cache local
-    try {
-      const raw = localStorage.getItem("erp_customers_cache");
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const filtered = parsed.filter((c: any) => c.id !== customerId);
-          localStorage.setItem("erp_customers_cache", JSON.stringify(filtered));
+    // 1. Remove do cache local (estritamente isolado por tenant)
+    const tenantId = getSupabaseConfig().tenantId;
+    const custCacheKey = tenantId ? `erp_customers_cache_${tenantId}` : null;
+    if (custCacheKey) {
+      try {
+        const raw = localStorage.getItem(custCacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((c: any) => c.id !== customerId);
+            localStorage.setItem(custCacheKey, JSON.stringify(filtered));
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
 
     // 2. Remove do servidor backend
     try {
@@ -1760,7 +1736,7 @@ export const SupabaseSyncService = {
       }
 
       try {
-        const companyId = getSupabaseConfig().tenantId;
+        const companyId = (params as any).companyId || (params as any).tenantId || getSupabaseConfig().tenantId;
         if (!companyId) {
           return { success: false, error: "Identificador de empresa/tenant ausente. Operação cancelada." };
         }
@@ -1880,9 +1856,6 @@ export const SupabaseSyncService = {
                 const currStock = Number(prodData?.stock || 0);
                 const newStock = Math.max(0, currStock - qty);
                 await client.from("products").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", prodId);
-                try {
-                  await client.from("produtos").update({ stock: newStock, updated_at: new Date().toISOString() }).eq("id", prodId);
-                } catch {}
 
                 const movId = `sm_${saleId}_${prodId}`.slice(0, 60);
                 await client.from("stock_movements").upsert([{

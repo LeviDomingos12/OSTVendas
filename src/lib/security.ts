@@ -71,6 +71,12 @@ export function sanitizeUserSession(user: Employee | null | undefined): Employee
   delete (safe as any).password;
   delete (safe as any).tempPassword;
   delete (safe as any).tokenSecret;
+  delete (safe as any).pinHash;
+  delete (safe as any).token;
+  delete (safe as any).secret;
+  delete (safe as any).accessToken;
+  delete (safe as any).refreshToken;
+  delete (safe as any).apiKey;
   return safe;
 }
 
@@ -84,6 +90,9 @@ export function sanitizeEmployeesForExport(employees: Employee[] = []): Employee
     delete (safe as any).password;
     delete (safe as any).tempPassword;
     delete (safe as any).tokenSecret;
+    delete (safe as any).pinHash;
+    delete (safe as any).token;
+    delete (safe as any).secret;
     return safe;
   });
 }
@@ -97,6 +106,9 @@ export function sanitizeSettingsForExport(settings: any): any {
   delete safe.securityPin;
   delete safe.smtpPassword;
   delete safe.smsTwilioToken;
+  delete safe.token;
+  delete safe.secret;
+  delete safe.apiKey;
   return safe;
 }
 
@@ -123,6 +135,8 @@ export function purgeClientSensitiveStorage(): void {
       "access_token",
       "refresh_token",
       "token",
+      "secret",
+      "api_key",
       "pos_sync_queue",
       "erp_cache_snapshot_global",
       "erp_auto_backup_local_db",
@@ -132,7 +146,16 @@ export function purgeClientSensitiveStorage(): void {
       "ost_pos_opening_balance",
       "ost_pos_shift_opened_at",
       "ost_pos_shift_opened_by",
-      "erp_simulated_logged_in_user"
+      "erp_simulated_logged_in_user",
+      "offline_queue",
+      "erp_offline_sales",
+      "pending_transactions",
+      "cached_sales",
+      "offline_sales",
+      "erp_offline_queue",
+      "sync_pending",
+      "offline_transactions",
+      "local_sales_cache"
     ];
 
     if (typeof localStorage !== "undefined") {
@@ -147,12 +170,20 @@ export function purgeClientSensitiveStorage(): void {
             lower.includes("password") ||
             lower.includes("senha") ||
             lower.includes("secret") ||
+            lower.includes("user_pin") ||
+            lower.includes("admin_pin") ||
+            lower.includes("supervisor_pin") ||
             lower.includes("google_access_token") ||
             lower.includes("google_token") ||
             lower.includes("gmail_token") ||
             lower.includes("provider_token") ||
+            (lower.includes("token") && !lower.startsWith("sb-") && !lower.includes("theme")) ||
             lower.startsWith("erp_cache_snapshot_") ||
-            lower.startsWith("erp_backup_slot_")
+            lower.startsWith("erp_backup_slot_") ||
+            lower.startsWith("offline_") ||
+            lower.startsWith("pending_") ||
+            lower.startsWith("cached_sales") ||
+            lower.startsWith("erp_offline")
           ) {
             keysToRemove.push(k);
           }
@@ -165,11 +196,28 @@ export function purgeClientSensitiveStorage(): void {
       if (rawUser) {
         try {
           const parsed = JSON.parse(rawUser);
-          if (parsed && (parsed.pin || parsed.password || parsed.tempPassword)) {
+          if (parsed && (parsed.pin || parsed.password || parsed.tempPassword || parsed.pinHash || parsed.token || parsed.secret)) {
             const sanitized = sanitizeUserSession(parsed);
             localStorage.setItem("erp_logged_in_user", JSON.stringify(sanitized));
           }
         } catch {}
+      }
+
+      // Higienizar erp_company_settings se contiver securityPin ou smtpPassword
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("erp_company_settings")) {
+          try {
+            const raw = localStorage.getItem(k);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed && (parsed.securityPin || parsed.smtpPassword || parsed.smsTwilioToken)) {
+                const sanitized = sanitizeSettingsForExport(parsed);
+                localStorage.setItem(k, JSON.stringify(sanitized));
+              }
+            }
+          } catch {}
+        }
       }
     }
 

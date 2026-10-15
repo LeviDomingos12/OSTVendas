@@ -64,8 +64,8 @@ export const branches = pgTable("branches", {
   createdAt: timestamp("created_at").defaultNow()
 });
 
-// --- Products & Inventory (produtos / products) ---
-export const produtos = pgTable("produtos", {
+// --- Products & Inventory (products) ---
+export const products = pgTable("products", {
   id: text("id").primaryKey(),
   tenantId: text("tenant_id").notNull(),
   companyId: text("company_id"),
@@ -101,7 +101,7 @@ export const produtos = pgTable("produtos", {
   updatedAt: timestamp("updated_at").defaultNow()
 });
 
-export const products = produtos;
+export const produtos = products;
 
 // --- Product Batches (Lotes) ---
 export const productBatches = pgTable("product_batches", {

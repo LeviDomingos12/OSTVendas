@@ -182,7 +182,7 @@ describe("Phase 6: Gestão de Clientes, Contas Correntes, Crédito/Dívidas e Fi
     totalSpent: 45000,
     purchaseCount: 12,
     loyaltyPoints: 350,
-    lastPurchaseDate: "2026-08-15"
+    lastPurchaseDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0] // Compra recente (5 dias atrás)
   };
 
   describe("Avaliação de Limite de Crédito / Venda a Prazo", () => {

@@ -43,6 +43,7 @@ import {
   CashClosure,
   CompanyProfile 
 } from "../types";
+import { sanitizeSettingsForExport } from "../lib/security";
 
 /**
  * Sanitização e normalização de mensagens de erro para proteção de dados e logs amigáveis.
@@ -391,12 +392,10 @@ export const CommercialDataService = {
   },
 
   subscribeProducts(onUpdate: () => void) {
-    const sub1 = SupabaseSyncService.subscribeToTableChanges("products", onUpdate);
-    const sub2 = SupabaseSyncService.subscribeToTableChanges("produtos", onUpdate);
+    const sub = SupabaseSyncService.subscribeToTableChanges("products", onUpdate);
     return {
       unsubscribe: () => {
-        try { sub1?.unsubscribe?.(); } catch {}
-        try { sub2?.unsubscribe?.(); } catch {}
+        try { sub?.unsubscribe?.(); } catch {}
       }
     };
   },
@@ -447,35 +446,14 @@ export const CommercialDataService = {
     }
   },
 
-  // --- TRANSAÇÕES / VENDAS ---
+  // --- TRANSAÇÕES / VENDAS (PostgreSQL Autoritativo Estrito: Sem mascarar erros, Sem cache offline) ---
   async fetchTransactions(): Promise<Transaction[]> {
-    let remote: Transaction[] = [];
     try {
-      remote = await SupabaseSyncService.fetchTransactions();
+      return await SupabaseSyncService.fetchTransactions();
     } catch (err: any) {
-      console.warn("[CommercialDataService.fetchTransactions] Sincronização remota pendente:", err?.message);
+      console.error("[CommercialDataService.fetchTransactions] Erro real ao ler vendas do PostgreSQL:", err);
+      throw err;
     }
-
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const stored = window.localStorage.getItem("ost_local_completed_sales");
-        if (stored) {
-          const localList: Transaction[] = JSON.parse(stored);
-          if (Array.isArray(localList) && localList.length > 0) {
-            const remoteMap = new Map((remote || []).map(t => [t.id, t]));
-            const merged = [...(remote || [])];
-            for (const loc of localList) {
-              if (!remoteMap.has(loc.id)) {
-                merged.push(loc);
-              }
-            }
-            return merged.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          }
-        }
-      }
-    } catch {}
-
-    return remote || [];
   },
 
   async fetchRecentTransactions24h(): Promise<Transaction[]> {
@@ -510,32 +488,14 @@ export const CommercialDataService = {
       idempotencyKey: transaction.idempotencyKey || transaction.id
     };
 
-    try {
-      const res = await SupabaseSyncService.processSaleAtomic(params);
-      if (res && res.success === true) {
-        return res;
-      }
-    } catch (err: any) {
-      console.warn("[CommercialDataService.saveTransaction] Base remota em sincronização secundária:", err?.message);
+    const res = await SupabaseSyncService.processSaleAtomic(params);
+    if (!res || res.success !== true) {
+      const errMsg = res?.error || "Falha atómica ao processar venda no PostgreSQL.";
+      console.error("[CommercialDataService.saveTransaction] Erro retornado pelo PostgreSQL:", errMsg);
+      throw new Error(errMsg);
     }
 
-    // Persistência local garantida para assegurar que o POS nunca falha ou bloqueia a venda
-    try {
-      if (typeof window !== "undefined" && window.localStorage) {
-        const stored = window.localStorage.getItem("ost_local_completed_sales") || "[]";
-        const sales = JSON.parse(stored);
-        if (!sales.some((s: any) => s.id === transaction.id || (transaction.idempotencyKey && s.idempotencyKey === transaction.idempotencyKey))) {
-          sales.unshift(transaction);
-          window.localStorage.setItem("ost_local_completed_sales", JSON.stringify(sales.slice(0, 1000)));
-        }
-      }
-    } catch {}
-
-    return {
-      success: true,
-      saleId: transaction.id,
-      invoiceNumber: transaction.invoiceNumber || transaction.id
-    };
+    return res;
   },
 
   async saveTransactionsBatch(transactions: Transaction[]): Promise<void> {
@@ -723,10 +683,11 @@ export const CommercialDataService = {
 
     // Persistência local isolada pelo email do utilizador (garante que 2 utilizadores tenham dados separados)
     try {
+      const sanitized = sanitizeSettingsForExport(payload);
       if (cleanEmail) {
-        localStorage.setItem(`erp_company_settings_${cleanEmail}`, JSON.stringify(payload));
+        localStorage.setItem(`erp_company_settings_${cleanEmail}`, JSON.stringify(sanitized));
       }
-      localStorage.setItem("erp_company_settings", JSON.stringify(payload));
+      localStorage.setItem("erp_company_settings", JSON.stringify(sanitized));
     } catch {}
 
     if (!savedToBackend && !savedToSupabase) {

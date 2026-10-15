@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Product } from "../types";
 import { authenticatedFetch } from "../lib/apiClient";
+import { getContrastTextColor, isDarkBackground } from "../lib/contrast";
 
 interface PromoFlyerGeneratorProps {
   product: Product;
@@ -373,7 +374,7 @@ export function PromoFlyerGenerator({
       ctx.fillText(p.name.toUpperCase(), rx, py + 52);
 
       // Category
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "rgba(255, 255, 255, 0.6)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "#ffffff";
       ctx.font = "bold 13px 'Inter', sans-serif";
       ctx.fillText(`CATEGORIA: ${p.category.toUpperCase()}`, rx, py + 80);
       ctx.restore();
@@ -396,11 +397,11 @@ export function PromoFlyerGenerator({
       // Old price left
       ctx.save();
       ctx.textAlign = "left";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "rgba(255, 255, 255, 0.65)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "#ffffff";
       ctx.font = "bold 11px 'Inter', sans-serif";
       ctx.fillText("PREÇO ANTERIOR", rx + 18, prY + 32);
       ctx.font = "bold 18px 'Inter', sans-serif";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "rgba(255, 255, 255, 0.5)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "#ffffff";
       const oldPText = `${originalPrice.toLocaleString()} ${currency}`;
       ctx.fillText(oldPText, rx + 18, prY + 60);
       const oldPWidth = ctx.measureText(oldPText).width;
@@ -415,7 +416,7 @@ export function PromoFlyerGenerator({
       // Promo Price right
       ctx.save();
       ctx.textAlign = "right";
-      ctx.fillStyle = "#f43f5e";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
       ctx.font = "bold 11px 'Inter', sans-serif";
       ctx.fillText("OFERTA ESPECIAL", rx + prW - 18, prY + 32);
       ctx.font = "black 30px 'Inter', sans-serif";
@@ -515,11 +516,11 @@ export function PromoFlyerGenerator({
       // Original price
       ctx.save();
       ctx.textAlign = "left";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "rgba(255, 255, 255, 0.6)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "#ffffff";
       ctx.font = "bold 9px 'Inter', sans-serif";
       ctx.fillText("DE", prX + 14, prY + 26);
       ctx.font = "bold 13px 'Inter', sans-serif";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "rgba(255, 255, 255, 0.5)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "#ffffff";
       const oldPText = `${originalPrice.toLocaleString()} ${currency}`;
       ctx.fillText(oldPText, prX + 14, prY + 48);
       const oldPWidth = ctx.measureText(oldPText).width;
@@ -534,11 +535,11 @@ export function PromoFlyerGenerator({
       // Promo price
       ctx.save();
       ctx.textAlign = "right";
-      ctx.fillStyle = "#f43f5e";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
       ctx.font = "bold 9px 'Inter', sans-serif";
       ctx.fillText("POR APENAS", prX + prW - 14, prY + 26);
       ctx.font = "black 19px 'Inter', sans-serif";
-      ctx.fillStyle = selectedTheme === "SUPERMARKET_RED" ? "#facc15" : selectedTheme === "NEON_CYBER" ? "#22d3ee" : selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
+      ctx.fillStyle = selectedTheme === "SUPERMARKET_RED" ? "#facc15" : selectedTheme === "NEON_CYBER" ? "#ffffff" : selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
       ctx.fillText(`${promoPrice.toLocaleString()} ${currency}`, prX + prW - 14, prY + 52);
       ctx.restore();
 
@@ -802,11 +803,11 @@ export function PromoFlyerGenerator({
       // De
       ctx.save();
       ctx.textAlign = "left";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "rgba(255, 255, 255, 0.7)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#64748b" : "#ffffff";
       ctx.font = "bold 18px 'Inter', sans-serif";
       ctx.fillText("PREÇO ANTERIOR", priceX + 40, priceY + 45);
       ctx.font = "bold 32px 'Inter', sans-serif";
-      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "rgba(255, 255, 255, 0.55)";
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#94a3b8" : "#ffffff";
       const oldPriceText = `${originalPrice.toLocaleString()} ${currency}`;
       ctx.fillText(oldPriceText, priceX + 40, priceY + 86);
       const oldPriceWidth = ctx.measureText(oldPriceText).width;
@@ -821,11 +822,11 @@ export function PromoFlyerGenerator({
       // Por apenas
       ctx.save();
       ctx.textAlign = "right";
-      ctx.fillStyle = "#f43f5e"; 
+      ctx.fillStyle = selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff"; 
       ctx.font = "bold 18px 'Inter', sans-serif";
       ctx.fillText("OFERTA ESPECIAL", priceX + priceW - 40, priceY + 45);
       ctx.font = "black 56px 'Inter', sans-serif";
-      ctx.fillStyle = selectedTheme === "SUPERMARKET_RED" ? "#facc15" : selectedTheme === "NEON_CYBER" ? "#22d3ee" : selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
+      ctx.fillStyle = selectedTheme === "SUPERMARKET_RED" ? "#facc15" : selectedTheme === "NEON_CYBER" ? "#ffffff" : selectedTheme === "MINIMALIST_LIGHT" ? "#ea580c" : "#ffffff";
       ctx.fillText(`${promoPrice.toLocaleString()} ${currency}`, priceX + priceW - 40, priceY + 96);
       ctx.restore();
 
@@ -938,29 +939,29 @@ export function PromoFlyerGenerator({
         };
       case "COSMIC_DARK":
         return {
-          wrapper: "bg-gradient-to-b from-slate-900 via-slate-950 to-zinc-950 text-slate-100 border border-slate-800/80 shadow-slate-950/40",
+          wrapper: "bg-gradient-to-b from-slate-900 via-slate-950 to-zinc-950 text-white border border-slate-800/80 shadow-slate-950/40",
           badge: "bg-gradient-to-r from-orange-500 to-amber-500 text-white border border-orange-400/25 shadow-lg",
-          sloganText: "text-white",
-          backdrop: "bg-white/5 border-white/10 backdrop-blur-md shadow-inner",
-          oldPrice: "text-slate-400",
-          promoPrice: "text-amber-400 font-black drop-shadow",
-          customText: "text-slate-300",
+          sloganText: "text-white font-extrabold",
+          backdrop: "bg-white/10 border-white/20 backdrop-blur-md shadow-inner",
+          oldPrice: "text-white/90 font-medium",
+          promoPrice: "text-white font-black drop-shadow",
+          customText: "text-white font-medium",
           discountBadge: "bg-gradient-to-r from-red-500 to-rose-600 text-white font-extrabold shadow",
-          cardInside: "bg-slate-900/40 border border-slate-800 shadow-sm",
-          priceText: "text-amber-400"
+          cardInside: "bg-slate-900/60 border border-slate-800 shadow-sm text-white",
+          priceText: "text-white font-black"
         };
       case "NEON_CYBER":
         return {
-          wrapper: "bg-gradient-to-b from-purple-950 via-zinc-950 to-indigo-950 text-fuchsia-100 border border-fuchsia-900/40 shadow-fuchsia-950/20",
+          wrapper: "bg-gradient-to-b from-purple-950 via-zinc-950 to-indigo-950 text-white border border-fuchsia-900/40 shadow-fuchsia-950/20",
           badge: "bg-gradient-to-r from-fuchsia-500 to-pink-500 text-white border border-fuchsia-400/20 shadow-lg",
-          sloganText: "text-white",
-          backdrop: "bg-fuchsia-950/20 border-fuchsia-500/20 backdrop-blur-md shadow-inner",
-          oldPrice: "text-slate-500",
-          promoPrice: "text-cyan-400 font-black drop-shadow-[0_0_8px_rgba(34,211,238,0.35)]",
-          customText: "text-fuchsia-300",
+          sloganText: "text-white font-extrabold",
+          backdrop: "bg-fuchsia-950/30 border-white/20 backdrop-blur-md shadow-inner",
+          oldPrice: "text-white/90 font-medium",
+          promoPrice: "text-white font-black drop-shadow",
+          customText: "text-white font-medium",
           discountBadge: "bg-pink-500 text-white font-extrabold shadow",
-          cardInside: "bg-purple-950/30 border border-purple-900/30 shadow-sm",
-          priceText: "text-cyan-400"
+          cardInside: "bg-purple-950/50 border border-purple-900/40 shadow-sm text-white",
+          priceText: "text-white font-black"
         };
       case "MINIMALIST_LIGHT":
         return {
@@ -1462,7 +1463,7 @@ export function PromoFlyerGenerator({
                       </div>
                       
                       <div className="text-right">
-                        <span className="text-[9px] font-bold block uppercase tracking-wider text-red-400">Preço Especial</span>
+                        <span className={`text-[9px] font-extrabold block uppercase tracking-wider ${selectedTheme === "MINIMALIST_LIGHT" ? "text-orange-600" : "text-white"}`}>Preço Especial</span>
                         <span className={`text-xl font-mono font-black ${themeStyle?.priceText}`}>
                           {promoPrice.toLocaleString()} {currency}
                         </span>

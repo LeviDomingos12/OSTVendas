@@ -10,7 +10,7 @@ import { products as productsTable, customers as customersTable, transactions as
 import { eq, and, gte, lte, sql, desc } from "drizzle-orm";
 import cron from "node-cron";
 import rateLimit from "express-rate-limit";
-import { requireAuth, requireAdmin, AuthenticatedUserContext } from "./src/server/authMiddleware";
+import { requireAuth, requireAdmin, requireStockOrAdmin, requireCashierOrAdmin, AuthenticatedUserContext } from "./src/server/authMiddleware";
 import { commercialRouter } from "./src/server/safeEndpoints";
 import { aiRouter } from "./src/server/aiRouter";
 import { communicationRouter } from "./src/server/communicationRouter";
@@ -504,25 +504,25 @@ app.use((req, res, next) => {
   app.use("/api/v1/debts/", financialLimiter);
   app.use("/api/v1", commercialRouter);
 
+  // Apply Rate Limiters and Strict Auth to Express Route Categories BEFORE routers and endpoints
+  app.use("/api/security", requireAuth, requireAdmin);
+  app.use("/api/backups", requireAuth);
+  app.use("/api/admin", requireAuth, requireAdmin);
+  app.use("/api/system", requireAuth, requireAdmin);
+  app.use("/api/gemini", aiLimiter, requireAuth);
+  app.use("/api/email", emailLimiter, requireAuth);
+  app.use("/api/campaign", emailLimiter, requireAuth);
+  app.use("/api/whatsapp", emailLimiter, requireAuth);
+  app.use("/api/sms", emailLimiter, requireAuth);
+  app.use("/api/db", dbLimiter, requireAuth);
+  app.use("/api/sql", dbLimiter, requireAuth);
+  app.use("/api", generalLimiter);
+
   // Mount Modular AI, Communications, Security & Backup Routers
-  app.use("/api/gemini", aiLimiter, aiRouter);
+  app.use("/api/gemini", aiRouter);
   app.use("/api", communicationRouter);
   app.use("/api/security", securityRouter);
   app.use("/api/backups", backupRouter);
-
-  // Apply Rate Limiters and Strict Auth to Express Route Categories
-  app.use("/api/gemini/", aiLimiter, requireAuth);
-  app.use("/api/email/", emailLimiter, requireAuth);
-  app.use("/api/campaign/", emailLimiter, requireAuth);
-  app.use("/api/whatsapp/", emailLimiter, requireAuth);
-  app.use("/api/sms/", emailLimiter, requireAuth);
-  app.use("/api/security/", requireAuth, requireAdmin);
-  app.use("/api/backups/", requireAuth, requireAdmin);
-  app.use("/api/admin/", requireAuth, requireAdmin);
-  app.use("/api/system/", requireAuth, requireAdmin);
-  app.use("/api/db/", dbLimiter, requireAuth);
-  app.use("/api/sql/", dbLimiter, requireAuth);
-  app.use("/api/", generalLimiter);
 
   // SECURITY & RATE LIMIT MANAGEMENT API ENDPOINTS
   app.get("/api/security/rate-limit-status", (req, res) => {
@@ -1401,7 +1401,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Gravar configurações SMTP no Banco de Dados (Substitui .env)
-  app.post("/api/settings/smtp", async (req, res) => {
+  app.post("/api/settings/smtp", requireAdmin, async (req, res) => {
     try {
       const { 
         smtpHost, 
@@ -1593,17 +1593,19 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Gravar Definições Gerais e Identidade da Empresa com Isolamento Estrito por Email
-  app.post("/api/settings", async (req, res) => {
+  app.post("/api/settings", requireAdmin, async (req, res) => {
     try {
       const updatedData = req.body || {};
-      const userEmail = String(
+      const user = (req as any).user as AuthenticatedUserContext;
+      const userEmail = (
+        user?.email ||
         req.headers["x-user-email"] || 
         req.headers["user-email"] || 
         updatedData.userEmail || 
         updatedData.storeEmail || 
         updatedData.email || 
         ""
-      ).trim().toLowerCase();
+      ).toString().trim().toLowerCase();
 
       const userFileName = userEmail ? `settings_${userEmail.replace(/[^a-z0-9]/g, "_")}.json` : "settings.json";
       const USER_SETTINGS_FILE = path.join(DB_DIR, userFileName);
@@ -1851,18 +1853,19 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Salvar Perfil da Empresa (company_profiles) isolado por e-mail autenticado
-  app.post("/api/company-profile", async (req, res) => {
+  app.post("/api/company-profile", requireAuth, async (req, res) => {
     try {
+      const user = (req as any).user as AuthenticatedUserContext;
       const authHeaderEmail = (req.headers["x-user-email"] as string || "").trim().toLowerCase();
       const bodyEmail = (req.body?.email as string || "").trim().toLowerCase();
-      const userEmail = authHeaderEmail || bodyEmail;
+      const userEmail = (user?.email || authHeaderEmail || bodyEmail).trim().toLowerCase();
 
       if (!userEmail) {
         return res.status(400).json({ success: false, error: "E-mail autenticado é obrigatório para gravação isolada." });
       }
 
       // Proteção de isolamento RLS: Se o cabeçalho veio autenticado, o utilizador só pode editar o seu próprio registo
-      if (authHeaderEmail && bodyEmail && authHeaderEmail !== bodyEmail) {
+      if (user?.email && bodyEmail && user.email.toLowerCase() !== bodyEmail) {
         return res.status(403).json({ success: false, error: "Violação de isolamento: você só pode editar o perfil do seu próprio e-mail autenticado." });
       }
 
@@ -2621,7 +2624,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // API Route - Delete a backup
-  app.delete("/api/backups/:filename", (req, res) => {
+  app.delete("/api/backups/:filename", requireAdmin, (req, res) => {
     try {
       const filename = req.params.filename;
       const safeFilename = path.basename(filename);
@@ -2639,7 +2642,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // API Route - Trigger backup manually
-  app.post("/api/backups/export", async (req, res) => {
+  app.post("/api/backups/export", requireAdmin, async (req, res) => {
     try {
       const { type } = req.body;
       const backupType = type || "manual";
@@ -2655,7 +2658,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // API Route - Restore from backup
-  app.post("/api/backups/restore", async (req, res) => {
+  app.post("/api/backups/restore", requireAdmin, async (req, res) => {
     try {
       const { filename } = req.body;
       if (!filename) {
@@ -2700,7 +2703,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Admin Endpoint to Permanently Clean Mock & Sample Data
-  app.post("/api/admin/clean-mock-data", async (req, res) => {
+  app.post("/api/admin/clean-mock-data", requireAdmin, async (req, res) => {
     try {
       console.log("[ADMIN PURGE] Executing permanent purge of all mock and sample data...");
       const { runMockDataCleanup } = await import("./scripts/clean-mock-data.js");
@@ -2740,7 +2743,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Full System Reset with mandatory backup and master admin initialization
-  app.post("/api/system/reset", async (req, res) => {
+  app.post("/api/system/reset", requireAdmin, async (req, res) => {
     try {
       console.log("[SYSTEM RESET] Iniciando procedimento de reset completo do sistema OST Vendas...");
 
@@ -2980,9 +2983,11 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: /api/customers - Gravação e sincronização em lote de clientes
-  app.post("/api/customers", async (req, res) => {
+  app.post("/api/customers", requireAuth, async (req, res) => {
     try {
       const { customers } = req.body;
+      const user = (req as any).user as AuthenticatedUserContext;
+      const effectiveTenant = user?.tenantId || (req.headers["x-tenant-id"] as string) || "";
       if (!Array.isArray(customers)) {
         return res.status(400).json({ success: false, error: "Array de clientes esperado." });
       }
@@ -3003,7 +3008,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
             if (c.id && c.name) {
               await drizzleDb.insert(customersTable).values({
                 id: c.id,
-                tenantId: c.tenantId || "ost-tenant-001",
+                tenantId: c.tenantId || effectiveTenant,
                 name: c.name,
                 email: c.email || "",
                 phone: c.phone || "",
@@ -3031,9 +3036,11 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: /api/customers/single - Gravação ou atualização individual de cliente
-  app.post("/api/customers/single", async (req, res) => {
+  app.post("/api/customers/single", requireAuth, async (req, res) => {
     try {
       const customer = req.body;
+      const user = (req as any).user as AuthenticatedUserContext;
+      const effectiveTenant = user?.tenantId || (req.headers["x-tenant-id"] as string) || "";
       if (!customer?.id || !customer?.name) {
         return res.status(400).json({ success: false, error: "ID e Nome do cliente são obrigatórios." });
       }
@@ -3051,7 +3058,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
         try {
           await drizzleDb.insert(customersTable).values({
             id: customer.id,
-            tenantId: customer.tenantId || "ost-tenant-001",
+            tenantId: customer.tenantId || effectiveTenant,
             name: customer.name,
             email: customer.email || "",
             phone: customer.phone || "",
@@ -3077,7 +3084,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // DELETE: /api/customers/:id - Remoção de cliente
-  app.delete("/api/customers/:id", async (req, res) => {
+  app.delete("/api/customers/:id", requireAuth, async (req, res) => {
     try {
       const { id } = req.params;
       const existing = getStoredCustomers();
@@ -3250,7 +3257,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Create/Update Product in Cloud SQL
-  app.post("/api/sql/products", async (req, res) => {
+  app.post("/api/sql/products", requireStockOrAdmin, async (req, res) => {
     if (!isCloudSqlAvailable()) {
       return res.status(400).json({ error: "Cloud SQL is not configured." });
     }
@@ -3293,7 +3300,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // DELETE: Product in Cloud SQL
-  app.delete("/api/sql/products/:id", async (req, res) => {
+  app.delete("/api/sql/products/:id", requireStockOrAdmin, async (req, res) => {
     if (!isCloudSqlAvailable()) {
       return res.status(400).json({ error: "Cloud SQL is not configured." });
     }
@@ -3386,7 +3393,7 @@ Responda de forma clara, objetiva, amigável e profissional em português de Mo�
   });
 
   // POST: Store Transaction in Cloud SQL
-  app.post("/api/sql/transactions", async (req, res) => {
+  app.post("/api/sql/transactions", requireCashierOrAdmin, async (req, res) => {
     if (!isCloudSqlAvailable()) {
       return res.status(400).json({ error: "Cloud SQL is not configured." });
     }

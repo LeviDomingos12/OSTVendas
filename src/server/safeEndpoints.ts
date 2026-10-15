@@ -13,7 +13,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { requireAuth, requireAdmin, requireStockOrAdmin, AuthenticatedUserContext, supabaseServerAdmin, supabasePublicAuth } from "./authMiddleware";
+import { requireAuth, requireAdmin, requireStockOrAdmin, requireCashierOrAdmin, AuthenticatedUserContext, AuthenticatedRequest, supabaseServerAdmin, supabasePublicAuth } from "./authMiddleware";
 import { db as drizzleDb, isCloudSqlAvailable } from "../db/index";
 import { 
   products as productsTable, 
@@ -50,7 +50,7 @@ const processedSalesCache = new Map<string, { saleId: string; invoiceNumber: str
 
 // GET /api/v1/products - Listar produtos da empresa do utilizador
 commercialRouter.get("/products", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
 
   try {
     if (isCloudSqlAvailable()) {
@@ -66,7 +66,7 @@ commercialRouter.get("/products", async (req: Request, res: Response) => {
     const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client
-        .from("produtos")
+        .from("products")
         .select("*")
         .eq("tenant_id", user.tenantId)
         .eq("is_active", true)
@@ -83,8 +83,8 @@ commercialRouter.get("/products", async (req: Request, res: Response) => {
 });
 
 // POST /api/v1/products - Criar ou atualizar produto com validação rigorosa
-commercialRouter.post("/products", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+commercialRouter.post("/products", requireStockOrAdmin, async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
   
   // Validar com Zod Schema
   const parseResult = productSchema.safeParse(req.body);
@@ -141,7 +141,7 @@ commercialRouter.post("/products", async (req: Request, res: Response) => {
       const client = getSupabaseClient();
       if (client) {
         const { error } = await client
-          .from("produtos")
+          .from("products")
           .upsert({
             id: productId,
             tenant_id: user.tenantId,
@@ -169,8 +169,8 @@ commercialRouter.post("/products", async (req: Request, res: Response) => {
 });
 
 // DELETE /api/v1/products/:id - Desativar produto (Soft Delete)
-commercialRouter.delete("/products/:id", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+commercialRouter.delete("/products/:id", requireStockOrAdmin, async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
   const { id } = req.params;
 
   try {
@@ -183,7 +183,7 @@ commercialRouter.delete("/products/:id", async (req: Request, res: Response) => 
       const client = getSupabaseClient();
       if (client) {
         await client
-          .from("produtos")
+          .from("products")
           .update({ is_active: false, updated_at: new Date().toISOString() })
           .eq("id", id)
           .eq("tenant_id", user.tenantId);
@@ -203,7 +203,7 @@ commercialRouter.delete("/products/:id", async (req: Request, res: Response) => 
 
 // GET /api/v1/customers
 commercialRouter.get("/customers", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
 
   try {
     if (isCloudSqlAvailable()) {
@@ -235,7 +235,7 @@ commercialRouter.get("/customers", async (req: Request, res: Response) => {
 
 // POST /api/v1/customers
 commercialRouter.post("/customers", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
   
   const parseResult = customerSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -309,8 +309,8 @@ commercialRouter.post("/customers", async (req: Request, res: Response) => {
  * ============================================================================
  */
 
-commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+commercialRouter.post("/sales/process", requireCashierOrAdmin, async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
   
   const parseResult = saleProcessSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -595,7 +595,7 @@ commercialRouter.post("/sales/process", async (req: Request, res: Response) => {
  */
 
 commercialRouter.get("/auditlogs", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
 
   try {
     const client = getSupabaseClient();
@@ -628,7 +628,7 @@ commercialRouter.get("/auditlogs", async (req: Request, res: Response) => {
 });
 
 commercialRouter.post("/auditlogs", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
   
   const parseResult = auditLogSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -679,7 +679,7 @@ commercialRouter.post("/auditlogs", async (req: Request, res: Response) => {
  */
 
 commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
 
   try {
     const client = getSupabaseClient();
@@ -693,7 +693,7 @@ commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: 
 
     if (client) {
       const [prods, custs, sales, logs, sett] = await Promise.all([
-        client.from("produtos").select("*").eq("tenant_id", user.tenantId),
+        client.from("products").select("*").eq("tenant_id", user.tenantId),
         client.from("clientes").select("*").eq("tenant_id", user.tenantId),
         client.from("vendas").select("*").eq("tenant_id", user.tenantId),
         client.from("audit_logs").select("*").eq("tenant_id", user.tenantId),
@@ -755,7 +755,7 @@ commercialRouter.get("/backups/export", requireAdmin, async (req: Request, res: 
  * ============================================================================
  */
 commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+  const user = (req as AuthenticatedRequest).user;
 
   const parseResult = replenishStockSchema.safeParse(req.body);
   if (!parseResult.success) {
@@ -771,7 +771,7 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
     const client = getSupabaseClient();
     if (client) {
       const { data: prod, error: prodErr } = await client
-        .from("produtos")
+        .from("products")
         .select("stock, cost_price")
         .eq("id", productId)
         .eq("tenant_id", user.tenantId)
@@ -787,7 +787,7 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
       const updateData: any = { stock: newStock, updated_at: new Date().toISOString() };
       if (costPrice) updateData.cost_price = costPrice;
 
-      await client.from("produtos").update(updateData).eq("id", productId).eq("tenant_id", user.tenantId);
+      await client.from("products").update(updateData).eq("id", productId).eq("tenant_id", user.tenantId);
 
       await client.from("stock_movements").insert({
         tenant_id: user.tenantId,
@@ -851,8 +851,8 @@ commercialRouter.post("/stock/replenish", requireStockOrAdmin, async (req: Reque
  * 7. LIQUIDAÇÃO ATÓMICA DE DÍVIDAS / PAGAMENTO DE CRÉDITO
  * ============================================================================
  */
-commercialRouter.post("/debts/settle", async (req: Request, res: Response) => {
-  const user = (req as any).user as AuthenticatedUserContext;
+commercialRouter.post("/debts/settle", requireCashierOrAdmin, async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
 
   const parseResult = debtPaymentSchema.safeParse(req.body);
   if (!parseResult.success) {

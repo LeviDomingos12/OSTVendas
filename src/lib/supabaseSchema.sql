@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 -- 2.3 CATEGORIAS DE ARTIGOS
 CREATE TABLE IF NOT EXISTS public.categories (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS public.categories (
 -- 2.4 FORNECEDORES / SUPPLIERS
 CREATE TABLE IF NOT EXISTS public.suppliers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   contact_person TEXT,
   email TEXT,
@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
 -- 2.5 FILIAIS / ARMAZÉNS / BRANCHES
 CREATE TABLE IF NOT EXISTS public.branches (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   address TEXT,
   contact TEXT,
@@ -125,7 +125,7 @@ CREATE TABLE IF NOT EXISTS public.branches (
 -- 2.6 PRODUTOS / ARTIGOS (Inventário, Preços e Variações)
 CREATE TABLE IF NOT EXISTS public.produtos (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_id TEXT,
   owner_id TEXT,
   created_by TEXT,
@@ -211,7 +211,7 @@ CREATE TRIGGER trg_sync_product_pricing
 -- 2.7 TABELA OU VIEW COMPATÍVEL DE PRODUTOS EM INGLÊS (public.products)
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_id TEXT,
   owner_id TEXT,
   created_by TEXT,
@@ -254,7 +254,7 @@ CREATE TRIGGER trg_sync_products_table_pricing
 -- 2.8 LOTES DE PRODUTOS / PRODUCT BATCHES (FIFO / LIFO / Controlo de Validade)
 CREATE TABLE IF NOT EXISTS public.product_batches (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   product_id TEXT NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
   product_name TEXT NOT NULL,
   batch_code TEXT NOT NULL,
@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS public.product_batches (
 -- 2.9 MOVIMENTOS DE STOCK (Kardex / Rastreabilidade)
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   product_id TEXT NOT NULL REFERENCES public.produtos(id) ON DELETE CASCADE,
   type TEXT NOT NULL, -- 'ENTRY', 'EXIT_SALE', 'LOSS', 'ADJUSTMENT', 'TRANSFER', 'RETURN'
   quantity NUMERIC(14,2) NOT NULL,
@@ -287,7 +287,7 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
 -- 2.10 TRANSFERÊNCIAS DE STOCK ENTRE FILIAIS / ARMAZÉNS
 CREATE TABLE IF NOT EXISTS public.stock_transfers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   origin_branch_id TEXT NOT NULL,
   destination_branch_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
@@ -302,7 +302,7 @@ CREATE TABLE IF NOT EXISTS public.stock_transfers (
 -- 2.11 CLIENTES & CRÉDITO
 CREATE TABLE IF NOT EXISTS public.clientes (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -358,7 +358,7 @@ CREATE TRIGGER trg_sync_cliente_balance
 -- 2.12 DÍVIDAS / CONTAS A RECEBER (Customer Debts)
 CREATE TABLE IF NOT EXISTS public.customer_debts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   customer_id TEXT NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
   sale_id TEXT,
   total_amount NUMERIC(14,2) NOT NULL,
@@ -373,7 +373,7 @@ CREATE TABLE IF NOT EXISTS public.customer_debts (
 -- 2.13 PAGAMENTOS DE DÍVIDAS / LIQUIDAÇÕES
 CREATE TABLE IF NOT EXISTS public.debt_payments (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   debt_id TEXT NOT NULL REFERENCES public.customer_debts(id) ON DELETE CASCADE,
   customer_id TEXT NOT NULL REFERENCES public.clientes(id) ON DELETE CASCADE,
   amount NUMERIC(14,2) NOT NULL,
@@ -386,7 +386,7 @@ CREATE TABLE IF NOT EXISTS public.debt_payments (
 -- 2.14 VENDAS / FATURAS (Transactions)
 CREATE TABLE IF NOT EXISTS public.vendas (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   idempotency_key TEXT,
   invoice_number TEXT NOT NULL,
   customer_id TEXT,
@@ -437,7 +437,7 @@ ALTER TABLE public.vendas ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAUL
 -- 2.15 ITENS DA VENDA
 CREATE TABLE IF NOT EXISTS public.venda_itens (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   sale_id TEXT NOT NULL REFERENCES public.vendas(id) ON DELETE CASCADE,
   product_id TEXT NOT NULL,
   product_name TEXT NOT NULL,
@@ -454,7 +454,7 @@ CREATE TABLE IF NOT EXISTS public.venda_itens (
 -- 2.16 DEVOLUÇÕES / NOTAS DE CRÉDITO (Returns & Credit Notes)
 CREATE TABLE IF NOT EXISTS public.returns (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   credit_note_number TEXT NOT NULL,
   sale_id TEXT,
   original_invoice_number TEXT NOT NULL,
@@ -474,7 +474,7 @@ CREATE OR REPLACE VIEW public.credit_notes AS SELECT * FROM public.returns;
 -- 2.17 CARRINHOS SUSPENSOS / EM ESPERA NO POS (Suspended Carts)
 CREATE TABLE IF NOT EXISTS public.suspended_carts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   customer_id TEXT,
   customer_name TEXT,
   items JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -487,7 +487,7 @@ CREATE TABLE IF NOT EXISTS public.suspended_carts (
 -- 2.18 FLUXO DE CAIXA / MOVIMENTOS DE CAIXA
 CREATE TABLE IF NOT EXISTS public.caixa (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   cash_register_id TEXT,
   shift_id TEXT,
   type TEXT NOT NULL, -- 'INPUT', 'REINFORCEMENT', 'EXPENSE', 'QUEBRA', 'SANGRIA', 'DEVOLUTION', 'SOBRA'
@@ -520,7 +520,7 @@ ALTER TABLE public.caixa ADD COLUMN IF NOT EXISTS notes TEXT;
 -- 2.19 SESSÕES DE CAIXA REGISTRADORA (Cash Registers)
 CREATE TABLE IF NOT EXISTS public.cash_registers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   opened_by TEXT NOT NULL,
   opener_name TEXT,
   opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -535,7 +535,7 @@ CREATE TABLE IF NOT EXISTS public.cash_registers (
 -- 2.20 HISTÓRICO DE FECHAMENTO DE TURNOS / BALANCETES (Cash Closures)
 CREATE TABLE IF NOT EXISTS public.cash_closures (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   shift_id TEXT,
   shift_number INTEGER,
   register_id TEXT,
@@ -559,7 +559,7 @@ CREATE TABLE IF NOT EXISTS public.cash_closures (
 -- 2.21 ESTADO ATIVO DO TURNO DE CAIXA (Current Cash Shift)
 CREATE TABLE IF NOT EXISTS public.cash_shifts (
   id TEXT PRIMARY KEY DEFAULT 'current_shift',
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'CLOSED', -- 'OPEN', 'CLOSED'
   opening_balance NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   opened_at TIMESTAMPTZ DEFAULT NOW(),
@@ -572,7 +572,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
 -- 2.22 COLABORADORES / UTILIZADORES DO SISTEMA (Staff & Permissions)
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   auth_uid TEXT,
   name TEXT NOT NULL,
   username TEXT,
@@ -619,7 +619,7 @@ ALTER TABLE public.colaboradores ADD COLUMN IF NOT EXISTS plan_granted_by TEXT;
 -- 2.23 PEDIDOS DE COMPRA A FORNECEDORES (Supplier Orders)
 CREATE TABLE IF NOT EXISTS public.supplier_orders (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   supplier_id TEXT NOT NULL,
   supplier_name TEXT NOT NULL,
   product_id TEXT NOT NULL,
@@ -636,7 +636,7 @@ CREATE TABLE IF NOT EXISTS public.supplier_orders (
 -- 2.24 LEMBRETES OPERACIONAIS (Reminders)
 CREATE TABLE IF NOT EXISTS public.reminders (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   user_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
@@ -650,7 +650,7 @@ CREATE TABLE IF NOT EXISTS public.reminders (
 -- 2.25 LEMBRETES E ROTINAS RECORRENTES (Recurring Reminders)
 CREATE TABLE IF NOT EXISTS public.recurring_reminders (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   user_id TEXT,
   title TEXT NOT NULL,
   description TEXT,
@@ -664,7 +664,7 @@ CREATE TABLE IF NOT EXISTS public.recurring_reminders (
 -- 2.26 PROGRESSO DE FORMAÇÃO E TREINAMENTO DO STAFF (User Training Progress)
 CREATE TABLE IF NOT EXISTS public.user_training_progress (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   video_id TEXT NOT NULL,
   watched BOOLEAN DEFAULT true,
@@ -676,7 +676,7 @@ CREATE TABLE IF NOT EXISTS public.user_training_progress (
 -- 2.27 LOGS DE AUDITORIA & SEGURANÇA
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   user_id TEXT,
   user_name TEXT NOT NULL,
   user_role TEXT,
@@ -694,7 +694,7 @@ ALTER TABLE public.audit_logs ADD COLUMN IF NOT EXISTS user_role TEXT;
 -- 2.28 DEFINIÇÕES DO SISTEMA (Settings & Configuration)
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'config',
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
   company_address TEXT DEFAULT 'Av. Eduardo Mondlane, Nº 1234, Maputo - Moçambique',
   company_nuit TEXT DEFAULT '400123987',
@@ -776,7 +776,7 @@ ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS supplier_overdue_tolerance_
 -- 2.29 PEDIDOS DE RECUPERAÇÃO DE ACESSO
 CREATE TABLE IF NOT EXISTS public.recovery_requests (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   employee_id TEXT NOT NULL,
   employee_name TEXT NOT NULL,
   email TEXT,
@@ -848,24 +848,29 @@ AS $$
   SELECT COALESCE(
     (SELECT company_id FROM public.profiles WHERE id = auth.uid() AND company_id IS NOT NULL AND company_id <> '' LIMIT 1),
     (SELECT tenant_id FROM public.colaboradores WHERE auth_uid = auth.uid()::text AND status = 'ACTIVE' AND tenant_id IS NOT NULL AND tenant_id <> '' LIMIT 1),
-    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text AND id IS NOT NULL AND id <> '' LIMIT 1),
-    'ost-tenant-001'
+    (SELECT id FROM public.companies WHERE owner_uid = auth.uid()::text AND id IS NOT NULL AND id <> '' LIMIT 1)
   );
 $$;
+
+REVOKE EXECUTE ON FUNCTION public.get_my_company_id() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.get_my_company_id() TO authenticated, service_role, postgres;
 
 CREATE OR REPLACE FUNCTION public.get_my_role()
 RETURNS TEXT
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
+SET search_path = public
 AS $$
   SELECT COALESCE(
-    (current_setting('request.jwt.claims', true)::jsonb -> 'user_metadata' ->> 'role'),
-    (current_setting('request.jwt.claims', true)::jsonb -> 'app_metadata' ->> 'role'),
     (SELECT role FROM public.profiles WHERE id = auth.uid() LIMIT 1),
-    'ADMIN'
+    (SELECT role FROM public.colaboradores WHERE auth_uid = auth.uid()::text AND status = 'ACTIVE' LIMIT 1),
+    NULL
   );
 $$;
+
+REVOKE EXECUTE ON FUNCTION public.get_my_role() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.get_my_role() TO authenticated, service_role, postgres;
 
 -- Trigger: Cria automaticamente Empresa e Perfil ao registar novo utilizador
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -993,82 +998,339 @@ ALTER TABLE public.company_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.company_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recovery_requests ENABLE ROW LEVEL SECURITY;
 
--- Macro de políticas permissivas para operação híbrida (Public / Authenticated / Service Role)
+-- 5.1 FUNÇÃO HELPER DE CONTEXTO MULTI-TENANT SEGURO E AUTORITATIVO
+-- NUNCA aceita JWTs, parâmetros ou variáveis de sessão controlados pelo cliente para trocar de empresa
+CREATE OR REPLACE FUNCTION public.current_tenant_id() RETURNS TEXT AS $$
+BEGIN
+  -- Se o utilizador estiver autenticado, derivar o tenant estritamente da identidade autorizada no banco
+  IF auth.uid() IS NOT NULL THEN
+    RETURN public.get_my_company_id();
+  END IF;
+
+  -- Se for operação interna do sistema com credenciais de serviço devidamente verificadas (sem depender de current_user)
+  IF (
+    COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+    OR (session_user IN ('service_role', 'supabase_admin'))
+    OR (session_user = 'postgres' AND COALESCE(auth.role(), '') = '' AND NULLIF(current_setting('request.jwt.claims', true), '') IS NULL)
+  ) THEN
+    RETURN NULLIF(current_setting('app.current_tenant_id', true), '');
+  END IF;
+
+  -- Acessos anónimos ou sem credenciais de serviço válidas não possuem tenant
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.current_tenant_id() FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.current_tenant_id() TO authenticated, service_role, postgres;
+
+-- 5.2 PROTEÇÕES CONTRA ESCALAÇÃO DE PRIVILÉGIOS E ALTERAÇÃO DE PERFIS (Triggers Autoritativos)
+CREATE OR REPLACE FUNCTION public.prevent_profile_privilege_escalation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_is_service BOOLEAN;
+  v_caller_role TEXT;
+BEGIN
+  v_is_service := (
+    COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+    OR (session_user IN ('service_role', 'supabase_admin'))
+    OR (session_user = 'postgres' AND COALESCE(auth.role(), '') = '' AND NULLIF(current_setting('request.jwt.claims', true), '') IS NULL)
+  );
+
+  IF v_is_service THEN
+    RETURN NEW;
+  END IF;
+
+  -- Impedir utilizador de alterar company_id
+  IF NEW.company_id IS DISTINCT FROM OLD.company_id THEN
+    RAISE EXCEPTION 'Violação de segurança: Não é permitido alterar a empresa (company_id) do perfil.';
+  END IF;
+
+  -- Impedir utilizador de alterar o próprio role ou de terceiros sem privilégio de ADMIN verificado
+  IF NEW.role IS DISTINCT FROM OLD.role THEN
+    v_caller_role := public.get_my_role();
+    IF v_caller_role IS DISTINCT FROM 'ADMIN' THEN
+      RAISE EXCEPTION 'Acesso negado: Apenas administradores autorizados têm permissão para alterar papéis (role).';
+    END IF;
+  END IF;
+
+  -- Impedir alteração de id
+  IF NEW.id IS DISTINCT FROM OLD.id THEN
+    RAISE EXCEPTION 'Violação de segurança: Não é permitido alterar o identificador do perfil.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_profile_privilege_escalation ON public.profiles;
+CREATE TRIGGER trg_prevent_profile_privilege_escalation
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.prevent_profile_privilege_escalation();
+
+-- Trigger para colaboradores: apenas administradores podem inserir, alterar ou apagar colaboradores
+CREATE OR REPLACE FUNCTION public.prevent_colaborador_privilege_escalation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_is_service BOOLEAN;
+  v_caller_role TEXT;
+BEGIN
+  v_is_service := (
+    COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+    OR (session_user IN ('service_role', 'supabase_admin'))
+    OR (session_user = 'postgres' AND COALESCE(auth.role(), '') = '' AND NULLIF(current_setting('request.jwt.claims', true), '') IS NULL)
+  );
+
+  IF v_is_service THEN
+    RETURN NEW;
+  END IF;
+
+  v_caller_role := public.get_my_role();
+  IF v_caller_role IS DISTINCT FROM 'ADMIN' THEN
+    RAISE EXCEPTION 'Acesso negado: Apenas administradores autorizados têm permissão para gerir colaboradores e permissões.';
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND NEW.tenant_id IS DISTINCT FROM OLD.tenant_id THEN
+    RAISE EXCEPTION 'Violação de segurança: Não é permitido alterar a empresa (tenant_id) do colaborador.';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_prevent_colaborador_privilege_escalation ON public.colaboradores;
+CREATE TRIGGER trg_prevent_colaborador_privilege_escalation
+  BEFORE INSERT OR UPDATE OR DELETE ON public.colaboradores
+  FOR EACH ROW
+  EXECUTE FUNCTION public.prevent_colaborador_privilege_escalation();
+
+-- 5.3 POLÍTICAS RLS ESPECÍFICAS POR OPERAÇÃO PARA PROFILES
+DROP POLICY IF EXISTS "profiles_select" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_insert" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_update" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_delete" ON public.profiles;
+DROP POLICY IF EXISTS "profiles_isolation" ON public.profiles;
+DROP POLICY IF EXISTS "allow_all_profiles" ON public.profiles;
+
+CREATE POLICY "profiles_select" ON public.profiles
+  FOR SELECT TO authenticated
+  USING (
+    id = auth.uid()
+    OR (public.get_my_role() IN ('ADMIN', 'SUPERVISOR') AND company_id = public.get_my_company_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "profiles_update" ON public.profiles
+  FOR UPDATE TO authenticated
+  USING (
+    id = auth.uid()
+    OR (public.get_my_role() = 'ADMIN' AND company_id = public.get_my_company_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  )
+  WITH CHECK (
+    id = auth.uid()
+    OR (public.get_my_role() = 'ADMIN' AND company_id = public.get_my_company_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "profiles_insert" ON public.profiles
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    id = auth.uid()
+    OR (public.get_my_role() = 'ADMIN' AND company_id = public.get_my_company_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "profiles_delete" ON public.profiles
+  FOR DELETE TO authenticated
+  USING (
+    (public.get_my_role() = 'ADMIN' AND company_id = public.get_my_company_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+REVOKE ALL ON public.profiles FROM anon, public;
+GRANT ALL ON public.profiles TO postgres, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
+
+-- 5.4 POLÍTICAS RLS ESPECÍFICAS POR OPERAÇÃO PARA COLABORADORES
+DROP POLICY IF EXISTS "colaboradores_select" ON public.colaboradores;
+DROP POLICY IF EXISTS "colaboradores_insert" ON public.colaboradores;
+DROP POLICY IF EXISTS "colaboradores_update" ON public.colaboradores;
+DROP POLICY IF EXISTS "colaboradores_delete" ON public.colaboradores;
+DROP POLICY IF EXISTS "tenant_isolation_colaboradores" ON public.colaboradores;
+DROP POLICY IF EXISTS "allow_all_colaboradores" ON public.colaboradores;
+
+CREATE POLICY "colaboradores_select" ON public.colaboradores
+  FOR SELECT TO authenticated
+  USING (
+    (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "colaboradores_insert" ON public.colaboradores
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    ((public.get_my_role() = 'ADMIN' AND tenant_id = public.current_tenant_id()))
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "colaboradores_update" ON public.colaboradores
+  FOR UPDATE TO authenticated
+  USING (
+    ((public.get_my_role() = 'ADMIN' AND tenant_id = public.current_tenant_id()))
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  )
+  WITH CHECK (
+    ((public.get_my_role() = 'ADMIN' AND tenant_id = public.current_tenant_id()))
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+CREATE POLICY "colaboradores_delete" ON public.colaboradores
+  FOR DELETE TO authenticated
+  USING (
+    ((public.get_my_role() = 'ADMIN' AND tenant_id = public.current_tenant_id()))
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
+  );
+
+REVOKE ALL ON public.colaboradores FROM anon, public;
+GRANT ALL ON public.colaboradores TO postgres, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.colaboradores TO authenticated;
+
+-- 5.5 POLÍTICAS DE ISOLAMENTO RIGOROSO POR TENANT COM PRIVILÉGIOS MÍNIMOS
 DO $$
 DECLARE
   tbl TEXT;
   tbls TEXT[] := ARRAY[
-    'companies', 'company_settings', 'company_profiles', 'profiles', 'categories', 'suppliers', 'branches',
+    'categories', 'suppliers', 'branches',
     'produtos', 'products', 'product_batches', 'stock_movements', 'stock_transfers',
     'clientes', 'customer_debts', 'debt_payments', 'vendas', 'venda_itens',
     'returns', 'suspended_carts', 'caixa', 'cash_registers', 'cash_shifts',
-    'cash_closures', 'colaboradores', 'supplier_orders', 'reminders',
-    'recurring_reminders', 'user_training_progress', 'audit_logs', 'settings', 'recovery_requests'
+    'cash_closures', 'supplier_orders', 'reminders',
+    'recurring_reminders', 'user_training_progress', 'audit_logs', 'settings',
+    'recovery_requests'
   ];
 BEGIN
   FOREACH tbl IN ARRAY tbls LOOP
     EXECUTE format('DROP POLICY IF EXISTS "allow_all_%s" ON public.%I;', tbl, tbl);
-    EXECUTE format('CREATE POLICY "allow_all_%s" ON public.%I FOR ALL TO public USING (true) WITH CHECK (true);', tbl, tbl);
-    EXECUTE format('GRANT ALL ON public.%I TO postgres, authenticated, anon, service_role;', tbl);
+    EXECUTE format('DROP POLICY IF EXISTS "tenant_isolation_%s" ON public.%I;', tbl, tbl);
+
+    -- Permite acesso estrito somente a utilizadores autenticados com tenant id correspondente
+    EXECUTE format('
+      CREATE POLICY "tenant_isolation_%s" ON public.%I
+      FOR ALL TO authenticated
+      USING (
+        (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+        OR auth.role() = ''service_role''
+        OR session_user IN (''postgres'', ''service_role'')
+      )
+      WITH CHECK (
+        (public.current_tenant_id() IS NOT NULL AND tenant_id = public.current_tenant_id())
+        OR auth.role() = ''service_role''
+        OR session_user IN (''postgres'', ''service_role'')
+      );
+    ', tbl, tbl);
+
+    -- Revogação total de privilégios para anon e public
+    EXECUTE format('REVOKE ALL ON public.%I FROM anon, public;', tbl);
+    EXECUTE format('GRANT ALL ON public.%I TO postgres, service_role;', tbl);
+
+    -- Concessão de menor privilégio necessário para utilizadores autenticados
+    IF tbl = 'audit_logs' THEN
+      EXECUTE format('GRANT SELECT, INSERT ON public.%I TO authenticated;', tbl);
+    ELSE
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON public.%I TO authenticated;', tbl);
+    END IF;
   END LOOP;
 END $$;
 
--- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente
-DROP POLICY IF EXISTS "allow_all_company_profiles" ON public.company_profiles;
-DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_select_matching_email" ON public.company_profiles
-  FOR SELECT
-  TO authenticated, anon, public
-  USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 
-DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_insert_matching_email" ON public.company_profiles
-  FOR INSERT
-  TO authenticated, anon, public
-  WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
-DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_update_matching_email" ON public.company_profiles
-  FOR UPDATE
-  TO authenticated, anon, public
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_settings: Isolamento por e-mail do proprietário autenticado
+DROP POLICY IF EXISTS "allow_all_company_settings" ON public.company_settings;
+DROP POLICY IF EXISTS "company_settings_matching_email" ON public.company_settings;
+CREATE POLICY "company_settings_matching_email" ON public.company_settings
+  FOR ALL TO authenticated
   USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(user_email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
+    OR session_user IN ('postgres', 'service_role')
   )
   WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(user_email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
+    OR session_user IN ('postgres', 'service_role')
   );
 
+REVOKE ALL ON public.company_settings FROM anon, public;
+GRANT ALL ON public.company_settings TO postgres, service_role;
+GRANT SELECT, INSERT, UPDATE ON public.company_settings TO authenticated;
+
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente autenticado
+DROP POLICY IF EXISTS "allow_all_company_profiles" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
 DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_delete_matching_email" ON public.company_profiles
-  FOR DELETE
-  TO authenticated, anon, public
+DROP POLICY IF EXISTS "company_profiles_matching_email" ON public.company_profiles;
+
+CREATE POLICY "company_profiles_matching_email" ON public.company_profiles
+  FOR ALL TO authenticated
   USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
+    OR session_user IN ('postgres', 'service_role')
+  )
+  WITH CHECK (
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
+    OR auth.role() = 'service_role'
+    OR session_user IN ('postgres', 'service_role')
   );
 
--- Views retrocompatíveis adicionais
-CREATE OR REPLACE VIEW public.sales AS SELECT * FROM public.vendas;
-CREATE OR REPLACE VIEW public.transactions AS SELECT * FROM public.vendas;
-CREATE OR REPLACE VIEW public.customers AS SELECT * FROM public.clientes;
+REVOKE ALL ON public.company_profiles FROM anon, public;
+GRANT ALL ON public.company_profiles TO postgres, service_role;
+GRANT SELECT, INSERT, UPDATE ON public.company_profiles TO authenticated;
 
-GRANT ALL ON public.sales TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.transactions TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.customers TO postgres, authenticated, anon, service_role;
-GRANT ALL ON public.credit_notes TO postgres, authenticated, anon, service_role;
+-- Views protegidas com invocação de segurança e sem acessos anónimos
+CREATE OR REPLACE VIEW public.sales WITH (security_invoker = true) AS SELECT * FROM public.vendas;
+CREATE OR REPLACE VIEW public.transactions WITH (security_invoker = true) AS SELECT * FROM public.vendas;
+CREATE OR REPLACE VIEW public.customers WITH (security_invoker = true) AS SELECT * FROM public.clientes;
+
+REVOKE ALL ON public.sales FROM anon, public;
+REVOKE ALL ON public.transactions FROM anon, public;
+REVOKE ALL ON public.customers FROM anon, public;
+REVOKE ALL ON public.credit_notes FROM anon, public;
+
+GRANT ALL ON public.sales TO postgres, service_role;
+GRANT ALL ON public.transactions TO postgres, service_role;
+GRANT ALL ON public.customers TO postgres, service_role;
+GRANT ALL ON public.credit_notes TO postgres, service_role;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.sales TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.transactions TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.customers TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.credit_notes TO authenticated;
 
 -- ============================================================================
 -- 6. ATOMIC STORED PROCEDURES / POSTGRESQL FUNCTIONS (RPC) - COMPLETE & HARDENED
@@ -1123,12 +1385,34 @@ DECLARE
   v_existing_invoice_number TEXT;
   v_existing_total NUMERIC;
   v_prod_found BOOLEAN;
+  v_is_service BOOLEAN;
 BEGIN
-  -- 0. Determinar e validar autoritativamente o tenant
+  -- 0. Verificar credenciais internas de serviço (service_role, postgres, supabase_admin)
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  -- 0.1 Determinar e validar autoritativamente o tenant
   IF auth.uid() IS NOT NULL THEN
-    v_tenant_id := COALESCE(public.get_my_company_id(), p_company_id, 'ost-tenant-001');
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    -- Rejeitar qualquer tentativa de operar com tenant diferente do autorizado pela identidade
+    IF p_company_id IS NOT NULL AND TRIM(p_company_id) <> '' AND TRIM(p_company_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    -- Operação interna com credenciais de serviço devidamente verificadas
+    v_tenant_id := NULLIF(TRIM(p_company_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
   ELSE
-    v_tenant_id := COALESCE(NULLIF(p_company_id, ''), 'ost-tenant-001');
+    -- Rejeitar chamadas anónimas ou sem identidade autenticada/credenciais de serviço
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
   END IF;
 
   -- 0.1 Normalização de campos derivados
@@ -1144,10 +1428,10 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Valores monetários inválidos ou negativos.');
   END IF;
 
-  -- 0.3 Verificação de Idempotência
+  -- 0.3 Verificação de Idempotência isolada por tenant
   SELECT id, invoice_number, grand_total INTO v_existing_sale_id, v_existing_invoice_number, v_existing_total
   FROM public.vendas 
-  WHERE (tenant_id = v_tenant_id OR tenant_id = 'ost-tenant-001')
+  WHERE tenant_id = v_tenant_id
     AND (
       id = p_sale_id 
       OR (v_idempotency_key IS NOT NULL AND (id = v_idempotency_key OR idempotency_key = v_idempotency_key))
@@ -1170,7 +1454,7 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'A venda deve conter pelo menos um artigo.');
   END IF;
 
-  -- 0.5 Validação e reserva atómica de stock
+  -- 0.5 Validação e reserva atómica de stock com isolamento estrito por tenant
   FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
   LOOP
     v_prod_id := COALESCE(v_item->>'productId', v_item->>'id');
@@ -1196,7 +1480,7 @@ BEGIN
     BEGIN
       SELECT stock, name INTO v_curr_stock, v_prod_name 
       FROM public.produtos 
-      WHERE id = v_prod_id AND is_active = TRUE 
+      WHERE id = v_prod_id AND tenant_id = v_tenant_id AND is_active = TRUE 
       LIMIT 1 
       FOR UPDATE;
       IF FOUND THEN
@@ -1210,7 +1494,7 @@ BEGIN
       BEGIN
         SELECT stock, name INTO v_curr_stock, v_prod_name 
         FROM public.products 
-        WHERE id = v_prod_id AND is_active = TRUE 
+        WHERE id = v_prod_id AND tenant_id = v_tenant_id AND is_active = TRUE 
         LIMIT 1 
         FOR UPDATE;
         IF FOUND THEN
@@ -1222,7 +1506,7 @@ BEGIN
     END IF;
 
     IF NOT v_prod_found THEN
-      RETURN jsonb_build_object('success', false, 'error', 'Artigo (' || v_prod_id || ') não encontrado no inventário ativo.');
+      RETURN jsonb_build_object('success', false, 'error', 'Artigo (' || v_prod_id || ') não encontrado no inventário ativo da empresa.');
     END IF;
 
     IF v_curr_stock < v_qty THEN
@@ -1264,22 +1548,22 @@ BEGIN
       v_unit_price, v_qty, v_cost_price, v_total_item, NOW()
     );
 
-    -- Obter stock atualizado
-    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id LIMIT 1;
+    -- Obter stock atualizado isolado por tenant
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     IF v_curr_stock IS NULL THEN
-      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id LIMIT 1;
+      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     END IF;
 
     v_new_stock := GREATEST(0.00, COALESCE(v_curr_stock, 0.00) - v_qty);
 
-    -- Atualizar stock nas tabelas de inventário
+    -- Atualizar stock nas tabelas de inventário estritamente da mesma empresa
     UPDATE public.produtos 
     SET stock = v_new_stock, updated_at = NOW() 
-    WHERE id = v_prod_id;
+    WHERE id = v_prod_id AND tenant_id = v_tenant_id;
 
     UPDATE public.products 
     SET stock = v_new_stock, updated_at = NOW() 
-    WHERE id = v_prod_id;
+    WHERE id = v_prod_id AND tenant_id = v_tenant_id;
 
     -- Registar no Kardex de movimentos de stock
     INSERT INTO public.stock_movements (
@@ -1314,7 +1598,7 @@ BEGIN
         purchase_count = purchase_count + 1,
         last_purchase_date = NOW(),
         updated_at = NOW()
-    WHERE id = p_customer_id;
+    WHERE id = p_customer_id AND tenant_id = v_tenant_id;
   ELSIF p_customer_id IS NOT NULL AND p_customer_id <> '' THEN
     -- Atualizar estatísticas de compra do cliente em vendas pagas
     UPDATE public.clientes 
@@ -1323,7 +1607,7 @@ BEGIN
         last_purchase_date = NOW(),
         loyalty_points = loyalty_points + FLOOR(v_total / 100)::INTEGER,
         updated_at = NOW()
-    WHERE id = p_customer_id;
+    WHERE id = p_customer_id AND tenant_id = v_tenant_id;
   END IF;
 
   -- 4. Registar entrada de caixa se pago em dinheiro
@@ -1360,7 +1644,8 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.process_sale_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.process_sale_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.process_sale_atomic TO postgres, authenticated, service_role;
 
 -- RPC 2: REPLENISH STOCK ATOMIC
 CREATE OR REPLACE FUNCTION public.replenish_stock_atomic(
@@ -1384,11 +1669,29 @@ DECLARE
   v_curr_cost NUMERIC;
   v_new_cost NUMERIC;
   v_operator TEXT;
+  v_is_service BOOLEAN;
 BEGIN
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
   IF auth.uid() IS NOT NULL THEN
-    v_tenant_id := COALESCE(public.get_my_company_id(), p_tenant_id, 'ost-tenant-001');
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
   ELSE
-    v_tenant_id := COALESCE(NULLIF(p_tenant_id, ''), 'ost-tenant-001');
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
   END IF;
 
   IF p_quantity <= 0 THEN
@@ -1399,16 +1702,16 @@ BEGIN
 
   SELECT stock, cost_price INTO v_curr_stock, v_curr_cost 
   FROM public.produtos 
-  WHERE id = p_product_id FOR UPDATE;
+  WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
     SELECT stock, cost INTO v_curr_stock, v_curr_cost 
     FROM public.products 
-    WHERE id = p_product_id FOR UPDATE;
+    WHERE id = p_product_id AND tenant_id = v_tenant_id FOR UPDATE;
   END IF;
 
   IF v_curr_stock IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no catálogo de produtos.');
+    RETURN jsonb_build_object('success', false, 'error', 'Artigo não encontrado no catálogo de produtos da sua organização.');
   END IF;
 
   v_new_stock := v_curr_stock + p_quantity;
@@ -1416,11 +1719,11 @@ BEGIN
 
   UPDATE public.produtos 
   SET stock = v_new_stock, cost_price = v_new_cost, cost = v_new_cost, updated_at = NOW()
-  WHERE id = p_product_id;
+  WHERE id = p_product_id AND tenant_id = v_tenant_id;
 
   UPDATE public.products 
   SET stock = v_new_stock, cost_price = v_new_cost, cost = v_new_cost, updated_at = NOW()
-  WHERE id = p_product_id;
+  WHERE id = p_product_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.stock_movements (
     id, tenant_id, product_id, type, quantity,
@@ -1439,7 +1742,8 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.replenish_stock_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.replenish_stock_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.replenish_stock_atomic TO postgres, authenticated, service_role;
 
 -- RPC 3: SETTLE DEBT PAYMENT ATOMIC
 CREATE OR REPLACE FUNCTION public.settle_debt_payment_atomic(
@@ -1464,11 +1768,29 @@ DECLARE
   v_new_remaining NUMERIC;
   v_debt_customer_id TEXT;
   v_operator TEXT;
+  v_is_service BOOLEAN;
 BEGIN
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
   IF auth.uid() IS NOT NULL THEN
-    v_tenant_id := COALESCE(public.get_my_company_id(), p_tenant_id, 'ost-tenant-001');
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
   ELSE
-    v_tenant_id := COALESCE(NULLIF(p_tenant_id, ''), 'ost-tenant-001');
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
   END IF;
 
   IF p_amount <= 0 THEN
@@ -1479,10 +1801,10 @@ BEGIN
 
   SELECT remaining_balance, customer_id INTO v_remaining, v_debt_customer_id 
   FROM public.customer_debts 
-  WHERE id = p_debt_id FOR UPDATE;
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id FOR UPDATE;
 
   IF NOT FOUND THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado.');
+    RETURN jsonb_build_object('success', false, 'error', 'Registo de dívida não encontrado na organização.');
   END IF;
 
   IF p_amount > v_remaining THEN
@@ -1497,7 +1819,7 @@ BEGIN
     remaining_balance = v_new_remaining,
     status = CASE WHEN v_new_remaining <= 0 THEN 'SETTLED' ELSE 'PARTIAL' END,
     settled_at = CASE WHEN v_new_remaining <= 0 THEN NOW() ELSE NULL END
-  WHERE id = p_debt_id;
+  WHERE id = p_debt_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.debt_payments (
     id, tenant_id, debt_id, customer_id, amount, payment_method, received_by, notes, timestamp
@@ -1509,7 +1831,7 @@ BEGIN
   SET balance = GREATEST(0.00, balance - p_amount),
       debt = GREATEST(0.00, debt - p_amount),
       updated_at = NOW()
-  WHERE id = v_debt_customer_id;
+  WHERE id = v_debt_customer_id AND tenant_id = v_tenant_id;
 
   INSERT INTO public.caixa (
     id, tenant_id, type, amount, reason, responsible_user, reference_id, timestamp
@@ -1526,7 +1848,8 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.settle_debt_payment_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.settle_debt_payment_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.settle_debt_payment_atomic TO postgres, authenticated, service_role;
 
 -- RPC 4: RECORD SALE RETURN ATOMIC (Devolução com Reabastecimento, Nota de Crédito e Caixa)
 CREATE OR REPLACE FUNCTION public.record_sale_return_atomic(
@@ -1555,8 +1878,30 @@ DECLARE
   v_curr_stock NUMERIC;
   v_new_stock NUMERIC;
   v_price NUMERIC;
+  v_is_service BOOLEAN;
 BEGIN
-  v_tenant_id := COALESCE(NULLIF(p_tenant_id, ''), 'ost-tenant-001');
+  v_is_service := (
+    current_user IN ('postgres', 'service_role', 'supabase_admin')
+    OR COALESCE(auth.role(), '') = 'service_role'
+    OR COALESCE((current_setting('request.jwt.claims', true)::jsonb ->> 'role'), '') = 'service_role'
+  );
+
+  IF auth.uid() IS NOT NULL THEN
+    v_tenant_id := public.get_my_company_id();
+    IF v_tenant_id IS NULL OR TRIM(v_tenant_id) = '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Utilizador autenticado não possui organização/empresa autorizada vinculada.');
+    END IF;
+    IF p_tenant_id IS NOT NULL AND TRIM(p_tenant_id) <> '' AND TRIM(p_tenant_id) <> v_tenant_id THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Tenant especificado pelo cliente não corresponde à identidade autenticada.');
+    END IF;
+  ELSIF v_is_service THEN
+    v_tenant_id := NULLIF(TRIM(p_tenant_id), '');
+    IF v_tenant_id IS NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Operação de serviço rejeitada: Identificação da organização/empresa (tenant_id) é estritamente obrigatória.');
+    END IF;
+  ELSE
+    RETURN jsonb_build_object('success', false, 'error', 'Acesso negado: Chamada a procedimento sem identidade autenticada ou credenciais de serviço devidamente verificadas.');
+  END IF;
 
   -- 1. Registar a Nota de Crédito / Devolução
   INSERT INTO public.returns (
@@ -1574,15 +1919,15 @@ BEGIN
     v_qty := COALESCE((v_item->>'quantity')::NUMERIC, 1.00);
     v_price := COALESCE((v_item->>'price')::NUMERIC, 0.00);
 
-    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id LIMIT 1;
+    SELECT stock INTO v_curr_stock FROM public.produtos WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     IF v_curr_stock IS NULL THEN
-      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id LIMIT 1;
+      SELECT stock INTO v_curr_stock FROM public.products WHERE id = v_prod_id AND tenant_id = v_tenant_id LIMIT 1;
     END IF;
 
     v_new_stock := COALESCE(v_curr_stock, 0.00) + v_qty;
 
-    UPDATE public.produtos SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
-    UPDATE public.products SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id;
+    UPDATE public.produtos SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id AND tenant_id = v_tenant_id;
+    UPDATE public.products SET stock = v_new_stock, updated_at = NOW() WHERE id = v_prod_id AND tenant_id = v_tenant_id;
 
     INSERT INTO public.stock_movements (
       id, tenant_id, product_id, type, quantity, previous_stock, new_stock,
@@ -1606,7 +1951,7 @@ BEGIN
 
   -- 4. Atualizar o estado da venda se aplicável
   IF p_sale_id IS NOT NULL AND p_sale_id <> '' THEN
-    UPDATE public.vendas SET status = 'REFUNDED', updated_at = NOW() WHERE id = p_sale_id;
+    UPDATE public.vendas SET status = 'REFUNDED', updated_at = NOW() WHERE id = p_sale_id AND tenant_id = v_tenant_id;
   END IF;
 
   -- 5. Registar auditoria
@@ -1626,7 +1971,8 @@ BEGIN
 END;
 $$;
 
-GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenticated, anon, service_role;
+REVOKE EXECUTE ON FUNCTION public.record_sale_return_atomic FROM anon, public;
+GRANT EXECUTE ON FUNCTION public.record_sale_return_atomic TO postgres, authenticated, service_role;
 
 -- ============================================================================
 -- 7. RECARREGAR O SCHEMA CACHE DO POSTGREST IMEDIATAMENTE

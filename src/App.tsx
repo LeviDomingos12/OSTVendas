@@ -1060,6 +1060,8 @@ export default function App() {
   const isLoggingAuditRef = useRef<boolean>(false);
   const isBackingUpRef = useRef<boolean>(false);
   const lastAutoBackupTimeRef = useRef<number>(Date.now());
+  const lastConfirmedProductMutationRef = useRef<number>(0);
+  const isHydratingRef = useRef<boolean>(false);
 
   const dbStateRef = useRef({
     settings,
@@ -1289,6 +1291,11 @@ export default function App() {
       console.log("[HYDRATE] Hidratação cancelada: operação de logout em curso ou utilizador desconectado.");
       return;
     }
+    if (isHydratingRef.current) {
+      console.log("[HYDRATE] Hidratação já em curso. Evitando execução duplicada.");
+      return;
+    }
+    isHydratingRef.current = true;
     try {
       console.log("[HYDRATE] Carregando dados comerciais diretamente do PostgreSQL...");
 
@@ -1340,22 +1347,45 @@ export default function App() {
         setProducts(prevProducts => {
           const incoming = sbProductsRes.prods;
           // Impedir que hydrateDatabaseForUser sobrescreva produtos válidos por lista vazia ou incompleta
-          if (prevProducts.length > 0 && incoming.length === 0) {
+          if (incoming.length === 0 && prevProducts.length > 0) {
             console.warn("[HYDRATE] Proteção ativada: bloqueada sobrescrita de", prevProducts.length, "produtos válidos por lista vazia.");
             return prevProducts;
           }
-          if (prevProducts.length > 0 && incoming.length < prevProducts.length) {
-            console.warn("[HYDRATE] Lista remota com menor contagem (" + incoming.length + " < " + prevProducts.length + "). Preservando produtos válidos.");
-            const incomingMap = new Map(incoming.map(p => [p.id, p]));
-            const merged = [...incoming];
-            for (const p of prevProducts) {
-              if (!incomingMap.has(p.id)) {
-                merged.push(p);
+
+          if (prevProducts.length === 0) {
+            return incoming;
+          }
+
+          // Se houve mutação confirmada recente (últimos 5 segundos), proteger o estado confirmado
+          const isRecentlyMutated = Date.now() - lastConfirmedProductMutationRef.current < 5000;
+          if (isRecentlyMutated) {
+            const prevMap = new Map(prevProducts.map(p => [p.id, p]));
+            const merged = [...prevProducts];
+            for (const inc of incoming) {
+              if (!prevMap.has(inc.id)) {
+                merged.push(inc);
               }
             }
             return merged;
           }
-          return incoming;
+
+          // Preserva todos os produtos válidos já confirmados localmente, atualizando os que vieram do PostgreSQL
+          const incomingMap = new Map(incoming.map(p => [p.id, p]));
+          const result: Product[] = [];
+          for (const prev of prevProducts) {
+            const inc = incomingMap.get(prev.id);
+            if (inc) {
+              result.push(inc);
+              incomingMap.delete(prev.id);
+            } else {
+              // Produto confirmado que não veio na resposta remota parcial - preservar!
+              result.push(prev);
+            }
+          }
+          for (const inc of incomingMap.values()) {
+            result.push(inc);
+          }
+          return result;
         });
       } else {
         const errMsg = sbProductsRes.error || "Falha na leitura dos produtos do PostgreSQL";
@@ -1368,7 +1398,7 @@ export default function App() {
 
         if (isTableMissing) {
           showToast(
-            `Tabela de produtos ('produtos'/'products') não encontrada no PostgreSQL. Os produtos locais foram preservados. Acesse Configurações > "SQL Produtos" para criar as tabelas no Supabase.`,
+            `Tabela de produtos ('products') não encontrada no PostgreSQL. Os produtos locais foram preservados.`,
             "warning",
             "Tabela PostgreSQL Não Encontrada"
           );
@@ -1462,6 +1492,8 @@ export default function App() {
     } catch (err) {
       console.error("[HYDRATE] Erro ao carregar dados do PostgreSQL:", err);
       setIsDbLoaded(true);
+    } finally {
+      isHydratingRef.current = false;
     }
   };
 
@@ -1635,25 +1667,48 @@ export default function App() {
       const unsubscribe = CommercialDataService.subscribeProducts(async () => {
         if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
         setIsOnline(true);
+
+        // Se uma mutação de produto foi confirmada recentemente (últimos 5 segundos),
+        // não executar nenhuma atualização imediata que possa sobrescrever o estado confirmado
+        if (Date.now() - lastConfirmedProductMutationRef.current < 5000) {
+          console.log("[SUPABASE] Realtime ignorado temporariamente (mutação recente confirmada protegida).");
+          return;
+        }
+
         try {
           const sbProducts = await CommercialDataService.fetchProducts();
           if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+
+          if (Date.now() - lastConfirmedProductMutationRef.current < 5000) {
+            return;
+          }
+
           // Impedir que qualquer realtime sobrescreva produtos válidos por lista vazia ou incompleta
           if (Array.isArray(sbProducts) && sbProducts.length > 0) {
             console.log(`[SUPABASE] Recebidos ${sbProducts.length} produtos em tempo real.`);
             setProducts(prevProducts => {
-              if (prevProducts.length > 0 && sbProducts.length < prevProducts.length) {
-                console.warn("[SUPABASE] Realtime retornou contagem inferior. Preservando produtos válidos confirmados.");
-                const incomingMap = new Map(sbProducts.map(p => [p.id, p]));
-                const merged = [...sbProducts];
-                for (const p of prevProducts) {
-                  if (!incomingMap.has(p.id)) {
-                    merged.push(p);
-                  }
-                }
-                return merged;
+              if (Date.now() - lastConfirmedProductMutationRef.current < 5000) {
+                return prevProducts;
               }
-              return sbProducts;
+              if (prevProducts.length === 0) {
+                return sbProducts;
+              }
+              const incomingMap = new Map(sbProducts.map(p => [p.id, p]));
+              const result: Product[] = [];
+              for (const prev of prevProducts) {
+                const inc = incomingMap.get(prev.id);
+                if (inc) {
+                  result.push(inc);
+                  incomingMap.delete(prev.id);
+                } else {
+                  // Preserva produto confirmado que não veio no realtime parcial
+                  result.push(prev);
+                }
+              }
+              for (const inc of incomingMap.values()) {
+                result.push(inc);
+              }
+              return result;
             });
           } else {
             console.warn("[SUPABASE] Realtime retornou lista vazia ou nula. Ignorando sobrescrita para proteger integridade.");
@@ -1665,6 +1720,7 @@ export default function App() {
 
       const loadTransactions = async () => {
         if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+        if (transactions.length > 0 && !transactionsError) return;
         setIsLoadingTransactions(true);
         try {
           const sbTx = await CommercialDataService.fetchTransactions();
@@ -1712,6 +1768,7 @@ export default function App() {
     if (isAuthenticated && !isLoggingOutRef.current && localStorage.getItem("erp_user_logged_out") !== "true") {
       const syncStaff = async () => {
         if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
+        if (employees.length > 0 && employees !== initialEmployees) return;
         try {
           const sbUsers = await CommercialDataService.fetchEmployees();
           if (isLoggingOutRef.current || localStorage.getItem("erp_user_logged_out") === "true") return;
@@ -2080,6 +2137,9 @@ export default function App() {
       await CommercialDataService.saveProduct(newP);
       console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para o produto "${newP.name}".`);
 
+      // Marca timestamp da confirmação para proteger estado contra sobrescrita imediata
+      lastConfirmedProductMutationRef.current = Date.now();
+
       // 3. Atualizar products somente após confirmação do banco de dados
       setProducts(prev => {
         const exists = prev.some(p => p.id === newP.id);
@@ -2103,6 +2163,8 @@ export default function App() {
       await CommercialDataService.saveProduct(updatedP);
       console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para "${updatedP.name}".`);
 
+      lastConfirmedProductMutationRef.current = Date.now();
+
       // 3. Atualizar products somente após confirmação do banco de dados
       setProducts(prev => prev.map(p => p.id === updatedP.id ? updatedP : p));
       showToast(`Produto "${updatedP.name}" atualizado e confirmado no PostgreSQL!`, "success", "Produto Atualizado");
@@ -2120,6 +2182,8 @@ export default function App() {
       await CommercialDataService.saveProductsBatch(updatedBatch);
       console.log(`[PRODUCTS] 2. Sucesso confirmado pelo PostgreSQL para ${updatedBatch.length} produtos.`);
 
+      lastConfirmedProductMutationRef.current = Date.now();
+
       const updatedMap = new Map(updatedBatch.map(p => [p.id, p]));
       setProducts(prev => prev.map(p => updatedMap.get(p.id) || p));
       showToast(`Reajuste em lote de ${updatedBatch.length} produtos gravado com sucesso no PostgreSQL!`, "success", "Preços Atualizados em Lote");
@@ -2136,6 +2200,9 @@ export default function App() {
       console.log(`[PRODUCTS] 1. Removendo produto "${productId}" no PostgreSQL...`);
       await CommercialDataService.removeProduct(productId);
       console.log(`[PRODUCTS] 2. Remoção confirmada pelo PostgreSQL para "${productId}".`);
+
+      lastConfirmedProductMutationRef.current = Date.now();
+
       setProducts(prev => prev.filter(p => p.id !== productId));
       showToast("Produto desativado com sucesso no PostgreSQL.", "success");
     } catch (err: any) {
@@ -2843,7 +2910,7 @@ export default function App() {
         category: "RECEBIMENTO_VENDA",
         reference: transaction.invoiceNumber,
         shiftId: transaction.shiftId || activeShift?.id,
-        tenantId: activeUser?.tenantId || "default_company",
+        tenantId: activeUser?.tenantId || activeUser?.companyId || "",
         notes: `Valor da Venda: ${transaction.grandTotal} MT | Valor Recebido: ${received} MT`
       };
 
@@ -2861,7 +2928,7 @@ export default function App() {
           category: "TROCO_DEVOLVIDO",
           reference: transaction.invoiceNumber,
           shiftId: transaction.shiftId || activeShift?.id,
-          tenantId: activeUser?.tenantId || "default_company",
+          tenantId: activeUser?.tenantId || activeUser?.companyId || "",
           notes: `Origem do Troco: ${trocoOrigin}`
         };
         newEntries.push(trocoEntry);
@@ -2884,7 +2951,7 @@ export default function App() {
         category: "RECEBIMENTO_VENDA",
         reference: transaction.invoiceNumber,
         shiftId: transaction.shiftId || activeShift?.id,
-        tenantId: activeUser?.tenantId || "default_company"
+        tenantId: activeUser?.tenantId || activeUser?.companyId || ""
       };
       setCashFlow(prev => {
         const updated = [cashEntry, ...prev];
@@ -2950,7 +3017,7 @@ export default function App() {
         paymentMethod: refundMethod as any,
         category: "DEVOLUCAO_VENDA",
         reference: creditNoteNum,
-        tenantId: activeUser?.tenantId || "default_company"
+        tenantId: activeUser?.tenantId || activeUser?.companyId || ""
       };
       setCashFlow(prev => {
         const updated = [refundCashEntry, ...prev];

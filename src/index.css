@@ -152,7 +152,95 @@ h1, h2, h3, h4, th {
   background-color: rgba(39, 39, 42, 0.5) !important;
 }
 
-/* Regra de Contraste do Sistema: Fundo escuro -> Texto estritamente Branco (#ffffff) */
+/* ==========================================================
+   REGRA FUNDAMENTAL DE CONTRASTE E SIMPLICIDADE VISUAL:
+   - Fundo Branco / Claro -> Letras ESTRITAMENTE PRETAS (#000000)
+   - Fundo Preto / Escuro  -> Letras ESTRITAMENTE BRANCAS (#ffffff)
+   Evita multiplicidade de cores, cinzentos e vermelhos de baixo contraste.
+   ========================================================== */
+
+/* 1. ONDE O FUNDO É BRANCO OU CLARO: TODAS AS LETRAS PRETAS (#000000) */
+body:not(.dark),
+.bg-white,
+[class*="bg-white"],
+.bg-slate-50,
+[class*="bg-slate-50"],
+.bg-slate-100,
+[class*="bg-slate-100"] {
+  color: #000000;
+}
+
+body:not(.dark) h1, body:not(.dark) h2, body:not(.dark) h3, body:not(.dark) h4, body:not(.dark) h5, body:not(.dark) h6,
+body:not(.dark) p, body:not(.dark) label, body:not(.dark) th, body:not(.dark) td, body:not(.dark) li,
+.bg-white h1, .bg-white h2, .bg-white h3, .bg-white h4, .bg-white h5, .bg-white h6,
+.bg-white p, .bg-white label, .bg-white th, .bg-white td, .bg-white li,
+[class*="bg-white"] h1, [class*="bg-white"] h2, [class*="bg-white"] h3, [class*="bg-white"] h4,
+[class*="bg-white"] p, [class*="bg-white"] label, [class*="bg-white"] td {
+  color: #000000 !important;
+}
+
+body:not(.dark) .text-slate-900,
+body:not(.dark) .text-slate-850,
+body:not(.dark) .text-slate-800,
+body:not(.dark) .text-slate-700,
+body:not(.dark) .text-slate-650,
+body:not(.dark) .text-slate-600,
+body:not(.dark) .text-slate-500,
+body:not(.dark) .text-slate-400,
+body:not(.dark) .text-zinc-900,
+body:not(.dark) .text-zinc-800,
+body:not(.dark) .text-zinc-700,
+body:not(.dark) .text-zinc-600,
+body:not(.dark) .text-zinc-500,
+body:not(.dark) .text-zinc-400,
+body:not(.dark) .text-gray-900,
+body:not(.dark) .text-gray-800,
+body:not(.dark) .text-gray-700,
+body:not(.dark) .text-gray-600,
+body:not(.dark) .text-gray-500,
+body:not(.dark) .text-gray-400 {
+  color: #000000 !important;
+}
+
+/* 2. ONDE O FUNDO É PRETO OU ESCURO (OU MODO ESCURO): TODAS AS LETRAS BRANCAS (#ffffff) */
+body.dark,
+.dark,
+.bg-black,
+[class*="bg-black"],
+.bg-zinc-950,
+[class*="bg-zinc-950"],
+.bg-zinc-900,
+[class*="bg-zinc-900"],
+.bg-slate-950,
+[class*="bg-slate-950"],
+.bg-slate-900,
+[class*="bg-slate-900"],
+.bg-neutral-950,
+[class*="bg-neutral-950"],
+.bg-neutral-900,
+[class*="bg-neutral-900"],
+[data-dark="true"] {
+  color: #ffffff;
+}
+
+body.dark h1, body.dark h2, body.dark h3, body.dark h4, body.dark h5, body.dark h6,
+body.dark p, body.dark label, body.dark th, body.dark td, body.dark li,
+.dark h1, .dark h2, .dark h3, .dark h4, .dark h5, .dark h6,
+.dark p, .dark label, .dark th, .dark td, .dark li,
+[class*="bg-black"] h1, [class*="bg-black"] h2, [class*="bg-black"] h3, [class*="bg-black"] h4,
+[class*="bg-black"] p, [class*="bg-black"] label, [class*="bg-black"] td,
+[class*="bg-zinc-950"] h1, [class*="bg-zinc-950"] h2, [class*="bg-zinc-950"] h3, [class*="bg-zinc-950"] h4,
+[class*="bg-zinc-950"] p, [class*="bg-zinc-950"] label, [class*="bg-zinc-950"] td,
+[class*="bg-zinc-900"] h1, [class*="bg-zinc-900"] h2, [class*="bg-zinc-900"] h3, [class*="bg-zinc-900"] h4,
+[class*="bg-zinc-900"] p, [class*="bg-zinc-900"] label, [class*="bg-zinc-900"] td,
+[class*="bg-slate-950"] h1, [class*="bg-slate-950"] h2, [class*="bg-slate-950"] h3, [class*="bg-slate-950"] h4,
+[class*="bg-slate-950"] p, [class*="bg-slate-950"] label, [class*="bg-slate-950"] td,
+[class*="bg-slate-900"] h1, [class*="bg-slate-900"] h2, [class*="bg-slate-900"] h3, [class*="bg-slate-900"] h4,
+[class*="bg-slate-900"] p, [class*="bg-slate-900"] label, [class*="bg-slate-900"] td {
+  color: #ffffff !important;
+}
+
+/* Onde o fundo é preto ou escuro, nunca usar cinzento nem vermelho */
 .dark .text-slate-900,
 .dark .text-slate-850,
 .dark .text-slate-800,
@@ -161,28 +249,65 @@ h1, h2, h3, h4, th {
 .dark .text-slate-600,
 .dark .text-slate-500,
 .dark .text-slate-400,
+.dark .text-slate-300,
+.dark .text-zinc-300,
 .dark .text-zinc-400,
 .dark .text-zinc-500,
 .dark .text-zinc-600,
 .dark .text-zinc-700,
 .dark .text-zinc-800,
-.dark .text-zinc-900 {
+.dark .text-zinc-900,
+.dark .text-gray-300,
+.dark .text-gray-400,
+.dark .text-gray-500,
+.dark .text-neutral-300,
+.dark .text-neutral-400,
+.dark .text-neutral-500,
+.dark .text-red-400,
+.dark .text-red-500,
+.dark .text-rose-400,
+.dark .text-rose-500,
+[class*="bg-black"] .text-slate-400,
+[class*="bg-black"] .text-slate-500,
+[class*="bg-black"] .text-zinc-400,
+[class*="bg-black"] .text-zinc-500,
+[class*="bg-black"] .text-gray-400,
+[class*="bg-black"] .text-gray-500,
+[class*="bg-black"] .text-red-400,
+[class*="bg-black"] .text-red-500,
+[class*="bg-zinc-950"] .text-slate-400,
+[class*="bg-zinc-950"] .text-slate-500,
+[class*="bg-zinc-950"] .text-zinc-400,
+[class*="bg-zinc-950"] .text-zinc-500,
+[class*="bg-zinc-950"] .text-gray-400,
+[class*="bg-zinc-950"] .text-gray-500,
+[class*="bg-zinc-950"] .text-red-400,
+[class*="bg-zinc-950"] .text-red-500,
+[class*="bg-zinc-900"] .text-slate-400,
+[class*="bg-zinc-900"] .text-slate-500,
+[class*="bg-zinc-900"] .text-zinc-400,
+[class*="bg-zinc-900"] .text-zinc-500,
+[class*="bg-zinc-900"] .text-gray-400,
+[class*="bg-zinc-900"] .text-gray-500,
+[class*="bg-zinc-900"] .text-red-400,
+[class*="bg-zinc-900"] .text-red-500,
+[class*="bg-slate-950"] .text-slate-400,
+[class*="bg-slate-950"] .text-slate-500,
+[class*="bg-slate-950"] .text-zinc-400,
+[class*="bg-slate-950"] .text-zinc-500,
+[class*="bg-slate-950"] .text-red-400,
+[class*="bg-slate-950"] .text-red-500,
+[class*="bg-slate-900"] .text-slate-400,
+[class*="bg-slate-900"] .text-slate-500,
+[class*="bg-slate-900"] .text-zinc-400,
+[class*="bg-slate-900"] .text-zinc-500,
+[class*="bg-slate-900"] .text-red-400,
+[class*="bg-slate-900"] .text-red-500,
+[data-dark="true"] span,
+[data-dark="true"] p,
+[data-dark="true"] label,
+[data-contrast-enforced="white"] {
   color: #ffffff !important;
-}
-
-/* Regra de Contraste do Sistema: Fundo claro -> Texto estritamente Preto (#000000) */
-body:not(.dark) .text-slate-900,
-body:not(.dark) .text-slate-850,
-body:not(.dark) .text-slate-800,
-body:not(.dark) .text-slate-700,
-body:not(.dark) .text-slate-650,
-body:not(.dark) .text-slate-600,
-body:not(.dark) .text-slate-500,
-body:not(.dark) .text-zinc-900,
-body:not(.dark) .text-zinc-800,
-body:not(.dark) .text-zinc-700,
-body:not(.dark) .text-zinc-600 {
-  color: #000000 !important;
 }
 
 /* ==========================================================

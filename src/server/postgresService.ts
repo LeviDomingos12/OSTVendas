@@ -236,7 +236,6 @@ export async function testPostgresConnection(customConfig?: Partial<PostgresConf
         { name: "colaboradores", category: "staff" },
         { name: "profiles", category: "staff" },
         { name: "products", category: "products" },
-        { name: "produtos", category: "products" },
         { name: "categories", category: "products" },
         { name: "branches", category: "products" },
         { name: "clientes", category: "customers" },
@@ -279,7 +278,7 @@ export async function testPostgresConnection(customConfig?: Partial<PostgresConf
 
       // Verificação de requisitos essenciais
       const hasSettings = tablesStatus.some(t => t.name === "settings" && t.exists);
-      const hasProducts = tablesStatus.some(t => (t.name === "products" || t.name === "produtos") && t.exists);
+      const hasProducts = tablesStatus.some(t => t.name === "products" && t.exists);
       const hasCustomers = tablesStatus.some(t => (t.name === "clientes" || t.name === "customers") && t.exists);
       const hasTransactions = tablesStatus.some(t => (t.name === "vendas" || t.name === "transactions") && t.exists);
 
@@ -375,53 +374,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_company_profiles_email ON public.company_p
 
 ALTER TABLE public.company_profiles ENABLE ROW LEVEL SECURITY;
 
--- POLÍTICAS RLS: O utilizador só acede e modifica a sua própria empresa correspondente ao seu email
+-- POLÍTICAS RLS ESPECÍFICAS PARA company_profiles: Utilizador só acede aos registos com email correspondente autenticado
+DROP POLICY IF EXISTS "allow_all_company_profiles" ON public.company_profiles;
+DROP POLICY IF EXISTS "company_profiles_matching_email" ON public.company_profiles;
 DROP POLICY IF EXISTS "company_profiles_select_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_select_matching_email" ON public.company_profiles
-  FOR SELECT
-  TO authenticated, anon, public
-  USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
 DROP POLICY IF EXISTS "company_profiles_insert_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_insert_matching_email" ON public.company_profiles
-  FOR INSERT
-  TO authenticated, anon, public
-  WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
 DROP POLICY IF EXISTS "company_profiles_update_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_update_matching_email" ON public.company_profiles
-  FOR UPDATE
-  TO authenticated, anon, public
+DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
+
+CREATE POLICY "company_profiles_matching_email" ON public.company_profiles
+  FOR ALL TO authenticated
   USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
     OR current_user = 'postgres'
   )
   WITH CHECK (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
+    (auth.jwt()->>'email' IS NOT NULL AND LOWER(TRIM(email)) = LOWER(TRIM(auth.jwt()->>'email')))
     OR auth.role() = 'service_role'
     OR current_user = 'postgres'
   );
 
-DROP POLICY IF EXISTS "company_profiles_delete_matching_email" ON public.company_profiles;
-CREATE POLICY "company_profiles_delete_matching_email" ON public.company_profiles
-  FOR DELETE
-  TO authenticated, anon, public
-  USING (
-    LOWER(TRIM(email)) = LOWER(TRIM(COALESCE(auth.jwt()->>'email', '')))
-    OR auth.role() = 'service_role'
-    OR current_user = 'postgres'
-  );
-
-GRANT ALL ON public.company_profiles TO postgres, authenticated, anon, service_role;
+REVOKE ALL ON public.company_profiles FROM anon, public;
+GRANT ALL ON public.company_profiles TO postgres, authenticated, service_role;
 
 CREATE TABLE IF NOT EXISTS public.companies (
   id TEXT PRIMARY KEY DEFAULT ('comp_' || substr(uuid_generate_v4()::TEXT, 1, 8)),
@@ -440,7 +415,7 @@ CREATE TABLE IF NOT EXISTS public.companies (
 
 CREATE TABLE IF NOT EXISTS public.settings (
   id TEXT PRIMARY KEY DEFAULT 'config',
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_name TEXT NOT NULL DEFAULT 'OST Comércio Geral, Lda',
   company_address TEXT DEFAULT '',
   company_nuit TEXT DEFAULT '',
@@ -481,7 +456,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.colaboradores (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   auth_uid TEXT,
   name TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -524,7 +499,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.categories (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -532,7 +507,7 @@ CREATE TABLE IF NOT EXISTS public.categories (
 
 CREATE TABLE IF NOT EXISTS public.branches (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   address TEXT,
   contact TEXT,
@@ -544,7 +519,7 @@ CREATE TABLE IF NOT EXISTS public.branches (
 
 CREATE TABLE IF NOT EXISTS public.suppliers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   contact_person TEXT,
   email TEXT,
@@ -557,7 +532,7 @@ CREATE TABLE IF NOT EXISTS public.suppliers (
 
 CREATE TABLE IF NOT EXISTS public.supplier_orders (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   supplier_id TEXT NOT NULL,
   supplier_name TEXT NOT NULL,
   product_id TEXT NOT NULL,
@@ -589,7 +564,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.cash_closures (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   date TEXT NOT NULL,
   opening_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   total_sales NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -609,7 +584,7 @@ CREATE TABLE IF NOT EXISTS public.cash_closures (
 
 CREATE TABLE IF NOT EXISTS public.cash_shifts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   operator_id TEXT,
   operator_name TEXT NOT NULL,
   initial_cash NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -621,7 +596,7 @@ CREATE TABLE IF NOT EXISTS public.cash_shifts (
 
 CREATE TABLE IF NOT EXISTS public.audit_logs (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   action TEXT NOT NULL,
   category TEXT NOT NULL,
@@ -654,7 +629,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.products (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   company_id TEXT,
   owner_id TEXT,
   created_by TEXT,
@@ -689,7 +664,7 @@ CREATE TABLE IF NOT EXISTS public.products (
 
 CREATE TABLE IF NOT EXISTS public.produtos (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   code TEXT,
   barcode TEXT,
@@ -718,7 +693,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.clientes (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -742,7 +717,7 @@ CREATE TABLE IF NOT EXISTS public.clientes (
 
 CREATE TABLE IF NOT EXISTS public.customers (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
   nuit TEXT,
   email TEXT,
@@ -766,7 +741,7 @@ CREATE TABLE IF NOT EXISTS public.customers (
 
 CREATE TABLE IF NOT EXISTS public.customer_debts (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   customer_id TEXT NOT NULL,
   sale_id TEXT,
   total_amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -791,7 +766,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.vendas (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   numero_fatura TEXT,
   invoice_number TEXT,
   operador TEXT,
@@ -816,7 +791,7 @@ CREATE TABLE IF NOT EXISTS public.vendas (
 
 CREATE TABLE IF NOT EXISTS public.transactions (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   invoice_number TEXT NOT NULL,
   cashier_name TEXT,
   customer_id TEXT,
@@ -833,7 +808,7 @@ CREATE TABLE IF NOT EXISTS public.transactions (
 
 CREATE TABLE IF NOT EXISTS public.venda_itens (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   venda_id TEXT NOT NULL,
   produto_id TEXT NOT NULL,
   quantidade NUMERIC(14,2) NOT NULL DEFAULT 1.00,
@@ -844,7 +819,7 @@ CREATE TABLE IF NOT EXISTS public.venda_itens (
 
 CREATE TABLE IF NOT EXISTS public.stock_movements (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   product_id TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'SALE',
   quantity NUMERIC(14,2) NOT NULL DEFAULT 0.00,
@@ -859,7 +834,7 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
 
 CREATE TABLE IF NOT EXISTS public.caixa (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'INPUT',
   amount NUMERIC(14,2) NOT NULL DEFAULT 0.00,
   reason TEXT NOT NULL,
@@ -870,7 +845,7 @@ CREATE TABLE IF NOT EXISTS public.caixa (
 
 CREATE TABLE IF NOT EXISTS public.returns (
   id TEXT PRIMARY KEY DEFAULT uuid_generate_v4()::TEXT,
-  tenant_id TEXT NOT NULL DEFAULT 'ost-tenant-001',
+  tenant_id TEXT NOT NULL,
   credit_note_number TEXT NOT NULL,
   sale_id TEXT,
   original_invoice_number TEXT NOT NULL,
@@ -962,12 +937,13 @@ export async function runPostgresSchemaSql(
         ]);
       }
 
-      // Permissões gerais
+      // Permissões gerais de segurança
       try {
         await client.query(`
-          GRANT ALL ON ALL TABLES IN SCHEMA public TO PUBLIC;
+          REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, public;
+          GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, authenticated, service_role;
         `);
-        logs.push("✓ Permissões concedidas às tabelas no schema public.");
+        logs.push("✓ Permissões restritas com segurança: revogados acessos públicos/anon e mantidos autenticados.");
       } catch (permErr: any) {
         logs.push(`Aviso sobre permissões: ${permErr.message}`);
       }
